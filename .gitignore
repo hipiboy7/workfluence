@@ -6,3 +6,6 @@ build/
 *.log
 npm-debug.log*
 .DS_Store
+
+# 로컬 프로젝트 데이터 (CLAUDE.md 8.1절): PostgreSQL 데이터, 첨부, pnpm store, Playwright 브라우저, 임시 파일
+.local/
