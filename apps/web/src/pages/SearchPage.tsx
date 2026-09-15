@@ -20,12 +20,12 @@ export function SearchPage() {
       <h1>검색: “{q}”</h1>
       {error && <p className="error">{error}</p>}
       {hits === null && !error && <p className="muted">검색 중…</p>}
-      {hits && hits.length === 0 && <p className="muted">결과가 없다.</p>}
+      {hits && hits.length === 0 && <p className="muted">결과가 없다. 내가 볼 수 있는 스페이스만 검색된다.</p>}
       <ul className="hits">
         {hits?.map((h) => (
           <li key={h.pageId} className="card">
             <Link to={`/spaces/${h.spaceId}/pages/${h.pageId}`}>
-              <span className="key">{h.spaceKey}</span> {h.title}
+              <span className="badge">{h.spaceName}</span> {h.title}
             </Link>
             <p className="muted">{h.snippet || '(본문 없음)'}</p>
           </li>

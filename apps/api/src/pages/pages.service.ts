@@ -8,37 +8,32 @@ import {
   type PageSummary,
   type PageVersionView,
   type PageView,
+  type Principal,
   type UpdatePageDto,
 } from '@workfluence/shared';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.module';
 import type { SessionUser } from '../auth/auth.guard';
 import { DB, type Db } from '../db/db.module';
-import { pageVersions, pages, spaces, users, type PageRow } from '../db/schema';
+import { pageVersions, pages, users, type PageRow } from '../db/schema';
+import { SpacesService } from '../spaces/spaces.module';
+import { toPageSummary } from './page-view';
 
-export function toPageSummary(p: PageRow): PageSummary {
-  return {
-    id: p.id,
-    spaceId: p.spaceId,
-    parentId: p.parentId,
-    title: p.title,
-    position: p.position,
-    currentVersionNo: p.currentVersionNo,
-    updatedAt: p.updatedAt.toISOString(),
-  };
-}
+export { toPageSummary };
 
 /**
  * 페이지·버전 (CLAUDE.md 6절).
  * - page_versions는 append-only. 수정·복원은 항상 새 버전을 만들고 pages.current_version_no만 옮긴다.
  * - 저장 시 baseVersionNo가 현재 버전과 다르면 409 — 다른 사람이 먼저 저장한 것을 덮어쓰지 않는다.
  * - 트랜잭션 안에서 페이지 행을 FOR UPDATE로 잠가 동시 저장의 버전 번호 충돌을 막는다.
+ * - 읽기·쓰기 권한은 스페이스 접근 판정(SpacesService.context / assertWrite)을 따른다.
  */
 @Injectable()
 export class PagesService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: AuditService,
+    private readonly spaces: SpacesService,
   ) {}
 
   private async getRowOrThrow(id: string, tx: Db = this.db): Promise<PageRow> {
@@ -47,8 +42,14 @@ export class PagesService {
     return row;
   }
 
-  async get(id: string): Promise<PageView> {
+  private async readable(id: string, principal: Principal): Promise<PageRow> {
     const page = await this.getRowOrThrow(id);
+    await this.spaces.context(page.spaceId, principal);
+    return page;
+  }
+
+  async get(id: string, principal: Principal): Promise<PageView> {
+    const page = await this.readable(id, principal);
     const version = await this.db.query.pageVersions.findFirst({
       where: and(eq(pageVersions.pageId, id), eq(pageVersions.versionNo, page.currentVersionNo)),
     });
@@ -63,9 +64,8 @@ export class PagesService {
   }
 
   async create(dto: CreatePageDto, actor: SessionUser, ip: string): Promise<PageView> {
+    await this.spaces.assertWrite(dto.spaceId, actor);
     return this.db.transaction(async (tx) => {
-      const space = await tx.query.spaces.findFirst({ where: and(eq(spaces.id, dto.spaceId), isNull(spaces.deletedAt)) });
-      if (!space) throw new NotFoundException('스페이스를 찾을 수 없다');
       if (dto.parentId) await this.assertParent(tx, dto.parentId, dto.spaceId, null);
 
       const [{ next }] = await tx
@@ -87,14 +87,7 @@ export class PagesService {
           updatedBy: actor.id,
         })
         .returning();
-      await tx.insert(pageVersions).values({
-        pageId: page.id,
-        versionNo: 1,
-        title: dto.title,
-        contentJson: dto.content,
-        contentText: text,
-        createdBy: actor.id,
-      });
+      await tx.insert(pageVersions).values({ pageId: page.id, versionNo: 1, title: dto.title, contentJson: dto.content, contentText: text, createdBy: actor.id });
       await this.audit.record(
         { action: 'page.create', actorId: actor.id, targetType: 'page', targetId: page.id, detail: { spaceId: dto.spaceId, title: dto.title }, ip },
         tx,
@@ -104,6 +97,8 @@ export class PagesService {
   }
 
   async update(id: string, dto: UpdatePageDto, actor: SessionUser, ip: string): Promise<PageView> {
+    const current = await this.getRowOrThrow(id);
+    await this.spaces.assertWrite(current.spaceId, actor);
     return this.db.transaction(async (tx) => {
       const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');
       if (!locked) throw new NotFoundException('페이지를 찾을 수 없다');
@@ -115,10 +110,7 @@ export class PagesService {
         });
       }
       const page = await this.appendVersion(tx, locked, dto.title, dto.content, actor);
-      await this.audit.record(
-        { action: 'page.update', actorId: actor.id, targetType: 'page', targetId: id, detail: { versionNo: page.currentVersionNo }, ip },
-        tx,
-      );
+      await this.audit.record({ action: 'page.update', actorId: actor.id, targetType: 'page', targetId: id, detail: { versionNo: page.currentVersionNo }, ip }, tx);
       return { ...toPageSummary(page), content: dto.content, createdBy: page.createdBy, updatedBy: actor.id, createdAt: page.createdAt.toISOString() };
     });
   }
@@ -135,8 +127,8 @@ export class PagesService {
     return page;
   }
 
-  async versions(id: string): Promise<PageVersionView[]> {
-    await this.getRowOrThrow(id);
+  async versions(id: string, principal: Principal): Promise<PageVersionView[]> {
+    await this.readable(id, principal);
     const rows = await this.db
       .select({
         versionNo: pageVersions.versionNo,
@@ -152,8 +144,8 @@ export class PagesService {
     return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
   }
 
-  async version(id: string, versionNo: number): Promise<PageVersionView & { content: DocNode }> {
-    await this.getRowOrThrow(id);
+  async version(id: string, versionNo: number, principal: Principal): Promise<PageVersionView & { content: DocNode }> {
+    await this.readable(id, principal);
     const row = await this.db
       .select({
         versionNo: pageVersions.versionNo,
@@ -173,6 +165,8 @@ export class PagesService {
 
   /** 과거 버전 복원 = 그 내용으로 새 버전을 만든다. 이력은 지워지지 않는다. */
   async restoreVersion(id: string, versionNo: number, actor: SessionUser, ip: string): Promise<PageView> {
+    const current = await this.getRowOrThrow(id);
+    await this.spaces.assertWrite(current.spaceId, actor);
     return this.db.transaction(async (tx) => {
       const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');
       if (!locked) throw new NotFoundException('페이지를 찾을 수 없다');
@@ -189,6 +183,8 @@ export class PagesService {
   }
 
   async move(id: string, dto: MovePageDto, actor: SessionUser, ip: string): Promise<PageSummary> {
+    const current = await this.getRowOrThrow(id);
+    await this.spaces.assertWrite(current.spaceId, actor);
     return this.db.transaction(async (tx) => {
       const page = await this.getRowOrThrow(id, tx);
       if (dto.parentId) await this.assertParent(tx, dto.parentId, page.spaceId, id);
@@ -203,6 +199,8 @@ export class PagesService {
   }
 
   async softDelete(id: string, actor: SessionUser, ip: string): Promise<void> {
+    const current = await this.getRowOrThrow(id);
+    await this.spaces.assertWrite(current.spaceId, actor);
     await this.db.transaction(async (tx) => {
       const page = await this.getRowOrThrow(id, tx);
       const children = await tx.select({ id: pages.id }).from(pages).where(and(eq(pages.parentId, id), isNull(pages.deletedAt)));

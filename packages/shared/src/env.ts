@@ -42,8 +42,10 @@ export const envSchema = z
     WF_SESSION_ABSOLUTE_HOURS: intString(1, 24 * 30, 12),
     WF_TRUST_PROXY: bool(false),
 
-    WF_ADMIN_USERNAME: z.string().min(1).default('admin'),
-    WF_ADMIN_INITIAL_PASSWORD: z.string().min(12).optional(),
+    // 최초 root 계정 (pnpm db:seed). 개발(development)에서는 admin1·member1·pending1 시드 계정도 같은 비밀번호를 쓴다
+    WF_ROOT_USERNAME: z.string().min(1).default('root'),
+    WF_ROOT_INITIAL_PASSWORD: z.string().min(8).optional(),
+    WF_ROOT_EMAIL: z.string().min(3).default('root@example.internal'),
 
     WF_SERVE_WEB: bool(false),
     WF_WEB_DIST: z.string().min(1).default('../web/dist'),

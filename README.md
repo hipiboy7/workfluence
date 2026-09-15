@@ -22,4 +22,5 @@ docs/              운영 이관 산출물 / docs/internal/ 작업 기록 / docs
 
 ## 빠른 시작
 
-`PROTOTYPE.md` 2절. 요약: `pnpm install` → `.env` 작성 → `pnpm dev:db` → `pnpm db:migrate` → `pnpm db:seed` → `pnpm dev`.
+`PROTOTYPE.md` 2절. 요약: `pnpm install` → `.env` 작성 → `pnpm dev:db` → `pnpm db:migrate` → `pnpm db:seed` → `pnpm build && pnpm start` → `http://127.0.0.1:3000`.
+시드 계정(root·admin1·member1·pending1)과 비밀번호 규칙은 `PROTOTYPE.md` 2절 표.

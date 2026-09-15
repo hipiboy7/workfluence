@@ -14,7 +14,7 @@ import type { Request } from 'express';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { UsersService } from '../users/users.service';
 
-export type SessionUser = { id: string; username: string; displayName: string; role: Role };
+export type SessionUser = { id: string; username: string; displayName: string; role: Role; mustChangePassword: boolean };
 
 declare module 'express-session' {
   interface SessionData {
@@ -25,8 +25,12 @@ declare module 'express-session' {
 }
 
 const ACTION_KEY = 'wf:action';
+const ALLOW_PENDING_PW_KEY = 'wf:allow-pending-password';
+
 /** 핸들러가 요구하는 행위. AuthGuard가 shared의 can()으로 판정한다 — 권한 판정은 한 곳에서 (CLAUDE.md 7절) */
 export const RequireAction = (action: Action) => SetMetadata(ACTION_KEY, action);
+/** 비밀번호 변경이 강제된 상태에서도 허용하는 핸들러 (me, change-password, logout) */
+export const AllowPendingPasswordChange = () => SetMetadata(ALLOW_PENDING_PW_KEY, true);
 
 export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionContext): SessionUser => {
   const req = ctx.switchToHttp().getRequest<Request & { user?: SessionUser }>();
@@ -54,8 +58,22 @@ export class AuthGuard implements CanActivate {
     }
 
     const user = await this.users.findById(session.userId);
-    if (!user) throw new UnauthorizedException('사용자를 찾을 수 없다');
-    req.user = { id: user.id, username: user.username, displayName: user.displayName, role: user.role as Role };
+    if (!user || user.status !== 'active') {
+      await new Promise<void>((resolve) => session.destroy(() => resolve()));
+      throw new UnauthorizedException('사용 가능한 계정이 아니다');
+    }
+    req.user = {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      role: user.role as Role,
+      mustChangePassword: user.mustChangePassword,
+    };
+
+    const allowPending = this.reflector.getAllAndOverride<boolean | undefined>(ALLOW_PENDING_PW_KEY, [ctx.getHandler(), ctx.getClass()]);
+    if (user.mustChangePassword && !allowPending) {
+      throw new ForbiddenException({ code: 'PASSWORD_CHANGE_REQUIRED', message: '비밀번호를 변경해야 계속할 수 있다' });
+    }
 
     const action = this.reflector.getAllAndOverride<Action | undefined>(ACTION_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (action && !can(req.user, action)) throw new ForbiddenException(`권한이 없다: ${action}`);

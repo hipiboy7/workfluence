@@ -11,10 +11,9 @@ import {
   type PageView,
   type UpdatePageDto,
 } from '@workfluence/shared';
-import { AuditModule } from '../audit/audit.module';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
-import { AuthModule } from '../auth/auth.module';
 import { ZodPipe } from '../common/zod.pipe';
+import { SpacesModule } from '../spaces/spaces.module';
 import { PagesService } from './pages.service';
 
 @Controller('api/pages')
@@ -30,8 +29,8 @@ export class PagesController {
 
   @Get(':id')
   @RequireAction('page.read')
-  get(@Param('id', ParseUUIDPipe) id: string): Promise<PageView> {
-    return this.svc.get(id);
+  get(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() me: SessionUser): Promise<PageView> {
+    return this.svc.get(id, me);
   }
 
   @Put(':id')
@@ -65,14 +64,18 @@ export class PagesController {
 
   @Get(':id/versions')
   @RequireAction('page.read')
-  versions(@Param('id', ParseUUIDPipe) id: string): Promise<PageVersionView[]> {
-    return this.svc.versions(id);
+  versions(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() me: SessionUser): Promise<PageVersionView[]> {
+    return this.svc.versions(id, me);
   }
 
   @Get(':id/versions/:no')
   @RequireAction('page.read')
-  version(@Param('id', ParseUUIDPipe) id: string, @Param('no', ParseIntPipe) no: number): Promise<PageVersionView & { content: DocNode }> {
-    return this.svc.version(id, no);
+  version(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('no', ParseIntPipe) no: number,
+    @CurrentUser() me: SessionUser,
+  ): Promise<PageVersionView & { content: DocNode }> {
+    return this.svc.version(id, no, me);
   }
 
   @Post(':id/versions/:no/restore')
@@ -88,7 +91,7 @@ export class PagesController {
 }
 
 @Module({
-  imports: [AuthModule, AuditModule],
+  imports: [SpacesModule],
   controllers: [PagesController],
   providers: [PagesService],
   exports: [PagesService],

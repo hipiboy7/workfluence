@@ -8,7 +8,9 @@ import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
+import { SettingsModule } from './settings/settings.module';
 import { SpacesModule } from './spaces/spaces.module';
+import { SystemModule } from './system/system.module';
 import { UsersModule } from './users/users.module';
 
 // SPA 정적 서빙 여부는 부트스트랩 전에 알아야 하므로 여기서 한 번 더 읽는다 (ConfigModule과 같은 로더)
@@ -19,11 +21,13 @@ const env = loadEnv();
     ConfigModule,
     DbModule,
     AuditModule,
+    SettingsModule,
+    SpacesModule,
     UsersModule,
     AuthModule,
-    SpacesModule,
     PagesModule,
     SearchModule,
+    SystemModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

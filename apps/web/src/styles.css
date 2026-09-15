@@ -96,3 +96,67 @@ button:disabled { opacity: 0.6; cursor: default; }
 .table th, .table td { border-bottom: 1px solid var(--line); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
 .table.small { font-size: 0.82rem; }
 .table code { font-size: 0.78rem; word-break: break-all; }
+
+/* ---- v2: 첫 페이지·비밀번호 눈 아이콘·배지·토글·Crew·관리 ---- */
+.login label { margin-top: 0.6rem; margin-bottom: 0.25rem; display: block; }
+.login input { width: 100%; }
+.login form .button, .login .button.wide, button.wide { width: 100%; display: block; text-align: center; margin-top: 0.8rem; }
+.landing-links { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 1rem; }
+.landing-links .button { text-align: center; }
+.pw-field { position: relative; display: flex; align-items: center; }
+.pw-field input { width: 100%; padding-right: 2.4rem; }
+.pw-field .eye { position: absolute; right: 0.3rem; top: 50%; transform: translateY(-50%); border: none; background: none; padding: 0.2rem; color: var(--muted); line-height: 0; }
+.pw-field .eye:hover { color: var(--accent); background: none; }
+.pw-field .eye[aria-pressed="true"] { color: var(--accent); }
+.mono { font-family: Consolas, "D2Coding", monospace; }
+.mono.big { font-size: 1.2rem; letter-spacing: 0.05em; }
+.notice.info { background: var(--accent-weak); border: 1px solid #b9c9f6; }
+.narrow { max-width: 480px; }
+.narrow label { display: block; margin: 0.6rem 0 0.25rem; }
+.narrow input { width: 100%; }
+ul.plain { list-style: none; padding: 0; }
+.crumb { margin: 0 0 0.3rem; font-size: 0.9rem; }
+
+.badge { display: inline-block; padding: 0 0.5rem; border-radius: 999px; font-size: 0.78rem; background: #eef1f5; color: var(--muted); margin-right: 0.3rem; vertical-align: middle; }
+.badge.kind-personal { background: #eaf7ee; color: #1d7a3a; }
+.badge.kind-team { background: var(--accent-weak); color: var(--accent); }
+.badge.status-active { background: #eaf7ee; color: #1d7a3a; }
+.badge.status-suspended, .badge.status-locked { background: #fde8e8; color: var(--danger); }
+.badge.status-pending { background: var(--warn-bg); color: #8a6d00; }
+.badges { margin: 0.3rem 0; }
+
+.title-row { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.8rem; }
+.title-row h1 { margin: 0; }
+button.toggle { border-color: var(--accent); color: var(--accent); }
+.card-title { font-weight: 600; font-size: 1.05rem; color: var(--fg); }
+.card.suspended { opacity: 0.7; }
+.radio-row { border: none; padding: 0; margin: 0 0 0.6rem; display: flex; gap: 1rem; align-items: center; }
+.radio-row legend { font-size: 0.9rem; margin-bottom: 0.3rem; }
+label.inline { display: inline-flex; flex-direction: row; align-items: center; gap: 0.3rem; margin: 0; }
+.inline-add { display: flex; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
+.inline-add input { flex: 1; }
+textarea { width: 100%; resize: vertical; }
+
+.space-title { margin-bottom: 0.3rem; }
+.sidebar-actions { display: flex; gap: 0.5rem; align-items: center; margin: 0.6rem 0 0.8rem; }
+.sidebar-actions .button.small { margin-bottom: 0; }
+button.small { padding: 0.25rem 0.6rem; font-size: 0.85rem; }
+button.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+.space-admin { display: flex; gap: 0.4rem; margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--line); }
+.crew { margin-bottom: 1rem; }
+.crew h3 { margin: 0 0 0.5rem; }
+.row-actions { white-space: nowrap; display: flex; gap: 0.3rem; }
+
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.admin-grid .wide-card { grid-column: 1 / -1; }
+.admin-grid h2 a { color: var(--fg); text-decoration: underline; text-decoration-color: var(--accent); }
+.two-col.wide-detail { grid-template-columns: 1fr 420px; }
+.table.selectable tbody tr { cursor: pointer; }
+.table.selectable tbody tr:hover { background: #f4f7fd; }
+.table.selectable tbody tr.active { background: var(--accent-weak); }
+.detail-panel h3 { margin: 1rem 0 0.4rem; }
+dl.meta { display: grid; grid-template-columns: 7rem 1fr; gap: 0.3rem 0.6rem; margin: 0.5rem 0 0.8rem; }
+dl.meta dt { color: var(--muted); }
+dl.meta dd { margin: 0; }
+.login .pw-field .eye { width: auto; margin-top: 0; }
+.login .inline-add button, .login .eye { width: auto; }

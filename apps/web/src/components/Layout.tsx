@@ -3,6 +3,8 @@ import { useState, type FormEvent } from 'react';
 import { Link, Outlet, useNavigate } from 'react-router';
 import { useAuth } from '../auth';
 
+const ROLE_LABEL: Record<string, string> = { root: 'root', admin: 'admin', member: '사용자' };
+
 export function Layout() {
   const { me, logout } = useAuth();
   const navigate = useNavigate();
@@ -24,7 +26,11 @@ export function Layout() {
         </form>
         <nav className="topnav">
           {me && can(me, 'user.manage') && <Link to="/admin">관리</Link>}
-          <span className="muted">{me?.displayName}</span>
+          {me && can(me, 'system.manage') && <Link to="/system">시스템</Link>}
+          <Link to="/change-password">비밀번호 변경</Link>
+          <span className="muted">
+            {me?.displayName} <span className="badge">{me ? ROLE_LABEL[me.role] : ''}</span>
+          </span>
           <button type="button" className="link" onClick={() => void logout().then(() => navigate('/login'))}>
             로그아웃
           </button>

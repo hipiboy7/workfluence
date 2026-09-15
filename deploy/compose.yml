@@ -35,8 +35,9 @@ services:
       WF_TRUST_PROXY: "true"
       WF_SERVE_WEB: "true"
       WF_WEB_DIST: ../../web/dist
-      WF_ADMIN_USERNAME: ${WF_ADMIN_USERNAME:-admin}
-      WF_ADMIN_INITIAL_PASSWORD: ${WF_ADMIN_INITIAL_PASSWORD:-}
+      WF_ROOT_USERNAME: ${WF_ROOT_USERNAME:-root}
+      WF_ROOT_INITIAL_PASSWORD: ${WF_ROOT_INITIAL_PASSWORD:-}
+      WF_ROOT_EMAIL: ${WF_ROOT_EMAIL:-root@example.internal}
       WF_LOG_LEVEL: ${WF_LOG_LEVEL:-info}
       # 임베디드 PG 설정은 개발 PC 전용이지만 스키마가 strict라 컨테이너에서는 아예 넘기지 않는다
     depends_on:
