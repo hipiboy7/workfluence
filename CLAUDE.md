@@ -253,11 +253,11 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
   |---|---|---|
   | PostgreSQL 데이터 디렉토리 (개발·테스트 DB) | `.local/pgdata/` | 서비스 초기화(`initdb`) 시 지정 |
   | 첨부 스토리지 | `.local/attachments/` | `WF_STORAGE_PATH` |
-  | pnpm store | `.local/pnpm-store/` | 프로젝트 `.npmrc`의 `store-dir`. 프로젝트와 같은 드라이브여야 하드링크가 된다 |
+  | pnpm store | `.local/pnpm-store/` | `pnpm-workspace.yaml`의 `storeDir` (pnpm 12는 `.npmrc`의 pnpm 설정을 읽지 않는다 — 2026-09-15 실측). 프로젝트와 같은 드라이브여야 하드링크가 된다 |
   | Playwright 브라우저 | `.local/ms-playwright/` | `PLAYWRIGHT_BROWSERS_PATH` |
   | 임시 파일·로그·DB 덤프 | `.local/tmp/`, `.local/logs/`, `.local/dumps/` | 스크립트 기본값 |
 
-  실측: 2026-09-14 D 전체 8.0GB·여유 4.0GB → **2026-09-15 16GB로 증설, 여유 12GB** (타 프로젝트가 4.2GB 사용). C 드라이브 여유 4.8GB (89% 사용). npm 캐시는 이미 `D:\claude\.cache\npm`, pnpm은 `.npmrc`로 `.local/` 아래.
+  실측: 2026-09-14 D 전체 8.0GB·여유 4.0GB → **2026-09-15 16GB로 증설, 여유 12GB** (타 프로젝트가 4.2GB 사용). C 드라이브 여유 4.8GB (89% 사용). npm 캐시는 이미 `D:\claude\.cache\npm`, pnpm은 `pnpm-workspace.yaml`의 `storeDir`로 `.local/` 아래.
 
   필요 용량 추정 (개발 PC, 2026-09-15):
 

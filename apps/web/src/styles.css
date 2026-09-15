@@ -1,0 +1,98 @@
+/* 외부 폰트·CDN 없음 (CLAUDE.md 7절). 시스템 폰트만. */
+:root {
+  --bg: #f6f7f9;
+  --fg: #1d2330;
+  --muted: #6b7380;
+  --line: #d9dee6;
+  --accent: #1f5eff;
+  --accent-weak: #e8effe;
+  --danger: #c62828;
+  --warn-bg: #fff6d6;
+  --card: #ffffff;
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1 { font-size: 1.6rem; margin: 0 0 0.8rem; }
+h2 { font-size: 1.1rem; margin: 0 0 0.6rem; }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+.error { color: var(--danger); }
+.key { display: inline-block; background: var(--accent-weak); color: var(--accent); border-radius: 4px; padding: 0 6px; font-weight: 600; font-size: 0.85em; margin-right: 4px; }
+
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1.2rem; background: var(--card); border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; font-size: 1.1rem; color: var(--fg); }
+.search-form { flex: 1; max-width: 480px; }
+.search-form input { width: 100%; }
+.topnav { margin-left: auto; display: flex; gap: 1rem; align-items: center; }
+.content { flex: 1; padding: 1.2rem; }
+
+input, select, textarea { font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+label { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.7rem; font-size: 0.9rem; }
+button, .button { font: inherit; padding: 0.45rem 0.8rem; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; color: var(--fg); }
+button:hover, .button:hover { background: var(--accent-weak); text-decoration: none; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.danger { color: var(--danger); }
+button.link { border: none; background: none; padding: 0; color: var(--accent); }
+button:disabled { opacity: 0.6; cursor: default; }
+.button.small { font-size: 0.85rem; display: inline-block; margin-bottom: 0.8rem; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; }
+.cards { list-style: none; padding: 0; display: grid; gap: 0.8rem; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.two-col { display: grid; grid-template-columns: 1fr 320px; gap: 1.5rem; align-items: start; }
+
+.login-wrap { min-height: 100vh; display: grid; place-items: center; }
+.login { width: 360px; }
+.login button { width: 100%; }
+
+.space-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; align-items: start; }
+.sidebar { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; position: sticky; top: 1rem; }
+.tree, .tree ul { list-style: none; padding-left: 0.9rem; margin: 0.2rem 0; }
+.tree > li { padding-left: 0; }
+.tree a { display: block; padding: 0.2rem 0.4rem; border-radius: 4px; color: var(--fg); }
+.tree a.active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.page { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1.5rem 2rem; min-height: 60vh; }
+.page-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; border-bottom: 1px solid var(--line); padding-bottom: 0.8rem; margin-bottom: 1rem; }
+.actions { display: flex; gap: 0.5rem; align-items: center; }
+
+.editor-page .editor-head { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.8rem; }
+.title-input { flex: 1; font-size: 1.4rem; font-weight: 600; }
+.editor { background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.25rem; padding: 0.5rem; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--card); z-index: 1; }
+.toolbar button { padding: 0.25rem 0.55rem; font-size: 0.85rem; }
+.toolbar button.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+.toolbar .sep { width: 1px; background: var(--line); margin: 0 0.3rem; }
+.notice { padding: 0.7rem 1rem; border-radius: 6px; margin-bottom: 0.8rem; display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.notice.warn { background: var(--warn-bg); border: 1px solid #e6c65a; }
+
+/* 문서 본문 (TipTap ProseMirror) */
+.doc .tiptap { outline: none; line-height: 1.7; }
+.doc.editable .tiptap { min-height: 50vh; padding: 1rem 1.5rem; }
+.tiptap p { margin: 0.4rem 0; }
+.tiptap h1 { font-size: 1.6rem; margin: 1.2rem 0 0.5rem; }
+.tiptap h2 { font-size: 1.35rem; margin: 1rem 0 0.4rem; }
+.tiptap h3 { font-size: 1.15rem; margin: 0.9rem 0 0.3rem; }
+.tiptap blockquote { border-left: 3px solid var(--line); margin: 0.6rem 0; padding-left: 1rem; color: var(--muted); }
+.tiptap pre { background: #0f172a; color: #e2e8f0; padding: 0.8rem 1rem; border-radius: 6px; overflow: auto; font-size: 0.9rem; }
+.tiptap code { font-family: Consolas, "D2Coding", monospace; font-size: 0.9em; background: #eef1f5; padding: 0 0.25rem; border-radius: 3px; }
+.tiptap pre code { background: none; padding: 0; }
+.tiptap hr { border: none; border-top: 1px solid var(--line); margin: 1rem 0; }
+.tiptap table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0.8rem 0; }
+.tiptap th, .tiptap td { border: 1px solid var(--line); padding: 0.4rem 0.6rem; vertical-align: top; min-width: 3rem; }
+.tiptap th { background: #f0f3f8; text-align: left; }
+.tiptap .selectedCell::after { content: ""; position: absolute; inset: 0; background: rgba(31, 94, 255, 0.12); pointer-events: none; }
+.tiptap td, .tiptap th { position: relative; }
+
+.versions { list-style: none; padding: 0; }
+.versions li { padding: 0.4rem 0.5rem; border-radius: 4px; }
+.versions li.active { background: var(--accent-weak); }
+.hits { list-style: none; padding: 0; display: grid; gap: 0.6rem; }
+.table { width: 100%; border-collapse: collapse; background: var(--card); margin-bottom: 1.5rem; }
+.table th, .table td { border-bottom: 1px solid var(--line); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+.table.small { font-size: 0.82rem; }
+.table code { font-size: 0.78rem; word-break: break-all; }

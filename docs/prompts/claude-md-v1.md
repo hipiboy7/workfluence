@@ -41,7 +41,7 @@
 > 만약 현재 용량이 충분하다면, 프로토타입을 별도 브랜치로 만들어서 먼저 만들어봤으면해.
 > 확인해보고 용량이 충분하면 바로 프로토타입 브랜치를 만들어서 완성본까지 진행해줘.
 
-반영 (2026-09-15): `.npmrc`(pnpm store·cache를 `.local/`로), `.gitattributes`(LF 고정), `CLAUDE.md` 8.1절 용량 추정 표.
+반영 (2026-09-15): `pnpm-workspace.yaml`의 `storeDir`·`cacheDir`·`stateDir`(pnpm store·cache를 `.local/`로. 처음엔 `.npmrc`에 썼으나 pnpm 12가 무시함을 실측으로 확인해 옮김), `.gitattributes`(LF 고정), `CLAUDE.md` 8.1절 용량 추정 표.
 D 16GB 증설 확인(여유 12GB) → 충분 판정 → 프로토타입은 `exp/prototype` 브랜치(`CLAUDE.md` 12.1절 탐색 브랜치 규칙)에서 진행.
 
 ## 2. 확정된 결정 (2026-09-14)

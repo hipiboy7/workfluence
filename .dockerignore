@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+.local
+.env
+.git
+e2e
+docs
+history
+**/dist
+**/coverage
+**/.vite
+test-results
+playwright-report

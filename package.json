@@ -1,13 +1,34 @@
 {
   "name": "workfluence",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "version": "0.1.0-proto",
+  "private": true,
+  "description": "금융 폐쇄망 내부용 위키·문서 협업 시스템 (프로토타입)",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=24 <25"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  "scripts": {
+    "check:env": "tsx scripts/check-env.ts",
+    "dev:db": "tsx scripts/dev-db.ts",
+    "dev": "pnpm --filter @workfluence/shared build && pnpm -r --parallel --stream run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "test:cov": "pnpm -r run test:cov",
+    "test:e2e": "tsx scripts/e2e.ts",
+    "typecheck": "pnpm -r run typecheck",
+    "db:generate": "pnpm --filter @workfluence/api db:generate",
+    "db:migrate": "pnpm --filter @workfluence/api db:migrate",
+    "db:seed": "pnpm --filter @workfluence/api db:seed",
+    "start": "pnpm --filter @workfluence/api start"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.0",
+    "embedded-postgres": "17.10.0-beta.17",
+    "pg": "^8.16.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.0"
+  }
 }
