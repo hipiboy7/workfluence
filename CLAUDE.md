@@ -246,7 +246,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 - 줄바꿈: `.gitattributes`에 `* text=auto eol=lf` (Phase 0). Linux에서 `.sh`·Dockerfile이 CRLF로 깨지는 것을 막는다.
 - 경로 대소문자: Linux는 구분한다. import 경로는 파일명과 대소문자까지 일치. lint로 잡는다.
 - 네이티브 모듈은 prebuilt 바이너리가 있는 것만 (argon2 등). 빌드 도구 체인을 요구하는 패키지는 피한다.
-- PostgreSQL은 로컬 설치본. **메이저 버전은 이미지와 같게** (Phase 0에서 고정). 개발 DB와 테스트 DB를 분리.
+- PostgreSQL은 로컬 설치본 또는 **임베디드 실행**(`embedded-postgres` 패키지가 `.local/pgdata`에 initdb·기동. 관리자 설치 불필요, 데이터가 프로젝트 디렉토리 안에 남음). **메이저 버전은 이미지와 같게** (Phase 0에서 고정). 개발 DB와 테스트 DB를 분리. 주의: PostgreSQL 서버 프로세스는 관리자 권한(elevated) 셸에서는 기동을 거부한다. 이 PC의 작업 셸은 비상승(2026-09-15 확인).
 - **프로젝트 데이터는 전부 D 드라이브, 이 저장소 디렉토리 아래 `.local/`에 둔다** (git 무시. 사용자 지시 2026-09-14). C 드라이브(사용자 프로필·ProgramData)에 두지 않는다. D 드라이브가 부족하면 증설한다.
 
   | 데이터 | 위치 | 지정 방법 |
@@ -257,7 +257,21 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
   | Playwright 브라우저 | `.local/ms-playwright/` | `PLAYWRIGHT_BROWSERS_PATH` |
   | 임시 파일·로그·DB 덤프 | `.local/tmp/`, `.local/logs/`, `.local/dumps/` | 스크립트 기본값 |
 
-  실측 (2026-09-14): D 드라이브 전체 8.0GB, 여유 4.0GB. C 드라이브 여유 4.8GB (89% 사용). `node_modules`·pnpm store·Playwright 브라우저만으로 2GB 이상이 필요하므로 **Phase 0 초기에 D 증설이 필요할 가능성이 높다.** `pnpm check:env`는 D 여유가 2GB 미만이면 경고한다.
+  실측: 2026-09-14 D 전체 8.0GB·여유 4.0GB → **2026-09-15 16GB로 증설, 여유 12GB** (타 프로젝트가 4.2GB 사용). C 드라이브 여유 4.8GB (89% 사용). npm 캐시는 이미 `D:\claude\.cache\npm`, pnpm은 `.npmrc`로 `.local/` 아래.
+
+  필요 용량 추정 (개발 PC, 2026-09-15):
+
+  | 항목 | 추정 |
+  |---|---|
+  | pnpm store + `node_modules` (같은 드라이브라 하드링크, 이중 계산 없음) | 1.5GB |
+  | Playwright 브라우저 (Chromium만 0.5GB, 3종이면 1.2GB) | 0.5~1.2GB |
+  | PostgreSQL 임베디드 바이너리 0.3GB + 개발·테스트 데이터·WAL 1GB | 1.3GB |
+  | 빌드 산출물·Vite/tsc 캐시·커버리지 | 0.5GB |
+  | 첨부 fixture·DB 덤프·임시 | 0.5GB |
+  | 소스 + git 이력 | 0.3GB |
+  | **합계** | **약 5GB, 버전 갱신 누적을 감안한 여유치 7GB** |
+
+  → 16GB(여유 12GB)로 Phase 0~5 개발이 충분하다. `pnpm check:env`는 D 여유가 3GB 미만이면 경고한다. 분기마다 `pnpm store prune`으로 옛 버전을 정리한다.
 - 권장 git 설정: `core.quotepath=false` (한글 파일명 표시).
 
 ### 8.2 빌드 (Linux)
