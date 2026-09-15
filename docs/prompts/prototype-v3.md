@@ -9,11 +9,24 @@
 
 > 우선 ID찾기와 패스워드 찾기를 로그인 바로 아래로 위치시켜줘. 그다음에 신규가입이랑 담당자 확인은 가장 아래로 내려줘.
 
+> 사용자 비밀번호 초기화 버튼을 누르면 아래와 같이 나와
+> "e2e2944529의 비밀번호를 초기화할까? 임시 비밀번호가 발급되고 다음 로그인에서 변경이 강제된다."
+> "비밀번호가 초기화 됩니다. 임시 비밀번호로 로그인 후 비밀번호를 변경하세요." 이렇게 바꿔줘.
+> 그리고 임시 비밀번호는 누르면 클립보드로 복사되도록 해줘. 복사 되면 '복사 되었습니다'가 뜨면 좋아.
+
 ## 2. 항목 정리
 
 | # | 항목 | 해석 | 상태 |
 |---|---|---|---|
 | 1 | 첫 페이지 버튼 배치 | 로그인 버튼 바로 아래에 `ID 찾기`·`PWD 찾기` 한 줄, 맨 아래에 `신규 가입`·`담당자 확인` 한 줄. 파일: `apps/web/src/pages/auth/LandingPage.tsx`, 스타일 `.landing-links` | 대기 |
+| 2 | 비밀번호 초기화 확인 문구 | `"비밀번호가 초기화 됩니다. 임시 비밀번호로 로그인 후 비밀번호를 변경하세요."` (사용자명은 넣지 않음). 파일: `apps/web/src/pages/admin/AdminUsersPage.tsx` `resetPassword()` | 대기 |
+| 3 | 임시 비밀번호 클립보드 복사 | 임시 비밀번호 값을 누르면 `navigator.clipboard.writeText` 후 `복사 되었습니다` 표시(2초 뒤 사라짐). 적용 위치: 관리자 초기화 결과 상자(`AdminUsersPage`), PWD 찾기 결과(`RecoverPasswordPage`). 클립보드 API는 HTTPS 또는 localhost에서만 동작하므로 실패 시 "직접 선택해 복사" 안내로 대체 | 대기 |
+
+## 3. 반영 시 함께 할 것
+
+- E2E `첫 페이지` 시나리오는 요소 존재만 확인하므로 순서 변경에 영향 없음. 순서를 검증하려면 위치 단언을 추가한다.
+- 복사 동작은 E2E에서 `page.evaluate(() => navigator.clipboard.readText())`로 확인할 수 있다(Chromium은 권한 부여 필요: `context.grantPermissions(['clipboard-read','clipboard-write'])`).
+- 확인 문구는 `window.confirm` 텍스트라 E2E에서 `dialog.message()`로 검증 가능.
 
 ## 3. 반영 시 함께 할 것
 
