@@ -229,7 +229,9 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 외부 자원 | 런타임에 인터넷 자원을 **하나도** 참조하지 않는다. 폰트·아이콘·Swagger UI 자산 전부 번들. CI에서 빌드 산출물의 외부 URL 참조를 검사한다 |
 | 세션 | 서버측 세션(PG). 쿠키 `HttpOnly; Secure; SameSite=Lax`. 유휴 30분 · 절대 12시간 기본. 로그아웃·비밀번호 변경·관리자 강제 종료 시 서버측 파기 |
 | CSRF | SameSite + 상태 변경 요청에 커스텀 헤더 요구 |
-| 로컬 계정 | argon2id. 기본 정책: 12자 이상, 영문·숫자·특수 중 3종, 90일 주기, 최근 5개 재사용 금지, 5회 실패 시 15분 잠금(관리자 해제 가능). 로그인 시도는 rate limit |
+| 로컬 계정 | argon2id. 기본 정책: **8자 이상, 영문 대·소문자·숫자·특수 중 2종** (사용자 결정 2026-09-15 — "엄청난 보안을 요하는 곳이 아니다". 이전 초안은 12자·3종), 5회 실패 시 15분 잠금(관리자 해제 가능). 주기 변경·재사용 금지는 사내 정책 확인 후. 로그인·가입·계정 복구는 IP별 rate limit |
+| 계정 생명주기 | 가입 요청 → `승인 대기` → 관리자 승인 → `활성`. 임시 비밀번호(관리자 초기화·PWD 찾기)는 화면에 1회 표시, 다음 로그인에서 변경 강제. ID 찾기는 email + 이름 일치 시 마스킹된 ID만 (계정 열거 방지) |
+| 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여, admin은 admin·member 생성. 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
 | 권한 | 기본 거부. 모든 엔드포인트에 가드. 권한 판정은 shared 순수 함수(A등급)로 한 곳에서 |
 | 입력 | 모든 요청 본문·쿼리는 zod 검증. 문서는 JSON만. 링크는 `http(s)`·내부 경로만, 이미지 출처는 내부 첨부 URL만 |
 | 응답 헤더 | CSP(`default-src 'self'` 기준), `X-Content-Type-Options`, `frame-ancestors 'none'`, HSTS. HTML·API는 `Cache-Control: no-store`, **해시 파일명 정적 자산은 immutable 캐시 허용** |
