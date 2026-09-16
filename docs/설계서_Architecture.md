@@ -228,7 +228,7 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 - 이미지 3종: `app`(Nest + SPA), `nginx`, `postgres`.
 - 빌드 스테이지에서 의존성 설치·빌드, 런타임 스테이지에는 산출물과 production 의존성만. 베이스는 `node:24-bookworm-slim` (alpine은 네이티브 모듈 호환 위험).
 - 컨테이너는 non-root, 헬스체크, `restart: unless-stopped`.
-- 반입 묶음 목록의 단일 출처는 `docs/배포가이드.md` (Phase 5).
+- 반입 묶음 목록의 단일 출처는 Phase 5에서 작성하는 배포가이드다.
 
 ## 10. Phase별 추가 지점
 

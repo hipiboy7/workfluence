@@ -41,13 +41,24 @@ const INCLUDE = ['README.md', 'CLAUDE.md', 'PROTOTYPE.md', 'docs/*.md', 'docs/**
  */
 const SKIP = [/^docs[\\/]prompts[\\/]prototype-/];
 
-/** 백틱 경로로 인정하는 접두. 이 밖의 문자열은 경로가 아니라고 본다. */
-const REPO_PREFIXES = ['apps/', 'packages/', 'scripts/', 'e2e/', 'deploy/', 'docs/', '.claude/', '.github/', '.local/'];
+/**
+ * 백틱 경로로 인정하는 접두. 이 밖의 문자열은 경로가 아니라고 본다.
+ * `.local/`은 **런타임 데이터**(git 무시)라 갓 클론한 저장소에는 없다. 저장소 경로로 검사하지 않는다.
+ */
+const REPO_PREFIXES = ['apps/', 'packages/', 'scripts/', 'e2e/', 'deploy/', 'docs/', '.claude/', '.github/'];
+
+/** pnpm 내장 명령. 스크립트 이름이 아니므로 package.json에서 찾지 않는다. */
+const PNPM_BUILTINS = new Set([
+  'install', 'i', 'add', 'remove', 'rm', 'update', 'up', 'exec', 'dlx', 'store', 'audit', 'why', 'list', 'ls',
+  'link', 'unlink', 'deploy', 'approve-builds', 'licenses', 'outdated', 'prune', 'rebuild', 'setup', 'env', 'config',
+]);
 
 type Finding = { file: string; line: number; kind: string; detail: string };
 
 function listDocs(): string[] {
-  const out = execSync(`git ls-files ${INCLUDE.map((p) => `"${p}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' });
+  // core.quotepath=false: 한글 파일명을 8진 이스케이프(ì¤...)로 내놓지 않게 한다.
+  // 그대로 두면 파일을 못 찾아 **조용히 건너뛴다** — 검사되지 않은 문서가 통과로 보인다.
+  const out = execSync(`git -c core.quotepath=false ls-files ${INCLUDE.map((p) => `"${p}"`).join(' ')}`, { cwd: ROOT, encoding: 'utf8' });
   return out
     .split(/\r?\n/)
     .filter(Boolean)
@@ -82,7 +93,7 @@ function pnpmScriptName(command: string): string | null {
   // `pnpm <script>` 같은 자리표시자는 명령이 아니다
   if (/[<>{}*]/.test(name)) return null;
   // pnpm 내장 명령은 검사 대상이 아니다
-  if (['install', 'add', 'remove', 'exec', 'dlx', 'store', 'audit', 'why', 'list', 'update', 'link', 'deploy'].includes(name)) return null;
+  if (PNPM_BUILTINS.has(name)) return null;
   return name;
 }
 
@@ -138,8 +149,10 @@ function checkFile(file: string, scripts: Set<string>, findings: Finding[]): voi
 
     // 5. 표 열 수
     if (/^\s*\|/.test(raw)) {
-      const cols = raw.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).length;
-      const isSeparator = /^\s*\|[\s:|-]+\|\s*$/.test(raw);
+      // 인라인 코드(`...`) 안의 파이프는 열 구분자가 아니다. 먼저 지우고 센다.
+      const cells = raw.trim().replace(/`[^`]*`/g, '');
+      const cols = cells.replace(/^\||\|$/g, '').split(/(?<!\\)\|/).length;
+      const isSeparator = /^\s*\|[\s:|-]+\|\s*$/.test(cells.trim() || raw);
       const head = tableHeaders[tableHeaders.length - 1];
       if (!head || head.line < lineNo - 1) {
         tableHeaders.push({ cols, line: lineNo });
@@ -155,7 +168,7 @@ function checkFile(file: string, scripts: Set<string>, findings: Finding[]): voi
 
 /** 6. deploy/*.sh 실행 권한 */
 function checkShellScripts(findings: Finding[]): void {
-  const out = execSync('git ls-files "deploy/*.sh" "deploy/**/*.sh"', { cwd: ROOT, encoding: 'utf8' });
+  const out = execSync('git -c core.quotepath=false ls-files "deploy/*.sh" "deploy/**/*.sh"', { cwd: ROOT, encoding: 'utf8' });
   for (const rel of out.split(/\r?\n/).filter(Boolean)) {
     const mode = execSync(`git ls-files -s "${rel}"`, { cwd: ROOT, encoding: 'utf8' }).trim().split(/\s+/)[0];
     if (mode !== '100755') findings.push({ file: rel, line: 0, kind: '실행 권한 없음', detail: `git mode ${mode} (100755 필요)` });
@@ -169,14 +182,21 @@ function main(): void {
   const docs = argPath >= 0 ? [relative(ROOT, resolve(process.argv[argPath + 1]))] : listDocs();
   const findings: Finding[] = [];
 
+  let checked = 0;
   for (const doc of docs) {
-    if (!existsSync(resolve(ROOT, doc)) || !statSync(resolve(ROOT, doc)).isFile()) continue;
+    const abs = resolve(ROOT, doc);
+    // 목록에 있는데 열 수 없으면 조용히 넘기지 않는다. 검사되지 않은 문서가 통과로 보이면 관문이 무의미하다.
+    if (!existsSync(abs) || !statSync(abs).isFile()) {
+      findings.push({ file: doc, line: 0, kind: '문서를 읽을 수 없음', detail: '목록에는 있으나 파일이 없다 (경로 인코딩 문제일 수 있다)' });
+      continue;
+    }
     checkFile(doc, scripts, findings);
+    checked++;
   }
   if (argPath < 0) checkShellScripts(findings);
 
   if (findings.length === 0) {
-    console.log(`verify:docs — 문서 ${docs.length}개, 위반 없음`);
+    console.log(`verify:docs — 문서 ${checked}개 검사, 위반 없음`);
     return;
   }
   for (const f of findings) console.error(`${f.file}:${f.line}  [${f.kind}] ${f.detail}`);
