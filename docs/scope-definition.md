@@ -31,7 +31,7 @@
 
 ### 1.3 제품 기준
 
-기능의 기준점은 **Confluence의 실제 동작**이다. 다만 그대로 베끼지 않는다. 각 Phase에서 다루는 기능을 Confluence와 대조해 채택·변형·제외를 `docs/internal/P{N}_검토서_ReferenceComparison.md`에 남기고, **산출물 본문에는 우리 판단의 근거만 쓴다** (`CLAUDE.md` 1.3절).
+기능의 기준점은 **Confluence의 실제 동작**이다. 다만 그대로 베끼지 않는다. 기능이 있는 Phase에서는 그 기능을 Confluence와 대조해 채택·변형·제외를 **그 Phase 설계서의 대조 절**에 남기고, 본문에는 우리 판단의 근거만 쓴다 (`CLAUDE.md` 1.3절·4절).
 
 ## 2. 용어
 
@@ -190,5 +190,8 @@
 |---|---|
 | [`CLAUDE.md`](../CLAUDE.md) | 상위 규칙 |
 | [`docs/설계서_Architecture.md`](설계서_Architecture.md) | 이 범위를 어떻게 만드는가 |
-| [`docs/P0_요구사항정의서_Foundation.md`](P0_요구사항정의서_Foundation.md) | Phase 0 상세 요구사항 |
+| [`docs/P0_설계서_Foundation.md`](P0_설계서_Foundation.md) | Phase 0 요구사항과 설계 |
+| [`docs/학습가이드_시스템이해.md`](학습가이드_시스템이해.md) | 개발 용어 없이 읽는 설명 |
+| [`docs/운영가이드_장애대응.md`](운영가이드_장애대응.md) | 증상에서 조치로 |
+| [`docs/기능백로그.md`](기능백로그.md) | 기능 요청 접수 상태 |
 | [`docs/prompts/phase0/foundation-v1.md`](prompts/phase0/foundation-v1.md) | Phase 0 수행 근거 프롬프트 |

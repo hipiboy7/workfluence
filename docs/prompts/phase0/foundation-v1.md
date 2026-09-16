@@ -3,8 +3,11 @@
 - 일자: 2026-09-16
 - 작성 LLM: Claude Opus 5
 - 상태: **승인 완료 (2026-09-16, 사용자 "응 시작해").** 5절 쟁점 4건은 모두 **권고안대로** 확정. `CLAUDE.md` 1.1절 2단계 산출물이며 이 파일이 Phase 0의 수행 근거다.
-- 대응 산출물: `docs/scope-definition.md`, `docs/설계서_Architecture.md`, `docs/P0_요구사항정의서_Foundation.md`, `docs/P0_설계서_Foundation.md`, 코드, `docs/P0_테스트결과서_Foundation.md`
+- 대응 산출물: `docs/scope-definition.md`, `docs/설계서_Architecture.md`, `docs/P0_설계서_Foundation.md`, 코드, `docs/P0_검증기록_Foundation.md`
 - 입력 자료: `exp/prototype` 브랜치의 프로토타입과 그 요청 기록 ([v1](../prototype-v1.md) · [v2](../prototype-v2.md) · [v3](../prototype-v3.md))
+
+
+> **정정 2026-09-16.** 이 프롬프트는 Phase 0 착수 시점의 요청이다. Phase 0 종료 후 방법론을 개정해 **산출물이 3단계(설계서 → 코드+테스트 → 검증기록)로 줄었고** 요구사항정의서는 설계서에 합쳐졌다. 아래 본문의 4단계 서술과 문서 이름은 그때의 기록이라 고치지 않는다. 현재 규칙은 `CLAUDE.md` 4절, 개정 근거는 [`docs/internal/검토서_방법론개정.md`](../../internal/검토서_방법론개정.md)다.
 
 ## 1. 왜 Phase 0인가
 
@@ -60,7 +63,7 @@ Phase 1~6이 공유하는 기반을 먼저 확정한다. 각 Phase가 필요할 
 - 환경 3종과 명령 표, 테스트 전략(등급별 대상·커버리지 관문)
 - 배포 경로: 빌드 → `docker save` → 반입 → `load` → 마이그레이션 → 기동
 
-### 3.3 `docs/P0_요구사항정의서_Foundation.md`
+### 3.3 `docs/P0_설계서_Foundation.md`
 
 FR/NFR 번호로. 최소 포함:
 
@@ -83,7 +86,7 @@ FR/NFR 번호로. 최소 포함:
 | CI (GitHub Actions) | `pnpm check` + `pnpm audit` + 라이선스 검사 + **gitleaks** + 빌드 산출물의 외부 URL 참조 검사 |
 | 에이전트 | `.claude/agents/doc-consistency.md`(sonnet, 읽기 전용), `.claude/agents/self-reviewer.md`(fable), `.claude/skills/troubleshoot/SKILL.md` |
 
-### 3.6 `docs/P0_테스트결과서_Foundation.md`
+### 3.6 `docs/P0_검증기록_Foundation.md`
 
 실행 환경·명령·건수·등급별 **실측** 커버리지·skip 건수, **Linux 빌드 기록**(Docker 버전·디스크 여유·이미지 크기·기동 확인·`/health` 응답 원문·일자), 실패·재작업 내역
 
@@ -100,7 +103,7 @@ FR/NFR 번호로. 최소 포함:
 - [ ] 재부팅 후 자동 기동 확인 (`restart: unless-stopped`)
 - [ ] 에이전트 정의 3개 + `docs/internal/설계서_Agents.md`  
   *(정정 2026-09-16: 요구사항정의서 단계에서 **에이전트 2개 + 스킬 1개**로 구체화했다. 셋 중 `troubleshoot`은 에이전트 기준 4개 중 1개만 충족해 스킬로 만들었다 — 근거는 `docs/internal/설계서_Agents.md` 3.3절. 이 줄은 착수 시점의 요청 기록이라 지우지 않는다.)*
-- [ ] `docs/internal/P0_검토서_ReferenceComparison.md`(Confluence 기능 대조)·`P0_검토서_SelfReview.md`
+- [ ] `docs/P0_설계서_Foundation.md`(Confluence 기능 대조)·`P0_검토서_SelfReview.md`
 
 ## 5. 착수 전 쟁점 — 확정 (2026-09-16)
 

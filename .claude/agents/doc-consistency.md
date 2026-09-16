@@ -30,13 +30,17 @@ model: sonnet
 3. docs/설계서_Architecture.md
 4. docs/P0_*.md
 5. docs/P1_*.md …          ← Phase가 늘면 Glob으로 docs/P*_*.md 전부
-6. docs/*.md               ← 배포가이드·운영이관 가이드 등 (생기면)
-7. docs/internal/*.md      ← 학습가이드·검토서·용어집·에이전트 설계
-8. README.md
-9. docs/prompts/**/*.md    ← 최신 버전만. 구버전은 이력이라 건드리지 않는다
+6. docs/학습가이드_시스템이해.md   ← 개발 용어 없이 쓴 설명. Phase마다 갱신되는 필수 문서
+7. docs/운영가이드_장애대응.md     ← 증상에서 조치로. Phase마다 갱신되는 필수 문서
+8. docs/*.md               ← 기능백로그·배포가이드·운영이관 가이드 등
+9. docs/internal/*.md      ← 검토서(트러블슈팅·SelfReview·방법론개정)·에이전트 설계
+10. README.md
+11. docs/prompts/**/*.md   ← 최신 버전만. 구버전은 이력이라 건드리지 않는다
 ```
 
 `docs/prompts/prototype-*.md`는 **다른 브랜치(exp/prototype)의 기록**이다. 읽되 "어긋남"으로 보고하지 않는다.
+
+**과거를 서술한 문장은 어긋남이 아니다.** 개정 이력·정정 이력·트러블슈팅 기록은 "그때 그랬다"를 적은 것이다. 지금 사실과 다르다는 이유로 올리지 않는다. 올릴 것은 **지금 사실을 틀리게 말하는 문장**이다.
 
 # 특히 놓치기 쉬운 곳 — 반드시 본다
 
