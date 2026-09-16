@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
+import { CopyableSecret } from '../../components/CopyableSecret';
 import { PasswordInput } from '../../components/PasswordInput';
 import { USER_STATUS_LABEL, fmtDate } from './format';
 
@@ -38,7 +39,7 @@ export function AdminUsersPage() {
   };
 
   const resetPassword = (u: UserView) => {
-    if (!window.confirm(`${u.username}의 비밀번호를 초기화할까? 임시 비밀번호가 발급되고 다음 로그인에서 변경이 강제된다.`)) return;
+    if (!window.confirm('비밀번호가 초기화 됩니다. 임시 비밀번호로 로그인 후 비밀번호를 변경하세요.')) return;
     void act(async () => {
       const r = await api<{ user: UserView; temporaryPassword: string }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
       setReset({ username: u.username, temporaryPassword: r.temporaryPassword });
@@ -57,7 +58,7 @@ export function AdminUsersPage() {
         {error && <p className="error">{error}</p>}
         {reset && (
           <div className="notice info">
-            <strong>{reset.username}</strong> 임시 비밀번호: <strong className="mono big">{reset.temporaryPassword}</strong>
+            <strong>{reset.username}</strong> 임시 비밀번호: <CopyableSecret value={reset.temporaryPassword} label={`reset-${reset.username}`} />
             <span className="muted small"> 이 값은 지금만 보인다. 본인에게 전달하고 첫 로그인에서 바꾸게 한다.</span>
             <button type="button" className="small" onClick={() => setReset(null)}>
               닫기

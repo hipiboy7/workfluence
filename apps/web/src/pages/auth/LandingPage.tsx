@@ -3,7 +3,10 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../../auth';
 import { PasswordInput } from '../../components/PasswordInput';
 
-/** 첫 페이지: 로그인 + 신규 가입 · ID 찾기 · PWD 찾기 · 담당자 확인 (prototype-v2) */
+/**
+ * 첫 페이지: 로그인 + 계정 찾기(ID·PWD) + 그 외(신규 가입·담당자 확인).
+ * 버튼 순서는 사용자 지시(2026-09-15, prototype-v3 1번): 로그인 바로 아래 ID·PWD 찾기, 맨 아래 신규 가입·담당자 확인.
+ */
 export function LandingPage() {
   const { me, loading, login } = useAuth();
   const navigate = useNavigate();
@@ -44,15 +47,18 @@ export function LandingPage() {
             {busy ? '확인 중…' : '로그인'}
           </button>
         </form>
-        <div className="landing-links">
-          <Link className="button" to="/signup">
-            신규 가입
-          </Link>
+        <div className="landing-links recover">
           <Link className="button" to="/find-id">
             ID 찾기
           </Link>
           <Link className="button" to="/recover-password">
             PWD 찾기
+          </Link>
+        </div>
+        <hr className="divider" />
+        <div className="landing-links secondary">
+          <Link className="button" to="/signup">
+            신규 가입
           </Link>
           <Link className="button" to="/contact">
             담당자 확인

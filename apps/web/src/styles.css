@@ -160,3 +160,14 @@ dl.meta dt { color: var(--muted); }
 dl.meta dd { margin: 0; }
 .login .pw-field .eye { width: auto; margin-top: 0; }
 .login .inline-add button, .login .eye { width: auto; }
+
+/* ---- v3: 첫 페이지 버튼 구분, 임시 비밀번호 클립보드 복사 ---- */
+.landing-links.recover { margin-top: 0.6rem; }
+.landing-links.secondary { margin-top: 0.6rem; }
+.login .divider { border: none; border-top: 1px solid var(--line); margin: 1rem 0 0; }
+.copyable { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+button.secret { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.15rem 0.5rem; width: auto; background: #fff; border: 1px dashed var(--accent); color: var(--fg); }
+button.secret:hover { background: #fff; border-style: solid; }
+button.secret svg { color: var(--accent); flex: none; }
+.copied-flash { font-size: 0.85rem; color: #1d7a3a; background: #eaf7ee; border-radius: 999px; padding: 0.1rem 0.6rem; }
+.copied-flash.failed { color: var(--danger); background: #fde8e8; }

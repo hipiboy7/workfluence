@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api } from '../../api';
+import { CopyableSecret } from '../../components/CopyableSecret';
 
 /** PWD 찾기: ID + email → 임시 비밀번호 1회 표시. 로그인 후 즉시 변경이 강제된다 */
 export function RecoverPasswordPage() {
@@ -28,7 +29,7 @@ export function RecoverPasswordPage() {
         {result ? (
           <>
             <p className="notice info">
-              임시 비밀번호: <strong className="mono big">{result.temporaryPassword}</strong>
+              임시 비밀번호: <CopyableSecret value={result.temporaryPassword} label="recover" />
             </p>
             <p className="muted small">{result.message}</p>
             <Link className="button primary wide" to="/login">
