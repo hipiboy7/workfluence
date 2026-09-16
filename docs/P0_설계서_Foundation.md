@@ -231,6 +231,12 @@ DB까지 확인하는 이유: 앱 프로세스는 살아 있는데 DB를 못 쓰
 | `verify-docs.ts` | 6종 검사(FR-082). 검사 대상은 `README.md`·`CLAUDE.md`·`PROTOTYPE.md`·`docs/**/*.md`. `history/`는 제외 — 과거 기록을 사후에 고치면 기록 위조다 |
 | `e2e.ts` | `PLAYWRIGHT_BROWSERS_PATH`를 저장소 안 경로로 설정해 Playwright를 실행. OS별 환경변수 문법을 문서에서 없앤다 |
 
+### 8.1 각 명령은 자기 전제를 스스로 만든다
+
+`apps/api`는 `@workfluence/shared`를 **빌드된 `dist`**로 참조한다. 따라서 `typecheck`·`test`·`test:cov`는 실행 전에 `build:shared`를 먼저 돌린다. 그러지 않으면 **개발 PC에서만 통과하고 갓 클론한 CI에서 실패한다** (실제로 겪었다 — `docs/internal/검토서_트러블슈팅.md` T-007).
+
+`tsc`가 빠르므로 중복 빌드 비용(명령당 약 1초)보다 "어떤 상태에서 실행해도 같은 결과"가 낫다고 판단했다.
+
 `check-env.ts`는 `statfsSync`로 드라이브 여유를 보고 3GB 미만이면 실패로 처리한다. 디스크 부족은 빌드·DB 쓰기를 **옆에서** 깨뜨려 원인 추적이 어렵다.
 
 ## 9. 검사와 CI (FR-090 ~ FR-094)
