@@ -4,7 +4,7 @@
 - 작성 LLM: Claude Opus 5
 - 상태: **승인 완료 (2026-09-16, 사용자 "응 시작해").** 5절 쟁점 4건은 모두 **권고안대로** 확정. `CLAUDE.md` 1.1절 2단계 산출물이며 이 파일이 Phase 0의 수행 근거다.
 - 대응 산출물: `docs/scope-definition.md`, `docs/설계서_Architecture.md`, `docs/P0_요구사항정의서_Foundation.md`, `docs/P0_설계서_Foundation.md`, 코드, `docs/P0_테스트결과서_Foundation.md`
-- 입력 자료: `exp/prototype` 브랜치 (`PROTOTYPE.md`, `docs/prompts/prototype-v1~v3.md`)
+- 입력 자료: `exp/prototype` 브랜치의 프로토타입과 그 요청 기록 ([v1](../prototype-v1.md) · [v2](../prototype-v2.md) · [v3](../prototype-v3.md))
 
 ## 1. 왜 Phase 0인가
 

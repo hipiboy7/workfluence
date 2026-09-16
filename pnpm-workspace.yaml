@@ -8,10 +8,11 @@ packages:
 storeDir: .local/pnpm-store
 cacheDir: .local/pnpm-cache
 
-# pnpm 10+는 의존성의 설치 스크립트를 기본 차단한다. 네이티브 prebuilt를 내려받는 것만 허용한다.
+# pnpm 10+는 의존성의 설치 스크립트를 기본 차단한다. 네이티브 prebuilt를 내려받는 것만 허용한다 (FR-004).
 allowBuilds:
-  argon2: true
   esbuild: true
   embedded-postgres: true
   '@embedded-postgres/windows-x64': true
   '@embedded-postgres/linux-x64': true
+  # eslint-import-resolver-typescript의 네이티브 리졸버 (import 경로 대소문자 검사에 필요)
+  unrs-resolver: true

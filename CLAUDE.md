@@ -94,10 +94,10 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 2 | pg_bigm 커스텀 DB 이미지. pg_trgm은 2글자 부분 일치 질의에 인덱스를 못 쓴다 | Phase 3 검색 측정 후 | 2글자 한글 질의 재현율과 p95 지연을 실측. 기준 미달이면 Linux에서 pg_bigm 포함 이미지를 빌드해 반입 목록에 추가 | `P3_테스트결과서_Search` |
 | 3 | 첨부 파일 바이러스 스캔(ClamAV 컨테이너 반입) | Phase 3 착수 | 사내 보안 정책 확인 (확인 필요 B). 정책이 요구하면 스캔 훅 구현, 아니면 훅 지점만 남김 | `P3_설계서_Attachment` |
 | 4 | 실시간 편집 도입 시 저장 모델 (Yjs 상태 vs JSON 정본) | Phase 6 착수 | Phase 2에서 문서 저장을 인터페이스 뒤에 두고 `page_versions.content_json`을 정본으로 유지한다. Phase 6은 실시간 상태를 별도 테이블로 추가 | `P2_설계서_Page` |
-| 5 | 이미지 자동 빌드 (GitHub Actions self-hosted runner) | Phase 0에서 수동 빌드 3회 연속 성공 후 | 수동 절차가 안정되면 runner 등록. 그 전까지 `git pull && docker compose build` 수동 | `docs/배포가이드.md` |
+| 5 | 이미지 자동 빌드 (GitHub Actions self-hosted runner) | Phase 0에서 수동 빌드 3회 연속 성공 후 | 수동 절차가 안정되면 runner 등록. 그 전까지 `git pull && docker compose build` 수동 | 배포가이드 (Phase 5) |
 | 6 | 앱 서버 이중화 | Phase 5 부하 테스트 | 동시 50세션에서 p95 1초 초과 또는 가용성 요구가 있으면 2대 + 세션 공유 (이미 PG) | `P5_테스트결과서_Load` |
 | 7 | PDF 내보내기 (헤드리스 브라우저 이미지 추가) | Phase 6 | 사용자 요구가 있을 때. Phase 4는 HTML + 인쇄 CSS | `P4_설계서_Export` |
-| 8 | 중앙 로그 수집 사이드카 (Promtail 등) | Phase 5 | 운영 측 수집 인프라 유무 확인. 없으면 stdout JSON + `docker logs`로 운영 | `docs/운영이관_가이드.md` |
+| 8 | 중앙 로그 수집 사이드카 (Promtail 등) | Phase 5 | 운영 측 수집 인프라 유무 확인. 없으면 stdout JSON + `docker logs`로 운영 | 운영이관 가이드 (Phase 5) |
 | 9 | ~~저장소 공개 여부~~ → **public 유지로 결정 (2026-09-14, 사용자)**. 대신 12.3절 규칙을 엄격히 적용 | 종료 | — | 이 문서 12.3절 |
 
 **확인 필요 (사용자 답변 대기)** — 답이 오면 위 표나 상수 기본값에 반영한다.
@@ -217,7 +217,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 첨부 | 내용 해시(SHA-256)로 저장, 원본 파일명은 메타데이터. MIME·확장자 화이트리스트, 크기 상한. 스토리지는 2절 인터페이스 |
 | 감사로그 | `audit_events` **append-only** (앱 DB 계정에 INSERT만 부여). 대상: 인증 성공·실패, 권한 변경, 스페이스·페이지·첨부·댓글의 생성·수정·삭제·이동·복원, 첨부 다운로드, 내보내기, 관리자 작업 |
 | 시각 | DB는 UTC `timestamptz`. 표시만 KST |
-| 검색 인덱스 | 본문 JSON에서 서버가 텍스트를 추출해 `tsvector` 컬럼 유지. 인덱스는 파생 데이터라 언제든 재생성 가능해야 한다 (`pnpm search:reindex`, Phase 3) |
+| 검색 인덱스 | 본문 JSON에서 서버가 텍스트를 추출해 `tsvector` 컬럼 유지. 인덱스는 파생 데이터라 언제든 재생성 가능해야 한다. 재생성 명령은 Phase 3에서 제공한다 |
 | 실데이터 | 실제 업무 문서·실제 직원 정보·실제 운영 로그는 저장소에 넣지 않는다. fixture·시드·스크린샷은 **합성 데이터만** |
 
 ## 7. 보안 규칙 (금융 폐쇄망)
@@ -286,7 +286,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 ### 8.3 운영 (폐쇄망)
 
-- 반입 묶음: 이미지 tar 3종(app·nginx·postgres) + 체크섬 + `deploy/compose.prod.yml` + `nginx.conf` + `.env` 템플릿 + 마이그레이션 절차 + SBOM·라이선스 목록. 목록은 `docs/배포가이드.md`가 단일 출처.
+- 반입 묶음: 이미지 tar 3종(app·nginx·postgres) + 체크섬 + 운영용 compose·nginx 설정 + `.env` 템플릿 + 마이그레이션 절차 + SBOM·라이선스 목록. 목록의 단일 출처는 Phase 5에서 쓰는 배포가이드다.
 - `docker load` → `.env` 작성 → `pnpm db:migrate`(컨테이너 안에서) → `docker compose up -d` → 사후 검증 체크리스트.
 - 모든 서비스 `restart: unless-stopped` + 헬스체크. 재부팅 후 자동 기동을 실제로 확인한다.
 - nginx: TLS 종단, `absolute_redirect off` (호스트 매핑 포트 유실 방지), `X-Forwarded-*` 전달, WebSocket `Upgrade` 프록시 (Phase 6 대비), `client_max_body_size`는 첨부 상한과 일치.
@@ -331,7 +331,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 - `<Topic>`은 코드 모듈명과 맞춘다 (`Auth`, `Page`, `Search`).
 - **`docs/` = 운영 이관 산출물** (요구사항정의서·설계서·테스트결과서·scope·Architecture·배포·운영 가이드). **`docs/internal/` = 작업 기록** (학습가이드·SelfReview·ReferenceComparison·트러블슈팅·용어집·설계서_Agents·반입후체크리스트·qa). 운영 담당자는 `docs/`만 읽어도 시스템을 운영할 수 있어야 한다.
 - 개정은 **제자리 개정 + 머리에 개정 사유(정정 이력)**. 전면 재작성만 `_v2` 새 파일.
-- 예외: `docs/scope-definition.md`, `README.md`, 디렉토리 안내 `README.md`, `docs/internal/용어집.md`.
+- 예외: `docs/scope-definition.md`, `README.md`, 디렉토리 안내 README, 용어집(`docs/internal/`에 두며 특정 Phase·DocType에 속하지 않는 공용 참조 문서).
 - 트러블을 해결한 직후 `.claude/skills/troubleshoot/SKILL.md`에 따라 `docs/internal/검토서_트러블슈팅.md`에 기록한다. 조용히 잘못되던 유형은 반드시 쓴다.
 
 ## 11. 요구사항–산출물 페어링

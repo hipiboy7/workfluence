@@ -64,6 +64,18 @@ e2e/                          [C] 기동 확인 시나리오
 
 **Phase 1에서 추가 예정**: `WF_SESSION_SECRET`, `WF_COOKIE_SECURE`, `WF_SESSION_IDLE_MINUTES`, `WF_SESSION_ABSOLUTE_HOURS`, `WF_ROOT_USERNAME`, `WF_ROOT_INITIAL_PASSWORD`, `WF_ROOT_EMAIL`, `WF_OIDC_*`.
 
+#### compose 전용 변수 (앱 스키마가 아니다)
+
+아래는 **docker compose 파일이 읽는 값**이고 앱에는 전달되지 않는다. 앱 환경 스키마에 넣으면 "코드가 읽지 않는 키"가 되므로 분리해 둔다.
+
+| 키 | 용도 |
+|---|---|
+| `WF_PG_PASSWORD` | postgres 컨테이너 비밀번호. compose가 `WF_DATABASE_URL` 조립에도 쓴다 |
+| `WF_APP_IMAGE` | 기동할 app 이미지 태그 |
+| `WF_HTTPS_PORT` | nginx가 노출할 호스트 포트 |
+
+테스트 러너 전용 변수는 `WF_` 접두사를 쓰지 않는다 (`E2E_BASE_URL`). **`WF_`는 앱 환경변수만**을 뜻한다.
+
 > **왜 Phase 1 키를 미리 넣지 않는가.** 스키마가 strict라 선언만 하고 코드가 읽지 않는 키는 "값을 바꿔도 아무 일이 없는" 상태가 된다. 그것이 바로 strict로 잡으려던 실패 유형이다. 반면 `schemas.ts`의 미사용 DTO는 **자기 테스트로 동작이 검증되는 타입 계약**이라 성격이 다르다.
 
 ### 1.2 파싱 설계

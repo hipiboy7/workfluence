@@ -1,6 +1,10 @@
 node_modules/
 dist/
 build/
+coverage/
+.vite/
+test-results/
+playwright-report/
 .env
 .env.local
 *.log

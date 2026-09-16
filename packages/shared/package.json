@@ -1,0 +1,23 @@
+{
+  "name": "@workfluence/shared",
+  "version": "0.1.0-proto",
+  "private": true,
+  "description": "서버·클라이언트 공유 계약: 환경 스키마, 상수, 문서 검증, 권한 판정, API DTO (CLAUDE.md 3절 A등급)",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:cov": "vitest run --coverage"
+  },
+  "dependencies": {
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.0"
+  }
+}
