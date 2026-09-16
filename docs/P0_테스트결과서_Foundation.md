@@ -256,6 +256,20 @@ compose 전용 변수 3개(`WF_PG_PASSWORD`·`WF_APP_IMAGE`·`WF_HTTPS_PORT`)는
 | web SPA 번들 (apps/web 아래 dist) | 225KB (JS 221KB / gzip 69KB, CSS 1.2KB) |
 | api 컴파일 결과 (apps/api 아래 dist) | 117KB |
 
+### 4.11 CI 실제 실행 (2026-09-16)
+
+워크플로를 작성만 하고 "돌 것이다"라고 적지 않는다. `impl-phase0`에 push해 실제로 돌린 결과다.
+
+| 작업 | 단계 | 결과 |
+|---|---|---|
+| `check` | 의존성 설치(lockfile 고정) · lint · typecheck · 단위·통합 테스트 · 문서 검사 · 취약점 점검 · 라이선스 검사 · 빌드 · 빌드 산출물의 외부 URL 참조 검사 | 9단계 전부 success |
+| `gitleaks` | 전체 이력 스캔 | success |
+
+- 대상 커밋: `271653b` (2026-09-16). 실행 번호 35049151021.
+- **세 번 실패한 뒤의 성공이다.** 실패 원인은 순서대로 ① `shared`의 빌드 산출물이 개발 PC에만 있던 것(6.4절), ② `verify:docs`가 한글 파일명을 건너뛴 것(6.5절), ③ 문서의 경로 검사가 디스크 상태를 물은 것(6.8절). 셋 다 **개발 PC에는 있고 갓 클론한 곳에는 없는 것**이 원인이다.
+- CI 단계를 쪼갠 덕에 세 번째 실패는 어느 관문인지 즉시 보였다. 한 덩어리였다면 로그를 뒤져야 했다.
+
+
 ## 5. 요구사항 대응
 
 | FR/NFR | 검증 방법 | 결과 |
@@ -278,16 +292,16 @@ compose 전용 변수 3개(`WF_PG_PASSWORD`·`WF_APP_IMAGE`·`WF_HTTPS_PORT`)는
 | FR-070~072 | E2E 3·4번, 빌드 산출물에 외부 URL 없음 | PASS |
 | FR-080~084 | `check:env` READY, `dev:db` 초기화, `verify:docs` 0건, `test:e2e` 4건, `check` | PASS |
 | FR-090 | ESLint 대소문자 검사 규칙 적용, lint 통과 | PASS |
-| FR-091~094 | CI 워크플로 작성 | **미검증** (7절) |
+| FR-091~094 | GitHub Actions 실제 실행 — 12단계 + gitleaks 전부 success (4.11절) | PASS |
 | FR-100~104 | Dockerfile·compose·nginx 작성 | **미검증** (7절) |
 | FR-110, 111 | 에이전트 2 + 스킬 1 + `설계서_Agents.md` | PASS |
 | NFR-01, 02 | 3절 커버리지, skip 0 | PASS |
 | NFR-03, 04 | 이미지 크기·기동 시간 | **미측정** (7절) |
-| NFR-05 | 빌드 산출물 외부 URL 검사 (CI 단계) | **미검증** (7절) |
+| NFR-05 | CI의 외부 URL 검사 단계 통과 (4.11절) | PASS |
 | NFR-06 | Windows에서 전 명령 동작 확인. Linux는 7절 | 부분 |
-| NFR-07 | `pnpm install --frozen-lockfile` (CI) | **미검증** (7절) |
+| NFR-07 | CI의 의존성 설치 단계가 lockfile 고정으로 통과 (4.11절) | PASS |
 | NFR-08 | `verify:docs` 0건 | PASS |
-| NFR-09 | `.env` 미커밋 확인, gitleaks는 CI | 부분 |
+| NFR-09 | `.env` 미커밋 확인 + CI gitleaks 작업 success (4.11절) | PASS |
 | NFR-10 | 4.8절 대조 | PASS |
 
 ## 6. 재작업·특이사항
@@ -338,6 +352,12 @@ compose 전용 변수 3개(`WF_PG_PASSWORD`·`WF_APP_IMAGE`·`WF_HTTPS_PORT`)는
 
 `CLAUDE.md` 3절대로 web에는 관문을 두지 않았다. Phase 0의 화면은 단일 컴포넌트라 E2E가 더 정확한 검증이다. 상태·분기가 늘어나는 Phase 1부터 컴포넌트 테스트를 붙인다.
 
+### 6.8 문서의 경로 검사가 "환경의 상태"를 묻고 있었다
+
+세 번째 CI 실패는 문서 검사 단계에서 났다. 같은 명령이 개발 PC에서는 "위반 없음"이었다. 이 4.10절이 빌드 산출물 디렉토리를 백틱 경로로 적었고, 검사기는 그 경로가 **디스크에 있는가**를 물었다. 빌드해 둔 개발 PC에는 있고 갓 클론한 CI에는 없다.
+
+앞서 같은 원인을 런타임 데이터 디렉토리에서 한 번 겪고 **접두 목록에서 빼는 식으로** 넘겼던 것이 화근이다. 예외는 증상만 지우고 원인을 남겨 다음 실패를 예약한다. 그래서 이번에는 기준 자체를 바꿨다 — 경로가 `git ls-files` 결과(상위 디렉토리 포함)에 있는지 본다. 커밋된 것만 통과하므로 어느 환경에서 돌려도 결과가 같고, 덤으로 **대소문자까지 대조**해 Windows에서 통과하고 Linux에서 깨지는 오타를 잡는다. 기록은 `docs/internal/검토서_트러블슈팅.md` T-010.
+
 ## 7. 미완 항목 — Linux 빌드 검증
 
 **Phase 0은 아직 닫히지 않았다.** 완료 기준의 마지막 항목이 남아 있다.
@@ -350,7 +370,7 @@ compose 전용 변수 3개(`WF_PG_PASSWORD`·`WF_APP_IMAGE`·`WF_HTTPS_PORT`)는
 | 기동 시간 (목표 ≤30초) | 미측정 | 사용자 |
 | 재부팅 후 자동 기동 | 미확인 | 사용자 |
 | Docker 버전·디스크 여유 (확인 필요 D) | 미기록 | 사용자 |
-| CI 실제 실행 (gitleaks·라이선스·외부 URL) | 미검증 | push 후 확인 |
+| ~~CI 실제 실행 (gitleaks·라이선스·외부 URL)~~ | **완료 2026-09-16** (4.11절) | — |
 
 ### 7.1 Linux 서버에서 실행할 명령
 
