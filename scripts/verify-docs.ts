@@ -11,7 +11,7 @@
  * --------
  * 1. pnpm 명령(본문 인라인)   `pnpm <script>`의 스크립트가 package.json에 있는가
  * 2. pnpm 명령(코드블록)      같음. 코드블록 안은 인라인 검사에 걸리지 않는다
- * 3. 저장소 경로              백틱 안 경로가 실제로 있는가
+ * 3. 저장소 경로              백틱 안 경로가 **저장소에 커밋돼 있는가** (대소문자까지)
  * 4. 마크다운 링크            상대 링크가 실제 파일을 가리키는가
  * 5. 표 열 수                 헤더와 각 행의 열 수가 같은가
  * 6. 셸 스크립트 실행 권한     deploy/*.sh가 존재하고 실행 가능한가
@@ -65,6 +65,25 @@ function listDocs(): string[] {
     .filter((p) => !SKIP.some((re) => re.test(p.replace(/\//g, '\\'))) && !SKIP.some((re) => re.test(p)));
 }
 
+/**
+ * git이 추적하는 파일과 그 상위 디렉토리 집합.
+ *
+ * 경로 검사를 "디스크에 있는가"로 하면 **개발 PC에만 있는 것**(빌드 산출물·런타임 데이터)이 통과하고
+ * 갓 클론한 CI에서만 실패한다. 실제로 두 번 겪었다 — 런타임 데이터 디렉토리와 빌드 산출물 디렉토리.
+ * 또 Windows는 대소문자를 구분하지 않아 철자가 다른 경로도 통과시킨다. Linux에서는 깨진다.
+ * 그래서 **저장소에 커밋된 목록**과 대소문자까지 정확히 대조한다.
+ */
+function trackedPaths(): Set<string> {
+  const out = execSync('git -c core.quotepath=false ls-files', { cwd: ROOT, encoding: 'utf8' });
+  const set = new Set<string>();
+  for (const file of out.split(/\r?\n/).filter(Boolean)) {
+    set.add(file);
+    const parts = file.split('/');
+    for (let i = 1; i < parts.length; i++) set.add(parts.slice(0, i).join('/'));
+  }
+  return set;
+}
+
 function packageScripts(): Set<string> {
   const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
   return new Set(Object.keys(pkg.scripts ?? {}));
@@ -101,7 +120,7 @@ function isRepoPath(value: string): boolean {
   return REPO_PREFIXES.some((p) => value.startsWith(p)) && !/[{}*<>|?"]/.test(value);
 }
 
-function checkFile(file: string, scripts: Set<string>, findings: Finding[]): void {
+function checkFile(file: string, scripts: Set<string>, tracked: Set<string>, findings: Finding[]): void {
   const abs = resolve(ROOT, file);
   const lines = readFileSync(abs, 'utf8').split(/\r?\n/);
   let fence: string | null = null;
@@ -134,8 +153,9 @@ function checkFile(file: string, scripts: Set<string>, findings: Finding[]): voi
         const name = pnpmScriptName(value);
         if (name && !scripts.has(name)) findings.push({ file, line: lineNo, kind: 'pnpm 스크립트 없음', detail: `${value} → package.json에 "${name}" 없음` });
       } else if (isRepoPath(value)) {
-        const target = value.replace(/[),.]+$/, '');
-        if (!existsSync(resolve(ROOT, target))) findings.push({ file, line: lineNo, kind: '경로 없음', detail: target });
+        const target = value.replace(/[),.]+$/, '').replace(/\/+$/, '');
+        // 존재 여부가 아니라 **커밋된 목록**과 대조한다 (환경·대소문자 무관)
+        if (!tracked.has(target)) findings.push({ file, line: lineNo, kind: '경로가 저장소에 없음', detail: target });
       }
     }
 
@@ -179,6 +199,7 @@ function checkShellScripts(findings: Finding[]): void {
 function main(): void {
   const argPath = process.argv.indexOf('--path');
   const scripts = packageScripts();
+  const tracked = trackedPaths();
   const docs = argPath >= 0 ? [relative(ROOT, resolve(process.argv[argPath + 1]))] : listDocs();
   const findings: Finding[] = [];
 
@@ -190,7 +211,7 @@ function main(): void {
       findings.push({ file: doc, line: 0, kind: '문서를 읽을 수 없음', detail: '목록에는 있으나 파일이 없다 (경로 인코딩 문제일 수 있다)' });
       continue;
     }
-    checkFile(doc, scripts, findings);
+    checkFile(doc, scripts, tracked, findings);
     checked++;
   }
   if (argPath < 0) checkShellScripts(findings);

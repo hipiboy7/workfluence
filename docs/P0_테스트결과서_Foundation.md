@@ -249,10 +249,12 @@ compose 전용 변수 3개(`WF_PG_PASSWORD`·`WF_APP_IMAGE`·`WF_HTTPS_PORT`)는
 
 ### 4.10 빌드 산출물
 
+빌드 산출물 디렉토리는 커밋하지 않으므로 경로를 코드 표기 없이 적는다 (`pnpm verify:docs`의 경로 검사는 커밋된 파일만 대상으로 한다).
+
 | 산출물 | 크기 |
 |---|---|
-| `apps/web/dist` | 225KB (JS 221KB / gzip 69KB, CSS 1.2KB) |
-| `apps/api/dist` | 117KB |
+| web SPA 번들 (apps/web 아래 dist) | 225KB (JS 221KB / gzip 69KB, CSS 1.2KB) |
+| api 컴파일 결과 (apps/api 아래 dist) | 117KB |
 
 ## 5. 요구사항 대응
 
