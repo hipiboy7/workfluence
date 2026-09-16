@@ -98,7 +98,8 @@ FR/NFR 번호로. 최소 포함:
 - [ ] **Linux 서버에서 `git pull` → 이미지 빌드 → `docker compose up -d` → `/health` 200** (확인 필요 D 실측 기록)
 - [ ] 이미지 크기 실측 ≤ 400MB (초과 시 사유와 감축 계획)
 - [ ] 재부팅 후 자동 기동 확인 (`restart: unless-stopped`)
-- [ ] 에이전트 정의 3개 + `docs/internal/설계서_Agents.md`
+- [ ] 에이전트 정의 3개 + `docs/internal/설계서_Agents.md`  
+  *(정정 2026-09-16: 요구사항정의서 단계에서 **에이전트 2개 + 스킬 1개**로 구체화했다. 셋 중 `troubleshoot`은 에이전트 기준 4개 중 1개만 충족해 스킬로 만들었다 — 근거는 `docs/internal/설계서_Agents.md` 3.3절. 이 줄은 착수 시점의 요청 기록이라 지우지 않는다.)*
 - [ ] `docs/internal/P0_검토서_ReferenceComparison.md`(Confluence 기능 대조)·`P0_검토서_SelfReview.md`
 
 ## 5. 착수 전 쟁점 — 확정 (2026-09-16)

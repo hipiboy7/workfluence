@@ -154,13 +154,13 @@ Phase 1~6이 공유하는 기반을 확정한다.
 
 **FR-083.** `pnpm test:e2e` — Playwright를 저장소 안 브라우저 경로로 실행한다. OS별 환경변수 문법을 문서에 노출하지 않는다.
 
-**FR-084.** `pnpm check` — lint + typecheck + test + verify:docs를 한 번에 돌린다. CI와 같은 명령이어야 "로컬은 통과했는데 CI가 실패"를 줄인다.
+**FR-084.** `pnpm check` — lint + typecheck + test + verify:docs를 한 번에 돌린다. 개발 PC가 CI와 **같은 검사**를 해야 "로컬은 통과했는데 CI가 실패"를 줄인다. CI는 같은 검사를 단계로 나눠 돌린다 (FR-091).
 
 ### 4.10 검사와 CI
 
 **FR-090.** ESLint로 **import 경로 대소문자 불일치**를 잡는다. Windows는 대소문자를 구분하지 않아 Linux 빌드에서만 실패하는 유형이다.
 
-**FR-091.** CI는 push·PR마다 `pnpm check`를 돌린다.
+**FR-091.** CI는 push·PR마다 `pnpm check`와 **같은 검사**(lint·typecheck·test·verify:docs)를 돌린다. CI에서는 한 줄로 묶지 않고 **관문마다 별도 단계**로 나눈다 — 어느 관문이 걸렸는지 로그를 뒤지지 않고 알기 위해서다. (정정 2026-09-16: 처음에는 "`pnpm check`를 돌린다"였다. CI 단계를 나눈 뒤 문구를 실제와 맞췄다.)
 
 **FR-092.** CI에 **gitleaks**를 넣는다. 공개 저장소에 시크릿이 들어가는 것을 막는다.
 

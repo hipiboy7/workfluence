@@ -259,14 +259,27 @@ flat config. TypeScript 파서 + `import-x` 플러그인.
 
 ### 9.2 CI (GitHub Actions)
 
-| 단계 | 내용 | 실패 시 |
-|---|---|---|
-| setup | Node 24 + pnpm, `--frozen-lockfile` | 중단 |
-| check | `pnpm check` (lint·typecheck·test·verify:docs) | 중단 |
-| audit | `pnpm audit --audit-level high` | 중단 |
-| license | 허용 라이선스 목록 검사 | 중단 |
-| gitleaks | 시크릿 검사 | 중단 |
-| build | `pnpm build` 후 산출물의 외부 URL(`http(s)://` 절대 주소) 참조 검사 | 중단 |
+작업 두 개다. `check`는 순차 단계로, `gitleaks`는 전체 이력을 따로 받아야 해서 **별도 작업**으로 돈다.
+
+**작업 `check`** — 각 관문을 한 단계씩 나눈다. 실패하면 모두 중단한다.
+
+| 단계 | 명령 |
+|---|---|
+| 의존성 설치 (lockfile 고정) | `pnpm install --frozen-lockfile` |
+| lint | `pnpm lint` |
+| typecheck | `pnpm typecheck` |
+| 단위·통합 테스트 | `pnpm test` |
+| 문서 검사 (verify:docs) | `pnpm verify:docs` |
+| 취약점 점검 | `pnpm audit --audit-level high --prod` |
+| 라이선스 검사 | `pnpm licenses:check` |
+| 빌드 | `pnpm build` |
+| 빌드 산출물의 외부 URL 참조 검사 | 워크플로 안 인라인 스크립트 (`http(s)://` 절대 주소를 찾고 예외 목록과 대조) |
+
+**작업 `gitleaks`** — 저장소 전체 이력에서 시크릿을 찾는다. 얕은 체크아웃으로는 과거 커밋을 못 보므로 전체 이력을 받는다.
+
+> **왜 `pnpm check` 한 줄이 아닌가.** 한 덩어리로 돌리면 로그를 뒤져야 어느 관문이 걸렸는지 안다. 실제로 CI가 세 번 실패하는 동안 단계를 나눈 뒤에야 문서 검사가 범인임이 한눈에 보였다 (`docs/P0_테스트결과서_Foundation.md` 6.8절). **검사 내용은 `pnpm check`와 같다** — FR-084가 요구하는 "로컬과 CI가 같은 검사"는 유지된다. 개발 PC에서는 한 줄로, CI에서는 나눠서 같은 것을 돌린다.
+>
+> **`--prod`를 붙이는 이유.** 개발 의존성의 취약점은 운영 이미지에 들어가지 않는다. 반입물에 없는 것으로 관문을 세우면 무시하는 습관이 생긴다.
 
 이미지 빌드는 CI에서 하지 않는다. Docker가 필요한 작업은 Linux 서버에서 수동으로 하고, 안정되면 self-hosted runner를 검토한다 (`CLAUDE.md` 보류 5).
 
