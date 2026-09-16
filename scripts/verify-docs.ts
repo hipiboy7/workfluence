@@ -116,8 +116,15 @@ function pnpmScriptName(command: string): string | null {
   return name;
 }
 
+/**
+ * 저장소 경로로 볼 문자열인가.
+ *
+ * 접두 비교는 **대소문자를 무시**한다. `Docs/...`처럼 첫 글자가 틀린 경로를 "경로가 아니다"로
+ * 흘려보내면 Linux에서만 깨지는 오타를 놓친다. 경로로 인정한 뒤 커밋 목록과 정확히 대조해 잡는다.
+ */
 function isRepoPath(value: string): boolean {
-  return REPO_PREFIXES.some((p) => value.startsWith(p)) && !/[{}*<>|?"]/.test(value);
+  const lower = value.toLowerCase();
+  return REPO_PREFIXES.some((p) => lower.startsWith(p)) && !/[{}*<>|?"]/.test(value);
 }
 
 function checkFile(file: string, scripts: Set<string>, tracked: Set<string>, findings: Finding[]): void {
