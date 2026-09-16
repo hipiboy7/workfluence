@@ -1,0 +1,250 @@
+# 설계서_Architecture — 시스템 아키텍처 (v1)
+
+- 상위 문서: [`docs/scope-definition.md`](scope-definition.md) — 무엇을·왜
+- 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
+- 사용 프롬프트: [`docs/prompts/phase0/foundation-v1.md`](prompts/phase0/foundation-v1.md)
+- 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
+- 상태: Phase 0 진행 중. Phase 1~6 항목은 **계획**이며 각 Phase 착수 시 `P{N}_설계서_*.md`로 상세화한다
+
+## 0. 범위 문서와의 경계
+
+같은 표를 두 문서에 두면 한쪽만 고쳐졌을 때 어느 것이 맞는지 알 수 없다. 그래서 **범위 문서는 결정과 기준, 설계서는 구현 방법**으로 나눈다.
+
+| 내용 | 위치 |
+|---|---|
+| 기능 범위, In/Out of Scope, Phase 인수 기준, 비기능 목표, 결정의 이유 | `scope-definition.md` |
+| 모듈 구조, 데이터 모델, 인터페이스, API 계약, 배포 경로, 테스트 전략 | **본 문서** |
+| 코딩 규칙, TDD 등급, 하드코딩 금지, Git·보안 규칙 | `CLAUDE.md` |
+
+## 1. 시스템 구성
+
+```
+[브라우저]
+    │ HTTPS
+    ▼
+[nginx]  TLS 종단 · X-Forwarded-* 전달 · WebSocket 프록시(Phase 6 대비) · 업로드 상한
+    │ HTTP (컨테이너 네트워크)
+    ▼
+[api]    NestJS. REST API + 빌드된 SPA 정적 서빙 (한 프로세스)
+    │                                   │
+    │ SQL                               │ OIDC (Phase 1)
+    ▼                                   ▼
+[postgres]  문서·사용자·감사로그       [사내 IdP]  외부. Discovery·JWKS
+    │
+    ▼
+[볼륨]  postgres_data · attachments(Phase 3)
+```
+
+### 1.1 왜 api가 SPA를 함께 서빙하는가
+
+배포물을 한 프로세스로 줄이면 반입·기동·헬스체크가 단순해진다. 정적 서버를 따로 두면 컨테이너가 하나 늘고, SPA 딥링크 폴백 규칙을 두 곳(정적 서버·nginx)에서 맞춰야 한다. 개발 중에는 Vite 개발 서버가 `/api`를 api로 프록시하므로 두 모드가 공존한다.
+
+- 정적 자산 캐시: 해시 파일명(`assets/<name>-<hash>.<ext>`)만 `immutable`, 나머지와 API 응답은 `no-store` (`CLAUDE.md` 7절).
+
+### 1.2 왜 단일 앱 서버인가
+
+300명·동시 수십 세션 규모에서 이중화는 세션·파일·검색 동기화 비용을 먼저 지불하게 만든다. 세션을 처음부터 PostgreSQL에 두어 **나중에 대수를 늘려도 코드가 바뀌지 않게** 해 둔다. 판단은 Phase 5 부하 실측 (`CLAUDE.md` 보류 6).
+
+## 2. 코드 구조
+
+```
+workfluence/
+├── apps/
+│   ├── api/                      NestJS
+│   │   ├── src/
+│   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
+│   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드
+│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드
+│   │   │   ├── health/           [P0] /api/health (DB까지 확인)
+│   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드
+│   │   │   ├── users/            [P1] 가입·승인·초기화·역할
+│   │   │   ├── audit/            [P1] append-only 기록·조회
+│   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 조절값
+│   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
+│   │   │   ├── pages/            [P2] 페이지·버전
+│   │   │   ├── search/           [P3] 검색
+│   │   │   ├── attachments/      [P3] 첨부
+│   │   │   └── system/           [P4] root 시스템 정보
+│   │   └── drizzle/              마이그레이션 SQL (커밋)
+│   └── web/                      React + Vite SPA
+│       └── src/{components,pages,api.ts,auth.tsx}
+├── packages/shared/              [P0] 서버·클라이언트 공유 계약
+│   └── src/{env,constants,document,permissions,security,schemas}.ts
+├── e2e/                          Playwright
+├── scripts/                      check-env · dev-db · verify-docs · e2e (tsx, OS 무관)
+├── deploy/                       Dockerfile · compose · nginx.conf
+└── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
+```
+
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P4]`는 해당 Phase에서 추가한다.
+
+### 2.1 의존 방향
+
+```
+shared  ←  api(config → db → common → 기능 모듈)
+  ↑
+ web
+```
+
+- **`shared`는 아무것도 import하지 않는다** (zod 외). 서버·클라이언트 양쪽이 쓰므로 Node 전용 API를 넣지 않는다.
+- api의 기능 모듈은 `config`·`db`·`common`에 의존하고, 기능 모듈끼리는 **인터페이스나 서비스 export를 통해서만** 의존한다.
+- **순환 import를 만들지 않는다.** CommonJS에서 순환이 생기면 타입 검사는 통과하지만 런타임에 클래스가 `undefined`가 되어 의존성 주입이 실패한다. 실제로 프로토타입에서 `pages.service ↔ spaces.module` 순환이 기동 실패를 냈다. **두 모듈이 함께 쓰는 변환 함수·타입은 제3의 파일로 뺀다** (예: `pages/page-view.ts`).
+
+### 2.2 공유 계약 (`packages/shared`)
+
+| 파일 | 내용 | 왜 공유인가 |
+|---|---|---|
+| `env.ts` | `WF_*` 환경 스키마(strict), 파싱, `.env.example` 키 추출 | 서버가 쓰고, 테스트가 `.env.example`과 대조한다 |
+| `constants.ts` | 역할·상태·Crew 역할·감사 이벤트·문서 스키마 버전·정책 기본값·CSRF 헤더 | 화면 문구와 서버 판정이 같은 목록을 봐야 한다 |
+| `document.ts` | 문서 JSON 허용 노드·마크, 검증, 텍스트 추출 | **서버 검증과 편집기 확장이 어긋나면 편집기가 만든 문서를 서버가 거부한다** |
+| `permissions.ts` | `can()`·`spaceAccess()`·역할 간 우열·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
+| `security.ts` | ID·email 마스킹, 임시 비밀번호·식별자 생성 (난수 소스 주입) | 난수를 주입받아 순수 함수로 두면 테스트가 결정적이다 |
+| `schemas.ts` | API 요청 DTO(zod) + 응답 뷰 타입 | 서버 검증과 클라이언트 타입이 한 정의에서 나온다 |
+
+전부 **A등급**(테스트 먼저, ≥90%)이다. 입출력이 결정적이고 외부 의존이 없다.
+
+> **Phase 0이 전 Phase의 DTO를 포함하는 이유.** 계약을 한 곳에 모아야 화면·서버가 어긋나지 않는다. 프로토타입에서 실제로 동작시켜 확인한 형태라 추측이 아니다. 다만 각 Phase에서 바뀔 수 있고, 바뀌면 그 Phase 문서에 정정 이력으로 남긴다.
+
+## 3. 데이터 모델
+
+전체를 여기에 그린다. **테이블이 Phase마다 따로 설계되면 관계가 어긋나기 때문**이다. 마이그레이션 파일은 각 Phase에서 추가한다.
+
+### 3.1 테이블
+
+| 테이블 | 핵심 컬럼 | 도입 | 비고 |
+|---|---|---|---|
+| `settings` | `key` PK, `value` jsonb, `updated_by`, `updated_at` | **P0** | 운영 조절값 (`CLAUDE.md` 5절 세 번째 분류) |
+| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by` | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생** |
+| `sessions` | (connect-pg-simple 관리) | P1 | 서버측 세션 |
+| `space_categories` | `id`, `name` uq, `created_by` | P2 | |
+| `spaces` | `id`, `key` uq(자동), `name`, `description`, `kind`, `status`, `category_id`, `created_by`, `suspended_at/by`, `deleted_at` | P2 | `kind`: `personal`/`team`, `status`: `active`/`suspended` |
+| `space_members` | (`space_id`,`user_id`) PK, `role`, `added_by` | P2 | Crew. `owner`/`editor`/`viewer` |
+| `pages` | `id`, `space_id`, `parent_id`, `title`, `position`, `current_version_no`, `search_text`, `created_by`, `updated_by`, `deleted_at` | P2 | `search_text`는 파생 데이터 |
+| `page_versions` | `id`, `page_id`, `version_no`, `title`, `content_json`, `content_text`, `created_by` — (`page_id`,`version_no`) uq | P2 | **append-only** |
+| `audit_events` | `id`, `action`, `actor_id`, `target_type`, `target_id`, `detail` jsonb, `ip`, `created_at` | P1 | **append-only** (트리거로 UPDATE/DELETE 차단) |
+| `attachments` | `id`, `page_id`, `sha256`, `filename`, `mime`, `size`, `uploaded_by`, `deleted_at` | P3 | 내용 해시로 저장, 원본 파일명은 메타데이터 |
+| `comments` | `id`, `page_id`, `parent_id`, `body_json`, `created_by`, `deleted_at` | P3 | |
+| `labels` / `page_labels` | `id`,`name` / (`page_id`,`label_id`) | P3 | |
+| `notifications` | `id`, `user_id`, `type`, `payload`, `read_at` | P4 | 앱 내 알림함 |
+
+### 3.2 규약
+
+- 모든 시각은 UTC `timestamptz`. 표시만 KST로 변환한다. 서버가 여러 대가 되거나 서머타임 지역이 섞여도 비교가 깨지지 않는다.
+- 식별자는 `uuid` (`gen_random_uuid()`). 순번 노출을 피하고 병합·이관이 쉽다.
+- 삭제는 `deleted_at` soft delete. 물리 삭제는 보존 기간 뒤 배치로, 감사로그에 남긴다.
+- **append-only 강제는 두 겹**: 앱 DB 계정에 `UPDATE`/`DELETE` 권한을 주지 않고(운영), 트리거로도 막는다(개발·실수 방지).
+- 파생 데이터(`search_text`)는 언제든 재생성 가능해야 한다. 재생성 명령을 Phase 3에서 제공한다.
+
+### 3.3 마이그레이션
+
+Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌리는 스크립트를 두지 않는다. 되돌림은 백업 복원으로 처리한다 — 폐쇄망에서 롤백 스크립트를 신뢰하기 어렵고, 잘못된 롤백이 데이터를 잃게 만든다.
+
+| 환경 | 적용 방법 |
+|---|---|
+| 개발 | `WF_DB_AUTO_MIGRATE=true`면 기동 시 자동 |
+| 운영 | **자동 적용 금지.** 배포 절차의 명시적 단계 (`pnpm db:migrate` 또는 컨테이너에서 `node dist/db/migrate.js`) |
+
+환경 스키마가 운영에서 `WF_DB_AUTO_MIGRATE=true`를 **거부**한다. 설정 실수로 운영 DB가 조용히 바뀌는 것을 막는다.
+
+## 4. 권한 판정
+
+```
+요청 → AuthGuard (세션 확인 · 사용자 적재 · 비밀번호 변경 강제 확인)
+         │
+         ├─ 시스템 행위 판정:  shared.can(user, action)          → 403
+         └─ 스페이스 판정:     shared.spaceAccess(user, space, membership, memberCount)
+                                 → { canRead, canWrite, canManageMembers, canChangeStatus, canDelete }
+```
+
+- **가드는 판정하지 않는다.** 데이터를 모아 공유 함수에 넘기고 결과만 쓴다. 판정 규칙이 한 곳에 있어야 화면과 서버가 어긋나지 않는다.
+- 응답의 스페이스 객체에 `access`를 실어 보낸다. 화면이 같은 규칙을 다시 구현하지 않고 버튼 노출을 결정한다.
+- 기본 거부. 핸들러에 요구 행위를 선언하지 않으면 통과시키지 않는다.
+
+## 5. 문서(본문) 계약
+
+- 저장 형식은 **ProseMirror JSON**. 서버는 HTML을 받지 않는다.
+- `shared/document.ts`의 허용 목록(노드·마크·속성) 밖이면 400. 링크는 `http(s)`·내부 경로·앵커만 허용한다.
+- **편집기 확장 목록과 서버 허용 목록은 같아야 한다.** 어긋나면 사용자가 만든 문서를 서버가 거부한다. 편집기 확장을 추가할 때 허용 목록도 같은 커밋에서 넓히고, 문서 스키마 버전을 올린다.
+- 검색용 평문은 서버가 JSON에서 추출한다. 클라이언트가 보낸 텍스트를 믿지 않는다.
+
+## 6. 교체 가능성 (DIP 경계)
+
+| 축 | 지금 | 경계 | 교체 시나리오 |
+|---|---|---|---|
+| 인증 제공자 | 로컬 + OIDC | `AuthProvider` 주입 토큰 | SAML·다른 IdP·인증서 |
+| 파일 스토리지 | 로컬 디스크(볼륨) | `StorageProvider` | MinIO·S3 호환·NAS |
+| 검색 | PostgreSQL ILIKE + pg_trgm | `SearchProvider` | pg_bigm·외부 엔진 |
+| 실시간 상태 | 없음 (JSON 정본) | 문서 저장 인터페이스 | Yjs 상태 테이블 추가 (Phase 6) |
+
+테스트에서는 이 인터페이스의 대역(fake)을 쓴다. 단 **PostgreSQL은 대역을 쓰지 않는다** — SQL·제약·트랜잭션이 곧 로직이라 대역으로 검증하면 실패를 놓친다.
+
+## 7. 환경과 명령
+
+| 환경 | 런타임 | DB | 비고 |
+|---|---|---|---|
+| 개발 (Windows) | Node 24 직접 실행 | 임베디드 PostgreSQL (`.local/pgdata`) | Docker 없음. 데이터는 전부 D 드라이브 `.local/` |
+| 빌드 (Linux) | Docker | — | 이미지 빌드 → `docker save` |
+| 운영 (폐쇄망) | Docker compose | postgres 컨테이너 | 인터넷 없음 |
+
+명령은 **`pnpm <script>` 형태로만** 문서에 적는다. 구현은 `tsx` 스크립트라 Windows·Linux에서 같게 동작한다 (`CLAUDE.md` 4.1절).
+
+| 스크립트 | 하는 일 |
+|---|---|
+| `check:env` | Node·pnpm·`.env`·DB·마이그레이션·데이터 경로·디스크 여유 → `READY` |
+| `dev:db` | 임베디드 PostgreSQL 기동 |
+| `db:generate` / `db:migrate` / `db:seed` | 마이그레이션 생성 / 적용 / 시드 |
+| `dev` / `build` / `start` | 개발 서버 / 빌드 / 실행 |
+| `lint` / `typecheck` / `test` / `test:cov` / `test:e2e` / `verify:docs` | 검사 |
+| `check` | lint + typecheck + test + verify:docs (CI와 동일) |
+
+## 8. 테스트 전략
+
+| 등급 | 대상 | 방법 | 관문 |
+|---|---|---|---|
+| A | `packages/shared/**`, `apps/api/src/**/domain/**` | 테스트 먼저 (Red→Green→Refactor) | 라인·브랜치 ≥90% |
+| B | api 나머지, web 컴포넌트 | 구현 후. api는 **실제 PostgreSQL**(테스트 DB), 외부는 대역 | api ≥70%, web은 측정만 |
+| C | `e2e/**` | Playwright, Phase당 핵심 흐름 1~3개 | 통과/실패 |
+
+- **web에 커버리지 관문을 두지 않는다**: 렌더링 코드의 라인 커버리지는 품질과 상관이 약하고, 숫자를 맞추려는 테스트를 낳는다. 무시되는 관문은 없는 것보다 나쁘다.
+- **skip은 통과가 아니다.** 테스트결과서에 skip 건수를 적는다.
+- E2E는 **자기가 필요한 상태를 직접 만든다.** 사람이 화면에서 바꿀 수 있는 시드 데이터를 전제로 두지 않는다 (프로토타입에서 실제로 깨졌다).
+
+## 9. 배포 경로
+
+```
+개발 PC ──git push──▶ GitHub ──git pull──▶ Linux 서버
+                                              │ docker build (멀티스테이지)
+                                              │ docker save → tar + sha256
+                                              ▼
+                                      [반입 절차] ──▶ 폐쇄망
+                                                        │ docker load
+                                                        │ .env 작성
+                                                        │ db:migrate (명시적 단계)
+                                                        │ docker compose up -d
+                                                        ▼
+                                                   사후 검증 체크리스트
+```
+
+- 이미지 3종: `app`(Nest + SPA), `nginx`, `postgres`.
+- 빌드 스테이지에서 의존성 설치·빌드, 런타임 스테이지에는 산출물과 production 의존성만. 베이스는 `node:24-bookworm-slim` (alpine은 네이티브 모듈 호환 위험).
+- 컨테이너는 non-root, 헬스체크, `restart: unless-stopped`.
+- 반입 묶음 목록의 단일 출처는 `docs/배포가이드.md` (Phase 5).
+
+## 10. Phase별 추가 지점
+
+| Phase | 이 설계에 더해지는 것 |
+|---|---|
+| 1 | `auth`·`users`·`audit` 모듈, `users`·`sessions`·`audit_events` 테이블, OIDC 제공자 구현, 세션·CSRF 미들웨어 |
+| 2 | `spaces`·`pages` 모듈과 테이블, 편집기, 버전·충돌 |
+| 3 | `search`·`attachments`, 댓글·라벨, trigram 인덱스, 스토리지 제공자 |
+| 4 | 관리 화면, 권한 세분화, 휴지통, 알림, `settings` 관리 UI |
+| 5 | 배포·운영 문서, 백업·복원, 부하·보안 점검 |
+| 6 | 실시간 편집(저장 모델은 보류 4에서 판정), 외부 알림, PDF |
+
+## 11. 관련 문서
+
+| 문서 | 관계 |
+|---|---|
+| [`docs/scope-definition.md`](scope-definition.md) | 상위 — 무엇을·왜 |
+| [`CLAUDE.md`](../CLAUDE.md) | 규칙 |
+| [`docs/P0_설계서_Foundation.md`](P0_설계서_Foundation.md) | Phase 0 상세 설계 |

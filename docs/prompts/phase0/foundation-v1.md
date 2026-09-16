@@ -2,7 +2,7 @@
 
 - 일자: 2026-09-16
 - 작성 LLM: Claude Opus 5
-- 상태: **승인 대기.** `CLAUDE.md` 1.1절 2단계 — 사용자 확인 후 이 파일이 Phase 0의 수행 근거가 된다.
+- 상태: **승인 완료 (2026-09-16, 사용자 "응 시작해").** 5절 쟁점 4건은 모두 **권고안대로** 확정. `CLAUDE.md` 1.1절 2단계 산출물이며 이 파일이 Phase 0의 수행 근거다.
 - 대응 산출물: `docs/scope-definition.md`, `docs/설계서_Architecture.md`, `docs/P0_요구사항정의서_Foundation.md`, `docs/P0_설계서_Foundation.md`, 코드, `docs/P0_테스트결과서_Foundation.md`
 - 입력 자료: `exp/prototype` 브랜치 (`PROTOTYPE.md`, `docs/prompts/prototype-v1~v3.md`)
 
@@ -101,14 +101,14 @@ FR/NFR 번호로. 최소 포함:
 - [ ] 에이전트 정의 3개 + `docs/internal/설계서_Agents.md`
 - [ ] `docs/internal/P0_검토서_ReferenceComparison.md`(Confluence 기능 대조)·`P0_검토서_SelfReview.md`
 
-## 5. 착수 전 확인이 필요한 쟁점 (사용자 결정)
+## 5. 착수 전 쟁점 — 확정 (2026-09-16)
 
-| # | 쟁점 | 선택지 | 권고 |
+| # | 쟁점 | 확정 | 근거 |
 |---|---|---|---|
-| 1 | Linux 빌드 서버 접근 | (a) 사용자가 직접 `git pull` + 빌드하고 결과를 붙여 준다 (b) 접속 정보를 주고 Claude가 원격 실행 | (a). 폐쇄망 인접 서버의 접속 정보를 공개 저장소 작업 세션에 두지 않는다 |
-| 2 | CI 실행 위치 | (a) GitHub-hosted runner (공개 저장소라 무료) (b) self-hosted (Linux 서버) | (a)로 시작. 이미지 빌드까지 자동화할 때 (b) 검토 (보류 5) |
-| 3 | 프로토타입 DB 데이터 | (a) 유지 (b) Phase 0에서 초기화 후 정식 시드로 다시 | (b). E2E·수동 확인이 남긴 합성 계정이 쌓여 있다 |
-| 4 | `main` 병합 시점 | (a) Phase 0 완료 후 PR 병합 (b) 모든 Phase 후 | (a). `CLAUDE.md` 12.1절대로 매 Phase PR |
+| 1 | Linux 빌드 서버 접근 | **사용자가 직접 `git pull` + 빌드하고 결과를 전달한다** | 폐쇄망 인접 서버의 접속 정보를 공개 저장소 작업 세션에 두지 않는다 |
+| 2 | CI 실행 위치 | **GitHub-hosted runner** | 공개 저장소라 무료. 이미지 빌드 자동화 시 self-hosted 검토 (보류 5) |
+| 3 | 프로토타입 DB 데이터 | **Phase 0에서 초기화 후 정식 시드로 다시** | E2E·수동 확인이 남긴 합성 계정이 쌓여 있다 |
+| 4 | `main` 병합 시점 | **Phase 0 완료 후 PR 병합** | `CLAUDE.md` 12.1절 매 Phase PR |
 
 ## 6. 하지 않는 것
 
