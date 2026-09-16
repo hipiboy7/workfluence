@@ -1,6 +1,6 @@
 {
   "name": "@workfluence/shared",
-  "version": "0.1.0-proto",
+  "version": "0.1.0",
   "private": true,
   "description": "서버·클라이언트 공유 계약: 환경 스키마, 상수, 문서 검증, 권한 판정, API DTO (CLAUDE.md 3절 A등급)",
   "main": "./dist/index.js",

@@ -32,7 +32,7 @@ services:
       WF_DB_AUTO_MIGRATE: "false"
       WF_TRUST_PROXY: "true"
       WF_SERVE_WEB: "true"
-      WF_WEB_DIST: ../../web/dist
+      WF_WEB_DIST: ../web/dist
       WF_LOG_LEVEL: ${WF_LOG_LEVEL:-info}
       # 세션·계정 키(WF_SESSION_*, WF_ROOT_*)는 Phase 1에서 추가한다. 지금 넘기면 strict 스키마가 기동을 거부한다.
       # 임베디드 PG 설정(WF_PG_EMBEDDED_*)은 개발 PC 전용이라 컨테이너에는 넘기지 않는다.

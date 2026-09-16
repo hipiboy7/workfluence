@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyDocument, extractText, validateDocument, type DocNode } from './document';
+import { DOCUMENT_SCHEMA_VERSION } from './constants';
+import { documentSchemaVersion, emptyDocument, extractText, validateDocument, type DocNode } from './document';
 
 const text = (t: string, marks?: DocNode['marks']): DocNode => ({ type: 'text', text: t, ...(marks ? { marks } : {}) });
 const para = (...content: DocNode[]): DocNode => ({ type: 'paragraph', content });
@@ -86,6 +87,26 @@ describe('validateDocument', () => {
 });
 
 type DocMarkLike = { type: string };
+
+describe('문서 스키마 버전 (CLAUDE.md 6절)', () => {
+  it('빈 문서에 스키마 버전이 박히고 검증을 통과한다', () => {
+    const d = emptyDocument();
+    expect(documentSchemaVersion(d)).toBe(DOCUMENT_SCHEMA_VERSION);
+    expect(validateDocument(d)).toEqual({ ok: true });
+  });
+
+  it('버전 표기가 없는 문서도 허용한다 (표기 이전 문서)', () => {
+    const d: DocNode = { type: 'doc', content: [{ type: 'paragraph' }] };
+    expect(documentSchemaVersion(d)).toBeNull();
+    expect(validateDocument(d)).toEqual({ ok: true });
+  });
+
+  it('doc에 다른 속성은 여전히 거부한다', () => {
+    const r = validateDocument({ type: 'doc', attrs: { schemaVersion: 1, onload: 'x' }, content: [] });
+    expect(r.ok).toBe(false);
+    expect((r as { errors: string[] }).errors[0]).toContain("허용되지 않는 속성 'onload'");
+  });
+});
 
 describe('extractText', () => {
   it('블록 경계에 줄바꿈을 넣고 인라인은 이어 붙인다', () => {

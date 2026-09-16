@@ -9,6 +9,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
+    "setup:env": "tsx scripts/setup-env.ts",
     "check:env": "tsx scripts/check-env.ts",
     "dev:db": "tsx scripts/dev-db.ts",
     "dev": "pnpm --filter @workfluence/shared build && pnpm -r --parallel --stream run dev",

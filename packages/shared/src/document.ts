@@ -1,3 +1,5 @@
+import { DOCUMENT_SCHEMA_VERSION } from './constants';
+
 /**
  * 페이지 본문(ProseMirror/TipTap JSON) 검증·텍스트 추출 (CLAUDE.md 6절·7절).
  *
@@ -19,9 +21,13 @@ export type DocMark = {
   attrs?: Record<string, unknown>;
 };
 
-/** 허용 노드와 각 노드에 허용되는 속성 키 */
+/**
+ * 허용 노드와 각 노드에 허용되는 속성 키.
+ * `doc`에 `schemaVersion`을 허용한다 — 저장된 문서가 어느 스키마로 만들어졌는지 스스로 말해야
+ * 나중에 허용 목록이 바뀌었을 때 옛 문서를 어떻게 다룰지 판단할 수 있다 (`CLAUDE.md` 6절).
+ */
 export const ALLOWED_NODES: Record<string, readonly string[]> = {
-  doc: [],
+  doc: ['schemaVersion'],
   paragraph: ['textAlign'],
   heading: ['level', 'textAlign'],
   text: [],
@@ -186,7 +192,13 @@ const BLOCK_NODES = new Set([
   'horizontalRule',
 ]);
 
-/** 빈 문서. 새 페이지의 초기 본문. */
+/** 빈 문서. 새 페이지의 초기 본문. 스키마 버전을 함께 박는다 (`CLAUDE.md` 6절). */
 export function emptyDocument(): DocNode {
-  return { type: 'doc', content: [{ type: 'paragraph' }] };
+  return { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph' }] };
+}
+
+/** 문서에 박힌 스키마 버전. 없으면 버전 표기 이전 문서다. */
+export function documentSchemaVersion(doc: DocNode): number | null {
+  const v = doc.attrs?.schemaVersion;
+  return typeof v === 'number' ? v : null;
 }

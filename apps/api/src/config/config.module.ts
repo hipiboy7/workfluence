@@ -22,6 +22,20 @@ export function loadEnv(): AppEnv {
   return parseEnv({ ...fromFile, ...process.env });
 }
 
+/**
+ * 실행 환경에 맞는 DB 접속 문자열. **연결하는 모든 경로(앱·마이그레이션·시드·스키마 생성)가 이 함수를 쓴다.**
+ *
+ * `WF_ENV=test`인데 테스트 URL이 없으면 **개발 DB로 조용히 붙지 않고 실패한다.**
+ * 통합 테스트가 개발 데이터를 지우는 사고를 막는다.
+ */
+export function databaseUrl(env: AppEnv): string {
+  if (env.WF_ENV !== 'test') return env.WF_DATABASE_URL;
+  if (!env.WF_DATABASE_URL_TEST) {
+    throw new Error('WF_ENV=test인데 WF_DATABASE_URL_TEST가 없다. 개발 DB로 대체하지 않는다 — .env에 테스트 DB를 지정한다.');
+  }
+  return env.WF_DATABASE_URL_TEST;
+}
+
 @Global()
 @Module({
   providers: [{ provide: APP_ENV, useFactory: loadEnv }],

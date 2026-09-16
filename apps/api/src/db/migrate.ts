@@ -18,13 +18,13 @@ export async function runMigrations(pool: Pool): Promise<string> {
 }
 
 if (require.main === module) {
-  // CLI 실행: 루트 .env를 읽는다 (config.module과 같은 로더)
+  // CLI 실행: 루트 .env를 읽는다 (config.module과 같은 로더·같은 접속 문자열 선택)
   (async () => {
-    const { loadEnv } = await import('../config/config.module');
-    const env = loadEnv();
-    const pool = new Pool({ connectionString: env.WF_DATABASE_URL });
+    const { loadEnv, databaseUrl } = await import('../config/config.module');
+    const url = databaseUrl(loadEnv());
+    const pool = new Pool({ connectionString: url });
     try {
-      console.log(`[migrate] ${MIGRATIONS_FOLDER} → ${env.WF_DATABASE_URL.replace(/\/\/.*@/, '//***@')}`);
+      console.log(`[migrate] ${MIGRATIONS_FOLDER} → ${url.replace(/\/\/.*@/, '//***@')}`);
       console.log(`[migrate] ${await runMigrations(pool)}`);
     } finally {
       await pool.end();

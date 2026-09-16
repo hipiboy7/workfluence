@@ -27,8 +27,12 @@ FROM node:24-bookworm-slim
 ENV NODE_ENV=production \
     WF_ENV=production \
     WF_SERVE_WEB=true \
-    WF_WEB_DIST=../../web/dist \
+    WF_WEB_DIST=../web/dist \
     WF_PORT=3000
+# 레이아웃: /app/api/dist/main.js 가 WF_WEB_DIST를 `resolve(__dirname, '..', WF_WEB_DIST)`로 푼다.
+#   __dirname=/app/api/dist → 기준 /app/api → `../web/dist` = /app/web/dist
+# `../../web/dist`로 두면 /web/dist가 되어 SPA가 통째로 404인데 /api/health는 200이라
+# **헬스체크가 healthy를 보고한다.** 조용히 잘못되는 유형이라 주석으로 남긴다.
 WORKDIR /app/api
 COPY --from=build /out/api /app/api
 COPY --from=build /out/web /app/web

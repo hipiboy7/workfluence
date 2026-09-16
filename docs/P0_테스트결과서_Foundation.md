@@ -34,11 +34,11 @@ pnpm licenses:check
 
 | 구분 | 파일 | 테스트 | 결과 | skip |
 |---|---|---|---|---|
-| 등급 A — `packages/shared` | 5 | **49** | 전부 통과 | 0 |
-| 등급 B — `apps/api` | 4 | **17** | 전부 통과 | 0 |
+| 등급 A — `packages/shared` | 5 | **52** | 전부 통과 | 0 |
+| 등급 B — `apps/api` | 4 | **18** | 전부 통과 | 0 |
 | 등급 B — `apps/web` | 0 | 0 | — (Phase 0 화면은 E2E로 검증) | 0 |
 | 등급 C — E2E | 1 | **4** | 전부 통과 | 0 |
-| **합계** | **10** | **70** | **PASS** | **0** |
+| **합계** | **10** | **74** | **PASS** | **0** |
 
 실패·에러 0건. **skip 0건** — skip은 통과가 아니다 (`CLAUDE.md` 1.3절).
 
@@ -49,77 +49,127 @@ pnpm licenses:check
 ```
 File            | % Stmts | % Branch | % Funcs | % Lines | Uncovered
 ----------------|---------|----------|---------|---------|----------
-All files       |   98.71 |    98.10 |  100.00 |   99.00 |
- document.ts    |   97.64 |    97.56 |  100.00 |   97.33 | 72-73
+All files       |   98.72 |    98.12 |  100.00 |   99.01 |
+ document.ts    |   97.70 |    97.61 |  100.00 |   97.40 | 78-79
  security.ts    |   97.36 |    92.30 |  100.00 |  100.00 | 50
  (constants·env·permissions·schemas) |  100 |  100 |  100 |  100 |
 ```
 
-→ 목표 90% 대비 **+8.7%p (라인 99%)**. 관문 통과.
+→ 목표 90% 대비 **+9%p (라인 99.01%)**. 관문 통과.
 
-미커버 2곳은 방어적 분기다: `document.ts` 72-73은 오류 20건 초과 시 조기 종료, `security.ts` 50은 생성된 임시 비밀번호가 정책을 위반할 경우의 예외(정상 경로에서는 도달 불가).
+미커버 2곳은 방어적 분기다: `document.ts` 78-79는 오류 20건 초과 시 조기 종료, `security.ts` 50은 생성된 임시 비밀번호가 정책을 위반할 경우의 예외(정상 경로에서는 도달 불가).
 
 ### 3.2 등급 B — `apps/api` 목표 ≥ 70%
 
 ```
 File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered
 -------------------|---------|----------|---------|---------|----------
-All files          |   98.03 |    88.88 |   94.11 |  100.00 |
+All files          |   98.11 |    90.00 |   94.11 |  100.00 |
  common/           |   97.77 |    88.88 |   93.33 |  100.00 |
   rate-limit.guard |   96.42 |    85.71 |   80.00 |  100.00 | 13,29
  health/           |  100.00 |   100.00 |  100.00 |  100.00 |
 ```
 
-→ 목표 70% 대비 **+28%p (라인 100%)**. 관문 통과.
+→ 목표 70% 대비 **+30%p (라인 100%)**. 관문 통과.
 
-측정 대상은 `src/common/**`·`src/health/**`다. 부트스트랩(`main.ts`)·모듈 조립(`app.module.ts`)·DB 연결·마이그레이션 실행은 **단위 테스트로 검증할 수 없는 배선**이라 E2E와 실제 기동으로 확인한다 (4절).
+**측정 대상은 `src/common/**`·`src/health/**`로 한정했다.** 따라서 위 수치는 **api 코드 전체의 커버리지가 아니다.** 제외한 것과 이유:
+
+| 제외 | 이유 | 무엇으로 검증하나 |
+|---|---|---|
+| `main.ts` | 부트스트랩. 프로세스를 띄워야 의미가 있다 | 실제 기동 + E2E (4절) |
+| `app.module.ts` | 모듈 조립·정적 서빙 설정 | E2E 3·4번, SPA 경로 오류 재현 (4.5절) |
+| `config/` | `.env`와 파일 시스템에 의존 | `check:env` 실행, 스키마 자체는 A등급 `env.spec.ts` |
+| `db/` | 실제 PostgreSQL이 있어야 한다 | 마이그레이션·시드 실행 (4.2절) |
+
+Phase 1에서 **실제 PostgreSQL을 쓰는 통합 테스트**를 도입하면 `db/`와 기능 모듈이 분모에 들어온다. 그때 측정 범위를 넓히고 이 표를 갱신한다.
 
 ### 3.3 A+B 가중 평균 — 목표 ≥ 80%
 
 | 구분 | 라인 커버리지 |
 |---|---|
-| A (`packages/shared`) | 99.00% |
+| A (`packages/shared`) | 99.01% |
 | B (`apps/api` 측정 대상) | 100.00% |
 | **가중 평균** | **약 99%** |
 
-→ 목표 80% 대비 큰 폭 초과.
+→ 목표 80% 대비 큰 폭 초과. 단 3.2절의 측정 범위 한정을 함께 읽어야 한다.
 
 ## 4. 실제 동작 검증 (CLAUDE.md 1.3절)
 
-**문서가 아니라 동작으로 확인한다.** 아래는 전부 실행한 결과다.
+**문서가 아니라 동작으로 확인한다.** 아래는 전부 실행한 결과를 그대로 옮긴 것이다.
 
 ### 4.1 환경 확인 — `pnpm check:env`
 
 ```
+OK   Node 24 — node 24.14.0
 OK   pnpm 버전 = packageManager — pnpm 12.4.1, 요구 12.4.1
 OK   .env 존재 — D:\claude\workfluence\.env
 OK   .env 스키마 (WF_* strict) — 12개 키
-OK   데이터 경로 = 이 디렉토리의 .local/ — D:\claude\workfluence\.local
+OK   .local/ 존재 — D:\claude\workfluence\.local
 OK   WF_PG_EMBEDDED_DIR이 .local/ 아래 — D:\claude\workfluence\.local\pgdata
+OK   데이터가 시스템 드라이브가 아닌 곳에 있음 — 프로젝트 d: / 시스템 c:
 OK   드라이브 여유 ≥ 3GB — 10.3GB 여유 (D:)
 OK   PostgreSQL 연결 — PostgreSQL 17.10 on x86_64-windows
-OK   마이그레이션 테이블 — 적용 이력 있음
+OK   마이그레이션 적용 — 적용 1개 / 파일 1개
 
 READY
 ```
 
-### 4.2 DB 초기화·마이그레이션·시드
+### 4.2 DB 초기화·마이그레이션·시드 — 멱등성 포함
 
 프로토타입 데이터를 지우고 처음부터 만들었다 (프롬프트 5절 쟁점 3 확정 사항).
 
 ```
 $ rm -rf .local/pgdata && pnpm dev:db
 [dev-db] initdb → D:\claude\workfluence\.local\pgdata
-[dev-db] 데이터베이스 생성: workfluence, workfluence_test
+[dev-db] 데이터베이스 workfluence: 생성
+[dev-db] 데이터베이스 workfluence_test: 생성
 [dev-db] READY. Ctrl+C로 종료.
+```
 
+**재실행(멱등)**: 같은 명령을 다시 실행하면 만들지 않고 "있음"으로 지나간다.
+
+```
+[dev-db] 데이터베이스 workfluence: 있음
+[dev-db] 데이터베이스 workfluence_test: 있음
+[dev-db] READY. Ctrl+C로 종료.
+```
+
+**마이그레이션 2회** — 같은 출력, 중복 적용 없음:
+
+```
 $ pnpm db:migrate
 [migrate] D:\claude\workfluence\apps\api\drizzle → postgres://***@127.0.0.1:5433/workfluence
 [migrate] 1개 마이그레이션 적용 상태
+$ pnpm db:migrate
+[migrate] D:\claude\workfluence\apps\api\drizzle → postgres://***@127.0.0.1:5433/workfluence
+[migrate] 1개 마이그레이션 적용 상태
+```
 
+**시드 2회** — 같은 출력:
+
+```
+$ pnpm db:seed
+[seed] Phase 0 — 시드할 데이터가 없다 (계정·카테고리는 Phase 1)
 $ pnpm db:seed
 [seed] Phase 0 — 시드할 데이터가 없다 (계정·카테고리는 Phase 1)
 ```
+
+**테스트 DB 배선 확인** (FR-030). `WF_ENV=test`면 테스트 DB로 붙는다:
+
+```
+$ WF_ENV=test pnpm db:migrate
+[migrate] D:\claude\workfluence\apps\api\drizzle → postgres://***@127.0.0.1:5433/workfluence_test
+[migrate] 1개 마이그레이션 적용 상태
+```
+
+두 DB의 테이블을 직접 조회해 확인했다.
+
+```
+workfluence      → drizzle.__drizzle_migrations, public.settings
+workfluence_test → drizzle.__drizzle_migrations, public.settings
+```
+
+`WF_ENV=test`인데 `WF_DATABASE_URL_TEST`가 비어 있으면 **개발 DB로 대체하지 않고 실패한다** (종료 코드 1). 통합 테스트가 개발 데이터를 지우는 사고를 막는다.
 
 ### 4.3 헬스체크 실호출 (FR-040)
 
@@ -131,8 +181,13 @@ Referrer-Policy: same-origin
 Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 Cache-Control: no-store
 Content-Type: application/json; charset=utf-8
+Content-Length: 59
+ETag: W/"3b-9hd2m53WGE2IfSD4VpYUaC3BrRk"
+Date: Wed, 16 Sep 2026 02:31:35 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
 
-{"status":"ok","db":"ok","time":"2026-09-16T01:56:30.000Z"}
+{"status":"ok","db":"ok","time":"2026-09-16T02:31:35.016Z"}
 ```
 
 ### 4.4 정적 자산 캐시 (FR-063)
@@ -145,11 +200,22 @@ Cache-Control: public, max-age=31536000, immutable
 
 해시 파일명만 `immutable`, 나머지와 `/api/*`는 `no-store`임을 확인했다.
 
-### 4.5 브라우저 화면 (FR-071)
+### 4.5 SPA 경로가 틀리면 기동이 멈춘다 (FR-070)
+
+경로를 잘못 두면 화면은 통째로 404인데 `/api/health`는 200이라 **헬스체크가 healthy를 보고한다.** 조용히 잘못되는 유형이라 기동 시점에 실패시킨다.
+
+```
+$ WF_WEB_DIST=../../web/dist node dist/main.js
+Error: WF_SERVE_WEB=true인데 SPA 산출물이 없다: D:\claude\workfluence\web\dist
+  WF_WEB_DIST=../../web/dist (기준 D:\claude\workfluence\apps\api)
+  개발이면 'pnpm build'를, 컨테이너면 이미지 레이아웃과 WF_WEB_DIST를 확인한다.
+```
+
+### 4.6 브라우저 화면 (FR-071)
 
 `http://127.0.0.1:3000/`에서 기동 확인 화면이 뜨고 API·데이터베이스가 각각 `ok`, 서버 시각이 표시된다. Phase 0의 인수 기준(`scope-definition.md` 5절)을 화면으로 충족한다.
 
-### 4.6 E2E (등급 C) — 4건 통과
+### 4.7 E2E (등급 C) — 4건 통과
 
 | # | 시나리오 | 확인 내용 |
 |---|---|---|
@@ -158,7 +224,7 @@ Cache-Control: public, max-age=31536000, immutable
 | 3 | SPA 셸 | 제목·기동 확인 영역 표시, 배지 `ok`, 데이터베이스 항목 노출 |
 | 4 | 딥링크 폴백 | 임의 경로는 200 text/html, `/api/unknown`은 404 JSON |
 
-### 4.7 설정 항목 추적성 (NFR-10)
+### 4.8 설정 항목 추적성 (NFR-10)
 
 코드가 읽는 `WF_*`와 설계서 1.1절 표, `.env.example`을 대조했다.
 
@@ -170,23 +236,23 @@ Cache-Control: public, max-age=31536000, immutable
 
 대조 중 발견해 고친 것: `deploy/compose.yml`이 프로토타입 시절의 세션·계정 키(`WF_SESSION_SECRET`·`WF_ROOT_*`·`WF_COOKIE_SECURE`)를 여전히 넘기고 있었다. **strict 스키마라 그대로 두면 운영 컨테이너가 기동에 실패한다.** 제거하고 Phase 1 주석으로 대체했다. Playwright의 `WF_E2E_BASE_URL`은 앱 환경변수가 아니므로 `E2E_BASE_URL`로 바꿨다 — `WF_` 접두사는 앱 환경변수만을 뜻한다.
 
-### 4.8 검사 관문
+compose 전용 변수 3개(`WF_PG_PASSWORD`·`WF_APP_IMAGE`·`WF_HTTPS_PORT`)는 앱에 전달되지 않으므로 앱 스키마에 넣지 않고 설계서 1.1절에 따로 표로 두었다.
+
+### 4.9 검사 관문
 
 | 검사 | 결과 |
 |---|---|
 | `pnpm lint` | 통과 (0건) |
 | `pnpm typecheck` | 3개 패키지 통과 |
-| `pnpm verify:docs` | 문서 위반 0건 |
-| `pnpm licenses:check` | production 의존성 **129개**, 허용 라이선스만 사용 |
+| `pnpm verify:docs` | **문서 13개 검사**, 위반 0건 |
+| `pnpm licenses:check` | production 의존성 **129개**, 허용 라이선스만 사용 (MIT 116 · ISC 7 · Apache-2.0 3 · BSD-3-Clause 2 · 0BSD 1) |
 
-### 4.9 빌드 산출물
+### 4.10 빌드 산출물
 
 | 산출물 | 크기 |
 |---|---|
 | `apps/web/dist` | 225KB (JS 221KB / gzip 69KB, CSS 1.2KB) |
 | `apps/api/dist` | 117KB |
-
-프로토타입 대비 web 번들이 837KB → 221KB로 줄었다. Phase 0 셸에는 편집기·라우터가 없기 때문이며, Phase 2에서 다시 늘어난다.
 
 ## 5. 요구사항 대응
 
@@ -198,14 +264,15 @@ Cache-Control: public, max-age=31536000, immutable
 | FR-016 | `.env.example`에 placeholder만, 실제 값 없음 | PASS |
 | FR-017 | `loadEnv`가 파일+`process.env` 병합, `process.env` 우선 | PASS |
 | FR-020~027 | `constants`·`document`·`permissions`·`security`·`schemas` 테스트 49건 | PASS |
-| FR-030~032 | 마이그레이션 실행·재실행(멱등) 확인 | PASS |
+| FR-030~032 | 마이그레이션 실행·재실행 2회 동일 출력, 테스트 DB 분기 확인 (4.2절) | PASS |
 | FR-033 | `settings` 테이블 생성 확인 | PASS |
-| FR-034 | 시드 2회 실행 결과 동일 | PASS |
+| FR-034 | 시드 2회 실행 결과 동일 (4.2절) | PASS |
 | FR-040, 041 | `health.controller.spec.ts` + 실호출 | PASS |
 | FR-050~052 | `logger.spec.ts` — JSON 한 줄·redact·레벨·Nest 위임 | PASS |
 | FR-060 | `zod.pipe.spec.ts` — 400 + 위반 목록·중첩 경로 | PASS |
 | FR-061 | `rate-limit.guard.spec.ts` — 상한·IP/핸들러 분리·창 만료 | PASS |
 | FR-062~064 | 실호출 헤더 확인 (4.3절) | PASS |
+| FR-070 | SPA 경로 오류 시 기동 중단 확인 (4.5절) | PASS |
 | FR-070~072 | E2E 3·4번, 빌드 산출물에 외부 URL 없음 | PASS |
 | FR-080~084 | `check:env` READY, `dev:db` 초기화, `verify:docs` 0건, `test:e2e` 4건, `check` | PASS |
 | FR-090 | ESLint 대소문자 검사 규칙 적용, lint 통과 | PASS |
@@ -219,7 +286,7 @@ Cache-Control: public, max-age=31536000, immutable
 | NFR-07 | `pnpm install --frozen-lockfile` (CI) | **미검증** (7절) |
 | NFR-08 | `verify:docs` 0건 | PASS |
 | NFR-09 | `.env` 미커밋 확인, gitleaks는 CI | 부분 |
-| NFR-10 | 4.7절 대조 | PASS |
+| NFR-10 | 4.8절 대조 | PASS |
 
 ## 6. 재작업·특이사항
 
@@ -253,7 +320,19 @@ Cache-Control: public, max-age=31536000, immutable
 
 **관문이 조용히 통과하면 없는 것보다 나쁘다.** "위반 없음"을 믿고 문서를 고치지 않게 되기 때문이다.
 
-### 6.6 `apps/web` 커버리지 관문 없음
+### 6.6 독립 검토가 운영 이미지의 화면 장애를 잡았다
+
+`self-reviewer` 정의를 따르는 에이전트가 별도 컨텍스트에서 검토해 **결함 25건**을 보고했다. 그중 하나는 Linux 빌드에 가서야 드러났을 것이고, 그것도 오진하기 쉬운 형태였다.
+
+`deploy/Dockerfile`과 `deploy/compose.yml`이 `WF_WEB_DIST=../../web/dist`를 넘겼다. 컨테이너 레이아웃에서 이 값은 `/web/dist`로 풀린다(정답은 `/app/web/dist`). **화면은 통째로 404인데 `/api/health`는 200이라 컨테이너 헬스체크가 healthy를 보고한다.** 로그에도 아무것도 남지 않는다.
+
+값을 고치는 데 그치지 않고 **기동 시점에 실패**하도록 했다. `WF_SERVE_WEB=true`인데 산출물 디렉토리가 없으면 경로를 찍고 멈춘다 (4.5절). 조용한 실패를 시끄러운 실패로 바꾼 것이다.
+
+같은 검토에서 CI의 외부 URL 검사가 **항상 실패할 상태**임도 드러났다. React 19 프로덕션 번들이 오류 안내 문구로 `https://react.dev/errors/`를 담는데 제외 목록에 없었다. 네트워크 요청이 아니므로 제외하되, 제외 목록에 **왜 요청이 아닌지**를 항목마다 적었다. 이유 없이 넓히면 관문이 무의미해진다.
+
+전체 25건의 처리 내역은 `docs/internal/P0_검토서_SelfReview.md` 5절.
+
+### 6.7 `apps/web` 커버리지 관문 없음
 
 `CLAUDE.md` 3절대로 web에는 관문을 두지 않았다. Phase 0의 화면은 단일 컴포넌트라 E2E가 더 정확한 검증이다. 상태·분기가 늘어나는 Phase 1부터 컴포넌트 테스트를 붙인다.
 
@@ -281,7 +360,7 @@ git checkout impl-phase0
 df -h /                    # 여유 5GB 미만이면 정리 후 진행 (CLAUDE.md 8.2절)
 docker --version && docker compose version
 
-cp .env.example .env       # WF_PG_PASSWORD 추가 (compose 전용, P0_설계서 1.1절)
+pnpm setup:env             # .env 생성. 여기에 WF_PG_PASSWORD 추가 (compose 전용, P0_설계서 1.1절)
 echo "WF_PG_PASSWORD=$(openssl rand -hex 16)" >> .env
 
 docker compose -f deploy/compose.yml --env-file .env build api

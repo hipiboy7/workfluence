@@ -29,7 +29,7 @@ apps/api/src/
 └── main.ts                   [B] 부트스트랩·보안 헤더
 
 apps/web/src/                 [B] SPA 셸 (기동 확인 화면)
-scripts/                      [—] check-env · dev-db · verify-docs · e2e
+scripts/                      [—] setup-env · check-env · dev-db · verify-docs · check-licenses · e2e
 e2e/                          [C] 기동 확인 시나리오
 ```
 
@@ -118,6 +118,8 @@ process.env + .env 파일 ──▶ WF_로 시작하는 키만 추출 ──▶ 
 | `PASSWORD_POLICY` | 8자·2종·5회·15분 | **기본값**. 운영 조절은 Phase 4에서 `settings`로 |
 | `RATE_LIMITS` | 엔드포인트별 제한 | 기본값 |
 | `TEMP_PASSWORD_LENGTH` | 12 | 기본값 |
+| `ASSIGNABLE_MEMBER_ROLES` | `editor`·`viewer` | owner는 생성자에게 자동 부여라 지정 대상이 아니다 |
+| `SETTINGS_KEYS` | `settings` 테이블 키 | 키 문자열이 코드 여러 곳에 흩어지면 오타가 조용히 통과한다 |
 
 ### 2.2 `document.ts` (FR-021, FR-022)
 
@@ -160,7 +162,9 @@ checkPasswordPolicy(password, policy)                    → string[]  위반 �
 
 `PG_POOL`(pg `Pool`) → `DB`(Drizzle 인스턴스) 두 토큰을 제공한다. 세션 저장소(Phase 1)가 같은 풀을 써야 해서 풀을 따로 노출한다. `OnModuleDestroy`에서 풀을 닫는다.
 
-연결 문자열은 `WF_ENV=test`면 `WF_DATABASE_URL_TEST`, 아니면 `WF_DATABASE_URL`.
+연결 문자열 선택은 `config.module.ts`의 `databaseUrl(env)` **한 함수**가 한다. 앱·마이그레이션·시드·스키마 생성이 모두 이 함수를 쓴다 — 경로마다 따로 고르면 스키마를 만든 DB와 앱이 붙는 DB가 갈린다.
+
+`WF_ENV=test`면 `WF_DATABASE_URL_TEST`를 쓰고, **그 값이 없으면 개발 DB로 대체하지 않고 실패한다.** 통합 테스트가 개발 데이터를 지우는 사고를 막는다.
 
 ### 3.2 스키마 — Phase 0
 
@@ -230,6 +234,8 @@ DB까지 확인하는 이유: 앱 프로세스는 살아 있는데 DB를 못 쓰
 | `dev-db.ts` | `embedded-postgres`로 `.local/pgdata`에 기동. 최초 실행이면 `initdb` + DB 2개(개발·테스트) 생성. `SIGINT`/`SIGTERM`에서 정상 종료 |
 | `verify-docs.ts` | 6종 검사(FR-082). 검사 대상은 `README.md`·`CLAUDE.md`·`PROTOTYPE.md`·`docs/**/*.md`. `history/`는 제외 — 과거 기록을 사후에 고치면 기록 위조다 |
 | `e2e.ts` | `PLAYWRIGHT_BROWSERS_PATH`를 저장소 안 경로로 설정해 Playwright를 실행. OS별 환경변수 문법을 문서에서 없앤다 |
+| `setup-env.ts` | `.env`가 없으면 `.env.example`을 복사한다. 문서의 실행 명령을 `pnpm <script>`로만 유지하기 위해(`cp`/`copy`는 OS마다 다르다) |
+| `check-licenses.ts` | production 의존성 라이선스를 `CLAUDE.md` 7절 목록과 대조한다. 넓히려면 개별 예외에 사유를 적는다 |
 
 ### 8.1 각 명령은 자기 전제를 스스로 만든다
 

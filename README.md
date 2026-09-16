@@ -26,7 +26,7 @@ Node 24와 pnpm 12가 필요하다. 프로젝트 데이터는 전부 저장소 �
 
 ```bash
 pnpm install
-cp .env.example .env
+pnpm setup:env
 ```
 
 ## 실행

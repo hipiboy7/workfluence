@@ -1,7 +1,7 @@
 import { Global, Inject, Injectable, Module, type OnModuleDestroy } from '@nestjs/common';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { APP_ENV, type AppEnvToken } from '../config/config.module';
+import { APP_ENV, databaseUrl, type AppEnvToken } from '../config/config.module';
 import * as schema from './schema';
 
 export const DB = Symbol('DB');
@@ -22,11 +22,8 @@ export class PoolHolder implements OnModuleDestroy {
     {
       provide: PG_POOL,
       inject: [APP_ENV],
-      useFactory: (env: AppEnvToken) =>
-        new Pool({
-          connectionString: env.WF_ENV === 'test' && env.WF_DATABASE_URL_TEST ? env.WF_DATABASE_URL_TEST : env.WF_DATABASE_URL,
-          max: 10,
-        }),
+      // 접속 문자열 선택은 databaseUrl 한 곳에서 한다 (test 환경에서 개발 DB로 조용히 붙지 않게)
+      useFactory: (env: AppEnvToken) => new Pool({ connectionString: databaseUrl(env), max: 10 }),
     },
     {
       provide: DB,

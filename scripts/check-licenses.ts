@@ -9,23 +9,16 @@
  */
 import { execSync } from 'node:child_process';
 
-const ALLOWED = [
-  'MIT',
-  'MIT-0',
-  'ISC',
-  'Apache-2.0',
-  'BSD-2-Clause',
-  'BSD-3-Clause',
-  '0BSD',
-  'CC0-1.0',
-  'CC-BY-4.0',
-  'Unlicense',
-  'BlueOak-1.0.0',
-  'Python-2.0',
-  'WTFPL',
-];
+/**
+ * 허용 라이선스. **`CLAUDE.md` 7절 목록과 같아야 한다.**
+ * 규칙보다 넓히면 관문이 규칙을 대신 정하게 된다 — 넓히려면 규칙을 먼저 고친다.
+ */
+const ALLOWED = ['MIT', 'ISC', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', '0BSD'];
 
-/** 승인하고 통과시키는 예외. 사유를 반드시 적는다 (무시되는 관문은 없는 것보다 나쁘다). */
+/**
+ * 허용 목록 밖이지만 승인해 통과시키는 개별 패키지. **사유와 확인 일자를 반드시 적는다.**
+ * 목록을 넓히는 대신 여기에 적는 이유: 무엇을 왜 예외로 두었는지가 남아야 다음 사람이 재검토할 수 있다.
+ */
 const EXCEPTIONS: Record<string, string> = {
   // 예: 'some-package@1.0.0': '듀얼 라이선스 중 MIT 선택. 2026-09-16 확인'
 };

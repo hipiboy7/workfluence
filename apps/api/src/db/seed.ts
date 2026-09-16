@@ -8,12 +8,12 @@
  */
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { loadEnv } from '../config/config.module';
+import { databaseUrl, loadEnv } from '../config/config.module';
 import * as schema from './schema';
 
 async function main(): Promise<void> {
-  const env = loadEnv();
-  const pool = new Pool({ connectionString: env.WF_DATABASE_URL });
+  // 접속 문자열 선택은 databaseUrl 한 곳에서 (test 환경에서 개발 DB를 건드리지 않는다)
+  const pool = new Pool({ connectionString: databaseUrl(loadEnv()) });
   const db = drizzle(pool, { schema });
   try {
     // Phase 0: 넣을 데이터 없음. 연결이 정상인지만 확인한다.

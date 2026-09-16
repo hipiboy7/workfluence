@@ -4,12 +4,13 @@
  *       드라이브 여유 공간, PostgreSQL 연결.
  */
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, statfsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statfsSync } from 'node:fs';
+import { parse, resolve, sep } from 'node:path';
 import { Client } from 'pg';
 import { parseEnv } from '../packages/shared/src/env';
 
 const root = resolve(__dirname, '..');
+const MIGRATIONS_DIR = resolve(root, 'apps', 'api', 'drizzle');
 const results: { name: string; ok: boolean; detail: string }[] = [];
 const check = (name: string, ok: boolean, detail: string) => results.push({ name, ok, detail });
 
@@ -39,11 +40,17 @@ async function main(): Promise<void> {
   }
 
   const localDir = resolve(root, '.local');
-  const onSameDrive = localDir.toLowerCase().startsWith(root.toLowerCase());
-  check('데이터 경로 = 이 디렉토리의 .local/', existsSync(localDir) && onSameDrive, localDir);
+  check('.local/ 존재', existsSync(localDir), localDir);
   if (env) {
     const pgDir = resolve(root, env.WF_PG_EMBEDDED_DIR);
-    check('WF_PG_EMBEDDED_DIR이 .local/ 아래', pgDir.toLowerCase().startsWith(localDir.toLowerCase()), pgDir);
+    check('WF_PG_EMBEDDED_DIR이 .local/ 아래', pgDir.toLowerCase().startsWith(localDir.toLowerCase() + sep), pgDir);
+  }
+  // CLAUDE.md 8.1절: 프로젝트 데이터를 시스템 드라이브(C:)에 두지 않는다.
+  // "`.local`이 저장소 안인가"는 경로를 그렇게 조립했으니 항상 참이라 검사가 아니다. 실제로 확인할 것은 드라이브다.
+  if (process.platform === 'win32') {
+    const systemDrive = (process.env.SystemDrive ?? 'C:').toLowerCase();
+    const projectDrive = parse(root).root.replace(/[\\/]+$/, '').toLowerCase();
+    check('데이터가 시스템 드라이브가 아닌 곳에 있음', projectDrive !== systemDrive, `프로젝트 ${projectDrive} / 시스템 ${systemDrive}`);
   }
 
   try {
@@ -60,10 +67,19 @@ async function main(): Promise<void> {
       await client.connect();
       const v = await client.query('select version()');
       check('PostgreSQL 연결', true, String(v.rows[0].version).split(',')[0]);
-      const m = await client.query(
+
+      // 테이블 존재 여부만 보면 "미적용 마이그레이션이 쌓여도 READY"가 된다. 적용 수와 파일 수를 센다.
+      const files = existsSync(MIGRATIONS_DIR) ? readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length : 0;
+      const t = await client.query<{ n: number }>(
         "select count(*)::int as n from information_schema.tables where table_schema='drizzle' and table_name='__drizzle_migrations'",
       );
-      check('마이그레이션 테이블', m.rows[0].n === 1, m.rows[0].n === 1 ? '적용 이력 있음' : '아직 없음 → pnpm db:migrate');
+      if (t.rows[0].n !== 1) {
+        check('마이그레이션 적용', false, `적용 이력 테이블이 없다 (파일 ${files}개) → pnpm db:migrate`);
+      } else {
+        const a = await client.query<{ n: number }>('select count(*)::int as n from drizzle.__drizzle_migrations');
+        const applied = a.rows[0].n;
+        check('마이그레이션 적용', applied === files, `적용 ${applied}개 / 파일 ${files}개${applied === files ? '' : ' → pnpm db:migrate'}`);
+      }
     } catch (e) {
       check('PostgreSQL 연결', false, `${(e as Error).message} → pnpm dev:db 로 임베디드 DB를 먼저 띄운다`);
     } finally {
