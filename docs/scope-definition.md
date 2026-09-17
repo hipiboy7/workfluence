@@ -2,7 +2,7 @@
 
 - 상위 규칙: [`CLAUDE.md`](../CLAUDE.md) (충돌 시 규칙서 우선)
 - 구현 방법: [`docs/설계서_Architecture.md`](설계서_Architecture.md)
-- 사용 프롬프트: [`docs/prompts/phase0/foundation-v1.md`](prompts/phase0/foundation-v1.md)
+- 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
 - 상태: Phase 0 진행 중
 
@@ -194,4 +194,4 @@
 | [`docs/학습가이드_시스템이해.md`](학습가이드_시스템이해.md) | 개발 용어 없이 읽는 설명 |
 | [`docs/운영가이드_장애대응.md`](운영가이드_장애대응.md) | 증상에서 조치로 |
 | [`docs/기능백로그.md`](기능백로그.md) | 기능 요청 접수 상태 |
-| [`docs/prompts/phase0/foundation-v1.md`](prompts/phase0/foundation-v1.md) | Phase 0 수행 근거 프롬프트 |
+| [`docs/internal/검토서_방법론개정.md`](internal/검토서_방법론개정.md) | 왜 이런 작업 방식과 문서 구조인가 |

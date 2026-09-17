@@ -1,15 +1,28 @@
 # P0_설계서_Foundation — Phase 0 공통 기반: 요구사항과 설계
 
 - 상위 문서: [`docs/scope-definition.md`](scope-definition.md) 5절 Phase 인수 기준, [`docs/설계서_Architecture.md`](설계서_Architecture.md)
-- 사용 프롬프트: [`docs/prompts/phase0/foundation-v1.md`](prompts/phase0/foundation-v1.md)
+- 요청 기록: [`docs/prompts/prototype-v1.md`](prompts/prototype-v1.md) · [v2](prompts/prototype-v2.md) · [v3](prompts/prototype-v3.md) — 프로토타입으로 확인한 요구. 승격 규칙은 `CLAUDE.md` 1.5절
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) 4절 1단계 산출물. 다음 산출물은 코드 + 테스트, 그다음 [`docs/P0_검증기록_Foundation.md`](P0_검증기록_Foundation.md)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
 
 > **개정 이력 (2026-09-16).** 원래 요구사항정의서와 설계서 두 문서였다. 같은 열두 개 주제를 "무엇을"과 "어떻게"로 나눠 두 번 적었고, 그 결과 CI 관련 서술이 한쪽만 고쳐져 실제로 어긋났다. 한 사실은 한 곳에만 둔다는 규칙(`CLAUDE.md` 1.3절)에 따라 합쳤다. 판단 근거는 [`docs/internal/검토서_방법론개정.md`](internal/검토서_방법론개정.md).
 >
 > **절 번호 규칙.** 코드 주석과 트러블슈팅 기록이 이 문서의 **숫자 절**(0~13)을 가리킨다. 그래서 숫자 절은 건드리지 않고, 합쳐 들어온 요구사항과 제품 대조를 **문자 절**(A·B)로 앞에 붙였다.
+>
+> **개정 이력 (2026-09-17).** 작업 계획을 별도 문서로 만들지 않기로 하면서(`CLAUDE.md` 11절) 옛 Phase 0 작업 프롬프트에 있던 **착수 쟁점 4건을 A.0절로 옮겼다.** 그 문서의 나머지 여섯 개 절 중 다섯 개는 이 설계서와 같은 내용이었고, 프로토타입 승격 규칙은 `CLAUDE.md` 1.5절로 옮겼다.
 
 ## A. 요구사항
+
+### A.0 착수 시 확정한 쟁점 (2026-09-16)
+
+시작 전에 **사용자만 정할 수 있는 것**을 물어 확정한 내용이다 (`CLAUDE.md` 1.1절 1단계).
+
+| # | 쟁점 | 확정 | 근거 |
+|---|---|---|---|
+| 1 | Linux 빌드 서버 접근 | **사용자가 직접 pull하고 빌드해 결과를 전달한다** | 폐쇄망 인접 서버의 접속 정보를 공개 저장소 작업 세션에 두지 않는다 |
+| 2 | CI 실행 위치 | **GitHub이 제공하는 러너** | 공개 저장소라 무료. 이미지 빌드 자동화 시 자체 러너 검토 (`CLAUDE.md` 보류 5) |
+| 3 | 프로토타입 DB 데이터 | **Phase 0에서 초기화하고 정식 시드로 다시 만든다** | E2E와 수동 확인이 남긴 합성 계정이 쌓여 있었다 |
+| 4 | `main` 병합 시점 | **Phase 0 완료 후 PR 병합** | `CLAUDE.md` 12.1절 매 Phase PR |
 
 ### A.1 목적
 

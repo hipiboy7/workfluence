@@ -2,7 +2,7 @@
 
 - 상위 문서: [`docs/scope-definition.md`](scope-definition.md) — 무엇을·왜
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
-- 사용 프롬프트: [`docs/prompts/phase0/foundation-v1.md`](prompts/phase0/foundation-v1.md)
+- 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
 - 상태: Phase 0 진행 중. Phase 1~6 항목은 **계획**이며 각 Phase 착수 시 `P{N}_설계서_*.md`로 상세화한다
 
