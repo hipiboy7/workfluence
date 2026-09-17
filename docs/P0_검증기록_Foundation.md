@@ -265,30 +265,11 @@ compose 전용 변수 3개는 앱에 전달되지 않으므로 앱 스키마에 
 | Docker 버전·디스크 여유 (확인 필요 D) | 미기록 | 사용자 |
 | ~~CI 실제 실행~~ | **완료 2026-09-16** (3.8절) | — |
 
-### 6.1 Linux 서버에서 실행할 명령
+### 6.1 실행 절차
 
-```bash
-git clone https://github.com/hipiboy7/workfluence.git   # 또는 git pull
-cd workfluence
-git checkout impl-phase0
+절차와 명령은 [`docs/운영가이드_리눅스빌드.md`](운영가이드_리눅스빌드.md)에 있다. **여기에 다시 적지 않는다** — 같은 명령을 두 곳에 두면 한쪽이 상한다 (`CLAUDE.md` 1.3절).
 
-df -h /                    # 여유 5GB 미만이면 정리 후 진행 (CLAUDE.md 8.2절)
-docker --version && docker compose version
-
-pnpm setup:env             # .env 생성. 여기에 WF_PG_PASSWORD 추가 (compose 전용, 설계서 1.1절)
-echo "WF_PG_PASSWORD=$(openssl rand -hex 16)" >> .env
-
-docker compose -f deploy/compose.yml --env-file .env build api
-docker images workfluence-app                                   # 크기 기록
-docker compose -f deploy/compose.yml --env-file .env up -d postgres api
-docker compose -f deploy/compose.yml --env-file .env run --rm api node dist/db/migrate.js
-curl -i http://127.0.0.1:3000/api/health                        # api 포트를 노출한 경우
-docker compose -f deploy/compose.yml ps                         # healthy 확인
-```
-
-결과(이미지 크기·기동 시간·헬스체크 응답 원문·Docker 버전·디스크 여유)를 위 표에 채우면 Phase 0을 닫는다.
-
-> nginx는 인증서가 있어야 뜬다. Phase 0 검증에서는 `postgres`와 `api`만 올려 확인하고, TLS 종단은 Phase 5 배포가이드에서 다룬다.
+그 문서가 받아 오는 값은 여섯 개다. Docker·Compose 버전, 디스크 여유, 이미지 크기, 기동 시간, 헬스체크 응답 원문, 재부팅 후 자동 기동. 값이 오면 위 표를 채우고 `CLAUDE.md` 1.2절 확인 필요 D도 함께 답한다.
 
 ## 7. 다음 Phase 인계
 

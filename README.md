@@ -20,6 +20,7 @@
 | 상황 | 문서 |
 |---|---|
 | 장애가 났다 | [`docs/운영가이드_장애대응.md`](docs/운영가이드_장애대응.md) |
+| 리눅스 서버에서 이미지를 만든다 | [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md) |
 | 새 기능을 넣고 싶다 | [`docs/기능백로그.md`](docs/기능백로그.md) |
 | 이 오류 본 적 있나 | [`docs/internal/검토서_트러블슈팅.md`](docs/internal/검토서_트러블슈팅.md) |
 | 무엇을 어떻게 검증했나 | [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) |
