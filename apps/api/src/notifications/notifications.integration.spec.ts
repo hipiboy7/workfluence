@@ -2,6 +2,7 @@ import type { DocNode, Principal } from '@workfluence/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CommentsService } from '../comments/comments.service';
+import { PagesService } from '../pages/pages.service';
 import { pages, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
@@ -13,6 +14,7 @@ let db: TestDb;
 let spacesSvc: SpacesService;
 let svc: NotificationsService;
 let commentsSvc: CommentsService;
+let pagesSvc: PagesService;
 
 const body = (text: string): DocNode => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
 
@@ -35,6 +37,7 @@ beforeAll(async () => {
   spacesSvc = new SpacesService(db);
   svc = new NotificationsService(db, new InAppChannel());
   commentsSvc = new CommentsService(db, spacesSvc, svc);
+  pagesSvc = new PagesService(db, spacesSvc, svc);
 });
 afterAll(closeTestDb);
 beforeEach(() => resetTables(db));
@@ -147,5 +150,36 @@ describe('알림함 (FR-505~508)', () => {
     const { mate } = await seeded();
     const list = await svc.list(mate, 20);
     expect(new Date(list[0].createdAt).getTime()).toBeGreaterThanOrEqual(new Date(list[1].createdAt).getTime());
+  });
+});
+
+describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
+  it('**본문에 적은 @아이디도 알림을 만든다.** 댓글만 되던 것을 고쳤다', async () => {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+
+    const created = await pagesSvc.create(
+      { spaceId: sp.id, parentId: null, title: '회의록', content: body('@mate 확인 부탁') },
+      owner,
+      db,
+    );
+
+    const list = await svc.list(mate, 20);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ pageId: created.id, commentId: null, actorName: 'owner' });
+  });
+
+  it('저장(수정)에서도 만든다', async () => {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+    const created = await pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('내용') }, owner, db);
+    expect(await svc.list(mate, 20)).toHaveLength(0);
+
+    await pagesSvc.update(created.id, { title: 'T', content: body('@mate 다시 봐 줘'), baseVersionNo: created.currentVersionNo }, owner, db);
+    expect(await svc.list(mate, 20)).toHaveLength(1);
   });
 });

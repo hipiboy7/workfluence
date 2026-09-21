@@ -15,6 +15,7 @@ import {
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { pageVersions, pages, users, type PageRow } from '../db/schema';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { checkMove, type TreeNode } from './domain/tree';
 
@@ -44,6 +45,7 @@ export class PagesService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly spaces: SpacesService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async row(id: string, tx: Db = this.db): Promise<PageRow> {
@@ -118,6 +120,12 @@ export class PagesService {
     await tx
       .insert(pageVersions)
       .values({ pageId: page.id, versionNo: 1, title: dto.title, contentJson: content, contentText: text, createdBy: principal.id });
+    // 본문의 멘션도 알림을 만든다 (FR-500 — 설계서는 "댓글·페이지 본문 둘 다"다).
+    // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다
+    await this.notifications.notifyMentions(
+      { doc: content, pageId: page.id, commentId: null, spaceId: page.spaceId, actorId: principal.id },
+      tx,
+    );
     return { ...toPageSummary(page), content, createdBy: principal.id, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
@@ -141,6 +149,12 @@ export class PagesService {
     // 나가고, 클라이언트가 그것을 다음 저장의 기준으로 쓴다
     const content = stampSchemaVersion(dto.content);
     const page = await this.appendVersion(tx, locked, dto.title, content, principal.id);
+    // 본문의 멘션도 알림을 만든다 (FR-500 — 설계서는 "댓글·페이지 본문 둘 다"다).
+    // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다
+    await this.notifications.notifyMentions(
+      { doc: content, pageId: page.id, commentId: null, spaceId: page.spaceId, actorId: principal.id },
+      tx,
+    );
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 

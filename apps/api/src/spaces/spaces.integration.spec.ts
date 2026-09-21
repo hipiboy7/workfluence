@@ -3,6 +3,7 @@ import { DOCUMENT_SCHEMA_VERSION, PAGE_TREE_MAX_DEPTH, documentSchemaVersion, ty
 import { eq } from 'drizzle-orm';
 import { pageVersions, pages, users } from '../db/schema';
 import { PagesService } from '../pages/pages.service';
+import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { SpacesService } from './spaces.service';
 
@@ -26,7 +27,7 @@ async function user(username: string, role: 'root' | 'admin' | 'member' = 'membe
 beforeAll(async () => {
   ({ db } = await openTestDb());
   spacesSvc = new SpacesService(db);
-  pagesSvc = new PagesService(db, spacesSvc);
+  pagesSvc = new PagesService(db, spacesSvc, new NotificationsService(db, new InAppChannel()));
 });
 afterAll(closeTestDb);
 beforeEach(() => resetTables(db));
