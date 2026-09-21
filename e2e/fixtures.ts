@@ -81,12 +81,24 @@ export async function cleanup(usernames: string[]): Promise<void> {
     if (!ids.length) return;
     // Phase 3에서 첨부·댓글이 pages를 참조한다. 자식부터 거꾸로 지우는 순서를 지킨다
     const pagesOfMine = 'SELECT id FROM pages WHERE created_by = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))';
+    // 알림은 **댓글·페이지를 참조한다.** 그것들보다 먼저 지워야 한다. 내가 만든 알림뿐 아니라
+    // 내가 만든 글을 가리키는 남의 알림도 함께 지운다 — 안 그러면 FK가 막는다
+    await c.query(
+      `DELETE FROM notifications
+        WHERE user_id = ANY($1) OR actor_id = ANY($1)
+           OR page_id IN (${pagesOfMine})
+           OR comment_id IN (SELECT id FROM comments WHERE created_by = ANY($1) OR page_id IN (${pagesOfMine}))`,
+      [ids],
+    );
     await c.query(`DELETE FROM comments WHERE created_by = ANY($1) OR page_id IN (${pagesOfMine})`, [ids]);
     await c.query(`DELETE FROM attachments WHERE uploaded_by = ANY($1) OR page_id IN (${pagesOfMine})`, [ids]);
     await c.query('DELETE FROM page_versions WHERE created_by = ANY($1) OR page_id IN (SELECT id FROM pages WHERE space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1)))', [ids]);
     await c.query('DELETE FROM pages WHERE created_by = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);
     await c.query('DELETE FROM space_members WHERE user_id = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);
     await c.query('DELETE FROM spaces WHERE created_by = ANY($1)', [ids]);
+    // Phase 4에서 users를 참조하는 것이 둘 늘었다. 알림은 지우고, 설정은 "누가 바꿨나"만 지운다 —
+    // 정책값 자체는 이 실행이 만든 것이 아니므로 남긴다
+    await c.query('UPDATE settings SET updated_by = NULL WHERE updated_by = ANY($1)', [ids]);
     await c.query('UPDATE users SET approved_by = NULL WHERE approved_by = ANY($1)', [ids]);
     await c.query('DELETE FROM users WHERE id = ANY($1)', [ids]);
   } finally {

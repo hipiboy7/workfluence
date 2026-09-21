@@ -34,6 +34,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     @Inject(APP_ENV) private readonly env: AppEnvToken,
+    private readonly rateLimit: RateLimitGuard,
   ) {}
 
   @Post('login')
@@ -42,6 +43,8 @@ export class AuthController {
   async login(@Body(new ZodPipe(loginDto)) dto: ReturnType<typeof loginDto.parse>, @Req() req: Request): Promise<MeView> {
     const user = await this.auth.login(dto, req.ip);
     await startSession(req, user.id);
+    // **성공했으므로 제한 예산을 돌려준다.** 무차별 대입을 막는 것이 목적이니 실패만 세면 된다 (T-023)
+    this.rateLimit.refund(req);
     return toMeView(user);
   }
 
@@ -144,6 +147,9 @@ export class AuthController {
   controllers: [AuthController],
   providers: [
     AuthService,
+    // 가드를 **주입 가능한 provider로도** 둔다. 성공한 로그인이 제한 예산을 돌려주려면
+    // 컨트롤러가 그 인스턴스를 잡아야 한다 (@UseGuards의 클래스 참조와 같은 싱글턴이다)
+    RateLimitGuard,
     MockOidcProvider,
     HttpOidcProvider,
     {
