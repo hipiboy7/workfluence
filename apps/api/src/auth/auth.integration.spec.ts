@@ -4,6 +4,8 @@ import { eq, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
+import { loadEnv } from '../config/config.module';
+import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { AuthService } from './auth.service';
@@ -47,7 +49,7 @@ function makeAuth(provider: OidcProvider | null = new StubProvider()): AuthServi
 
 beforeAll(async () => {
   ({ db } = await openTestDb());
-  usersSvc = new UsersService(db);
+  usersSvc = new UsersService(db, new SettingsService(db, loadEnv()));
   spacesSvc = new SpacesService(db);
   audit = new AuditService(db);
   auth = makeAuth();

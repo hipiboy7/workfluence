@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  PASSWORD_POLICY,
   canAssignRole,
   canManageUser,
   generateTemporaryPassword,
@@ -15,6 +14,7 @@ import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import { afterFailure, afterSuccess, isLocked } from '../auth/domain/lockout';
 import { DB, type Db } from '../db/db.module';
+import { SettingsService } from '../settings/settings.service';
 import { users, type UserRow } from '../db/schema';
 
 /**
@@ -52,7 +52,10 @@ const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2FsdA$QkNERU
 
 @Injectable()
 export class UsersService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly settings: SettingsService,
+  ) {}
 
   findById(id: string): Promise<UserRow | undefined> {
     return this.db.query.users.findFirst({ where: eq(users.id, id) });
@@ -269,7 +272,8 @@ export class UsersService {
     if (isLocked(state, now)) return { ok: false, reason: 'locked' };
 
     if (!(await argon2.verify(user.passwordHash, password))) {
-      const next = afterFailure(state, now, PASSWORD_POLICY);
+      // **운영이 조절한 값을 쓴다** (FR-521). 코드 기본값은 DB가 비었을 때만 쓰인다
+      const next = afterFailure(state, now, await this.settings.get(tx));
       await tx
         .update(users)
         .set({ failedAttempts: next.failedAttempts, lockedUntil: next.lockedUntil, updatedAt: sql`now()` })
