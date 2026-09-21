@@ -8,6 +8,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard } from './auth/auth.guard';
 import { CommentsModule } from './comments/comments.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
@@ -51,6 +52,8 @@ function resolveWebDist(): string {
     PagesModule,
     SearchModule,
     AttachmentsModule,
+    // NotificationsModule은 @Global — 댓글·페이지 저장이 멘션 알림을 만든다
+    NotificationsModule,
     CommentsModule,
     ...(env.WF_SERVE_WEB
       ? [

@@ -267,6 +267,17 @@ export type CommentView = {
   /** 지울 수 있는지. 화면이 규칙을 다시 구현하지 않게 서버가 판정해 내려 준다 */
   canDelete: boolean;
 };
+export type NotificationView = {
+  id: string;
+  kind: 'mention';
+  pageId: string | null;
+  commentId: string | null;
+  actorName: string;
+  /** 대상이 지워졌으면 null이다 (FR-506) — 알림은 남되 링크는 대상이 없음을 알린다 */
+  pageTitle: string | null;
+  readAt: string | null;
+  createdAt: string;
+};
 export type SearchHit = { pageId: string; spaceId: string; spaceName: string; title: string; snippet: string; updatedAt: string };
 export type AuditEventView = {
   id: string;
