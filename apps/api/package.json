@@ -1,0 +1,44 @@
+{
+  "name": "@workfluence/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "workfluence API 서버 (NestJS). 빌드된 SPA도 함께 서빙한다.",
+  "main": "dist/main.js",
+  "files": ["dist", "drizzle"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json && concurrently -k -n tsc,node \"tsc -p tsconfig.build.json -w --preserveWatchOutput\" \"node --enable-source-maps --watch-path=dist dist/main.js\"",
+    "start": "node --enable-source-maps dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:cov": "vitest run --passWithNoTests --coverage",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.0.0",
+    "@nestjs/core": "^12.0.0",
+    "@nestjs/platform-express": "^12.0.0",
+    "@nestjs/serve-static": "^12.0.0",
+    "@workfluence/shared": "workspace:*",
+    "drizzle-orm": "^0.45.0",
+    "express": "^5.2.0",
+    "pg": "^8.16.0",
+    "pino": "^10.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.0",
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.0",
+    "@vitest/coverage-v8": "^5.0.0",
+    "concurrently": "^10.0.0",
+    "drizzle-kit": "^0.31.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.0"
+  }
+}
