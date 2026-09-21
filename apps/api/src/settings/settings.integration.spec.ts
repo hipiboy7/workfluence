@@ -154,6 +154,22 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
     ).rejects.toThrow(/20/);
   });
 
+  it('**문자 종류를 낮추는 방향도 먹는다** (자체 점검 2) — 계약은 바닥만 본다', async () => {
+    const me = await admin();
+    const settings = svcWith();
+    const users = new UsersService(db, settings);
+    const oneClass = 'abcdefgh'; // 8자·소문자만
+
+    await expect(
+      users.signup({ username: 'lax1', displayName: 'lax1', email: 'lax1@example.internal', password: oneClass }, db),
+    ).rejects.toThrow(/2종/);
+
+    await settings.update({ passwordMinCharClasses: 1 }, me);
+    await expect(
+      users.signup({ username: 'lax2', displayName: 'lax2', email: 'lax2@example.internal', password: oneClass }, db),
+    ).resolves.toBeTruthy();
+  });
+
   it('**잠금 임계도 살아 있는 값을 쓴다 — 실제로 실패시켜 본다** (자체 점검 7)', async () => {
     const me = await admin();
     const settings = svcWith();

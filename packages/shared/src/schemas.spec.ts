@@ -27,14 +27,18 @@ describe('인증·계정 DTO', () => {
     expect(loginDto.safeParse({ username: '', password: 'x' }).success).toBe(false);
   });
 
-  it('signupDto: 사용자명 규칙, email 정규화, 비밀번호 정책(8자·2종)', () => {
+  it('signupDto: 사용자명 규칙, email 정규화, 비밀번호는 **바닥(8자)만** 계약이 본다', () => {
     const ok = signupDto.parse({ username: 'hong.gd', displayName: '홍길동', email: ' Hong.GD@Example.Internal ', password: 'abcd1234' });
     expect(ok.email).toBe('hong.gd@example.internal');
     expect(signupDto.safeParse({ username: 'Bad Name', displayName: 'x', email: 'a@b.co', password: 'abcd1234' }).success).toBe(false);
     expect(signupDto.safeParse({ username: 'ok', displayName: 'x', email: 'not-an-email', password: 'abcd1234' }).success).toBe(false);
-    const weak = signupDto.safeParse({ username: 'ok', displayName: 'x', email: 'a@b.co', password: 'abcdefgh' });
-    expect(weak.success).toBe(false);
-    if (!weak.success) expect(weak.error.issues.map((i) => i.message)).toContain('영문 대·소문자, 숫자, 특수문자 중 2종 이상');
+    // 8자·1종은 **계약을 통과한다.** 문자 종류는 운영이 조절하는 값이라 서비스가
+    // 살아 있는 정책값으로 본다 — 여기서 굳히면 관리자가 낮춰도 영영 안 먹는다 (P4 자체 점검 2)
+    expect(signupDto.safeParse({ username: 'ok', displayName: 'x', email: 'a@b.co', password: 'abcdefgh' }).success).toBe(true);
+    // 바닥은 계약이 막는다
+    const short = signupDto.safeParse({ username: 'ok', displayName: 'x', email: 'a@b.co', password: 'abc1' });
+    expect(short.success).toBe(false);
+    if (!short.success) expect(short.error.issues.map((i) => i.message)).toContain('8자 이상');
   });
 
   it('findIdDto는 email과 이름을 둘 다 요구한다', () => {

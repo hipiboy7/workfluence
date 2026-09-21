@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
-  PASSWORD_POLICY,
   ROLES,
   SPACE_KINDS,
   SPACE_MEMBER_ROLES,
@@ -9,7 +8,7 @@ import {
   USER_STATUSES,
 } from './constants';
 import { validateDocument, type DocNode } from './document';
-import { checkPasswordPolicy } from './permissions';
+import { POLICY_FLOOR } from './policy';
 
 /** API 요청·응답 계약. 서버(zod 파이프)와 클라이언트(타입)가 같은 정의를 쓴다. */
 
@@ -21,9 +20,14 @@ export const documentSchema = z
   })
   .transform((v) => v as DocNode);
 
-export const passwordSchema = z.string().superRefine((pw, ctx) => {
-  for (const reason of checkPasswordPolicy(pw, PASSWORD_POLICY)) ctx.addIssue({ code: 'custom', message: reason });
-});
+/**
+ * 비밀번호 **계약**. 바닥(8자)만 본다.
+ *
+ * 세기(최소 길이·문자 종류)는 운영이 조절하는 값이라 **서비스가 살아 있는 정책값으로**
+ * 판정한다 (`users.service.ts`의 `assertPasswordStrength`). 여기서 현재 정책을 강제하면
+ * 파싱 시점에 굳어, 관리자가 기준을 **낮춰도** 영영 안 먹는다 (P4 자체 점검 2).
+ */
+export const passwordSchema = z.string().min(POLICY_FLOOR.passwordMinLength, `${POLICY_FLOOR.passwordMinLength}자 이상`);
 
 export const usernameSchema = z.string().trim().regex(/^[a-z0-9._-]{2,64}$/, '소문자·숫자·._- 2~64자');
 // zod 4의 z.email()은 검증만 하므로 정규화(trim·소문자)를 먼저 하고 파이프한다. TLD는 2자 이상이어야 통과한다

@@ -23,6 +23,15 @@ export const POLICY_DEFAULTS = {
   auditRetentionDays: 365,
 };
 
+/**
+ * **정책값이 절대 내려갈 수 없는 바닥.**
+ *
+ * 비밀번호 최소 길이 8자는 사용자 결정(2026-09-15)이라 운영이 그 아래로 못 내린다.
+ * zod 계약은 이 바닥만 강제하고, 그 위의 세기는 살아 있는 정책값으로 서비스가 본다 —
+ * zod가 파싱 시점에 현재 정책을 강제하면 **낮추는 방향이 영영 안 먹는다** (P4 자체 점검 2).
+ */
+export const POLICY_FLOOR = { passwordMinLength: 8 } as const;
+
 export type Policy = typeof POLICY_DEFAULTS;
 export const POLICY_KEYS = Object.keys(POLICY_DEFAULTS) as (keyof Policy)[];
 
@@ -31,7 +40,7 @@ const RANGES: Record<string, { min: number; max: number }> = {
   uploadMaxMb: { min: 1, max: 1024 },
   sessionIdleMinutes: { min: 1, max: 1440 },
   sessionAbsoluteHours: { min: 1, max: 720 },
-  passwordMinLength: { min: 8, max: 128 }, // 사용자 결정(2026-09-15)인 8자 아래로는 못 내린다
+  passwordMinLength: { min: POLICY_FLOOR.passwordMinLength, max: 128 }, // 사용자 결정(2026-09-15)인 8자 아래로는 못 내린다
   passwordMinCharClasses: { min: 1, max: 4 },
   lockoutThreshold: { min: 3, max: 100 },
   lockoutMinutes: { min: 1, max: 1440 },
