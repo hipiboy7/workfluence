@@ -1,7 +1,9 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import connectPgSimple from 'connect-pg-simple';
 import type { NextFunction, Request, Response } from 'express';
+import session from 'express-session';
 import type { Pool } from 'pg';
 import { AppModule } from './app.module';
 import { PinoNestLogger, createLogger } from './common/logger';
@@ -10,8 +12,7 @@ import { PG_POOL } from './db/db.module';
 import { runMigrations } from './db/migrate';
 
 /**
- * 부트스트랩 (P0_설계서_Foundation 6절).
- * 세션·CSRF는 Phase 1에서 붙인다 — 보호할 세션이 없는 상태의 CSRF 미들웨어는 의미 없는 관문이다.
+ * 부트스트랩 (P0_설계서_Foundation 6절, P1_설계서_Auth 4절).
  */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
@@ -47,6 +48,31 @@ async function bootstrap(): Promise<void> {
   });
 
   app.useBodyParser('json', { limit: '2mb' });
+
+  /**
+   * 서버측 세션 (FR-220~223). 저장소는 PG이고 **앱과 같은 풀을 재사용한다** (P0 13절 인계).
+   *
+   * - 쿠키 maxAge = 유휴 타임아웃. `rolling`이 요청마다 갱신한다
+   * - **절대 타임아웃은 쿠키로 못 지킨다** — rolling이 갱신해 버리므로 AuthGuard가 본다
+   * - 테이블은 마이그레이션이 만든다. createTableIfMissing을 켜면 스키마가 두 곳에서 관리된다
+   */
+  const PgStore = connectPgSimple(session);
+  app.use(
+    session({
+      name: 'wf.sid',
+      store: new PgStore({ pool: app.get<Pool>(PG_POOL), tableName: 'sessions', createTableIfMissing: false }),
+      secret: env.WF_SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      rolling: true,
+      cookie: {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: env.WF_ENV === 'production',
+        maxAge: env.WF_SESSION_IDLE_MINUTES * 60_000,
+      },
+    }),
+  );
 
   await app.listen(env.WF_PORT, '0.0.0.0');
   logger.info({ port: env.WF_PORT, env: env.WF_ENV, serveWeb: env.WF_SERVE_WEB }, 'workfluence api 기동');

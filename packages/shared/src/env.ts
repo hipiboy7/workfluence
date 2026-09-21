@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ROLES, type Role } from './constants';
 
 /**
  * 환경변수 스키마 (P0_설계서_Foundation 1절, FR-010~FR-017).
@@ -16,6 +17,36 @@ const bool = (def: boolean) =>
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default(def);
+
+/**
+ * 그룹명 → 역할 매핑. JSON 문자열로 받는다 (P1_설계서_Auth 3.3절, FR-216).
+ * 값이 ROLES에 없으면 기동 실패 — 오타 난 역할 이름이 "매핑 안 됨"으로 조용히 흘러가면
+ * 그 그룹 사용자가 이유 없이 로그인 거부된다.
+ */
+const roleMap = z
+  .string()
+  .transform((raw, ctx) => {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        ctx.addIssue({ code: 'custom', message: 'JSON 객체여야 한다' });
+        return z.NEVER;
+      }
+      const out: Record<string, Role> = {};
+      for (const [group, role] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof role !== 'string' || !(ROLES as readonly string[]).includes(role)) {
+          ctx.addIssue({ code: 'custom', message: `${group}: 역할은 ${ROLES.join('|')} 중 하나여야 한다` });
+          return z.NEVER;
+        }
+        out[group] = role as Role;
+      }
+      return out;
+    } catch {
+      ctx.addIssue({ code: 'custom', message: 'JSON으로 파싱할 수 없다' });
+      return z.NEVER;
+    }
+  })
+  .default({} as Record<string, Role>);
 
 const intString = (min: number, max: number, def: number) =>
   z
@@ -43,6 +74,23 @@ export const envSchema = z
 
     WF_SERVE_WEB: bool(false),
     WF_WEB_DIST: z.string().min(1).default('../web/dist'),
+
+    // --- Phase 1: 세션·계정 (P1_설계서_Auth 9절) ---
+    WF_SESSION_SECRET: z.string().min(32, '32자 이상'),
+    WF_SESSION_IDLE_MINUTES: intString(1, 1440, 30),
+    WF_SESSION_ABSOLUTE_HOURS: intString(1, 720, 12),
+    WF_ROOT_USERNAME: z.string().min(1).default('root'),
+    WF_ROOT_PASSWORD: z.string().min(1),
+
+    // --- Phase 1: OIDC (FR-210~219) ---
+    WF_OIDC_ENABLED: bool(false),
+    WF_OIDC_ISSUER: z.string().default(''),
+    WF_OIDC_CLIENT_ID: z.string().default(''),
+    WF_OIDC_CLIENT_SECRET: z.string().default(''),
+    WF_OIDC_REDIRECT_URI: z.string().default(''),
+    WF_OIDC_PKCE: bool(true),
+    WF_OIDC_ROLE_MAP: roleMap,
+    WF_OIDC_MOCK: bool(false),
   })
   .strict();
 
@@ -74,9 +122,24 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
     );
   }
   const env = result.data;
+  const problems: string[] = [];
   if (env.WF_ENV === 'production' && env.WF_DB_AUTO_MIGRATE) {
-    throw new EnvValidationError(['WF_DB_AUTO_MIGRATE: 운영(production)에서는 true를 허용하지 않는다']);
+    problems.push('WF_DB_AUTO_MIGRATE: 운영(production)에서는 true를 허용하지 않는다');
   }
+  // 모의 인증이 운영에 켜지는 것은 조용히 잘못되는 유형이다 (P1_설계서_Auth 9절).
+  if (env.WF_ENV === 'production' && env.WF_OIDC_MOCK) {
+    problems.push('WF_OIDC_MOCK: 운영(production)에서는 모의 OIDC를 허용하지 않는다');
+  }
+  // 켜 놓고 값을 안 채우면 "로그인 버튼은 있는데 눌러도 안 되는" 상태가 된다. 기동에서 잡는다.
+  if (env.WF_OIDC_ENABLED && !env.WF_OIDC_MOCK) {
+    for (const key of ['WF_OIDC_ISSUER', 'WF_OIDC_CLIENT_ID', 'WF_OIDC_CLIENT_SECRET', 'WF_OIDC_REDIRECT_URI'] as const) {
+      if (!env[key]) problems.push(`${key}: WF_OIDC_ENABLED=true면 값이 있어야 한다`);
+    }
+    if (Object.keys(env.WF_OIDC_ROLE_MAP).length === 0) {
+      problems.push('WF_OIDC_ROLE_MAP: 비어 있으면 모든 IdP 사용자가 로그인 거부된다 (FR-218)');
+    }
+  }
+  if (problems.length) throw new EnvValidationError(problems);
   return env;
 }
 

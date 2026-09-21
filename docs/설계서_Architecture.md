@@ -114,7 +114,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 테이블 | 핵심 컬럼 | 도입 | 비고 |
 |---|---|---|---|
 | `settings` | `key` PK, `value` jsonb, `updated_by`, `updated_at` | **P0** | 운영 조절값 (`CLAUDE.md` 5절 세 번째 분류) |
-| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by` | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생** |
+| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by` | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
 | `sessions` | (connect-pg-simple 관리) | P1 | 서버측 세션 |
 | `space_categories` | `id`, `name` uq, `created_by` | P2 | |
 | `spaces` | `id`, `key` uq(자동), `name`, `description`, `kind`, `status`, `category_id`, `created_by`, `suspended_at/by`, `deleted_at` | P2 | `kind`: `personal`/`team`, `status`: `active`/`suspended` |
@@ -158,7 +158,8 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 
 - **가드는 판정하지 않는다.** 데이터를 모아 공유 함수에 넘기고 결과만 쓴다. 판정 규칙이 한 곳에 있어야 화면과 서버가 어긋나지 않는다.
 - 응답의 스페이스 객체에 `access`를 실어 보낸다. 화면이 같은 규칙을 다시 구현하지 않고 버튼 노출을 결정한다.
-- 기본 거부. 핸들러에 요구 행위를 선언하지 않으면 통과시키지 않는다.
+- 기본 거부. **로그인은 언제나 요구한다** — 예외는 `@Public`을 명시한 핸들러(로그인·가입·계정 찾기)뿐이다.
+- 그 위에 `@RequireAction`으로 행위를 선언하면 `can()`으로 한 번 더 건다. **행위를 선언하지 않은 핸들러는 "로그인한 사람이면 누구나"의 뜻이다** — 데이터 범위를 스스로 좁히는 핸들러(`/api/auth/me` 등)가 여기 해당한다. 남의 데이터를 다루는 핸들러에 선언을 빼면 그것은 결함이다.
 
 ## 5. 문서(본문) 계약
 

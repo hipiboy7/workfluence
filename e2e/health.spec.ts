@@ -21,12 +21,17 @@ test('보안 응답 헤더가 붙는다', async ({ request }) => {
   expect(headers['x-powered-by']).toBeUndefined();
 });
 
-test('SPA 셸이 뜨고 기동 확인 결과를 보여준다', async ({ page }) => {
+/**
+ * Phase 1이 루트 화면을 로그인 뒤로 옮겼다 (P1_설계서_Auth 8절). Phase 0의 "기동 확인" 화면은
+ * 더 이상 없다. **없어진 화면을 계속 확인하는 테스트는 통과해도 아무것도 보증하지 않으므로**
+ * 이 자리에서 확인할 것을 "SPA 셸이 뜨고 로그인으로 보낸다"로 바꿨다.
+ * 기동 확인 자체는 위의 /api/health 테스트가 그대로 본다.
+ */
+test('SPA 셸이 뜨고 로그인하지 않은 사용자를 로그인으로 보낸다', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'workfluence' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: '기동 확인' })).toBeVisible();
-  await expect(page.locator('.badge.ok').first()).toHaveText('ok');
-  await expect(page.locator('dl.meta')).toContainText('데이터베이스');
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByRole('heading', { name: '로그인' })).toBeVisible();
 });
 
 test('SPA 딥링크는 index.html로 폴백하고 /api는 제외된다', async ({ request }) => {

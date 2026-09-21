@@ -4,7 +4,10 @@
   "private": true,
   "description": "workfluence API 서버 (NestJS). 빌드된 SPA도 함께 서빙한다.",
   "main": "dist/main.js",
-  "files": ["dist", "drizzle"],
+  "files": [
+    "dist",
+    "drizzle"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json && concurrently -k -n tsc,node \"tsc -p tsconfig.build.json -w --preserveWatchOutput\" \"node --enable-source-maps --watch-path=dist dist/main.js\"",
@@ -22,8 +25,12 @@
     "@nestjs/platform-express": "^12.0.0",
     "@nestjs/serve-static": "^12.0.0",
     "@workfluence/shared": "workspace:*",
+    "argon2": "^0.45.1",
+    "connect-pg-simple": "^10.0.0",
     "drizzle-orm": "^0.45.0",
     "express": "^5.2.0",
+    "express-session": "^1.19.0",
+    "jose": "^6.2.12",
     "pg": "^8.16.0",
     "pino": "^10.0.0",
     "reflect-metadata": "^0.2.2",
@@ -31,7 +38,9 @@
     "zod": "^4.6.0"
   },
   "devDependencies": {
+    "@types/connect-pg-simple": "^7.0.3",
     "@types/express": "^5.0.0",
+    "@types/express-session": "^1.19.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.15.0",
     "@vitest/coverage-v8": "^5.0.0",
