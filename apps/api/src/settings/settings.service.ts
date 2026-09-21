@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { POLICY_KEYS, SETTINGS_KEYS, applyPolicy, validatePolicyPatch, type Policy, type Principal } from '@workfluence/shared';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { settings } from '../db/schema';
@@ -83,6 +83,9 @@ export class SettingsService {
     if (errors.length) throw new BadRequestException(errors.join('; '));
 
     const current = await this.get(tx);
+    // **줄을 세운다** (자체 점검 12). 읽기-병합-쓰기 사이에 다른 관리자가 끼어들면 한쪽
+    // 변경이 조용히 사라지고, 감사로그에는 둘 다 남아 기록과 실제가 어긋난다
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${SETTINGS_KEYS.policy}))`);
     const row = await tx.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     const stored = (row?.value as Record<string, unknown> | undefined) ?? {};
     const merged = { ...stored, ...patch };

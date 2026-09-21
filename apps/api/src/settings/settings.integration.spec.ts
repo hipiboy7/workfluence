@@ -154,10 +154,20 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
     ).rejects.toThrow(/20/);
   });
 
-  it('잠금 임계도 살아 있는 값을 쓴다', async () => {
+  it('**잠금 임계도 살아 있는 값을 쓴다 — 실제로 실패시켜 본다** (자체 점검 7)', async () => {
     const me = await admin();
     const settings = svcWith();
+    const users = new UsersService(db, settings);
+    await users.signup({ username: 'lockme', displayName: 'lockme', email: 'l@example.internal', password: 'Abcd12ef' }, db);
+
+    // 기본 임계는 5다. 3으로 낮추면 세 번째 실패에서 잠겨야 한다
     await settings.update({ lockoutThreshold: 3 }, me);
-    expect((await settings.get()).lockoutThreshold).toBe(3);
+    // 승인 전이라도 비밀번호 검증은 돈다 — 우리가 보는 것은 잠금 누적이다
+    for (let i = 0; i < 2; i++) await users.verifyCredentials('lockme', '틀린비밀번호');
+    expect((await users.findByUsername('lockme'))?.lockedUntil).toBeNull();
+
+    const third = await users.verifyCredentials('lockme', '틀린비밀번호');
+    expect(third).toMatchObject({ ok: false, reason: 'locked' });
+    expect((await users.findByUsername('lockme'))?.lockedUntil).not.toBeNull();
   });
 });
