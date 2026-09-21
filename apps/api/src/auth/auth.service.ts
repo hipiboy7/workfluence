@@ -44,21 +44,27 @@ export class AuthService {
 
   // ---- 로컬 ----
 
-  /** FR-202·205·206. 실패해도 감사로그는 남긴다 */
+  /**
+   * FR-202·205·206. 실패해도 감사로그는 남긴다.
+   *
+   * **실패 횟수 갱신과 기록을 같은 트랜잭션에 둔다** (FR-236). 따로 두면 한쪽만 반영돼
+   * "잠겼는데 기록이 없다" 또는 그 반대가 생긴다.
+   */
   async login(dto: LoginDto, ip?: string): Promise<UserRow> {
-    const result = await this.users.verifyCredentials(dto.username, dto.password);
-    if (!result.ok) {
-      await this.audit.record({
-        action: 'auth.login.failure',
-        targetType: 'username',
-        targetId: dto.username,
-        // 사유는 응답에 쓰지 않는다. 운영자가 나중에 볼 수 있게 기록에만 남긴다
-        detail: { reason: result.reason },
-        ip,
-      });
-      throw new UnauthorizedException(LOGIN_FAILED);
-    }
-    await this.audit.record({ action: 'auth.login.success', actorId: result.user.id, detail: { method: 'local' }, ip });
+    const result = await this.db.transaction(async (tx) => {
+      const r = await this.users.verifyCredentials(dto.username, dto.password, new Date(), tx);
+      if (!r.ok) {
+        await this.audit.record(
+          // 사유는 응답에 쓰지 않는다. 운영자가 나중에 볼 수 있게 기록에만 남긴다
+          { action: 'auth.login.failure', targetType: 'username', targetId: dto.username, detail: { reason: r.reason }, ip },
+          tx,
+        );
+      } else {
+        await this.audit.record({ action: 'auth.login.success', actorId: r.user.id, detail: { method: 'local' }, ip }, tx);
+      }
+      return r;
+    });
+    if (!result.ok) throw new UnauthorizedException(LOGIN_FAILED);
     return result.user;
   }
 
@@ -153,8 +159,11 @@ export class AuthService {
       throw new UnauthorizedException('이 계정에 부여할 역할이 없다');
     }
 
-    const user = await this.db.transaction(async (tx) => this.upsertFromClaims(claims, role, tx));
-    await this.audit.record({ action: 'auth.login.success', actorId: user.id, detail: { method: 'oidc' }, ip });
+    const user = await this.db.transaction(async (tx) => {
+      const u = await this.upsertFromClaims(claims, role, tx);
+      await this.audit.record({ action: 'auth.login.success', actorId: u.id, detail: { method: 'oidc' }, ip }, tx);
+      return u;
+    });
     return user;
   }
 
@@ -162,7 +171,7 @@ export class AuthService {
   private async upsertFromClaims(claims: OidcClaims, role: Role, tx: Db): Promise<UserRow> {
     const existing = await this.users.findByOidcSub(claims.sub);
     const displayName = claims.preferredUsername ?? claims.sub;
-    const email = claims.email?.toLowerCase() ?? null;
+    const email = await this.freeEmail(claims.email, existing?.id);
 
     if (existing) {
       const [row] = await tx
@@ -188,6 +197,23 @@ export class AuthService {
       })
       .returning();
     return row;
+  }
+
+  /**
+   * 쓸 수 있는 email을 고른다.
+   *
+   * **로컬 계정이 이미 같은 email을 쓰고 있으면 비워 둔다.** `users_email_uq` 때문에 그대로
+   * 넣으면 unique 위반으로 500이 나고, 로컬로 가입한 사람이 나중에 IdP로 들어오는 것은
+   * 드문 경로가 아니다. 로그인을 막지 않고 email만 포기한다 — **계정을 자동으로 합치지는
+   * 않는다**(같은 이름의 다른 사람일 수 있고 합치면 되돌릴 수 없다). 관리자가 감사로그를
+   * 보고 정리하도록 남긴다.
+   */
+  private async freeEmail(raw: string | undefined, selfId?: string): Promise<string | null> {
+    const email = raw?.toLowerCase() ?? null;
+    if (!email) return null;
+    const owner = await this.users.findByEmail(email);
+    if (!owner || owner.id === selfId) return email;
+    return null;
   }
 
   /**

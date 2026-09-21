@@ -75,3 +75,60 @@ test('계정 찾기는 없는 정보에도 같은 모양으로 답한다 (FR-208
   await page.getByRole('button', { name: '찾기' }).click();
   await expect(page.getByText('일치하는 정보로 찾을 수 없다')).toBeVisible();
 });
+
+/**
+ * 컨트롤러(`*.module.ts`)를 커버리지에서 뺐으므로 **그 배선은 여기서 봐야 한다**
+ * (P1_검증기록_Auth 2.1절). 아래는 단위·통합 테스트가 닿지 않는 HTTP 경로다.
+ */
+test('사내 계정(모의 OIDC)으로 로그인한다', async ({ page }) => {
+  await page.goto('/login');
+  const button = page.getByRole('link', { name: '사내 계정으로 로그인' });
+  await expect(button).toBeVisible();
+  await button.click();
+  // start → callback → / 까지 서버 리다이렉트를 따라간다
+  await expect(page.getByText('idp.dev님')).toBeVisible();
+  await expect(page.getByText('member')).toBeVisible();
+});
+
+test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한다', async ({ page }) => {
+  const target = { username: `e2e-tgt-${Date.now()}`, displayName: 'E2E 대상', email: `tgt-${Date.now()}@example.internal`, password: 'E2e-Target-2026!' };
+
+  await page.goto('/signup');
+  await page.getByLabel('아이디').fill(target.username);
+  await page.getByLabel('이름').fill(target.displayName);
+  await page.getByLabel('email').fill(target.email);
+  await page.getByLabel('비밀번호').fill(target.password);
+  await page.getByRole('button', { name: '가입 요청' }).click();
+  await expect(page.getByText('가입 요청이 접수됐다')).toBeVisible();
+
+  await page.goto('/login');
+  await page.getByLabel('아이디').fill(ADMIN.username);
+  await page.getByLabel('비밀번호').fill(ADMIN.password);
+  await page.getByRole('button', { name: '로그인' }).click();
+  await page.getByRole('link', { name: '사용자 관리' }).click();
+
+  const row = page.getByRole('row').filter({ hasText: target.username });
+  await row.getByRole('button', { name: '승인' }).click();
+  await expect(row.getByText('active')).toBeVisible();
+
+  // 역할 변경 (PATCH /api/users/:id/role)
+  await row.getByRole('combobox').selectOption('admin');
+  await expect(row.getByRole('combobox')).toHaveValue('admin');
+
+  // 비밀번호 초기화 (POST /api/users/:id/reset-password) — 임시 비밀번호가 1회 보인다
+  await row.getByRole('button', { name: '비밀번호 초기화' }).click();
+  await expect(page.getByText('임시 비밀번호')).toBeVisible();
+  await expect(page.getByText('이 값은 다시 볼 수 없다. 지금 전달한다.')).toBeVisible();
+
+  // 감사로그 (GET /api/audit)
+  await page.goto('/admin/audit');
+  await expect(page.getByRole('heading', { name: '감사로그' })).toBeVisible();
+  await expect(page.getByText('user.approve').first()).toBeVisible();
+  await expect(page.getByText('user.password.reset').first()).toBeVisible();
+
+  cleanupExtra.push(target.username);
+});
+
+/** afterAll이 지울 추가 계정 */
+const cleanupExtra: string[] = [];
+test.afterAll(() => cleanup(cleanupExtra));

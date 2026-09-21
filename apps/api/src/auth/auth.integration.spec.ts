@@ -191,6 +191,29 @@ describe('OIDC (인수 기준 2)', () => {
     expect(user.oidcSub).toBe(DEV_IDENTITY.sub);
   });
 
+  it('로컬 계정이 쓰는 email이면 IdP 계정은 email 없이 만든다 — 500이 아니다', async () => {
+    // 로컬로 가입한 사람이 나중에 IdP로 들어오는 것은 드문 경로가 아니다.
+    // users_email_uq 때문에 그대로 넣으면 unique 위반으로 죽는다 (자체 점검 #1)
+    await auth.signup({ ...SIGNUP, email: 'shared@example.internal' });
+    const s = await start();
+    const code = encodeMockCode({ ...DEV_IDENTITY, email: 'shared@example.internal' });
+    const user = await auth.oidcCallback({ code, state: s.state }, { state: s.state, nonce: s.nonce });
+    expect(user.oidcSub).toBe(DEV_IDENTITY.sub);
+    expect(user.email).toBeNull();
+    // 계정을 합치지 않았다 — 로컬 계정은 그대로다
+    expect((await usersSvc.findByUsername('alice'))?.email).toBe('shared@example.internal');
+  });
+
+  it('자기 email은 그대로 유지한다 (재로그인이 자기 자신과 충돌하지 않는다)', async () => {
+    const s1 = await start();
+    const claims = { ...DEV_IDENTITY, email: 'mine@example.internal' };
+    const first = await auth.oidcCallback({ code: encodeMockCode(claims), state: s1.state }, { state: s1.state, nonce: s1.nonce });
+    expect(first.email).toBe('mine@example.internal');
+    const s2 = await start();
+    const again = await auth.oidcCallback({ code: encodeMockCode(claims), state: s2.state }, { state: s2.state, nonce: s2.nonce });
+    expect(again.email).toBe('mine@example.internal');
+  });
+
   it('OIDC가 꺼져 있으면 404다 (FR-219)', async () => {
     const off = new AuthService(usersSvc, audit, db, { ...ENV, WF_OIDC_ENABLED: false } as never, null);
     await expect(off.oidcStart()).rejects.toThrow(/OIDC/);
@@ -224,12 +247,35 @@ describe('감사로그 (인수 기준 3, FR-236, FR-238)', () => {
     expect(JSON.stringify(e?.detail)).not.toContain(SIGNUP.email);
   });
 
-  it('본 작업이 롤백되면 기록도 사라진다 (FR-236)', async () => {
-    // 같은 트랜잭션이라 사용자 삽입이 실패하면 감사 기록도 남지 않는다
-    await auth.signup(SIGNUP);
-    const before = (await audit.list(100)).length;
-    await auth.signup(SIGNUP).catch(() => undefined); // 중복이라 실패
-    expect((await audit.list(100)).length).toBe(before);
+  /**
+   * **앞 판은 아무것도 검증하지 못했다.** 중복 가입은 `assertUnique`가 insert와 audit.record
+   * **전에** 던지므로 롤백이 일어나지 않는다. `audit.record`를 트랜잭션 밖으로 빼도 통과하는
+   * 테스트였다. 자체 점검이 잡았다. 이번에는 **기록을 남긴 뒤 실패시켜** 실제로 되돌아가는지 본다.
+   */
+  it('기록을 남긴 뒤 트랜잭션이 실패하면 기록도 사라진다 (FR-236)', async () => {
+    const before = (await audit.list(200)).length;
+    await db
+      .transaction(async (tx) => {
+        await audit.record({ action: 'user.approve', targetType: 'user', targetId: 'rollback-me' }, tx);
+        throw new Error('일부러 실패');
+      })
+      .catch(() => undefined);
+    expect((await audit.list(200)).length).toBe(before);
+    expect((await audit.list(200)).some((e) => e.targetId === 'rollback-me')).toBe(false);
+  });
+
+  it('반대로 커밋되면 남는다 — 위 테스트가 항진 명제가 아님을 보인다', async () => {
+    await db.transaction(async (tx) => {
+      await audit.record({ action: 'user.approve', targetType: 'user', targetId: 'keep-me' }, tx);
+    });
+    expect((await audit.list(200)).some((e) => e.targetId === 'keep-me')).toBe(true);
+  });
+
+  it('로그인 실패의 횟수 갱신과 기록이 함께 남는다 (FR-236)', async () => {
+    const alice = await approvedAlice();
+    await auth.login({ username: 'alice', password: 'wrong' }).catch(() => undefined);
+    expect((await usersSvc.findById(alice.id))?.failedAttempts).toBe(1);
+    expect((await audit.list(5)).some((e) => e.action === 'auth.login.failure')).toBe(true);
   });
 });
 

@@ -258,7 +258,7 @@ export class UsersService {
    * 호출부는 `reason`으로 응답을 나누지 않는다 — 전부 같은 401이다. 이 값은 **감사로그와
    * 관리자 화면에만** 쓴다.
    */
-  async verifyCredentials(username: string, password: string, now: Date = new Date()): Promise<CredentialResult> {
+  async verifyCredentials(username: string, password: string, now: Date = new Date(), tx: Db = this.db): Promise<CredentialResult> {
     const user = await this.findByUsername(username);
     if (!user || !user.passwordHash) {
       await argon2.verify(DUMMY_HASH, password).catch(() => false);
@@ -270,7 +270,7 @@ export class UsersService {
 
     if (!(await argon2.verify(user.passwordHash, password))) {
       const next = afterFailure(state, now, PASSWORD_POLICY);
-      await this.db
+      await tx
         .update(users)
         .set({ failedAttempts: next.failedAttempts, lockedUntil: next.lockedUntil, updatedAt: sql`now()` })
         .where(eq(users.id, user.id));
@@ -283,7 +283,7 @@ export class UsersService {
 
     if (user.failedAttempts > 0 || user.lockedUntil) {
       const cleared = afterSuccess();
-      await this.db
+      await tx
         .update(users)
         .set({ failedAttempts: cleared.failedAttempts, lockedUntil: cleared.lockedUntil })
         .where(eq(users.id, user.id));

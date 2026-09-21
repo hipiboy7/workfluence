@@ -384,7 +384,7 @@ CREATE TRIGGER audit_events_no_update BEFORE UPDATE OR DELETE ON audit_events
   FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
 ```
 
-운영에서는 앱 DB 계정 권한으로도 막는다(`CLAUDE.md` 6절). **두 겹인 이유**는 개발에서 계정 권한을 나누지 않기 때문이다 — 트리거가 없으면 개발에서 실수로 지워도 아무도 모른다.
+`CLAUDE.md` 6절은 운영에서 앱 DB 계정 권한으로도 막으라고 한다. **Phase 1에서는 하지 않았다** — 앱·마이그레이션·시드가 모두 소유자 계정 하나를 쓴다. 계정 분리는 운영화 단계(Phase 5)에서 배포 절차와 함께 한다. 지금 막고 있는 것은 **트리거 한 겹뿐**이고, 그 사실을 여기 적어 둔다.
 
 **남기지 않는 것 (FR-238).** 비밀번호·임시 비밀번호·토큰·세션 ID. `email`은 `maskEmail`로 줄여 넣는다.
 

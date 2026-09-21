@@ -20,7 +20,12 @@ export class HttpOidcProvider implements OidcProvider {
 
   constructor(@Inject(APP_ENV) private readonly env: AppEnvToken) {}
 
-  /** Discovery는 캐시한다. 엔드포인트 URL을 하드코딩하지 않는다 (FR-210) */
+  /**
+   * Discovery는 캐시한다. 엔드포인트 URL을 하드코딩하지 않는다 (FR-210).
+   *
+   * **실패한 Promise는 캐시하지 않는다.** `??=`로 두면 IdP가 잠깐 죽었을 때 거부된 Promise가
+   * 영구히 남아, IdP가 복구돼도 앱을 다시 띄우기 전까지 모든 OIDC 로그인이 같은 오류를 낸다.
+   */
   private load(): Promise<Discovery> {
     this.discovery ??= (async () => {
       const url = new URL('/.well-known/openid-configuration', this.env.WF_OIDC_ISSUER).toString();
@@ -31,7 +36,10 @@ export class HttpOidcProvider implements OidcProvider {
         if (!d[k]) throw new Error(`OIDC Discovery 응답에 ${k}가 없다`);
       }
       return d;
-    })();
+    })().catch((e: unknown) => {
+      this.discovery = undefined;
+      throw e;
+    });
     return this.discovery;
   }
 
