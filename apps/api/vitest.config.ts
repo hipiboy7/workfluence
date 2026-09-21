@@ -19,7 +19,16 @@ export default defineConfig({
     include: ['src/**/*.spec.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/common/**/*.ts', 'src/health/**/*.ts', 'src/auth/**/*.ts', 'src/users/**/*.ts', 'src/audit/**/*.ts'],
+      // **Phase를 늘릴 때 여기도 늘린다.** 빠뜨리면 새 코드가 조용히 측정 대상 밖에 있게 된다
+      include: [
+        'src/common/**/*.ts',
+        'src/health/**/*.ts',
+        'src/auth/**/*.ts',
+        'src/users/**/*.ts',
+        'src/audit/**/*.ts',
+        'src/spaces/**/*.ts',
+        'src/pages/**/*.ts',
+      ],
       exclude: ['src/auth/oidc/http.provider.ts', 'src/**/*.module.ts', 'src/**/*.spec.ts'],
       thresholds: {
         lines: 70,
@@ -28,6 +37,7 @@ export default defineConfig({
         statements: 70,
         // A등급은 90% (CLAUDE.md 3절). 디렉토리로 고정해 측정을 기계적으로 만든다
         'src/auth/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/pages/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

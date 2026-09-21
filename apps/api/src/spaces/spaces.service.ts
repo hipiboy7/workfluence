@@ -216,8 +216,10 @@ export class SpacesService {
 
   private async assertManage(spaceId: string, principal: Principal, tx: Db): Promise<SpaceContext> {
     const ctx = await this.context(spaceId, principal, tx);
-    if (!ctx.access.canManageMembers) throw new ForbiddenException('Crew를 관리할 권한이 없다');
+    // 종류를 먼저 본다. 개인 스페이스는 `canManageMembers`가 언제나 false라 권한 오류가 먼저
+    // 나가는데, 그러면 "권한을 받으면 되나?"로 읽힌다. 실제 이유는 Crew라는 것이 없다는 것이다
     if (ctx.space.kind !== 'team') throw new BadRequestException('개인 스페이스에는 Crew가 없다');
+    if (!ctx.access.canManageMembers) throw new ForbiddenException('Crew를 관리할 권한이 없다');
     return ctx;
   }
 
