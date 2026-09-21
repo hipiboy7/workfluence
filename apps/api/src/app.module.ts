@@ -1,10 +1,15 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { AuditModule } from './audit/audit.module';
+import { AuthModule } from './auth/auth.module';
+import { CsrfGuard } from './auth/auth.guard';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
+import { UsersModule } from './users/users.module';
 
 // SPA 정적 서빙 여부는 모듈 구성 시점에 알아야 하므로 같은 로더를 한 번 더 호출한다 (순수 함수라 결과가 같다)
 const env = loadEnv();
@@ -32,6 +37,10 @@ function resolveWebDist(): string {
   imports: [
     ConfigModule,
     DbModule,
+    // AuditModule은 @Global — 쓰기를 하는 모든 모듈이 AuditService를 쓴다
+    AuditModule,
+    UsersModule,
+    AuthModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({
@@ -53,6 +62,8 @@ function resolveWebDist(): string {
       : []),
   ],
   controllers: [HealthController],
+  // CSRF는 전역이다 (FR-240). 핸들러마다 붙이면 새 엔드포인트에서 빠뜨린다
+  providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
 })
 export class AppModule {}
 

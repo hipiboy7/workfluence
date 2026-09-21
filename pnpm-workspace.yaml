@@ -11,6 +11,8 @@ cacheDir: .local/pnpm-cache
 # pnpm 10+는 의존성의 설치 스크립트를 기본 차단한다. 네이티브 prebuilt를 내려받는 것만 허용한다 (FR-004).
 allowBuilds:
   esbuild: true
+  # argon2 — 비밀번호 해싱 네이티브 모듈 (P1_설계서_Auth 2.3절). prebuilt 바이너리를 내려받는다
+  argon2: true
   embedded-postgres: true
   '@embedded-postgres/windows-x64': true
   '@embedded-postgres/linux-x64': true
