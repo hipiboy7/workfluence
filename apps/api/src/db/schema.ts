@@ -196,6 +196,76 @@ export const pageVersions = pgTable(
   (t) => [uniqueIndex('page_versions_page_no_uq').on(t.pageId, t.versionNo)],
 );
 
+/**
+ * 첨부 (P3_설계서_Content 3절, FR-410~419).
+ * 파일은 내용 SHA-256으로 한 벌만 저장하고 이 표는 **메타데이터**다. 같은 내용을 여러 페이지에
+ * 올리면 행만 늘어난다.
+ */
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => pages.id),
+    /** 내용 해시. **파일 이름이기도 하다** — 사용자 입력은 경로에 닿지 않는다 (FR-412) */
+    sha256: text('sha256').notNull(),
+    filename: text('filename').notNull(),
+    mime: text('mime').notNull(),
+    size: integer('size').notNull(),
+    uploadedBy: uuid('uploaded_by')
+      .notNull()
+      .references(() => users.id),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('attachments_page_idx').on(t.pageId), index('attachments_sha_idx').on(t.sha256)],
+);
+
+/** 댓글 (FR-420~424). 본문도 ProseMirror JSON이다 */
+export const comments = pgTable(
+  'comments',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => pages.id),
+    /** 대댓글은 한 단계까지 (FR-421) */
+    parentId: uuid('parent_id'),
+    bodyJson: jsonb('body_json').notNull(),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index('comments_page_idx').on(t.pageId, t.createdAt)],
+);
+
+/** 라벨 (FR-425). 테이블만 만들고 화면은 Phase 4 */
+export const labels = pgTable(
+  'labels',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('labels_name_uq').on(t.name)],
+);
+
+export const pageLabels = pgTable(
+  'page_labels',
+  {
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => pages.id),
+    labelId: uuid('label_id')
+      .notNull()
+      .references(() => labels.id),
+  },
+  (t) => [primaryKey({ columns: [t.pageId, t.labelId] })],
+);
+
 /** 운영 조절값 (CLAUDE.md 5절 세 번째 분류). 관리 화면은 Phase 4. */
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
@@ -205,6 +275,8 @@ export const settings = pgTable('settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export type AttachmentRow = typeof attachments.$inferSelect;
+export type CommentRow = typeof comments.$inferSelect;
 export type SpaceRow = typeof spaces.$inferSelect;
 export type SpaceCategoryRow = typeof spaceCategories.$inferSelect;
 export type SpaceMemberRow = typeof spaceMembers.$inferSelect;

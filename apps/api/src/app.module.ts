@@ -10,6 +10,7 @@ import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { PagesModule } from './pages/pages.module';
+import { SearchModule } from './search/search.module';
 import { SpacesModule } from './spaces/spaces.module';
 import { UsersModule } from './users/users.module';
 
@@ -46,6 +47,7 @@ function resolveWebDist(): string {
     // SpacesModule은 @Global — PagesService와 승인 시 개인 스페이스 생성이 쓴다
     SpacesModule,
     PagesModule,
+    SearchModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({
