@@ -46,8 +46,21 @@ services:
       WF_SERVE_WEB: "true"
       WF_WEB_DIST: ../web/dist
       WF_LOG_LEVEL: ${WF_LOG_LEVEL:-info}
-      # 세션·계정 키(WF_SESSION_*, WF_ROOT_*)는 Phase 1에서 추가한다. 지금 넘기면 strict 스키마가 기동을 거부한다.
-      # 임베디드 PG 설정(WF_PG_EMBEDDED_*)은 개발 PC 전용이라 컨테이너에는 넘기지 않는다.
+      # 임베디드 PG 설정(WF_PG_EMBEDDED_*)은 개발 전용이라 컨테이너에는 넘기지 않는다.
+      # --- Phase 1 (P1_설계서_Auth 9절) ---
+      WF_SESSION_SECRET: ${WF_SESSION_SECRET:?WF_SESSION_SECRET를 deploy/.env에 설정 (32자 이상)}
+      WF_SESSION_IDLE_MINUTES: ${WF_SESSION_IDLE_MINUTES:-30}
+      WF_SESSION_ABSOLUTE_HOURS: ${WF_SESSION_ABSOLUTE_HOURS:-12}
+      WF_ROOT_USERNAME: ${WF_ROOT_USERNAME:-root}
+      WF_ROOT_PASSWORD: ${WF_ROOT_PASSWORD:?WF_ROOT_PASSWORD를 deploy/.env에 설정}
+      WF_OIDC_ENABLED: ${WF_OIDC_ENABLED:-false}
+      WF_OIDC_ISSUER: ${WF_OIDC_ISSUER:-}
+      WF_OIDC_CLIENT_ID: ${WF_OIDC_CLIENT_ID:-}
+      WF_OIDC_CLIENT_SECRET: ${WF_OIDC_CLIENT_SECRET:-}
+      WF_OIDC_REDIRECT_URI: ${WF_OIDC_REDIRECT_URI:-}
+      WF_OIDC_PKCE: ${WF_OIDC_PKCE:-true}
+      WF_OIDC_ROLE_MAP: ${WF_OIDC_ROLE_MAP:-{}}
+      # WF_OIDC_MOCK은 넘기지 않는다 — 운영 이미지에서 모의 인증이 켜질 경로를 아예 만들지 않는다
     depends_on:
       postgres:
         condition: service_healthy
