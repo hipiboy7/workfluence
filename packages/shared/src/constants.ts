@@ -59,6 +59,13 @@ export const AUDIT_ACTIONS = [
   'comment.create',
   'comment.update',
   'comment.delete',
+  'page.restore.trash',
+  'space.restore',
+  'trash.purge',
+  'label.attach',
+  'label.detach',
+  'category.update',
+  'category.delete',
   'settings.update',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -81,9 +88,23 @@ export const PASSWORD_POLICY = {
 /** 임시(초기화) 비밀번호 길이. 생성 규칙은 security.ts */
 export const TEMP_PASSWORD_LENGTH = 12;
 
+
+/**
+ * 첨부로 받을 수 있는 확장자 (P4_설계서_Admin FR-521).
+ *
+ * **판정 규칙(`attachments/domain/upload.ts`·`signature.ts`)이 있는 것만 여기 있다.**
+ * 관리자가 이 목록 밖의 확장자를 켤 수는 없다 — 규칙 없는 확장자를 허용하면 내용 검사를
+ * 지나치게 되고, 그것이 곧 "이름만 바꾼 파일"이 들어오는 길이다.
+ */
+export const ALLOWED_UPLOAD_EXTENSIONS = [
+  'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'csv', 'md', 'zip', 'docx', 'xlsx', 'pptx', 'hwp',
+] as const;
+
 /** settings 테이블 키 */
 export const SETTINGS_KEYS = {
   contactInfo: 'contact_info',
+  /** 운영 정책값 한 덩어리 (P4_설계서_Admin FR-520). 키마다 행을 두지 않는 이유는 한 번에 읽고 한 번에 캐시하기 위해서다 */
+  policy: 'policy',
 } as const;
 
 /** 공개 엔드포인트 요청 제한 (IP 기준). 계정 열거·무차별 대입 완화 */

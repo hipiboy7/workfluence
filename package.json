@@ -27,6 +27,7 @@
     "db:migrate": "pnpm build:shared && pnpm --filter @workfluence/api db:migrate",
     "db:seed": "pnpm build:shared && pnpm --filter @workfluence/api db:seed",
     "search:reindex": "pnpm build:shared && tsx scripts/reindex.ts",
+    "trash:purge": "pnpm build:shared && tsx scripts/trash-purge.ts",
     "licenses:check": "tsx scripts/check-licenses.ts"
   },
   "devDependencies": {

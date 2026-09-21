@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalMime, checkUpload } from './upload';
+import { ALLOWED_UPLOAD_EXTENSIONS } from '@workfluence/shared';
+import { ALLOWED_EXTENSIONS, canonicalMime, checkUpload } from './upload';
 
 /** A등급 (P3_설계서_Content 0절). 테스트를 먼저 썼다. */
 const ok = (over: Partial<Parameters<typeof checkUpload>[0]> = {}) =>
@@ -57,5 +58,13 @@ describe('checkUpload — 파일명 (FR-412)', () => {
   it('점이 여러 개면 마지막 것을 본다', () => {
     expect(ok({ filename: 'a.exe.pdf' })).toEqual({ ok: true });
     expect(ok({ filename: 'a.pdf.exe', mime: 'application/pdf' })).toMatchObject({ ok: false, reason: 'extension' });
+  });
+});
+
+describe('공유 상수와의 일치', () => {
+  it('**허용 확장자 목록이 두 곳에 있다. 기계로 묶어 둔다**', () => {
+    // 관리 화면(P4)이 `ALLOWED_UPLOAD_EXTENSIONS`에서 고르고, 실제 판정은 여기 `ALLOWED`가 한다.
+    // 한쪽만 늘리면 "화면에서 켰는데 올라가지 않는" 또는 "규칙 없는 확장자가 통과하는" 상태가 된다
+    expect([...ALLOWED_EXTENSIONS].sort()).toEqual([...ALLOWED_UPLOAD_EXTENSIONS].sort());
   });
 });

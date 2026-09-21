@@ -266,6 +266,35 @@ export const pageLabels = pgTable(
   (t) => [primaryKey({ columns: [t.pageId, t.labelId] })],
 );
 
+/**
+ * 알림 (P4_설계서_Admin C절, FR-500~509).
+ *
+ * **파생 데이터가 아니다** (FR-506). 지운 댓글의 알림도 남는다 — "누가 나를 불렀다"는
+ * 대상이 사라졌다고 없던 일이 되지 않는다. 링크만 "대상이 없다"로 표시한다.
+ */
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    /** 받는 사람 */
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    kind: text('kind').notNull(),
+    /** 어디서 불렸나. 댓글이면 pageId와 commentId가 함께 있다 */
+    pageId: uuid('page_id').references(() => pages.id),
+    commentId: uuid('comment_id').references(() => comments.id),
+    /** 부른 사람 */
+    actorId: uuid('actor_id')
+      .notNull()
+      .references(() => users.id),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // 알림함은 "내 것 중 안 읽은 것"을 먼저 본다
+  (t) => [index('notifications_user_idx').on(t.userId, t.readAt, t.createdAt)],
+);
+
 /** 운영 조절값 (CLAUDE.md 5절 세 번째 분류). 관리 화면은 Phase 4. */
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
@@ -286,3 +315,4 @@ export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type SettingRow = typeof settings.$inferSelect;
+export type NotificationRow = typeof notifications.$inferSelect;
