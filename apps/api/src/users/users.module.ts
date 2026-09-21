@@ -34,6 +34,8 @@ export class UsersController {
   ): Promise<UserView> {
     return this.db.transaction(async (tx) => {
       const row = await this.users.create(dto, actor, tx);
+      // 관리자가 만든 계정도 바로 활성이다. 승인 경로를 거치지 않으므로 여기서도 만든다 (FR-309)
+      await this.spaces.ensurePersonalSpace(row.id, row.displayName, tx);
       await this.audit.record(
         { action: 'user.create', actorId: actor.id, targetType: 'user', targetId: row.id, detail: { username: row.username, role: row.role }, ip: req.ip },
         tx,

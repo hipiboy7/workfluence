@@ -11,22 +11,17 @@ import EmbeddedPostgres from 'embedded-postgres';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Client } from 'pg';
+import { parseDotenv } from '../packages/shared/src/env';
 
 const root = resolve(__dirname, '..');
 
-function loadDotenv(path: string): Record<string, string> {
-  if (!existsSync(path)) return {};
-  const out: Record<string, string> = {};
-  for (const raw of readFileSync(path, 'utf8').split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const idx = line.indexOf('=');
-    if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-  }
-  return out;
-}
 
 /** 남은 잠금 파일 정리. 그 PID가 살아 있으면 손대지 않고 그대로 알린다. */
+/** `.env`를 읽는다. 파싱은 shared의 `parseDotenv` 한 곳에서 한다 (CLAUDE.md 1.3절) */
+function readDotenv(path: string): Record<string, string> {
+  return existsSync(path) ? parseDotenv(readFileSync(path, 'utf8')) : {};
+}
+
 function clearStaleLock(databaseDir: string): void {
   const lock = resolve(databaseDir, 'postmaster.pid');
   if (!existsSync(lock)) return;
@@ -64,7 +59,7 @@ async function ensureDatabases(port: number, password: string, names: string[]):
 }
 
 async function main(): Promise<void> {
-  const env = { ...loadDotenv(resolve(root, '.env')), ...process.env } as Record<string, string>;
+  const env = { ...readDotenv(resolve(root, '.env')), ...process.env } as Record<string, string>;
   const databaseDir = resolve(root, env.WF_PG_EMBEDDED_DIR || '.local/pgdata');
   const port = Number(env.WF_PG_EMBEDDED_PORT || 5433);
   const password = env.WF_PG_EMBEDDED_PASSWORD || 'workfluence';

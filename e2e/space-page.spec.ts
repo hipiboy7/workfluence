@@ -91,7 +91,31 @@ test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원',
 });
 
 test('Crew가 아니면 스페이스가 보이지 않는다', async ({ page }) => {
-  await login(page, mate.username, mate.password);
-  // 동료는 자기 개인 스페이스만 보인다 (승인 시 자동 생성 — FR-309)
-  await expect(page.getByText(`${mate.displayName}의 공간`)).toBeVisible();
+  // 이 테스트는 앞 테스트가 만든 팀 스페이스를 **동료가 못 보는지**가 핵심이다.
+  // 개인 스페이스가 보이는 것만 단언하면 제목이 말하는 것을 검증하지 않는다
+  const outsider = { username: `e2e-out-${Date.now()}`, displayName: 'E2E 외부인', email: `out-${Date.now()}@example.internal`, password: 'E2e-Out-2026!' };
+  outsiders.push(outsider.username);
+
+  await page.goto('/signup');
+  await page.getByLabel('아이디').fill(outsider.username);
+  await page.getByLabel('이름').fill(outsider.displayName);
+  await page.getByLabel('email').fill(outsider.email);
+  await page.getByLabel('비밀번호').fill(outsider.password);
+  await page.getByRole('button', { name: '가입 요청' }).click();
+
+  await login(page, ADMIN.username, ADMIN.password);
+  await page.getByRole('link', { name: '사용자 관리' }).click();
+  await page.getByRole('row').filter({ hasText: outsider.username }).getByRole('button', { name: '승인' }).click();
+  await expect(page.getByRole('row').filter({ hasText: outsider.username }).getByText('active')).toBeVisible();
+  await page.goto('/');
+  await page.getByRole('button', { name: '로그아웃' }).click();
+
+  await login(page, outsider.username, outsider.password);
+  // 자기 개인 스페이스는 보인다 (FR-309)
+  await expect(page.getByText(`${outsider.displayName}의 공간`)).toBeVisible();
+  // **앞 테스트의 팀 스페이스는 보이지 않는다** — Crew가 아니다
+  await expect(page.getByRole('link', { name: /^E2E 공간/ })).toHaveCount(0);
 });
+
+const outsiders: string[] = [];
+test.afterAll(() => cleanup(outsiders));

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import {
   PAGE_TREE_MAX_DEPTH,
   extractText,
+  stampSchemaVersion,
   type CreatePageDto,
   type DocNode,
   type MovePageDto,
@@ -99,6 +100,8 @@ export class PagesService {
       );
 
     const text = extractText(dto.content);
+    // 저장 직전에 버전을 찍는다. 편집기는 이 값을 만들지 않는다 (shared의 stampSchemaVersion 주석)
+    const content = stampSchemaVersion(dto.content);
     const [page] = await tx
       .insert(pages)
       .values({
@@ -114,8 +117,8 @@ export class PagesService {
       .returning();
     await tx
       .insert(pageVersions)
-      .values({ pageId: page.id, versionNo: 1, title: dto.title, contentJson: dto.content, contentText: text, createdBy: principal.id });
-    return { ...toPageSummary(page), content: dto.content, createdBy: principal.id, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
+      .values({ pageId: page.id, versionNo: 1, title: dto.title, contentJson: content, contentText: text, createdBy: principal.id });
+    return { ...toPageSummary(page), content, createdBy: principal.id, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
   /** 저장 (FR-322, FR-323). 호출부가 트랜잭션을 준다 — 감사 기록과 같은 트랜잭션이어야 한다 */
@@ -134,12 +137,16 @@ export class PagesService {
         baseVersionNo: dto.baseVersionNo,
       });
     }
-    const page = await this.appendVersion(tx, locked, dto.title, dto.content, principal.id);
-    return { ...toPageSummary(page), content: dto.content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
+    // 응답은 **저장된 것과 같아야 한다.** dto.content를 그대로 돌려주면 버전이 찍히기 전 모양이
+    // 나가고, 클라이언트가 그것을 다음 저장의 기준으로 쓴다
+    const content = stampSchemaVersion(dto.content);
+    const page = await this.appendVersion(tx, locked, dto.title, content, principal.id);
+    return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
-  private async appendVersion(tx: Db, locked: PageRow, title: string, content: DocNode, actorId: string): Promise<PageRow> {
+  private async appendVersion(tx: Db, locked: PageRow, title: string, raw: DocNode, actorId: string): Promise<PageRow> {
     const nextNo = locked.currentVersionNo + 1;
+    const content = stampSchemaVersion(raw);
     const text = extractText(content);
     await tx.insert(pageVersions).values({ pageId: locked.id, versionNo: nextNo, title, contentJson: content, contentText: text, createdBy: actorId });
     const [page] = await tx
@@ -196,7 +203,7 @@ export class PagesService {
     if (!locked) throw new NotFoundException('페이지를 찾을 수 없다');
     const old = await tx.query.pageVersions.findFirst({ where: and(eq(pageVersions.pageId, id), eq(pageVersions.versionNo, versionNo)) });
     if (!old) throw new NotFoundException('버전을 찾을 수 없다');
-    const content = old.contentJson as DocNode;
+    const content = stampSchemaVersion(old.contentJson as DocNode);
     const page = await this.appendVersion(tx, locked, old.title, content, principal.id);
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }

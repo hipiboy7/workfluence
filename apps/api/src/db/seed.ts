@@ -14,6 +14,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { databaseUrl, loadEnv } from '../config/config.module';
+import { SpacesService } from '../spaces/spaces.service';
 import * as schema from './schema';
 
 async function main(): Promise<void> {
@@ -24,8 +25,11 @@ async function main(): Promise<void> {
     const username = env.WF_ROOT_USERNAME;
     const existing = await db.query.users.findFirst({ where: eq(schema.users.username, username) });
 
+    /** 개인 스페이스 보장. SpacesService는 DB만 있으면 되므로 Nest 없이 직접 쓴다 */
+    const spaces = new SpacesService(db as never);
+
     if (!existing) {
-      await db.insert(schema.users).values({
+      const [created] = await db.insert(schema.users).values({
         username,
         displayName: '시스템 관리자',
         email: null,
@@ -35,10 +39,14 @@ async function main(): Promise<void> {
         // 첫 로그인에서 반드시 바꾸게 한다 — .env에 적힌 값이 계속 유효하면 그것이 곧 유출 경로다
         mustChangePassword: true,
         approvedAt: sql`now()`,
-      });
+      }).returning();
+      await spaces.ensurePersonalSpace(created.id, created.displayName, db as never);
       console.log(`[seed] root 계정 생성: ${username} (첫 로그인에서 비밀번호 변경 강제)`);
       return;
     }
+
+    // 이미 있는 계정도 개인 스페이스가 없으면 만든다 — 멱등 규칙은 "빠진 것을 채우는 것"까지다
+    await spaces.ensurePersonalSpace(existing.id, existing.displayName, db as never);
 
     // 있으면 빠진 것만 채운다. 비밀번호는 건드리지 않는다
     const fixes: Record<string, unknown> = {};

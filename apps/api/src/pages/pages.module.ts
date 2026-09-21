@@ -11,6 +11,7 @@ import {
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
+import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
 import { PagesService } from './pages.service';
@@ -27,12 +28,12 @@ export class PagesController {
 
   /** 스페이스의 트리. `@RequireAction`이 없는 것은 "로그인한 사람이면 누구나"가 아니라, 스페이스 판정이 대신 거른다는 뜻이다 */
   @Get()
-  tree(@Query('spaceId') spaceId: string, @CurrentUser() me: SessionUser): Promise<PageSummary[]> {
+  tree(@Query('spaceId', UuidPipe) spaceId: string, @CurrentUser() me: SessionUser): Promise<PageSummary[]> {
     return this.pages.tree(spaceId, me);
   }
 
   @Get(':id')
-  get(@Param('id') id: string, @CurrentUser() me: SessionUser): Promise<PageView> {
+  get(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser): Promise<PageView> {
     return this.pages.get(id, me);
   }
 
@@ -54,7 +55,7 @@ export class PagesController {
 
   @Patch(':id')
   update(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(updatePageDto)) dto: ReturnType<typeof updatePageDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
@@ -71,7 +72,7 @@ export class PagesController {
 
   @Patch(':id/move')
   move(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(movePageDto)) dto: ReturnType<typeof movePageDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
@@ -84,7 +85,7 @@ export class PagesController {
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
+  async remove(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
     await this.db.transaction(async (tx) => {
       const page = await this.pages.softDelete(id, me, tx);
       await this.audit.record({ action: 'page.delete', actorId: me.id, targetType: 'page', targetId: id, detail: { title: page.title }, ip: req.ip }, tx);
@@ -93,13 +94,13 @@ export class PagesController {
   }
 
   @Get(':id/versions')
-  versions(@Param('id') id: string, @CurrentUser() me: SessionUser): Promise<PageVersionView[]> {
+  versions(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser): Promise<PageVersionView[]> {
     return this.pages.versions(id, me);
   }
 
   @Get(':id/versions/:no')
   version(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Param('no', ParseIntPipe) no: number,
     @CurrentUser() me: SessionUser,
   ): Promise<PageVersionView & { content: DocNode }> {
@@ -108,7 +109,7 @@ export class PagesController {
 
   @Post(':id/versions/:no/restore')
   restore(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Param('no', ParseIntPipe) no: number,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,

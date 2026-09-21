@@ -2,7 +2,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import { useEffect } from 'react';
-import type { DocNode } from '@workfluence/shared';
+import { emptyDocument, type DocNode } from '@workfluence/shared';
 
 /**
  * 본문 편집기 (FR-342).
@@ -31,5 +31,9 @@ export function Editor({ value, onChange, editable = true }: { value: DocNode; o
   return <EditorContent className={editable ? 'editor' : 'editor readonly'} editor={editor} />;
 }
 
-/** 빈 문서 — 새 페이지의 초기값 */
-export const EMPTY_DOC: DocNode = { type: 'doc', schemaVersion: 1, content: [{ type: 'paragraph' }] } as DocNode;
+/**
+ * 빈 문서 — 새 페이지의 초기값.
+ * **shared의 것을 쓴다.** 여기서 직접 만들면 `schemaVersion`이 엉뚱한 자리에 들어간다
+ * (실제로 최상위 키로 넣었다가 서버가 못 읽는 상태로 저장됐다).
+ */
+export const EMPTY_DOC: DocNode = emptyDocument();

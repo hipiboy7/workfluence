@@ -15,6 +15,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
+import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
 import { spaceCategories } from '../db/schema';
@@ -39,7 +40,7 @@ export class SpacesController {
   }
 
   @Get(':id')
-  get(@Param('id') id: string, @CurrentUser() me: SessionUser): Promise<SpaceView> {
+  get(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser): Promise<SpaceView> {
     return this.spaces.get(id, me);
   }
 
@@ -63,7 +64,7 @@ export class SpacesController {
 
   @Patch(':id')
   async update(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(updateSpaceDto)) dto: ReturnType<typeof updateSpaceDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
@@ -77,7 +78,7 @@ export class SpacesController {
 
   @Patch(':id/status')
   async changeStatus(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(spaceStatusDto)) dto: ReturnType<typeof spaceStatusDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
@@ -90,7 +91,7 @@ export class SpacesController {
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
+  async remove(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
     await this.db.transaction(async (tx) => {
       const row = await this.spaces.softDelete(id, me, tx);
       await this.audit.record({ action: 'space.delete', actorId: me.id, targetType: 'space', targetId: id, detail: { name: row.name }, ip: req.ip }, tx);
@@ -101,13 +102,13 @@ export class SpacesController {
   // ---- Crew ----
 
   @Get(':id/members')
-  members(@Param('id') id: string, @CurrentUser() me: SessionUser): Promise<SpaceMemberView[]> {
+  members(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser): Promise<SpaceMemberView[]> {
     return this.spaces.members(id, me);
   }
 
   @Post(':id/members')
   async addMember(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(addMemberDto)) dto: ReturnType<typeof addMemberDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
@@ -121,8 +122,8 @@ export class SpacesController {
 
   @Patch(':id/members/:userId')
   async changeMemberRole(
-    @Param('id') id: string,
-    @Param('userId') userId: string,
+    @Param('id', UuidPipe) id: string,
+    @Param('userId', UuidPipe) userId: string,
     @Body(new ZodPipe(updateMemberRoleDto)) dto: ReturnType<typeof updateMemberRoleDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
@@ -139,8 +140,8 @@ export class SpacesController {
 
   @Delete(':id/members/:userId')
   async removeMember(
-    @Param('id') id: string,
-    @Param('userId') userId: string,
+    @Param('id', UuidPipe) id: string,
+    @Param('userId', UuidPipe) userId: string,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<SpaceMemberView[]> {

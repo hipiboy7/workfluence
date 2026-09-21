@@ -3,6 +3,7 @@ import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { users } from '../db/schema';
+import { SpacesService } from '../spaces/spaces.service';
 import { UsersService } from '../users/users.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { AuthService } from './auth.service';
@@ -36,16 +37,18 @@ let db: TestDb;
 let usersSvc: UsersService;
 let audit: AuditService;
 let auth: AuthService;
+let spacesSvc: SpacesService;
 
 const ROOT: Principal = { id: '00000000-0000-0000-0000-000000000000', role: 'root' };
 
 function makeAuth(provider: OidcProvider | null = new StubProvider()): AuthService {
-  return new AuthService(usersSvc, audit, db, ENV as never, provider);
+  return new AuthService(usersSvc, audit, spacesSvc, db, ENV as never, provider);
 }
 
 beforeAll(async () => {
   ({ db } = await openTestDb());
   usersSvc = new UsersService(db);
+  spacesSvc = new SpacesService(db);
   audit = new AuditService(db);
   auth = makeAuth();
 });
@@ -215,7 +218,7 @@ describe('OIDC (인수 기준 2)', () => {
   });
 
   it('OIDC가 꺼져 있으면 404다 (FR-219)', async () => {
-    const off = new AuthService(usersSvc, audit, db, { ...ENV, WF_OIDC_ENABLED: false } as never, null);
+    const off = new AuthService(usersSvc, audit, spacesSvc, db, { ...ENV, WF_OIDC_ENABLED: false } as never, null);
     await expect(off.oidcStart()).rejects.toThrow(/OIDC/);
   });
 });
@@ -276,6 +279,24 @@ describe('감사로그 (인수 기준 3, FR-236, FR-238)', () => {
     await auth.login({ username: 'alice', password: 'wrong' }).catch(() => undefined);
     expect((await usersSvc.findById(alice.id))?.failedAttempts).toBe(1);
     expect((await audit.list(5)).some((e) => e.action === 'auth.login.failure')).toBe(true);
+  });
+});
+
+describe('개인 스페이스는 모든 계정 생성 경로에서 만들어진다 (FR-309)', () => {
+  it('IdP JIT 계정에도 생긴다 — **운영의 주 로그인 경로다**', async () => {
+    const s = await auth.oidcStart();
+    const user = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: s.state }, { state: s.state, nonce: s.nonce });
+    const list = await spacesSvc.list({ id: user.id, role: 'member' }, 'personal', 10);
+    expect(list).toHaveLength(1);
+  });
+
+  it('재로그인해도 하나뿐이다 (멱등)', async () => {
+    for (let i = 0; i < 2; i++) {
+      const s = await auth.oidcStart();
+      await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: s.state }, { state: s.state, nonce: s.nonce });
+    }
+    const u = (await usersSvc.findByOidcSub(DEV_IDENTITY.sub))!;
+    expect(await spacesSvc.list({ id: u.id, role: 'member' }, 'personal', 10)).toHaveLength(1);
   });
 });
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { PAGE_TREE_MAX_DEPTH, type DocNode, type Principal } from '@workfluence/shared';
+import { DOCUMENT_SCHEMA_VERSION, PAGE_TREE_MAX_DEPTH, documentSchemaVersion, type DocNode, type Principal } from '@workfluence/shared';
 import { eq } from 'drizzle-orm';
 import { pageVersions, pages, users } from '../db/schema';
 import { PagesService } from '../pages/pages.service';
@@ -174,6 +174,17 @@ describe('페이지 버전과 충돌 (FR-322~325)', () => {
     expect(await pagesSvc.versions(page.id, owner)).toHaveLength(3);
   });
 
+  it('**저장된 문서가 스스로 버전을 말한다** — 편집기는 이 값을 만들지 않는다', async () => {
+    const { owner, page } = await setup();
+    const stored = await db.query.pageVersions.findFirst({ where: eq(pageVersions.pageId, page.id) });
+    expect(documentSchemaVersion(stored!.contentJson as DocNode)).toBe(DOCUMENT_SCHEMA_VERSION);
+    // 버전 없는 본문을 보내도 서버가 찍는다
+    const updated = await db.transaction((tx) =>
+      pagesSvc.update(page.id, { title: 'T2', content: { type: 'doc', content: [{ type: 'paragraph' }] } as DocNode, baseVersionNo: 1 }, owner, tx),
+    );
+    expect(documentSchemaVersion(updated.content)).toBe(DOCUMENT_SCHEMA_VERSION);
+  });
+
   it('본문에서 평문을 뽑아 search_text에 넣는다 (FR-332)', async () => {
     const { page } = await setup();
     const [row] = await db.select().from(pages).where(eq(pages.id, page.id));
@@ -215,6 +226,32 @@ describe('페이지 트리 (FR-326~330)', () => {
     ).rejects.toThrow(/깊이/);
   });
 
+  it('**이동 성공 경로** — 부모와 순서를 바꾼다 (FR-326, 인수 기준)', async () => {
+    const { owner, space, mk } = await setup();
+    const a = await mk('A', null);
+    const b = await mk('B', null);
+    expect(b.parentId).toBeNull();
+
+    const moved = await db.transaction((tx) => pagesSvc.move(b.id, { parentId: a.id, position: 0 }, owner, tx));
+    expect(moved.parentId).toBe(a.id);
+    expect(moved.position).toBe(0);
+
+    const tree = await pagesSvc.tree(space.id, owner);
+    expect(tree.find((p) => p.id === b.id)?.parentId).toBe(a.id);
+
+    // 루트로 되돌린다
+    const back = await db.transaction((tx) => pagesSvc.move(b.id, { parentId: null, position: 1 }, owner, tx));
+    expect(back.parentId).toBeNull();
+  });
+
+  it('viewer는 이동하지 못한다', async () => {
+    const { owner, space, mk } = await setup();
+    const viewer = await user('mover-viewer');
+    await spacesSvc.addMember(space.id, { username: 'mover-viewer', role: 'viewer' }, owner);
+    const a = await mk('A', null);
+    await expect(db.transaction((tx) => pagesSvc.move(a.id, { parentId: null, position: 3 }, viewer, tx))).rejects.toThrow(/권한/);
+  });
+
   it('하위가 있으면 삭제할 수 없다 (FR-329)', async () => {
     const { owner, mk } = await setup();
     const a = await mk('A', null);
@@ -250,6 +287,21 @@ describe('페이지 권한은 스페이스를 따른다 (FR-331)', () => {
     await expect(
       db.transaction((tx) => pagesSvc.update(p.id, { title: 'X', content: doc('y'), baseVersionNo: 1 }, viewer, tx)),
     ).rejects.toThrow(/권한/);
+  });
+});
+
+describe('버전 단건 조회', () => {
+  it('이력 화면의 "보기"가 쓰는 경로', async () => {
+    const owner = await user('vowner');
+    const sp = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const p = await db.transaction((tx) => pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: doc('처음') }, owner, tx));
+    await db.transaction((tx) => pagesSvc.update(p.id, { title: 'T2', content: doc('나중'), baseVersionNo: 1 }, owner, tx));
+
+    const v1 = await pagesSvc.version(p.id, 1, owner);
+    expect(v1.versionNo).toBe(1);
+    expect(v1.title).toBe('T');
+    expect(JSON.stringify(v1.content)).toContain('처음');
+    await expect(pagesSvc.version(p.id, 99, owner)).rejects.toThrow(/버전을 찾을 수 없다/);
   });
 });
 

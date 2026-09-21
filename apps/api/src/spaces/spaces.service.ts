@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  can,
   generateSpaceKey,
   spaceAccess,
   type AddMemberDto,
@@ -91,8 +92,16 @@ export class SpacesService {
     };
   }
 
-  /** 목록 (FR-310). `all`은 `space.manage` 권한자만 — 컨트롤러가 가드로 거른다 */
+  /**
+   * 목록 (FR-310). `all`은 `space.manage` 권한자만.
+   *
+   * **여기서 막는다.** 핸들러에 `@RequireAction`을 붙이면 `scope`와 무관하게 막혀 일반
+   * 사용자가 자기 목록도 못 본다. 권한이 `scope` 값에 달려 있으므로 판정도 여기여야 한다.
+   */
   async list(principal: Principal, scope: 'personal' | 'team' | 'all', limit: number): Promise<SpaceView[]> {
+    if (scope === 'all' && !can(principal, 'space.manage')) {
+      throw new ForbiddenException('전체 스페이스를 볼 권한이 없다');
+    }
     const mineIds = await this.db
       .select({ id: spaceMembers.spaceId })
       .from(spaceMembers)
@@ -109,10 +118,10 @@ export class SpacesService {
               : and(eq(spaces.kind, 'team'), ids.length ? or(inArray(spaces.id, ids), eq(spaces.createdBy, principal.id)) : eq(spaces.createdBy, principal.id)),
           );
 
-    const rows = await this.db.select().from(spaces).where(visible).orderBy(spaces.name).limit(limit);
+    const rows = await this.db.select().from(spaces).where(visible).orderBy(spaces.name);
     const views = await Promise.all(rows.map((r) => this.toView(r, principal)));
-    // `all`이라도 볼 수 없는 것은 빼고 준다 — 목록이 판정을 우회하는 창이 되면 안 된다
-    return views.filter((v) => v.access.canRead);
+    // 볼 수 없는 것을 먼저 빼고 자른다. 자르고 거르면 결과가 조용히 비는 수가 있다
+    return views.filter((v) => v.access.canRead).slice(0, limit);
   }
 
   async get(spaceId: string, principal: Principal): Promise<SpaceView> {
@@ -161,8 +170,18 @@ export class SpacesService {
     await this.create({ name: `${displayName}의 공간`, kind: 'personal', categoryId: null, description: '' }, { id: userId, role: 'member' }, tx);
   }
 
+  /**
+   * 이름·설명·분류 변경. **쓰기 권한이 아니라 소유 권한을 본다.**
+   * editor는 글을 쓰는 사람이지 공간의 정체성을 바꾸는 사람이 아니다.
+   */
   async update(spaceId: string, dto: UpdateSpaceDto, principal: Principal, tx: Db = this.db): Promise<SpaceRow> {
-    await this.assertWrite(spaceId, principal, tx);
+    const ctx = await this.context(spaceId, principal, tx);
+    if (!ctx.access.canChangeStatus) throw new ForbiddenException('스페이스 정보를 바꿀 권한이 없다');
+    if (!ctx.access.canWrite) throw new ForbiddenException('중지된 스페이스는 바꿀 수 없다');
+    if (dto.categoryId) {
+      const c = await tx.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, dto.categoryId) });
+      if (!c) throw new BadRequestException('없는 분류다');
+    }
     const [row] = await tx
       .update(spaces)
       .set({ ...dto, updatedAt: sql`now()` })
