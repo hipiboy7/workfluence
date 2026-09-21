@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CommentsService } from '../comments/comments.service';
 import { PagesService } from '../pages/pages.service';
-import { pages, users } from '../db/schema';
+import { comments, pages, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { InAppChannel, NotificationsService } from './notifications.service';
@@ -181,5 +181,30 @@ describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
 
     await pagesSvc.update(created.id, { title: 'T', content: body('@mate 다시 봐 줘'), baseVersionNo: created.currentVersionNo }, owner, db);
     expect(await svc.list(mate, 20)).toHaveLength(1);
+  });
+});
+
+describe('대상이 사라진 알림 (FR-506 — 자체 점검 9)', () => {
+  async function mentioned() {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+    const pid = await page(sp.id, owner.id);
+    const c = await commentsSvc.create(pid, { body: body('@mate 확인') }, owner);
+    return { mate, sp, pid, cid: c.id };
+  }
+
+  it('**댓글이 지워지면** 갈 곳이 없다고 알린다', async () => {
+    const { mate, cid } = await mentioned();
+    expect((await svc.list(mate, 20))[0].pageTitle).not.toBeNull();
+    await db.update(comments).set({ deletedAt: new Date() }).where(eq(comments.id, cid));
+    expect((await svc.list(mate, 20))[0].pageTitle).toBeNull();
+  });
+
+  it('**스페이스가 통째로 지워져도** 마찬가지다 — 링크가 404로 가면 안 된다', async () => {
+    const { mate, sp } = await mentioned();
+    await db.update(spaces).set({ deletedAt: new Date() }).where(eq(spaces.id, sp.id));
+    expect((await svc.list(mate, 20))[0].pageTitle).toBeNull();
   });
 });

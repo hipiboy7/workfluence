@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { spaceAccess, type DocNode, type NotificationView, type Principal, type Role, type SpaceMemberRole } from '@workfluence/shared';
 import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
-import { notifications, pages, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
+import { comments, notifications, pages, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
 import { extractMentions } from './domain/mention';
 
 /** 알림을 보내는 경계 (FR-509). 지금은 앱 안 저장뿐이고, 메일·메신저는 이 뒤에 붙인다 */
@@ -91,10 +91,16 @@ export class NotificationsService {
         actorName: users.displayName,
         pageTitle: pages.title,
         pageDeletedAt: pages.deletedAt,
+        // 대상이 살아 있는지는 **페이지만으로 판단할 수 없다** (자체 점검 9).
+        // 댓글이 지워졌거나 스페이스가 통째로 지워졌으면 링크는 갈 곳이 없다
+        commentDeletedAt: comments.deletedAt,
+        spaceDeletedAt: spaces.deletedAt,
       })
       .from(notifications)
       .innerJoin(users, eq(users.id, notifications.actorId))
       .leftJoin(pages, eq(pages.id, notifications.pageId))
+      .leftJoin(spaces, eq(spaces.id, pages.spaceId))
+      .leftJoin(comments, eq(comments.id, notifications.commentId))
       .where(eq(notifications.userId, principal.id))
       .orderBy(desc(notifications.createdAt))
       .limit(limit);
@@ -105,8 +111,9 @@ export class NotificationsService {
       pageId: r.pageId,
       commentId: r.commentId,
       actorName: r.actorName,
-      // 대상이 지워졌으면 제목 대신 그 사실을 준다 (FR-506)
-      pageTitle: r.pageDeletedAt || !r.pageTitle ? null : r.pageTitle,
+      // 대상이 지워졌으면 제목 대신 그 사실을 준다 (FR-506).
+      // 페이지·댓글·스페이스 **셋 중 하나라도** 지워졌으면 갈 곳이 없다
+      pageTitle: r.pageDeletedAt || r.commentDeletedAt || r.spaceDeletedAt || !r.pageTitle ? null : r.pageTitle,
       readAt: r.readAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
     }));
