@@ -20,7 +20,7 @@
 | 대상 | 파일 | 건수 | skip |
 |---|---|---|---|
 | `packages/shared` | 6 | 71 | 0 |
-| `apps/api` | 23 | 249 | 0 |
+| `apps/api` | 23 | 255 | 0 |
 | E2E (`pnpm test:e2e`) | 5 | 16 | 0 |
 
 이번 Phase가 만든 모듈 (`pnpm test:cov`, v8):
@@ -32,12 +32,16 @@
 > 이 행은 **한 번 틀리게 적었다.** 처음에 100/100으로 썼는데 실측은 브랜치 89.28%였고,
 > A등급 기준(90%) 미달인데 패키지 합계가 가려 관문은 초록이었다. 자체 점검이 잡았다
 > (`internal/P4_검토서_SelfReview.md` 1절). 빈 분기에 테스트를 넣어 지금은 표대로다.
-| `apps/api/src/notifications/notifications.service.ts` | B | 100.00 | 90.32 | 100.00 |
+| `apps/api/src/notifications/notifications.service.ts` | B | 100.00 | 93.93 | 100.00 |
 | `apps/api/src/trash/trash.service.ts` | B | 100.00 | 86.36 | 100.00 |
 | `apps/api/src/settings/settings.service.ts` | B | 100.00 | 100.00 | 100.00 |
 | `apps/api/src/labels/labels.service.ts` | B | 100.00 | 84.61 | 100.00 |
 
-전체: `apps/api` 라인 **93.84%** · 브랜치 82.47%, `packages/shared` 라인 **96.30%** · 브랜치 94.97%.
+전체: `apps/api` 라인 **93.89%** · 브랜치 82.86%, `packages/shared` 라인 **96.33%** · 브랜치 94.97%.
+`apps/web`은 테스트 0건·커버리지 0%다 (`CLAUDE.md` 3절 — web은 관문 없이 측정·기록만).
+
+> **이 표는 손으로 쓰지 않았다.** `coverage-summary.json`에서 뽑아 넣었다 — 한 번 손으로
+> 옮기다 틀렸기 때문이다 (아래).
 
 > **이번에도 측정 대상이 틀려 있었다** (T-024). Phase 3의 T-020과 **글자 그대로 같은 증상**이다.
 > T-020의 재발 방지가 "목록에 디렉토리를 더한다 + 주석"이었는데, 주석은 그 파일을 열었을 때만
@@ -55,7 +59,7 @@ Running 16 tests using 1 worker
   ✓ e2e/admin.spec.ts:30  › 멘션 → 알림함 → 휴지통 복원 → 라벨
   ✓ e2e/admin.spec.ts:93  › 운영 설정을 바꾸면 다시 띄우지 않아도 먹는다 (NFR-40)
   ✓ e2e/admin.spec.ts:116 › 일반 사용자에게는 운영 설정이 보이지 않는다
-  16 passed (14.0s)
+  16 passed (14.5s)
 ```
 
 브라우저에서 확인한 것: 댓글로 동료를 부르면 그 사람 알림함에 뜬다 → 지운 페이지가 휴지통에
