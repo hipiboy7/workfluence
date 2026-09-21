@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Inject, Module, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { attachLabelDto, listLimitDto, type AttachLabelDto, type LabelView, type SearchHit } from '@workfluence/shared';
+import { attachLabelDto, labelNameDto, listLimitDto, type AttachLabelDto, type LabelView, type SearchHit } from '@workfluence/shared';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
@@ -25,7 +25,7 @@ export class LabelsController {
 
   @Get('labels/:name/pages')
   find(
-    @Param('name') name: string,
+    @Param('name', new ZodPipe(labelNameDto.shape.name)) name: string,
     @Query(new ZodPipe(listLimitDto)) q: ReturnType<typeof listLimitDto.parse>,
     @CurrentUser() me: SessionUser,
   ): Promise<SearchHit[]> {

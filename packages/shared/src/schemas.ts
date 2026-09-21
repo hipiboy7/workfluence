@@ -160,6 +160,25 @@ export type CreateCommentDto = z.infer<typeof createCommentDto>;
 export const updateCommentDto = z.object({ body: documentSchema });
 export type UpdateCommentDto = z.infer<typeof updateCommentDto>;
 
+export const labelNameDto = z.object({ name: z.string().trim().min(1).max(40) });
+
+/** 정책값 변경. **모양만** 본다 — 범위·허용값 판정은 `validatePolicyPatch`(A등급)가 한다 */
+export const policyPatchDto = z
+  .object({
+    uploadMaxMb: z.number().int().optional(),
+    allowedExtensions: z.array(z.string()).optional(),
+    sessionIdleMinutes: z.number().int().optional(),
+    sessionAbsoluteHours: z.number().int().optional(),
+    passwordMinLength: z.number().int().optional(),
+    passwordMinCharClasses: z.number().int().optional(),
+    lockoutThreshold: z.number().int().optional(),
+    lockoutMinutes: z.number().int().optional(),
+    trashRetentionDays: z.number().int().optional(),
+    auditRetentionDays: z.number().int().optional(),
+  })
+  .strict();
+export type PolicyPatchDto = z.infer<typeof policyPatchDto>;
+
 export const attachLabelDto = z.object({ name: z.string().trim().min(1).max(40) });
 export type AttachLabelDto = z.infer<typeof attachLabelDto>;
 

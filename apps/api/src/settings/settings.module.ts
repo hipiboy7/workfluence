@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Global, Inject, Module, Patch, Req, UseGuards } from '@nestjs/common';
-import { type Policy } from '@workfluence/shared';
+import { policyPatchDto, type Policy, type PolicyPatchDto } from '@workfluence/shared';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
+import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
 import { SettingsService } from './settings.service';
 
@@ -24,7 +25,7 @@ export class PolicyController {
 
   @Patch()
   @RequireAction('settings.manage')
-  update(@Body() patch: Record<string, unknown>, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
+  update(@Body(new ZodPipe(policyPatchDto)) patch: PolicyPatchDto, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
     return this.db.transaction(async (tx) => {
       const { before, after } = await this.svc.update(patch, me, tx);
       // **바뀐 키의 이전·이후를 남긴다** (FR-525). "누가 바꿨다"만으로는 되돌릴 수 없다

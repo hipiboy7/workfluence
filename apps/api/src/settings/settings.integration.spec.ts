@@ -109,6 +109,33 @@ describe('변경 (FR-523~526)', () => {
   });
 });
 
+describe('캐시·천장 (자체 점검 3·5)', () => {
+  it('**트랜잭션 안에서 읽은 값은 캐시하지 않는다** — 롤백되면 DB와 메모리가 어긋난다', async () => {
+    const me = await admin();
+    const svc = svcWith();
+    await svc.update({ trashRetentionDays: 7 }, me);
+    svc.invalidate();
+
+    // 트랜잭션 안에서 다른 값을 써 놓고 롤백한다
+    await db
+      .transaction(async (tx) => {
+        await svc.update({ trashRetentionDays: 99 }, me, tx);
+        throw new Error('의도적 롤백');
+      })
+      .catch(() => undefined);
+
+    // 캐시에 99가 남아 있으면 안 된다. DB의 7을 다시 읽어야 한다
+    expect((await svc.get()).trashRetentionDays).toBe(7);
+  });
+
+  it('**읽기에서도 천장을 건다** — DB에 50이 있는데 환경변수를 20으로 내려도 20이다', async () => {
+    const me = await admin();
+    await svcWith({ WF_UPLOAD_MAX_MB: 100 }).update({ uploadMaxMb: 50 }, me);
+    // 같은 DB를 천장 20짜리 서버가 읽는다 (환경변수를 내리고 재기동한 상황)
+    expect((await svcWith({ WF_UPLOAD_MAX_MB: 20 }).get()).uploadMaxMb).toBe(20);
+  });
+});
+
 describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
   it('**값을 만들었으면 소비 지점이 그 값을 받는다.** 비밀번호 최소 길이를 올리면 짧은 것이 막힌다', async () => {
     const me = await admin();

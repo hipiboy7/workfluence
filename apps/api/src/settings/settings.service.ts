@@ -50,8 +50,21 @@ export class SettingsService {
     if (this.cache) return this.cache;
     const row = await tx.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     const stored = (row?.value as Record<string, unknown> | undefined) ?? {};
-    this.cache = applyPolicy({ ...this.fromEnv(), ...stored });
-    return this.cache;
+    const policy = this.clamp(applyPolicy({ ...this.fromEnv(), ...stored }));
+    // **트랜잭션 안에서 읽은 값은 캐시하지 않는다.** 그 트랜잭션이 롤백되면 DB에는 옛값,
+    // 메모리에는 새값이 남아 재기동 전까지 어긋난다 (자체 점검 3)
+    if (tx === this.db) this.cache = policy;
+    return policy;
+  }
+
+  /**
+   * **읽기에서도 천장을 건다** (자체 점검 5).
+   *
+   * 쓰기에서만 막으면, DB에 50이 저장된 뒤 `WF_UPLOAD_MAX_MB`를 20으로 내려 재기동했을 때
+   * 판정은 50을 쓰고 multer는 20에서 자른다 — FR-528이 막으려던 상태가 다른 문으로 다시 열린다.
+   */
+  private clamp(p: Policy): Policy {
+    return p.uploadMaxMb > this.env.WF_UPLOAD_MAX_MB ? { ...p, uploadMaxMb: this.env.WF_UPLOAD_MAX_MB } : p;
   }
 
   /** 테스트와 변경 직후에 쓴다. 다음 `get()`이 DB를 다시 읽는다 */
@@ -79,9 +92,10 @@ export class SettingsService {
       .values({ key: SETTINGS_KEYS.policy, value: merged, updatedBy: principal.id, updatedAt: new Date() })
       .onConflictDoUpdate({ target: settings.key, set: { value: merged, updatedBy: principal.id, updatedAt: new Date() } });
 
-    // **캐시를 버리는 것이 "즉시 반영"의 전부다** (FR-523, NFR-40). 재기동을 요구하지 않는다
+    // **캐시를 버리는 것이 "즉시 반영"의 전부다** (FR-523, NFR-40). 재기동을 요구하지 않는다.
+    // 다음 값은 캐시를 거치지 않고 계산한다 — 아직 커밋되지 않았기 때문이다
     this.invalidate();
-    const next = await this.get(tx);
+    const next = this.clamp(applyPolicy({ ...this.fromEnv(), ...merged }));
 
     const before: Partial<Policy> = {};
     const after: Partial<Policy> = {};
