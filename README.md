@@ -36,7 +36,7 @@ e2e/               Playwright
 deploy/            Dockerfile · compose · nginx (Linux 서버에서 빌드)
 scripts/           check-env · dev-db · verify-docs · e2e (tsx, OS 무관)
 docs/              운영·인수인계 산출물 / docs/internal 작업 기록 / docs/prompts 요청 원문
-.local/            (git 무시) PostgreSQL 데이터·pnpm store·Playwright 브라우저 — 전부 D 드라이브
+.local/            (git 무시) PostgreSQL 데이터·pnpm store·Playwright 브라우저 — 전부 저장소 안
 ```
 
 ## 개발 환경 준비

@@ -24,8 +24,8 @@
     "verify:docs": "tsx scripts/verify-docs.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm verify:docs",
     "db:generate": "pnpm --filter @workfluence/api db:generate",
-    "db:migrate": "pnpm --filter @workfluence/api db:migrate",
-    "db:seed": "pnpm --filter @workfluence/api db:seed",
+    "db:migrate": "pnpm build:shared && pnpm --filter @workfluence/api db:migrate",
+    "db:seed": "pnpm build:shared && pnpm --filter @workfluence/api db:seed",
     "licenses:check": "tsx scripts/check-licenses.ts"
   },
   "devDependencies": {

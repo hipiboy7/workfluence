@@ -182,11 +182,10 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 
 | 환경 | 런타임 | DB | 비고 |
 |---|---|---|---|
-| 개발 (Windows) | Node 24 직접 실행 | 임베디드 PostgreSQL (`.local/pgdata`) | Docker 없음. 데이터는 전부 D 드라이브 `.local/` |
-| 빌드 (Linux) | Docker | — | 이미지 빌드 → `docker save` |
+| 개발·빌드 (Linux) | Node 24 직접 실행 + Docker | 임베디드 PostgreSQL (`.local/pgdata`) | 2026-09-21 통합. 데이터는 저장소 안 `.local/`, 이미지 빌드 → `docker save` |
 | 운영 (폐쇄망) | Docker compose | postgres 컨테이너 | 인터넷 없음 |
 
-명령은 **`pnpm <script>` 형태로만** 문서에 적는다. 구현은 `tsx` 스크립트라 Windows·Linux에서 같게 동작한다 (`CLAUDE.md` 4.1절).
+명령은 **`pnpm <script>` 형태로만** 문서에 적는다. 구현은 `tsx` 스크립트라 OS가 바뀌어도 같게 동작한다 (`CLAUDE.md` 4.1절). 개발과 빌드가 한 호스트가 됐어도 **컨테이너에서 되는지는 따로 확인한다** — 운영은 컨테이너다 (`CLAUDE.md` 0.3절).
 
 | 스크립트 | 하는 일 |
 |---|---|

@@ -1,7 +1,7 @@
 /**
  * pnpm check:env — CLAUDE.md 1.1절 0단계 환경 확인. 전부 통과하면 마지막 줄에 READY.
- * 검사: Node·pnpm 버전, .env 존재·스키마, 데이터 경로가 이 디렉토리의 .local/ 아래(D 드라이브)인지,
- *       드라이브 여유 공간, PostgreSQL 연결.
+ * 검사: Node·pnpm 버전, .env 존재·스키마, 데이터 경로가 이 디렉토리의 .local/ 아래인지,
+ *       디스크 여유 공간, PostgreSQL 연결.
  */
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statfsSync } from 'node:fs';
@@ -45,8 +45,10 @@ async function main(): Promise<void> {
     const pgDir = resolve(root, env.WF_PG_EMBEDDED_DIR);
     check('WF_PG_EMBEDDED_DIR이 .local/ 아래', pgDir.toLowerCase().startsWith(localDir.toLowerCase() + sep), pgDir);
   }
-  // CLAUDE.md 8.1절: 프로젝트 데이터를 시스템 드라이브(C:)에 두지 않는다.
+  // CLAUDE.md 8.1절: Windows에서는 프로젝트 데이터를 시스템 드라이브(C:)에 두지 않았다.
   // "`.local`이 저장소 안인가"는 경로를 그렇게 조립했으니 항상 참이라 검사가 아니다. 실제로 확인할 것은 드라이브다.
+  // Linux 작업 서버(2026-09-21~)는 볼륨이 하나뿐이라 이 검사에 대응물이 없다. 거기서 실제로 위험한 것은
+  // 도커와 같은 디스크를 나눠 쓴다는 점이고, 그것은 아래 여유 공간 검사가 본다.
   if (process.platform === 'win32') {
     const systemDrive = (process.env.SystemDrive ?? 'C:').toLowerCase();
     const projectDrive = parse(root).root.replace(/[\\/]+$/, '').toLowerCase();
@@ -56,9 +58,10 @@ async function main(): Promise<void> {
   try {
     const fs = statfsSync(root);
     const freeGb = (Number(fs.bavail) * Number(fs.bsize)) / 1024 ** 3;
-    check('드라이브 여유 ≥ 3GB', freeGb >= 3, `${freeGb.toFixed(1)}GB 여유 (${root.slice(0, 2)})`);
+    const where = process.platform === 'win32' ? root.slice(0, 2) : `${root} 기준`;
+    check('디스크 여유 ≥ 3GB', freeGb >= 3, `${freeGb.toFixed(1)}GB 여유 (${where})`);
   } catch (e) {
-    check('드라이브 여유', false, (e as Error).message);
+    check('디스크 여유', false, (e as Error).message);
   }
 
   if (env) {

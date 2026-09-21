@@ -1,9 +1,9 @@
 /**
- * pnpm dev:db — 개발용 임베디드 PostgreSQL을 .local/pgdata(D 드라이브)에서 띄운다 (CLAUDE.md 8.1절).
+ * pnpm dev:db — 개발용 임베디드 PostgreSQL을 .local/pgdata에서 띄운다 (CLAUDE.md 8.1절).
  * 최초 실행 시 initdb + 데이터베이스 생성. Ctrl+C로 종료. 데이터는 유지된다.
  *
  * 주의
- * - PostgreSQL은 관리자 권한(elevated) 셸에서 기동을 거부한다.
+ * - PostgreSQL은 관리자 권한(Windows elevated / Linux root) 셸에서 기동을 거부한다.
  * - 이전 프로세스를 Ctrl+C가 아닌 방식으로 죽이면 `postmaster.pid`가 남아 다음 기동이 실패한다.
  *   그 경우 남은 프로세스가 실제로 없을 때만 잠금 파일을 치운다 (살아 있으면 건드리지 않는다).
  */

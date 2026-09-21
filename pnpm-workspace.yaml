@@ -2,7 +2,7 @@ packages:
   - apps/*
   - packages/*
 
-# pnpm 데이터는 전부 이 저장소의 .local/ 아래(D 드라이브)에 둔다 — CLAUDE.md 8.1절
+# pnpm 데이터는 전부 이 저장소의 .local/ 아래에 둔다 — CLAUDE.md 8.1절
 # pnpm 12는 설정을 .npmrc가 아니라 이 파일에서 읽는다. 상대 경로는 이 파일 위치 기준. 확인: pnpm store path
 # stateDir은 프로젝트 단위로 설정할 수 없어(pnpm 경고) 제외. 수 KB라 무시한다.
 storeDir: .local/pnpm-store

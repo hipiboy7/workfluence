@@ -18,6 +18,11 @@
 | 브라우저 | Chromium (Playwright 1.63, `.local/ms-playwright`) |
 | 환경변수 | 12개 키 |
 
+> **개발 환경이 2026-09-21에 Linux로 옮겨졌다** (`CLAUDE.md` 확인 필요 E). 위 표는 2026-09-16
+> Windows에서의 실행 기록이고 그대로 둔다. 같은 명령을 옮긴 서버에서 다시 돌려 `pnpm check:env`
+> `READY`와 `pnpm check` 통과를 확인했다 — Node v24.21.0, pnpm 12.4.1, 임베디드 PostgreSQL 17.10,
+> 테스트 18건 통과. NFR-06(이식성)이 이것으로 실측됐다. 경위는 T-015·T-016.
+
 ```bash
 pnpm dev:db
 pnpm db:migrate
@@ -317,19 +322,15 @@ enabled
 `DISK USAGE`(384MB)와 `CONTENT SIZE`(86.4MB)로 갈린다. 400MB 목표와 비교한 값은
 `--format '{{.Size}}'`가 가리키는 **384MB**다. 둘 중 큰 쪽으로 판정했다.
 
-### 6.3 첫 빌드는 실패했다 — 프록시가 빌드 컨테이너에 전달되지 않았다
+### 6.3 첫 빌드는 실패했다
 
-`RUN npm install -g pnpm`이 **471초 뒤 ETIMEDOUT**으로 죽었다. 도커 데몬에는 사내 프록시가
-설정돼 있어 **베이스 이미지 받기는 성공**하는데, 빌드 컨테이너 안의 `RUN` 단계는 프록시를
-물려받지 못해 레지스트리로 직접 나가려다 끊긴 것이다.
+프록시가 빌드 컨테이너에 전달되지 않아 `RUN npm install`이 471초 뒤 `ETIMEDOUT`으로 죽었다.
+`deploy/compose.yml`의 `build.args`로 고쳤고 같은 단계가 2.5초로 끝난다. 위 값들은 모두
+고친 뒤의 이미지에서 잰 것이다.
 
-조용히 잘못되기 쉬운 형태였다. `git clone`은 호스트 셸이 프록시를 쓰므로 **성공한다.**
-그래서 가이드 1절의 "`git clone`이 되는지"를 통과하고도 빌드에서 막힌다.
+경위는 [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) **T-014**에 있다
+(`CLAUDE.md` 4절 — 경위는 한 곳에만 쓴다).
 
-`deploy/compose.yml`의 `api.build.args`에 프록시를 셸 환경에서 받아 넘기도록 해서 고쳤다.
-같은 단계가 **2.5초**로 끝난다. 값은 저장소에 박지 않고(`${HTTP_PROXY:-}`) 프록시가 없는
-폐쇄망 반입 서버에서는 빈 값이라 무해하다. 프록시 값이 이미지에 남지 않는 것도 확인했다
-(`docker history` 0건, `Config.Env`에 없음 — 도커가 predefined build arg로 처리해 제거한다).
 
 ## 7. 다음 Phase 인계
 

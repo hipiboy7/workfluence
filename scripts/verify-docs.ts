@@ -48,6 +48,13 @@ const SKIP = [/^docs[\\/]prompts[\\/]prototype-/];
  */
 const REPO_PREFIXES = ['apps/', 'packages/', 'scripts/', 'e2e/', 'deploy/', 'docs/', '.claude/', '.github/'];
 
+/**
+ * 저장소에 **일부러 커밋하지 않는** 파일. 문서가 "이것을 만들어라"라고 가리키는 것이 정상이라
+ * 커밋 목록 대조에서 뺀다. `.local/`을 접두에서 뺀 것과 같은 이유다(위 주석).
+ * 넣기 전에 `.gitignore`가 실제로 그 경로를 막는지 확인한다 — `git check-ignore -v <경로>`.
+ */
+const GITIGNORED_BY_DESIGN = new Set(['deploy/.env']);
+
 /** pnpm 내장 명령. 스크립트 이름이 아니므로 package.json에서 찾지 않는다. */
 const PNPM_BUILTINS = new Set([
   'install', 'i', 'add', 'remove', 'rm', 'update', 'up', 'exec', 'dlx', 'store', 'audit', 'why', 'list', 'ls',
@@ -163,7 +170,8 @@ function checkFile(file: string, scripts: Set<string>, tracked: Set<string>, fin
       } else if (isRepoPath(value)) {
         const target = value.replace(/[),.]+$/, '').replace(/\/+$/, '');
         // 존재 여부가 아니라 **커밋된 목록**과 대조한다 (환경·대소문자 무관)
-        if (!tracked.has(target)) findings.push({ file, line: lineNo, kind: '경로가 저장소에 없음', detail: target });
+        if (!tracked.has(target) && !GITIGNORED_BY_DESIGN.has(target))
+          findings.push({ file, line: lineNo, kind: '경로가 저장소에 없음', detail: target });
       }
     }
 
