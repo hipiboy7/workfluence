@@ -16,6 +16,7 @@ import { AuditService } from '../audit/audit.service';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { users, type UserRow } from '../db/schema';
+import { SpacesService } from '../spaces/spaces.service';
 import { UsersService } from '../users/users.service';
 import { mapGroupsToRole } from './domain/claims';
 import { OIDC_PROVIDER, type OidcClaims, type OidcProvider, type PkcePair } from './oidc/oidc.provider';
@@ -37,6 +38,7 @@ export class AuthService {
   constructor(
     private readonly users: UsersService,
     private readonly audit: AuditService,
+    private readonly spaces: SpacesService,
     @Inject(DB) private readonly db: Db,
     @Inject(APP_ENV) private readonly env: AppEnvToken,
     @Inject(OIDC_PROVIDER) private readonly oidc: OidcProvider | null,
@@ -196,6 +198,9 @@ export class AuthService {
         approvedAt: sql`now()`,
       })
       .returning();
+    // IdP 계정도 쓸 공간이 필요하다 (FR-309). **운영의 주 로그인 경로가 여기다** —
+    // 승인 경로에만 두면 IdP로 들어온 사람은 첫 화면이 비어 있다
+    await this.spaces.ensurePersonalSpace(row.id, row.displayName, tx);
     return row;
   }
 

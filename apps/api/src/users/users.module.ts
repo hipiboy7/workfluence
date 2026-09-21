@@ -5,6 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
+import { SpacesService } from '../spaces/spaces.service';
 import { UsersService, toUserView } from './users.service';
 
 /** 사용자 관리 API (P1_설계서_Auth 5절). 모든 쓰기는 감사로그와 **같은 트랜잭션**이다 (FR-236). */
@@ -14,6 +15,7 @@ export class UsersController {
   constructor(
     private readonly users: UsersService,
     private readonly audit: AuditService,
+    private readonly spaces: SpacesService,
     @Inject(DB) private readonly db: Db,
   ) {}
 
@@ -32,6 +34,8 @@ export class UsersController {
   ): Promise<UserView> {
     return this.db.transaction(async (tx) => {
       const row = await this.users.create(dto, actor, tx);
+      // 관리자가 만든 계정도 바로 활성이다. 승인 경로를 거치지 않으므로 여기서도 만든다 (FR-309)
+      await this.spaces.ensurePersonalSpace(row.id, row.displayName, tx);
       await this.audit.record(
         { action: 'user.create', actorId: actor.id, targetType: 'user', targetId: row.id, detail: { username: row.username, role: row.role }, ip: req.ip },
         tx,
@@ -45,6 +49,9 @@ export class UsersController {
   async approve(@Param('id') id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
     return this.db.transaction(async (tx) => {
       const row = await this.users.approve(id, actor, tx);
+      // **승인과 같은 트랜잭션에서** 개인 스페이스를 만든다 (FR-309).
+      // 따로 두면 승인은 됐는데 스페이스가 없는 계정이 생긴다
+      await this.spaces.ensurePersonalSpace(row.id, row.displayName, tx);
       await this.audit.record({ action: 'user.approve', actorId: actor.id, targetType: 'user', targetId: id, detail: { username: row.username }, ip: req.ip }, tx);
       return toUserView(row);
     });

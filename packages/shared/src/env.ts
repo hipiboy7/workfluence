@@ -143,6 +143,26 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
   return env;
 }
 
+/**
+ * `.env` 본문을 키-값 맵으로 읽는다.
+ *
+ * **한 곳에만 둔다** (`CLAUDE.md` 1.3절). 앱·`check:env`·`dev:db`가 각자 파싱하고 있었고,
+ * 따옴표 처리를 한 곳만 고쳤다가 `pnpm check:env`가 조용히 깨졌다.
+ *
+ * 값의 홑·겹따옴표를 벗긴다. JSON 값은 **홑따옴표로 감싸야** 이 파일을 셸에서 `source`할 때
+ * 쪼개지지 않는다 — 겹따옴표는 안쪽 따옴표가 중첩되지 않아 값이 깨진다.
+ */
+export function parseDotenv(content: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf('=');
+    if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return out;
+}
+
 /** .env.example 본문에서 키를 추출한다 (주석·빈 줄 제외). */
 export function extractEnvExampleKeys(content: string): string[] {
   return content

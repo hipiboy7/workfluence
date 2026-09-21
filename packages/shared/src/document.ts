@@ -193,6 +193,17 @@ const BLOCK_NODES = new Set([
 ]);
 
 /** 빈 문서. 새 페이지의 초기 본문. 스키마 버전을 함께 박는다 (`CLAUDE.md` 6절). */
+/**
+ * 문서에 스키마 버전을 찍는다 (`CLAUDE.md` 6절 "문서에 `schemaVersion` 포함").
+ *
+ * **편집기는 이 값을 만들지 않는다.** ProseMirror의 `toJSON()`은 type·attrs·content·marks·text만
+ * 내보내므로, 화면이 넣어 주기를 기대하면 **아무 오류 없이 버전 없는 문서가 쌓인다.**
+ * 그래서 **서버가 저장 직전에 찍는다** — 정본을 쓰는 쪽이 책임진다.
+ */
+export function stampSchemaVersion(doc: DocNode): DocNode {
+  return { ...doc, attrs: { ...(doc.attrs ?? {}), schemaVersion: DOCUMENT_SCHEMA_VERSION } };
+}
+
 export function emptyDocument(): DocNode {
   return { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph' }] };
 }

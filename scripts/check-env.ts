@@ -7,12 +7,17 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statfsSync } from 'node:fs';
 import { parse, resolve, sep } from 'node:path';
 import { Client } from 'pg';
-import { parseEnv } from '../packages/shared/src/env';
+import { parseEnv, parseDotenv } from '../packages/shared/src/env';
 
 const root = resolve(__dirname, '..');
 const MIGRATIONS_DIR = resolve(root, 'apps', 'api', 'drizzle');
 const results: { name: string; ok: boolean; detail: string }[] = [];
 const check = (name: string, ok: boolean, detail: string) => results.push({ name, ok, detail });
+
+/** `.env`를 읽는다. 파싱은 shared의 `parseDotenv` 한 곳에서 한다 (CLAUDE.md 1.3절) */
+function readDotenv(path: string): Record<string, string> {
+  return existsSync(path) ? parseDotenv(readFileSync(path, 'utf8')) : {};
+}
 
 async function main(): Promise<void> {
   const nodeMajor = Number(process.versions.node.split('.')[0]);
@@ -32,7 +37,7 @@ async function main(): Promise<void> {
   let env: ReturnType<typeof parseEnv> | undefined;
   if (existsSync(envPath)) {
     try {
-      env = parseEnv(loadDotenv(envPath));
+      env = parseEnv(readDotenv(envPath));
       check('.env 스키마 (WF_* strict)', true, `${Object.keys(env).length}개 키`);
     } catch (e) {
       check('.env 스키마 (WF_* strict)', false, (e as Error).message);
@@ -99,17 +104,6 @@ async function main(): Promise<void> {
   console.log('\nREADY');
 }
 
-function loadDotenv(path: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of readFileSync(path, 'utf8').split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const idx = line.indexOf('=');
-    if (idx < 0) continue;
-    out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^"(.*)"$/, '$1');
-  }
-  return out;
-}
 
 main().catch((e) => {
   console.error(e);

@@ -9,6 +9,8 @@ import { CsrfGuard } from './auth/auth.guard';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
+import { PagesModule } from './pages/pages.module';
+import { SpacesModule } from './spaces/spaces.module';
 import { UsersModule } from './users/users.module';
 
 // SPA 정적 서빙 여부는 모듈 구성 시점에 알아야 하므로 같은 로더를 한 번 더 호출한다 (순수 함수라 결과가 같다)
@@ -41,6 +43,9 @@ function resolveWebDist(): string {
     AuditModule,
     UsersModule,
     AuthModule,
+    // SpacesModule은 @Global — PagesService와 승인 시 개인 스페이스 생성이 쓴다
+    SpacesModule,
+    PagesModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * 데이터 모델. 전체 그림은 docs/설계서_Architecture.md 3.1절이 단일 출처이고,
@@ -87,6 +87,115 @@ export const auditEvents = pgTable(
   (t) => [index('audit_events_created_idx').on(t.createdAt), index('audit_events_actor_idx').on(t.actorId)],
 );
 
+/** 스페이스 분류 (P2_설계서_Page 1절). 이름은 유일하다 */
+export const spaceCategories = pgTable(
+  'space_categories',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    name: text('name').notNull(),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('space_categories_name_uq').on(t.name)],
+);
+
+/**
+ * 스페이스 (FR-300~314).
+ * `kind`: personal|team, `status`: active|suspended. 접근 판정은 shared의 spaceAccess()가 한다.
+ */
+export const spaces = pgTable(
+  'spaces',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    /** WF + 6자. 사람이 부르는 이름과 별개로 변하지 않는 식별자 */
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    kind: text('kind').notNull().default('team'),
+    status: text('status').notNull().default('active'),
+    categoryId: uuid('category_id').references(() => spaceCategories.id),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+    suspendedBy: uuid('suspended_by'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('spaces_key_uq').on(t.key), index('spaces_kind_status_idx').on(t.kind, t.status)],
+);
+
+/** Crew (FR-301, FR-302). 개인 스페이스는 이 표를 쓰지 않는다 */
+export const spaceMembers = pgTable(
+  'space_members',
+  {
+    spaceId: uuid('space_id')
+      .notNull()
+      .references(() => spaces.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    role: text('role').notNull().default('viewer'),
+    addedBy: uuid('added_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.userId] }), index('space_members_user_idx').on(t.userId)],
+);
+
+/**
+ * 페이지 (FR-320~334).
+ * `current_version_no`가 정본 버전을 가리킨다. `search_text`는 **파생 데이터**라 언제든 재생성한다.
+ */
+export const pages = pgTable(
+  'pages',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references(() => spaces.id),
+    parentId: uuid('parent_id'),
+    title: text('title').notNull(),
+    position: integer('position').notNull().default(0),
+    currentVersionNo: integer('current_version_no').notNull().default(0),
+    /** 현재 버전의 평문. 검색 전용 파생 데이터 (Phase 3에서 인덱스를 건다) */
+    searchText: text('search_text').notNull().default(''),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    updatedBy: uuid('updated_by')
+      .notNull()
+      .references(() => users.id),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index('pages_space_parent_idx').on(t.spaceId, t.parentId, t.position)],
+);
+
+/**
+ * 페이지 버전 (FR-324). **append-only** — 수정도 복원도 새 행이다.
+ * (page_id, version_no) 유일 제약이 동시 저장의 번호 충돌을 최종적으로 막는다.
+ */
+export const pageVersions = pgTable(
+  'page_versions',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => pages.id),
+    versionNo: integer('version_no').notNull(),
+    title: text('title').notNull(),
+    contentJson: jsonb('content_json').notNull(),
+    contentText: text('content_text').notNull().default(''),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('page_versions_page_no_uq').on(t.pageId, t.versionNo)],
+);
+
 /** 운영 조절값 (CLAUDE.md 5절 세 번째 분류). 관리 화면은 Phase 4. */
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
@@ -96,6 +205,11 @@ export const settings = pgTable('settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export type SpaceRow = typeof spaces.$inferSelect;
+export type SpaceCategoryRow = typeof spaceCategories.$inferSelect;
+export type SpaceMemberRow = typeof spaceMembers.$inferSelect;
+export type PageRow = typeof pages.$inferSelect;
+export type PageVersionRow = typeof pageVersions.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
 export type AuditEventRow = typeof auditEvents.$inferSelect;

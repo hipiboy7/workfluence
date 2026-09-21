@@ -17,9 +17,28 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.spec.ts'],
+    /**
+     * **파일 병렬을 끈다.** 통합 테스트가 **하나의 테스트 DB**를 공유하고 각 테스트 앞에서
+     * TRUNCATE한다. 파일이 병렬로 돌면 한 파일의 정리가 다른 파일의 데이터를 지운다.
+     *
+     * 이것이 Phase 1에서 재현하지 못했던 간헐적 실패의 원인이다 — 그때는 DB를 쓰는 파일이
+     * 하나뿐이라 드물게만 났고, Phase 2에서 둘이 되자 매번 났다.
+     *
+     * 워커별 스키마 분리가 더 빠르지만 복잡하다. 전체가 15초 안쪽이라 순차로 둔다.
+     */
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
-      include: ['src/common/**/*.ts', 'src/health/**/*.ts', 'src/auth/**/*.ts', 'src/users/**/*.ts', 'src/audit/**/*.ts'],
+      // **Phase를 늘릴 때 여기도 늘린다.** 빠뜨리면 새 코드가 조용히 측정 대상 밖에 있게 된다
+      include: [
+        'src/common/**/*.ts',
+        'src/health/**/*.ts',
+        'src/auth/**/*.ts',
+        'src/users/**/*.ts',
+        'src/audit/**/*.ts',
+        'src/spaces/**/*.ts',
+        'src/pages/**/*.ts',
+      ],
       exclude: ['src/auth/oidc/http.provider.ts', 'src/**/*.module.ts', 'src/**/*.spec.ts'],
       thresholds: {
         lines: 70,
@@ -28,6 +47,7 @@ export default defineConfig({
         statements: 70,
         // A등급은 90% (CLAUDE.md 3절). 디렉토리로 고정해 측정을 기계적으로 만든다
         'src/auth/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/pages/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

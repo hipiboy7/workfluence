@@ -2,7 +2,11 @@ import { BrowserRouter, Route, Routes } from 'react-router';
 import { AuthProvider, RequireAuth } from './auth';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { FindAccountPage } from './pages/FindAccountPage';
-import { HomePage } from './pages/HomePage';
+import { PageEditorPage } from './pages/PageEditorPage';
+import { PageHistoryPage } from './pages/PageHistoryPage';
+import { PageViewPage } from './pages/PageViewPage';
+import { SpacePage } from './pages/SpacePage';
+import { SpacesPage } from './pages/SpacesPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
@@ -25,7 +29,12 @@ export function App() {
           <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
           <Route path="/admin/users" element={<RequireAuth><AdminUsersPage /></RequireAuth>} />
           <Route path="/admin/audit" element={<RequireAuth><AdminAuditPage /></RequireAuth>} />
-          <Route path="/" element={<RequireAuth><HomePage /></RequireAuth>} />
+          <Route path="/spaces/:id" element={<RequireAuth><SpacePage /></RequireAuth>} />
+          <Route path="/pages/:id" element={<RequireAuth><PageViewPage /></RequireAuth>} />
+          <Route path="/pages/:id/edit" element={<RequireAuth><PageEditorPage /></RequireAuth>} />
+          <Route path="/pages/:id/history" element={<RequireAuth><PageHistoryPage /></RequireAuth>} />
+          {/* Phase 2가 홈을 스페이스 목록으로 바꿨다 */}
+          <Route path="/" element={<RequireAuth><SpacesPage /></RequireAuth>} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
