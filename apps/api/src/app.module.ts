@@ -15,6 +15,7 @@ import { HealthController } from './health/health.controller';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
 import { SpacesModule } from './spaces/spaces.module';
+import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
 
 // SPA 정적 서빙 여부는 모듈 구성 시점에 알아야 하므로 같은 로더를 한 번 더 호출한다 (순수 함수라 결과가 같다)
@@ -55,6 +56,7 @@ function resolveWebDist(): string {
     // NotificationsModule은 @Global — 댓글·페이지 저장이 멘션 알림을 만든다
     NotificationsModule,
     CommentsModule,
+    TrashModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

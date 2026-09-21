@@ -130,8 +130,8 @@
 |---|---|---|---|
 | 멘션 추출 | `apps/api/src/notifications/domain/mention.ts` | **A (신규)** | 문서 JSON에서 `@아이디`를 뽑는다. 순수 함수 |
 | 정책값 검증 | `packages/shared/src/policy.ts` | **A (신규)** | 범위·형식 판정. 서버·화면이 같이 쓴다 |
-| 알림 | apps/api/src/notifications/ | B | 생성·목록·읽음. 채널 경계 |
-| 휴지통 | apps/api/src/trash/ | B | 목록·되살리기·물리 삭제 |
+| 알림 | `apps/api/src/notifications/` | B | 생성·목록·읽음. 채널 경계 |
+| 휴지통 | `apps/api/src/trash/` | B | 목록·되살리기·물리 삭제 |
 | 정책값 | apps/api/src/settings/ | B | 읽기 캐시·변경·감사 |
 | 라벨 | apps/api/src/labels/ | B | 붙이기·떼기·찾기 |
 | 화면 | `apps/web/src/pages/admin/`, `components/` | B | 알림함·휴지통·정책 설정·라벨 |

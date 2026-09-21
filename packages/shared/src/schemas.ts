@@ -267,6 +267,8 @@ export type CommentView = {
   /** 지울 수 있는지. 화면이 규칙을 다시 구현하지 않게 서버가 판정해 내려 준다 */
   canDelete: boolean;
 };
+export type TrashPageView = { id: string; title: string; spaceId: string; spaceName: string; deletedAt: string; deletedByName: string };
+export type TrashSpaceView = { id: string; key: string; name: string; deletedAt: string; createdByName: string };
 export type NotificationView = {
   id: string;
   kind: 'mention';
