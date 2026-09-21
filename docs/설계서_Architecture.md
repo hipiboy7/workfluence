@@ -114,7 +114,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 테이블 | 핵심 컬럼 | 도입 | 비고 |
 |---|---|---|---|
 | `settings` | `key` PK, `value` jsonb, `updated_by`, `updated_at` | **P0** | 운영 조절값 (`CLAUDE.md` 5절 세 번째 분류) |
-| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by` | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생** |
+| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by` | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
 | `sessions` | (connect-pg-simple 관리) | P1 | 서버측 세션 |
 | `space_categories` | `id`, `name` uq, `created_by` | P2 | |
 | `spaces` | `id`, `key` uq(자동), `name`, `description`, `kind`, `status`, `category_id`, `created_by`, `suspended_at/by`, `deleted_at` | P2 | `kind`: `personal`/`team`, `status`: `active`/`suspended` |
