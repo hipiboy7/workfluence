@@ -17,6 +17,30 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # 통합 테스트는 **실제 PostgreSQL**을 쓴다 (CLAUDE.md 3절 B등급 — DB는 대역을 쓰지 않는다).
+    # 그렇게 정한 이상 CI가 DB를 줘야 한다. 포트는 개발과 같은 5433으로 맞춰 둔다.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: workfluence_test
+          POSTGRES_USER: workfluence
+          POSTGRES_PASSWORD: workfluence
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U workfluence -d workfluence_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    # CI 전용 값이다. 일회용 컨테이너에만 쓰이고 운영과 무관하다 (CLAUDE.md 12.3절).
+    # 실제 형태의 시크릿을 쓰지 않는다 — 보자마자 가짜임을 알 수 있어야 한다.
+    env:
+      WF_ENV: test
+      WF_DATABASE_URL: postgres://workfluence:workfluence@127.0.0.1:5433/workfluence_test
+      WF_DATABASE_URL_TEST: postgres://workfluence:workfluence@127.0.0.1:5433/workfluence_test
+      WF_SESSION_SECRET: ci-only-not-a-real-secret-0000000000
+      WF_ROOT_PASSWORD: ci-only-not-a-real-password
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,8 +61,10 @@ jobs:
       - name: typecheck
         run: pnpm typecheck
 
-      - name: 단위·통합 테스트
-        run: pnpm test
+      - name: 단위·통합 테스트 (커버리지 임계 포함)
+        # `pnpm test`가 아니라 `test:cov`다. 임계(api 70% · A등급 90%)를 CI가 강제하지 않으면
+        # 설계서 A.6의 "확인 방법: CI"가 거짓이 된다 — 사람이 손으로 돌릴 때만 확인된다 (자체 점검 #5)
+        run: pnpm test:cov
 
       - name: 문서 검사 (verify:docs)
         run: pnpm verify:docs
