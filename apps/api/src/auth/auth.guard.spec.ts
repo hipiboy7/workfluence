@@ -2,7 +2,7 @@ import { ForbiddenException, UnauthorizedException, type ExecutionContext } from
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 import { CSRF_HEADER } from '@workfluence/shared';
-import type { UsersService } from '../users/users.service';
+import { UsersService } from '../users/users.service';
 import type { UserRow } from '../db/schema';
 import { AuthGuard, CsrfGuard } from './auth.guard';
 
