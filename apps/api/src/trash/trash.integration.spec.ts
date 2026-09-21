@@ -137,3 +137,37 @@ describe('스페이스 휴지통 (FR-513)', () => {
     await expect(svc.restoreSpace(sp.id, admin)).rejects.toThrow(/찾을 수 없다/);
   });
 });
+
+describe('NFR-42 — 휴지통 목록 지연', () => {
+  it('스페이스당 1,000건에서 p95를 잰다', async () => {
+    const me = await user('me');
+    const sp = await team(me);
+
+    // 합성 데이터 1,000건. **한 번에 넣는다** — 1,000번 왕복하면 재는 것이 삽입 시간이 된다
+    const now = new Date();
+    const rows = Array.from({ length: 1000 }, (_, i) => ({
+      spaceId: sp.id,
+      parentId: null,
+      title: `지운 문서 ${i}`,
+      position: i,
+      currentVersionNo: 1,
+      searchText: '',
+      createdBy: me.id,
+      updatedBy: me.id,
+      deletedAt: now,
+    }));
+    for (let i = 0; i < rows.length; i += 200) await db.insert(pages).values(rows.slice(i, i + 200));
+
+    const samples: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      const t = performance.now();
+      await svc.listPages(me, 200);
+      samples.push(performance.now() - t);
+    }
+    samples.sort((a, b) => a - b);
+    const p95 = samples[Math.floor(samples.length * 0.95) - 1];
+    // 수치를 남긴다 — 검증기록이 이 출력을 인용한다
+    console.log(`[NFR-42] 1,000건 휴지통 목록 p50=${samples[9].toFixed(1)}ms p95=${p95.toFixed(1)}ms max=${samples[19].toFixed(1)}ms`);
+    expect(p95).toBeLessThan(300);
+  });
+});
