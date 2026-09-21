@@ -90,6 +90,13 @@ describe('업로드 (FR-410~415)', () => {
     await expect(svc.upload(pid, file({ originalname: 'x.pdf', mimetype: 'text/html' }), me)).rejects.toThrow(/맞지 않/);
   });
 
+  it('빈 파일은 400이다 — 413(너무 크다)이 아니다 (자체 점검 #14)', async () => {
+    const me = await user('me');
+    const sp = await team(me);
+    const pid = await page(sp.id, me.id);
+    await expect(svc.upload(pid, file({ buffer: Buffer.alloc(0), size: 0 }), me)).rejects.toMatchObject({ status: 400 });
+  });
+
   it('크기 상한을 넘으면 413 (FR-415)', async () => {
     const me = await user('me');
     const sp = await team(me);
@@ -106,6 +113,25 @@ describe('업로드 (FR-410~415)', () => {
     // 이름은 메타데이터로 그대로 남지만, 내려받을 수 있다는 것이 곧 경로가 정상이라는 뜻이다
     expect(view.filename).toBe('../../../../etc/passwd.pdf');
     expect((await svc.download(view.id, me)).data.length).toBeGreaterThan(0);
+  });
+
+  it('이름은 맞는데 내용이 다르면 막는다 (FR-414b)', async () => {
+    const me = await user('me');
+    const sp = await team(me);
+    const pid = await page(sp.id, me.id);
+    // 윈도우 실행 파일을 `.pdf`로 이름 바꿔 올린다. **앞의 두 검사는 통과한다** — 이름도 형식도 맞다
+    const renamed = file({ originalname: 'report.pdf', mimetype: 'application/pdf', buffer: Buffer.from('MZ\x90\x00executable') });
+    await expect(svc.upload(pid, renamed, me)).rejects.toThrow(/내용이 \.pdf 형식이 아니다/);
+    expect(await svc.list(pid, me)).toHaveLength(0);
+  });
+
+  it('저장하는 형식은 올린 쪽이 말한 것이 아니다 — 그 값이 다운로드 헤더가 된다', async () => {
+    const me = await user('me');
+    const sp = await team(me);
+    const pid = await page(sp.id, me.id);
+    const view = await svc.upload(pid, file({ originalname: 'a.txt', mimetype: 'text/plain', buffer: Buffer.from('글자다') }), me);
+    expect(view.mime).toBe('text/plain');
+    expect((await svc.download(view.id, me)).row.mime).toBe('text/plain');
   });
 
   it('스캐너가 거부하면 저장하지 않는다 (FR-418 훅 지점)', async () => {
@@ -144,6 +170,17 @@ describe('권한 (FR-416)', () => {
     await expect(svc.remove(view.id, viewer)).rejects.toThrow(/권한/);
   });
 
+  it('중지된 스페이스에서는 올린 사람도 지우지 못한다 (자체 점검 #4)', async () => {
+    const admin = await user('adm', 'admin');
+    const sp = await team(admin);
+    const pid = await page(sp.id, admin.id);
+    const view = await svc.upload(pid, file(), admin);
+    await spacesSvc.changeStatus(sp.id, 'suspended', admin);
+    // 중지는 "읽기 전용"이다. 작성자만 빠져나가면 판정이 두 벌이 된다
+    await expect(svc.remove(view.id, admin)).rejects.toThrow(/쓸 권한/);
+    expect((await svc.download(view.id, admin)).row.id).toBe(view.id);
+  });
+
   it('지워진 페이지의 첨부는 보이지 않는다 (FR-427)', async () => {
     const me = await user('me');
     const sp = await team(me);
@@ -159,6 +196,12 @@ describe('다운로드 헤더 (FR-417)', () => {
     const h = contentDisposition('a"b\r\nX-Evil: 1.pdf');
     expect(h).not.toMatch(/[\r\n]/);
     expect(h.split('filename="')[1].split('"')[0]).not.toContain('"');
+  });
+
+  it('**언제나 attachment로 시작한다** — 브라우저가 우리 출처에서 내용을 실행하지 않게', () => {
+    for (const name of ['a.pdf', '보고서.txt', 'x";inline;.pdf', 'a\r\nb.png', '한글 이름.hwp']) {
+      expect(contentDisposition(name).startsWith('attachment;')).toBe(true);
+    }
   });
 
   it('한글 이름은 RFC 5987로 나간다', () => {

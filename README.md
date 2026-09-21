@@ -2,7 +2,7 @@
 
 금융 폐쇄망 내부용 위키·문서 협업 시스템 (Confluence 대체).
 
-**현재 단계**: Phase 0 (공통 기반). Linux 서버 이미지 빌드 검증만 남았다.
+**현재 단계**: Phase 3까지 완료 (검색·첨부·댓글, 2026-09-22). 다음은 Phase 4 (권한 세분화·관리·알림).
 
 ## 처음 온 사람이 읽는 순서
 
@@ -23,7 +23,7 @@
 | 리눅스 서버에서 이미지를 만든다 | [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md) |
 | 새 기능을 넣고 싶다 | [`docs/기능백로그.md`](docs/기능백로그.md) |
 | 이 오류 본 적 있나 | [`docs/internal/검토서_트러블슈팅.md`](docs/internal/검토서_트러블슈팅.md) |
-| 무엇을 어떻게 검증했나 | [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) |
+| 무엇을 어떻게 검증했나 | Phase별 검증기록 — [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) · [`docs/P1_검증기록_Auth.md`](docs/P1_검증기록_Auth.md) · [`docs/P2_검증기록_Page.md`](docs/P2_검증기록_Page.md) · [`docs/P3_검증기록_Content.md`](docs/P3_검증기록_Content.md) |
 | 왜 이런 작업 방식인가 | [`docs/internal/검토서_방법론개정.md`](docs/internal/검토서_방법론개정.md) |
 
 ## 구조
@@ -34,7 +34,7 @@ apps/web/          React + Vite SPA
 packages/shared/   서버·클라이언트 공유 계약 (환경 스키마·상수·문서 검증·권한·DTO)
 e2e/               Playwright
 deploy/            Dockerfile · compose · nginx (Linux 서버에서 빌드)
-scripts/           check-env · dev-db · verify-docs · e2e (tsx, OS 무관)
+scripts/           check-env · setup-env · dev-db · verify-docs · e2e · reindex · check-licenses (tsx, OS 무관)
 docs/              운영·인수인계 산출물 / docs/internal 작업 기록 / docs/prompts 요청 원문
 .local/            (git 무시) PostgreSQL 데이터·pnpm store·Playwright 브라우저 — 전부 저장소 안
 ```

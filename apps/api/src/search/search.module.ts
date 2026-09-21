@@ -1,13 +1,13 @@
-import { Controller, Get, Global, Module, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Global, Inject, Module, Query, UseGuards } from '@nestjs/common';
 import { searchQueryDto, type SearchHit } from '@workfluence/shared';
 import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
-import { SearchService } from './search.service';
+import { SEARCH, SearchService, type SearchProvider } from './search.service';
 
 @Controller('api/search')
 @UseGuards(AuthGuard)
 export class SearchController {
-  constructor(private readonly search: SearchService) {}
+  constructor(@Inject(SEARCH) private readonly search: SearchProvider) {}
 
   /** 검색은 읽기다. **감사로그에 남기지 않는다** (FR-409) — 기록이 검색량만큼 불어난다 */
   @Get()
@@ -20,5 +20,9 @@ export class SearchController {
 }
 
 @Global()
-@Module({ providers: [SearchService], controllers: [SearchController], exports: [SearchService] })
+@Module({
+  providers: [SearchService, { provide: SEARCH, useExisting: SearchService }],
+  controllers: [SearchController],
+  exports: [SearchService, SEARCH],
+})
 export class SearchModule {}

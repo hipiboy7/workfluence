@@ -94,7 +94,8 @@ export class CommentsService {
     const row = await tx.query.comments.findFirst({ where: and(eq(comments.id, id), isNull(comments.deletedAt)) });
     if (!row) throw new NotFoundException('댓글을 찾을 수 없다');
     const page = await this.page(row.pageId, tx);
-    const ctx = await this.spaces.context(page.spaceId, principal, tx);
+    // 중지된 스페이스에서는 작성자도 지우지 못한다 — 판정을 두 벌로 만들지 않는다 (P3 자체 점검 #4)
+    const ctx = await this.spaces.assertWrite(page.spaceId, principal, tx);
     if (row.createdBy !== principal.id && !this.moderates(ctx.access, principal)) {
       throw new ForbiddenException('이 댓글을 지울 권한이 없다');
     }

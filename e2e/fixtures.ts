@@ -47,10 +47,19 @@ export async function createMember(m: { username: string; password: string; disp
   const c = new Client(url());
   await c.connect();
   try {
-    await c.query(
+    const display = m.displayName ?? m.username;
+    const { rows } = await c.query<{ id: string }>(
       `INSERT INTO users (username, display_name, password_hash, role, status, must_change_password, approved_at)
-       VALUES ($1, $3, $2, 'member', 'active', false, now())`,
-      [m.username, await argon2.hash(m.password, { type: argon2.argon2id }), m.displayName ?? m.username],
+       VALUES ($1, $3, $2, 'member', 'active', false, now())
+       RETURNING id`,
+      [m.username, await argon2.hash(m.password, { type: argon2.argon2id }), display],
+    );
+    // **승인이 만드는 상태를 그대로 만든다.** 개인 스페이스는 승인 시 생긴다(FR-309).
+    // 여기서 빼면 "화면을 안 거쳤을 뿐"인데 계정 상태가 달라져, 그것을 전제한 테스트가 깨진다
+    await c.query(
+      `INSERT INTO spaces (key, name, kind, status, description, created_by)
+       VALUES ($1, $2, 'personal', 'active', '', $3)`,
+      [`E2E${Date.now().toString(36).slice(-5).toUpperCase()}${Math.floor(Math.random() * 900 + 100)}`, `${display}의 공간`, rows[0].id],
     );
   } finally {
     await c.end();

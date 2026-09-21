@@ -8,6 +8,7 @@ import { UuidPipe } from '../common/uuid.pipe';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { AttachmentsService, contentDisposition, type UploadedFileLike } from './attachments.service';
+import { mbToBytes } from './domain/upload';
 import { LocalDiskStorage } from './storage/local.storage';
 import { PassThroughScanner, SCANNER, STORAGE } from './storage/storage.provider';
 
@@ -84,7 +85,7 @@ export class AttachmentsController {
     MulterModule.registerAsync({
       inject: [APP_ENV],
       useFactory: (env: AppEnvToken) => ({
-        limits: { fileSize: env.WF_UPLOAD_MAX_MB * 1024 * 1024, files: 1 },
+        limits: { fileSize: mbToBytes(env.WF_UPLOAD_MAX_MB), files: 1 },
         // **한글 파일명이 깨진다.** multer 기본값은 latin1이라 `보고서.txt`가 `ë³´ê³ ì<...>`로 들어온다.
         // 조용히 잘못되는 유형이다 — 업로드는 성공하고 목록에도 나오는데 이름만 읽을 수 없다 (T-018)
         defParamCharset: 'utf8',

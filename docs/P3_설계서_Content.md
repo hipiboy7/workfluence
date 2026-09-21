@@ -143,11 +143,11 @@
 | 모듈 | 경로 | 등급 | 하는 일 |
 |---|---|---|---|
 | 문서 텍스트 추출 | `packages/shared/src/document.ts` | A | `extractText` — **이미 있다** |
-| 업로드 판정 | apps/api/src/attachments/domain/upload.ts | **A (신규)** | MIME·확장자·크기 판정. 순수 함수 |
-| 검색 | apps/api/src/search/ | B | 질의·권한 필터 |
-| 첨부 | apps/api/src/attachments/ | B | 업로드·다운로드·삭제 |
-| 저장소 제공자 | apps/api/src/attachments/storage/ | B | **DIP 경계.** 로컬 디스크 구현 |
-| 댓글 | apps/api/src/comments/ | B | |
+| 업로드 판정 | `apps/api/src/attachments/domain/upload.ts` | **A (신규)** | MIME·확장자·크기 판정. 순수 함수 |
+| 검색 | `apps/api/src/search/` | B | 질의·권한 필터 |
+| 첨부 | `apps/api/src/attachments/` | B | 업로드·다운로드·삭제 |
+| 저장소 제공자 | `apps/api/src/attachments/storage/` | B | **DIP 경계.** 로컬 디스크 구현 |
+| 댓글 | `apps/api/src/comments/` | B | |
 
 ---
 

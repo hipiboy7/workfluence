@@ -20,7 +20,7 @@
 | 대상 | 파일 | 건수 | skip |
 |---|---|---|---|
 | `packages/shared` | 5 | 58 | 0 |
-| `apps/api` | 17 | 176 | 0 |
+| `apps/api` | 18 | 191 | 0 |
 | E2E (`pnpm test:e2e`) | 4 | 13 | 0 |
 
 **skip은 0건이다.** skip으로 통과한 것은 통과가 아니다 (`CLAUDE.md` 1.3절).
@@ -30,21 +30,22 @@
 | 파일 | 등급 | 라인 | 브랜치 | 함수 | 구문 |
 |---|---|---|---|---|---|
 | `apps/api/src/attachments/domain/upload.ts` | **A** | 100.00 | 100.00 | 100.00 | 100.00 |
-| `apps/api/src/attachments/attachments.service.ts` | B | 100.00 | 87.50 | 100.00 | 95.91 |
-| `apps/api/src/attachments/storage/local.storage.ts` | B | 92.85 | 50.00 | 83.33 | 86.66 |
+| `apps/api/src/attachments/domain/signature.ts` | **A** | 100.00 | 100.00 | 100.00 | 100.00 |
+| `apps/api/src/attachments/attachments.service.ts` | B | 100.00 | 80.76 | 100.00 | 94.23 |
+| `apps/api/src/attachments/storage/local.storage.ts` | B | 90.00 | 75.00 | 85.71 | 86.36 |
 | `apps/api/src/attachments/storage/storage.provider.ts` | B | 100.00 | 100.00 | 100.00 | 100.00 |
-| `apps/api/src/comments/comments.service.ts` | B | 94.59 | 87.50 | 100.00 | 90.90 |
-| `apps/api/src/search/search.service.ts` | B | 100.00 | 75.00 | 100.00 | 100.00 |
+| `apps/api/src/comments/comments.service.ts` | B | 91.89 | 84.37 | 100.00 | 88.63 |
+| `apps/api/src/search/search.service.ts` | B | 100.00 | 75.00 | 75.00 | 88.88 |
 
-전체: `apps/api` 라인 **92.28%** · 브랜치 80.54% · 구문 87.87%, `packages/shared` 라인 **95.79%** · 브랜치 94.24%.
+전체: `apps/api` 라인 **92.30%** · 브랜치 80.89% · 구문 87.97%, `packages/shared` 라인 **95.79%** · 브랜치 94.24%.
 A등급 90% 관문(`src/attachments/domain/**`)과 B등급 70% 관문을 **기계가 판정한다** (`apps/api/vitest.config.ts`의 `thresholds`).
 
 > **이번에 측정 대상 자체가 틀려 있었다.** 검색·첨부·댓글이 커버리지 `include`에 없어 표에 한 줄도 나오지 않는데 관문은 통과했다.
 > 원인과 조치는 T-020. 서비스 로직을 `*.service.ts`로 옮기고 `include`를 늘렸다.
 > **관문 통과가 "측정했다"를 뜻하지 않는다**는 것이 이번에 값을 치르고 배운 것이다.
 
-`local.storage.ts`의 브랜치 50%는 `get()`의 실패 경로(파일이 없을 때 `readFile`이 던지는 것)를 시험하지 않은 것이다.
-DB에 메타데이터가 있는데 파일이 없는 상태는 우리가 만들지 않으므로 합성하지 않았다. **확인하지 못한 것**에 적는다.
+`local.storage.ts`의 남은 브랜치는 `get()`의 실패 경로(파일이 없을 때)와 `put()`의 쓰기 실패 되돌리기다.
+DB에 메타데이터가 있는데 파일이 없는 상태·디스크가 찬 상태를 우리가 만들지 않으므로 합성하지 않았다. **확인하지 못한 것**에 적는다.
 
 ---
 
@@ -69,9 +70,16 @@ pg_bigm 커스텀 DB 이미지를 **반입 대상에 올리지 않는다.** GIN 
 
 ## 3. 인수 기준 검증
 
-인수 기준(`docs/scope-definition.md` 5절): **"한글 질의로 페이지가 검색되고 파일이 첨부된다"**
+인수 기준(`docs/scope-definition.md` 5절): **"한글 두 글자로 페이지가 검색되고, 내가 볼 수 없는 스페이스는 결과에 없다. 파일을 첨부·다운로드하고 댓글을 단다"**
 
 ### 3.1 브라우저 (E2E, `pnpm test:e2e`)
+
+명령은 **적힌 그대로** 동작한다. `.env`를 셸에 내보낼 필요가 없다 — 스크립트가 읽어 넘긴다 (`CLAUDE.md` 4.1절).
+
+> **1분 안에 전체를 연속 두 번 돌리면 로그인이 막힌다.** IP별 60초 20회 제한(`RATE_LIMITS.login`)이고
+> 한 번 실행에 로그인이 열 번 넘게 일어난다. 고장이 아니라 그 규칙이 동작하는 것이다 — 잠깐 두고 다시 돌린다.
+> **가입**은 10분 5회인데, 스펙이 늘수록 뒤에 도는 것이 먼저 막히므로 **가입 흐름을 보는 테스트 하나만**
+> 화면으로 가입하고 나머지는 계정을 직접 만든다 (`e2e/fixtures.ts`의 `createMember`).
 
 ```
 Running 13 tests using 1 worker
@@ -150,6 +158,11 @@ auth.login.success    · {"method": "local"}
 | 서버가 `schemaVersion`을 찍는다 | 댓글 본문을 버전 없이 보내고 DB 원본 확인 | `attrs.schemaVersion = 1` |
 | 스캔 훅 (FR-418) | 거부하는 대역 스캐너로 업로드 | 400, **저장소에 파일이 남지 않는다** |
 | non-root가 볼륨에 쓴다 | 컨테이너에서 `id` + `/data/attachments`에 쓰기 | `uid=1000(node)`, `drwxr-xr-x node node`, WRITABLE |
+| **이름만 바꾼 실행 파일** (FR-414b) | `MZ\x90\x00…`을 `위장.pdf`로 컨테이너에 업로드 | 400 `내용이 .pdf 형식이 아니다` |
+| 저장 형식은 우리가 도출한다 | 업로드 응답의 `mime` | 올린 쪽 선언이 아니라 확장자에서 나온 값 |
+| 빈 파일은 400이다 (413이 아니다) | 0바이트 업로드 | 400 `빈 파일은 올릴 수 없다` |
+| 검색 와일드카드 | `GET /api/search?q=%25` | 0건. `%`를 글자로 찾는다 (전부 돌려주지 않는다) |
+| 중지된 스페이스에서는 작성자도 못 지운다 | 스페이스를 중지한 뒤 자기 첨부·댓글 삭제 | 403 `쓸 권한이 없다`. 읽기는 된다 |
 
 ---
 
@@ -170,7 +183,7 @@ $ docker compose -f deploy/compose.yml ps
 $ df -h /            39G  26G  14G  67%   (빌드 후)
 ```
 
-이미지 **389MB**로 예산 400MB 이하다 (`CLAUDE.md` 8.2절). Phase 2의 388MB에서 1MB 늘었다 — 첨부·댓글 화면 코드다.
+이미지 **389MB**로 예산 400MB 이하다 (`CLAUDE.md` 8.2절). Phase 2도 389MB였으므로 **늘지 않았다** — 첨부·댓글은 새 의존성 없이 만들었고(multer는 `@nestjs/platform-express`가 이미 가지고 있다) 화면 코드 증가분은 MB 단위로 보이지 않는다.
 
 **이번 Phase가 반입 형상에 더한 것**
 
@@ -194,6 +207,8 @@ nginx는 이번에 **처음으로 실제로 띄워 확인했다.** Phase 0~2는 
 | 첨부 파일이 사라진 상태의 다운로드 | DB에 메타데이터가 있는데 디스크에 파일이 없는 상태를 우리가 만들지 않는다. 합성해서 시험하지 않았다 (`local.storage.ts` 브랜치 50%의 정체) | 물리 삭제 배치를 만드는 Phase 5 |
 | 다중 사용자 동시 업로드 | 부하 시험은 Phase 5의 일이다 (보류 6) | Phase 5 |
 | 라벨 화면 | FR-426대로 테이블만 만들었다. 화면은 Phase 4 | Phase 4 |
+| 디스크가 찬 상태의 업로드 | `put()`이 임시 파일에 쓰고 `rename`으로 옮기므로 중간에 죽어도 잘린 파일이 남지 않는다. 그러나 **실제로 디스크를 채워 확인하지는 않았다** | Phase 5 부하·용량 시험 |
+| 바이러스가 든 파일 | 스캐너가 통과 구현이다. 거부 경로는 대역으로만 확인했다 | 확인 필요 B |
 | 재색인 명령(`pnpm search:reindex`)의 대량 실행 | 50,000건에서 돌려 보지 않았다. 문법과 소량 동작만 확인했다 | Phase 5 |
 | 재부팅 후 자동 기동 | 공유 서버라 재부팅하지 않는다 (사용자 지시) | 폐쇄망 반입 리허설 (Phase 5) |
 
@@ -206,3 +221,6 @@ nginx는 이번에 **처음으로 실제로 띄워 확인했다.** Phase 0~2는 
 3. **댓글 대댓글은 원 댓글이 지워져도 남는다.** 화면이 그 자리를 비워 두는 것으로 처리한다. 더 나은 처리가 필요하면 Phase 4에서 정한다.
 4. **운영 조절값이 아직 `.env`다.** 업로드 상한·확장자 목록은 Phase 4에서 DB `settings` + 관리 화면으로 옮긴다 (`CLAUDE.md` 5절).
 5. **`client_max_body_size`와 `WF_UPLOAD_MAX_MB`는 손으로 맞춘다.** 한쪽만 바꾸면 조용히 어긋난다 — Phase 4에서 기계 검사를 둘지 검토한다.
+6. **재색인 구현이 둘이다.** `PagesService.reindexAll`(FR-333, 운영 호출자 없음)과 `scripts/reindex.ts`(FR-408, `pnpm search:reindex`). 이번에 대상 범위(삭제된 페이지 제외)는 맞췄지만 코드는 둘이다. Phase 4에서 하나로 모은다 (`CLAUDE.md` 1.3절).
+7. **첨부 삭제는 메타데이터만 지운다.** 같은 내용을 여러 메타데이터가 참조하므로 파일을 지우려면 참조 수를 세야 한다. `StorageProvider.delete`는 그래서 아직 운영 호출자가 없다 — 보존 기간 배치와 함께 Phase 5.
+8. **HWP는 내용 서명으로만 거른다.** `application/octet-stream`을 받아야 해서(브라우저가 그렇게 보낸다) 확장자·MIME 쌍만으로는 막을 수 없고, OLE/zip 서명 검사가 그 자리를 대신한다. 사내 정책이 정해지면 스캐너 훅에 실제 검사를 끼운다 (보류 3).

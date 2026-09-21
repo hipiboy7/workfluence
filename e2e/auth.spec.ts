@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cleanup, createAdmin, newAdmin } from './fixtures';
+import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
 const ADMIN = newAdmin('auth');
 
@@ -11,7 +11,10 @@ const ADMIN = newAdmin('auth');
 const member = { username: `e2e-user-${Date.now()}`, displayName: 'E2E 사용자', email: `e2e-${Date.now()}@example.internal`, password: 'E2e-User-2026!' };
 
 test.beforeAll(() => createAdmin(ADMIN));
-test.afterAll(() => cleanup([ADMIN.username, member.username]));
+/** 이 파일이 만든 계정. 가입 흐름을 보는 첫 테스트 말고는 **계정을 직접 만든다** —
+ *  가입은 IP별 rate limit이 걸려 있어(10분 5회) 스펙이 늘수록 뒤가 먼저 막힌다 */
+const made: string[] = [ADMIN.username, member.username];
+test.afterAll(() => cleanup(made));
 
 test('가입 요청 → 승인 → 로그인 → 비밀번호 변경', async ({ page }) => {
   // 1) 가입 요청
@@ -93,15 +96,10 @@ test('사내 계정(모의 OIDC)으로 로그인한다', async ({ page }) => {
 });
 
 test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한다', async ({ page }) => {
-  const target = { username: `e2e-tgt-${Date.now()}`, displayName: 'E2E 대상', email: `tgt-${Date.now()}@example.internal`, password: 'E2e-Target-2026!' };
-
-  await page.goto('/signup');
-  await page.getByLabel('아이디').fill(target.username);
-  await page.getByLabel('이름').fill(target.displayName);
-  await page.getByLabel('email').fill(target.email);
-  await page.getByLabel('비밀번호').fill(target.password);
-  await page.getByRole('button', { name: '가입 요청' }).click();
-  await expect(page.getByText('가입 요청이 접수됐다')).toBeVisible();
+  const target = { username: `e2e-tgt-${Date.now()}`, displayName: 'E2E 대상', password: 'E2e-Target-2026!' };
+  made.push(target.username);
+  // 이 테스트가 보는 것은 **관리자의 조작**이다. 가입 흐름은 위 테스트가 이미 본다
+  await createMember(target);
 
   await page.goto('/login');
   await page.getByLabel('아이디').fill(ADMIN.username);
@@ -109,8 +107,8 @@ test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한�
   await page.getByRole('button', { name: '로그인' }).click();
   await page.getByRole('link', { name: '사용자 관리' }).click();
 
+  // 이 계정은 이미 활성이다 (승인 흐름은 위 테스트가 본다)
   const row = page.getByRole('row').filter({ hasText: target.username });
-  await row.getByRole('button', { name: '승인' }).click();
   await expect(row.getByText('active')).toBeVisible();
 
   // 역할 변경 (PATCH /api/users/:id/role)

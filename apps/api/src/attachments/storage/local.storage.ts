@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { APP_ENV, type AppEnvToken } from '../../config/config.module';
+import { randomBytes } from 'node:crypto';
+import { mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { APP_ENV, REPO_ROOT, type AppEnvToken } from '../../config/config.module';
 import type { StorageProvider } from './storage.provider';
 
 /** 해시가 아닌 이름은 받지 않는다. 경로를 만드는 값이라 **여기서 한 번 더 막는다** (FR-412) */
@@ -21,7 +22,11 @@ export class LocalDiskStorage implements StorageProvider {
   private readonly root: string;
 
   constructor(@Inject(APP_ENV) env: AppEnvToken) {
-    this.root = resolve(process.cwd(), env.WF_STORAGE_PATH);
+    // **상대 경로는 저장소 루트 기준이다** (CLAUDE.md 8.1절 표). `process.cwd()` 기준으로 풀면
+    // `pnpm dev`가 api를 `apps/api`에서 띄우므로 `apps/api/.local/attachments`에 쌓인다 —
+    // 문서가 가리키는 곳과 다른 데 생기고, 아무도 오류를 보지 못한다 (P3 자체 점검 #2).
+    // 컨테이너는 절대 경로(`/data/attachments`)라 이 분기를 타지 않는다
+    this.root = isAbsolute(env.WF_STORAGE_PATH) ? env.WF_STORAGE_PATH : resolve(REPO_ROOT, env.WF_STORAGE_PATH);
   }
 
   private pathOf(sha256: string): string {
@@ -29,10 +34,25 @@ export class LocalDiskStorage implements StorageProvider {
     return join(this.root, sha256.slice(0, 2), sha256);
   }
 
+  /**
+   * **임시 이름으로 다 쓴 뒤 옮긴다.**
+   *
+   * 곧바로 최종 경로에 쓰면 도중에 죽었을 때(디스크 참·프로세스 종료) **잘린 파일이 그 해시
+   * 자리에 남는다.** 그 뒤로는 `has()`가 true라 아무도 다시 쓰지 않아 영구히 고정되고,
+   * 다운로드는 오류 없이 잘린 내용을 준다 — 조용히 잘못되는 유형이다 (P3 자체 점검 #1).
+   * 같은 파일시스템 안의 `rename`은 원자적이라, 최종 경로에는 **완성된 것만** 나타난다.
+   */
   async put(sha256: string, data: Buffer): Promise<void> {
     const p = this.pathOf(sha256);
     await mkdir(dirname(p), { recursive: true });
-    await writeFile(p, data);
+    const tmp = `${p}.tmp-${randomBytes(8).toString('hex')}`;
+    try {
+      await writeFile(tmp, data);
+      await rename(tmp, p);
+    } catch (e) {
+      await unlink(tmp).catch(() => undefined);
+      throw e;
+    }
   }
 
   async get(sha256: string): Promise<Buffer> {

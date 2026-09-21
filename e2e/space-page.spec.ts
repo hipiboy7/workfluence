@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cleanup, createAdmin, newAdmin } from './fixtures';
+import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
 const ADMIN = newAdmin('space');
 
@@ -9,9 +9,14 @@ const ADMIN = newAdmin('space');
  *  두 사람이 같은 버전을 저장하면 뒤가 충돌 안내를 받는다"
  */
 
-const mate = { username: `e2e-mate-${Date.now()}`, displayName: 'E2E 동료', email: `mate-${Date.now()}@example.internal`, password: 'E2e-Mate-2026!' };
+const mate = { username: `e2e-mate-${Date.now()}`, displayName: 'E2E 동료', password: 'E2e-Mate-2026!' };
 
-test.beforeAll(() => createAdmin(ADMIN));
+test.beforeAll(async () => {
+  await createAdmin(ADMIN);
+  // 동료는 Crew에 넣을 계정이 필요할 뿐이다. 가입 흐름은 `auth.spec.ts`가 본다 —
+  // 가입은 IP별 rate limit이 걸려 있어 스펙마다 부르면 뒤에 도는 것이 먼저 막힌다
+  await createMember(mate);
+});
 test.afterAll(() => cleanup([ADMIN.username, mate.username]));
 
 async function login(page: import('@playwright/test').Page, username: string, password: string) {
@@ -19,22 +24,12 @@ async function login(page: import('@playwright/test').Page, username: string, pa
   await page.getByLabel('아이디').fill(username);
   await page.getByLabel('비밀번호').fill(password);
   await page.getByRole('button', { name: '로그인' }).click();
+  // 로그인이 끝나기를 기다린다. 바로 goto하면 진행 중인 요청이 취소된다 (T-019)
+  await expect(page).not.toHaveURL(/\/login/);
 }
 
 test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원', async ({ page }) => {
-  // 동료 계정을 만들어 승인해 둔다 (Crew에 넣으려면 계정이 있어야 한다)
-  await page.goto('/signup');
-  await page.getByLabel('아이디').fill(mate.username);
-  await page.getByLabel('이름').fill(mate.displayName);
-  await page.getByLabel('email').fill(mate.email);
-  await page.getByLabel('비밀번호').fill(mate.password);
-  await page.getByRole('button', { name: '가입 요청' }).click();
-  await expect(page.getByText('가입 요청이 접수됐다')).toBeVisible();
-
   await login(page, ADMIN.username, ADMIN.password);
-  await page.getByRole('link', { name: '사용자 관리' }).click();
-  await page.getByRole('row').filter({ hasText: mate.username }).getByRole('button', { name: '승인' }).click();
-  await expect(page.getByRole('row').filter({ hasText: mate.username }).getByText('active')).toBeVisible();
 
   // 1) 팀 스페이스를 만든다
   const spaceName = `E2E 공간 ${Date.now()}`;
@@ -93,22 +88,9 @@ test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원',
 test('Crew가 아니면 스페이스가 보이지 않는다', async ({ page }) => {
   // 이 테스트는 앞 테스트가 만든 팀 스페이스를 **동료가 못 보는지**가 핵심이다.
   // 개인 스페이스가 보이는 것만 단언하면 제목이 말하는 것을 검증하지 않는다
-  const outsider = { username: `e2e-out-${Date.now()}`, displayName: 'E2E 외부인', email: `out-${Date.now()}@example.internal`, password: 'E2e-Out-2026!' };
+  const outsider = { username: `e2e-out-${Date.now()}`, displayName: 'E2E 외부인', password: 'E2e-Out-2026!' };
   outsiders.push(outsider.username);
-
-  await page.goto('/signup');
-  await page.getByLabel('아이디').fill(outsider.username);
-  await page.getByLabel('이름').fill(outsider.displayName);
-  await page.getByLabel('email').fill(outsider.email);
-  await page.getByLabel('비밀번호').fill(outsider.password);
-  await page.getByRole('button', { name: '가입 요청' }).click();
-
-  await login(page, ADMIN.username, ADMIN.password);
-  await page.getByRole('link', { name: '사용자 관리' }).click();
-  await page.getByRole('row').filter({ hasText: outsider.username }).getByRole('button', { name: '승인' }).click();
-  await expect(page.getByRole('row').filter({ hasText: outsider.username }).getByText('active')).toBeVisible();
-  await page.goto('/');
-  await page.getByRole('button', { name: '로그아웃' }).click();
+  await createMember(outsider);
 
   await login(page, outsider.username, outsider.password);
   // 자기 개인 스페이스는 보인다 (FR-309)

@@ -17,9 +17,12 @@ async function main(): Promise<void> {
   await c.connect();
   try {
     const { rows } = await c.query<{ id: string; content_json: DocNode }>(
+      // 지워진 페이지는 건너뛴다 — `PagesService.reindexAll`(FR-333)과 **같은 범위**여야 한다.
+      // 둘이 다르면 어느 쪽으로 돌렸느냐에 따라 결과가 달라지고, 그 차이를 아무도 못 본다
       `SELECT p.id, v.content_json
          FROM pages p
-         JOIN page_versions v ON v.page_id = p.id AND v.version_no = p.current_version_no`,
+         JOIN page_versions v ON v.page_id = p.id AND v.version_no = p.current_version_no
+        WHERE p.deleted_at IS NULL`,
     );
     let n = 0;
     for (const r of rows) {

@@ -126,6 +126,17 @@ describe('삭제 권한 (FR-422)', () => {
     expect(await svc.list(pid, owner)).toHaveLength(0);
   });
 
+  it('중지된 스페이스에서는 작성자도 지우지 못한다 (자체 점검 #4)', async () => {
+    const admin = await user('adm', 'admin');
+    const sp = await team(admin);
+    const pid = await page(sp.id, admin.id);
+    const c = await svc.create(pid, { body: body('내 말') }, admin);
+    await spacesSvc.changeStatus(sp.id, 'suspended', admin);
+    await expect(svc.remove(c.id, admin)).rejects.toThrow(/쓸 권한/);
+    // 읽기는 된다
+    expect(await svc.list(pid, admin)).toHaveLength(1);
+  });
+
   it('viewer는 남의 댓글을 지우지 못하고 canDelete도 false다', async () => {
     const owner = await user('owner');
     const viewer = await user('viewer');

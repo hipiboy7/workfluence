@@ -6,7 +6,8 @@ import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { attachments, pages, users, type AttachmentRow, type PageRow } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
-import { checkUpload } from './domain/upload';
+import { checkSignature } from './domain/signature';
+import { canonicalMime, checkUpload, extensionOf, mbToBytes } from './domain/upload';
 import { SCANNER, STORAGE, type AttachmentScanner, type StorageProvider } from './storage/storage.provider';
 
 /** multer가 넘기는 것 중 우리가 쓰는 것만. `@types/multer`를 의존성으로 들이지 않으려고 여기서 좁게 적는다 */
@@ -70,13 +71,19 @@ export class AttachmentsService {
       filename: file.originalname,
       mime: file.mimetype,
       size: file.size,
-      maxBytes: this.env.WF_UPLOAD_MAX_MB * 1024 * 1024,
+      maxBytes: mbToBytes(this.env.WF_UPLOAD_MAX_MB),
     });
     if (!verdict.ok) {
       // 크기는 413이다 (FR-415). 400으로 주면 "고쳐서 다시 보내라"로 읽혀 같은 파일을 또 보낸다
       if (verdict.reason === 'size') throw new PayloadTooLargeException(verdict.message);
       throw new BadRequestException(verdict.message);
     }
+
+    // **이름과 선언한 형식은 둘 다 올리는 쪽이 정한다.** 그래서 내용을 한 번 더 본다 (FR-414b).
+    // `.hwp`가 `application/octet-stream`을 받아야 하는 현실 때문에 앞의 두 검사만으로는
+    // "이름이 .hwp면 바이트는 무엇이든"이 되어 버린다
+    const signature = checkSignature(extensionOf(file.originalname), file.buffer);
+    if (!signature.ok) throw new BadRequestException(signature.message);
 
     const scanned = await this.scanner.scan(file.buffer, file.originalname);
     if (!scanned.ok) throw new BadRequestException(`첨부 검사에서 거부됐다: ${scanned.reason}`);
@@ -87,7 +94,8 @@ export class AttachmentsService {
 
     const [row] = await tx
       .insert(attachments)
-      .values({ pageId, sha256, filename: file.originalname, mime: file.mimetype, size: file.size, uploadedBy: principal.id })
+      // **선언한 형식이 아니라 우리가 도출한 형식을 저장한다** — 이 값이 다운로드 응답 헤더가 된다
+      .values({ pageId, sha256, filename: file.originalname, mime: canonicalMime(file.originalname), size: file.size, uploadedBy: principal.id })
       .returning();
     return this.view(row, tx);
   }
@@ -111,7 +119,9 @@ export class AttachmentsService {
     const row = await tx.query.attachments.findFirst({ where: and(eq(attachments.id, id), isNull(attachments.deletedAt)) });
     if (!row) throw new NotFoundException('첨부를 찾을 수 없다');
     const page = await this.page(row.pageId, tx);
-    const ctx = await this.spaces.context(page.spaceId, principal, tx);
+    // **중지된 스페이스에서는 올린 사람도 지우지 못한다.** `spaceAccess`가 "중지 상태: 누구도
+    // 쓰기 불가"로 판정하는데 여기서 작성자만 빠져나가면 판정이 두 벌이 된다 (P3 자체 점검 #4)
+    const ctx = await this.spaces.assertWrite(page.spaceId, principal, tx);
     if (!ctx.access.canWrite && row.uploadedBy !== principal.id) throw new ForbiddenException('이 첨부를 지울 권한이 없다');
     await tx.update(attachments).set({ deletedAt: new Date() }).where(eq(attachments.id, id));
     return row;
