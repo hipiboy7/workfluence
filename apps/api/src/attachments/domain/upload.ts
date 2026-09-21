@@ -36,12 +36,19 @@ export function extensionOf(filename: string): string {
 
 export type UploadCheck = { ok: true } | { ok: false; reason: 'extension' | 'mime' | 'size' | 'empty'; message: string };
 
-export function checkUpload(args: { filename: string; mime: string; size: number; maxBytes: number }): UploadCheck {
-  const { filename, mime, size, maxBytes } = args;
+export function checkUpload(args: {
+  filename: string;
+  mime: string;
+  size: number;
+  maxBytes: number;
+  /** 운영이 켜 둔 확장자. 안 주면 전체 화이트리스트다. **이 목록 밖은 받지 않는다** (FR-521) */
+  allowedExtensions?: readonly string[];
+}): UploadCheck {
+  const { filename, mime, size, maxBytes, allowedExtensions } = args;
 
   // 확장자는 **마지막 점 뒤**를 본다. `a.pdf.exe`는 exe다
   const ext = extensionOf(filename);
-  const allowedMimes = ALLOWED[ext];
+  const allowedMimes = allowedExtensions && !allowedExtensions.includes(ext) ? undefined : ALLOWED[ext];
   if (!allowedMimes) {
     return { ok: false, reason: 'extension', message: `허용하지 않는 확장자다: ${ext || '(없음)'}` };
   }

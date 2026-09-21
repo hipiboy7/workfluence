@@ -14,6 +14,7 @@ import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
+import { SettingsModule } from './settings/settings.module';
 import { SpacesModule } from './spaces/spaces.module';
 import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
@@ -52,6 +53,8 @@ function resolveWebDist(): string {
     SpacesModule,
     PagesModule,
     SearchModule,
+    // SettingsModule은 @Global — 정책값을 쓰는 모든 모듈이 읽는다
+    SettingsModule,
     AttachmentsModule,
     // NotificationsModule은 @Global — 댓글·페이지 저장이 멘션 알림을 만든다
     NotificationsModule,

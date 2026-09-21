@@ -82,6 +82,7 @@
 | FR-525 | 정책값 변경을 감사로그에 남긴다. **바뀐 키와 이전·이후 값** | `CLAUDE.md` 6절 |
 | FR-526 | 변경은 `settings.manage` 권한자만 | |
 | FR-527 | `WF_UPLOAD_MAX_MB` 등 기존 환경변수는 **DB에 값이 없을 때의 기본값**이 된다 | 키를 지우면 운영 `.env`가 깨진다 |
+| FR-528 | **업로드 상한만은 환경변수가 천장이다.** DB로 그보다 크게 올리면 400 | multer 방벽이 기동 시점에 정해져, 더 크게 올려도 요청이 그 앞에서 잘린다. "바꿨는데 안 먹는" 상태가 되느니 못 올리게 막는다 |
 
 ## 관리 콘솔·라벨 (FR-530 ~ FR-537)
 
@@ -132,7 +133,7 @@
 | 정책값 검증 | `packages/shared/src/policy.ts` | **A (신규)** | 범위·형식 판정. 서버·화면이 같이 쓴다 |
 | 알림 | `apps/api/src/notifications/` | B | 생성·목록·읽음. 채널 경계 |
 | 휴지통 | `apps/api/src/trash/` | B | 목록·되살리기·물리 삭제 |
-| 정책값 | apps/api/src/settings/ | B | 읽기 캐시·변경·감사 |
+| 정책값 | `apps/api/src/settings/` | B | 읽기 캐시·변경·감사 |
 | 라벨 | apps/api/src/labels/ | B | 붙이기·떼기·찾기 |
 | 화면 | `apps/web/src/pages/admin/`, `components/` | B | 알림함·휴지통·정책 설정·라벨 |
 | E2E | e2e/admin.spec.ts | C | 멘션 → 알림 → 휴지통 복원 → 정책 변경 |

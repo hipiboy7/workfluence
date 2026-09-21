@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { attachments, pages, users, type AttachmentRow, type PageRow } from '../db/schema';
+import { SettingsService } from '../settings/settings.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { checkSignature } from './domain/signature';
 import { canonicalMime, checkUpload, extensionOf, mbToBytes } from './domain/upload';
@@ -27,6 +28,7 @@ export class AttachmentsService {
     @Inject(SCANNER) private readonly scanner: AttachmentScanner,
     @Inject(APP_ENV) private readonly env: AppEnvToken,
     private readonly spaces: SpacesService,
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -67,11 +69,15 @@ export class AttachmentsService {
     const page = await this.page(pageId, tx);
     await this.spaces.assertWrite(page.spaceId, principal, tx);
 
+    // **정책값을 읽는다** — 관리자가 화면에서 바꾸면 재기동 없이 다음 요청부터 먹는다 (FR-523).
+    // 환경변수는 이 기계의 천장이고, 그 아래에서 운영이 조절한다
+    const policy = await this.settings.get(tx);
     const verdict = checkUpload({
       filename: file.originalname,
       mime: file.mimetype,
       size: file.size,
-      maxBytes: mbToBytes(this.env.WF_UPLOAD_MAX_MB),
+      maxBytes: mbToBytes(policy.uploadMaxMb),
+      allowedExtensions: policy.allowedExtensions,
     });
     if (!verdict.ok) {
       // 크기는 413이다 (FR-415). 400으로 주면 "고쳐서 다시 보내라"로 읽혀 같은 파일을 또 보낸다

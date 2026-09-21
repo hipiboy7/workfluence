@@ -8,6 +8,7 @@ import { pages, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { AttachmentsService, contentDisposition, type UploadedFileLike } from './attachments.service';
+import { SettingsService } from '../settings/settings.service';
 import { LocalDiskStorage } from './storage/local.storage';
 import { PassThroughScanner, type AttachmentScanner } from './storage/storage.provider';
 
@@ -20,6 +21,8 @@ let storage: LocalDiskStorage;
 let root: string;
 
 const env = (maxMb = 20) => ({ WF_STORAGE_PATH: root, WF_UPLOAD_MAX_MB: maxMb }) as unknown as AppEnv;
+/** 정책값은 실제 서비스를 쓴다 — DB가 비면 환경변수·코드 기본값으로 떨어지는 것까지가 동작이다 */
+const settingsFor = (maxMb = 20) => new SettingsService(db, env(maxMb));
 const file = (over: Partial<UploadedFileLike> = {}): UploadedFileLike => {
   const buffer = over.buffer ?? Buffer.from('%PDF-1.4 내용');
   return { originalname: 'report.pdf', mimetype: 'application/pdf', size: buffer.length, buffer, ...over, ...(over.buffer ? { size: over.size ?? buffer.length } : {}) };
@@ -44,7 +47,7 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'wf-att-'));
   spacesSvc = new SpacesService(db);
   storage = new LocalDiskStorage(env());
-  svc = new AttachmentsService(db, storage, new PassThroughScanner(), env(), spacesSvc);
+  svc = new AttachmentsService(db, storage, new PassThroughScanner(), env(), spacesSvc, settingsFor());
 });
 afterAll(async () => {
   await closeTestDb();
@@ -101,8 +104,10 @@ describe('업로드 (FR-410~415)', () => {
     const me = await user('me');
     const sp = await team(me);
     const pid = await page(sp.id, me.id);
-    const tiny = new AttachmentsService(db, storage, new PassThroughScanner(), env(0.000001), spacesSvc);
-    await expect(tiny.upload(pid, file(), me)).rejects.toMatchObject({ status: 413 });
+    const tiny = new AttachmentsService(db, storage, new PassThroughScanner(), env(1), spacesSvc, settingsFor(1));
+    // 상한 1MB에 2MB를 올린다. 앞은 %PDF- 서명이라 내용 검사는 통과하고 크기에서 걸린다
+    const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(2 * 1024 * 1024, 0x20)]);
+    await expect(tiny.upload(pid, file({ buffer: big }), me)).rejects.toMatchObject({ status: 413 });
   });
 
   it('경로가 섞인 파일명도 저장 경로에 닿지 않는다 (FR-412)', async () => {
@@ -139,7 +144,7 @@ describe('업로드 (FR-410~415)', () => {
     const sp = await team(me);
     const pid = await page(sp.id, me.id);
     const reject: AttachmentScanner = { scan: async () => ({ ok: false, reason: 'EICAR-Test' }) };
-    const scanned = new AttachmentsService(db, storage, reject, env(), spacesSvc);
+    const scanned = new AttachmentsService(db, storage, reject, env(), spacesSvc, settingsFor());
     await expect(scanned.upload(pid, file(), me)).rejects.toThrow(/EICAR-Test/);
     expect(await svc.list(pid, me)).toHaveLength(0);
   });
