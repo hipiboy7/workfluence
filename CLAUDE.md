@@ -103,8 +103,8 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | # | 열린 결정 | 트리거 | 판정 방법 | 이정표 |
 |---|---|---|---|---|
 | 1 | IdP가 PKCE를 지원하는가 | Phase 1 착수 | Discovery 응답의 `code_challenge_methods_supported` 확인. 코드는 PKCE on/off를 설정으로 둔다 | `P1_설계서_Auth` |
-| 2 | pg_bigm 커스텀 DB 이미지. pg_trgm은 2글자 부분 일치에 인덱스를 못 쓴다 | Phase 3 검색 측정 후 | 2글자 한글 질의 재현율과 p95 지연 실측. 미달이면 pg_bigm 포함 이미지를 반입 목록에 추가 | `P3_검증기록_Search` |
-| 3 | 첨부 파일 바이러스 스캔(ClamAV 반입) | Phase 3 착수 | 사내 보안 정책 확인 (확인 필요 B). 요구하면 스캔 훅 구현, 아니면 훅 지점만 | `P3_설계서_Attachment` |
+| 2 | pg_bigm 커스텀 DB 이미지. pg_trgm은 2글자 부분 일치에 인덱스를 못 쓴다 | Phase 3 검색 측정 후 | 2글자 한글 질의 재현율과 p95 지연 실측. 미달이면 pg_bigm 포함 이미지를 반입 목록에 추가 | `P3_검증기록_Content` |
+| 3 | 첨부 파일 바이러스 스캔(ClamAV 반입) | Phase 3 착수 | 사내 보안 정책 확인 (확인 필요 B). 요구하면 스캔 훅 구현, 아니면 훅 지점만 | `P3_설계서_Content` |
 | 4 | 실시간 편집 저장 모델 (Yjs 상태 vs JSON 정본) | Phase 6 착수 | Phase 2에서 문서 저장을 인터페이스 뒤에 두고 `page_versions.content_json`을 정본으로 유지. Phase 6은 실시간 상태를 별도 테이블로 | `P2_설계서_Page` |
 | 5 | 이미지 자동 빌드 (self-hosted runner) | 수동 빌드 3회 연속 성공 후 | 수동 절차가 안정되면 runner 등록 | 배포가이드 (Phase 5) |
 | 6 | 앱 서버 이중화 | Phase 5 부하 테스트 | 동시 50세션에서 p95 1초 초과 또는 가용성 요구가 있으면 2대 + 세션 공유 | `P5_검증기록_Load` |
