@@ -134,7 +134,7 @@
 | 알림 | `apps/api/src/notifications/` | B | 생성·목록·읽음. 채널 경계 |
 | 휴지통 | `apps/api/src/trash/` | B | 목록·되살리기·물리 삭제 |
 | 정책값 | `apps/api/src/settings/` | B | 읽기 캐시·변경·감사 |
-| 라벨 | apps/api/src/labels/ | B | 붙이기·떼기·찾기 |
+| 라벨 | `apps/api/src/labels/` | B | 붙이기·떼기·찾기 |
 | 화면 | `apps/web/src/pages/admin/`, `components/` | B | 알림함·휴지통·정책 설정·라벨 |
 | E2E | e2e/admin.spec.ts | C | 멘션 → 알림 → 휴지통 복원 → 정책 변경 |
 

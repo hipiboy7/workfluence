@@ -12,6 +12,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
+import { LabelsModule } from './labels/labels.module';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
 import { SettingsModule } from './settings/settings.module';
@@ -60,6 +61,7 @@ function resolveWebDist(): string {
     NotificationsModule,
     CommentsModule,
     TrashModule,
+    LabelsModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

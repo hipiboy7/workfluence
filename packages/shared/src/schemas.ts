@@ -160,6 +160,9 @@ export type CreateCommentDto = z.infer<typeof createCommentDto>;
 export const updateCommentDto = z.object({ body: documentSchema });
 export type UpdateCommentDto = z.infer<typeof updateCommentDto>;
 
+export const attachLabelDto = z.object({ name: z.string().trim().min(1).max(40) });
+export type AttachLabelDto = z.infer<typeof attachLabelDto>;
+
 export const searchQueryDto = z.object({
   q: z.string().trim().min(1).max(200),
   spaceId: z.uuid().optional(),
@@ -267,6 +270,7 @@ export type CommentView = {
   /** 지울 수 있는지. 화면이 규칙을 다시 구현하지 않게 서버가 판정해 내려 준다 */
   canDelete: boolean;
 };
+export type LabelView = { id: string; name: string };
 export type TrashPageView = { id: string; title: string; spaceId: string; spaceName: string; deletedAt: string; deletedByName: string };
 export type TrashSpaceView = { id: string; key: string; name: string; deletedAt: string; createdByName: string };
 export type NotificationView = {
