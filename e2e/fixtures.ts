@@ -37,6 +37,36 @@ export async function createAdmin(admin: { username: string; password: string })
 }
 
 /**
+ * 활성 상태의 일반 사용자를 만든다.
+ *
+ * **가입 화면을 거치지 않는다.** 가입은 IP별 rate limit이 걸려 있어(7절, 10분에 5회)
+ * 스펙이 늘어날수록 뒤에 도는 테스트가 먼저 막힌다. 가입 흐름 자체를 보는 것은
+ * `auth.spec.ts`의 일이고, 다른 스펙은 "이미 있는 사용자"만 필요하다.
+ */
+export async function createMember(m: { username: string; password: string; displayName?: string }): Promise<void> {
+  const c = new Client(url());
+  await c.connect();
+  try {
+    const display = m.displayName ?? m.username;
+    const { rows } = await c.query<{ id: string }>(
+      `INSERT INTO users (username, display_name, password_hash, role, status, must_change_password, approved_at)
+       VALUES ($1, $3, $2, 'member', 'active', false, now())
+       RETURNING id`,
+      [m.username, await argon2.hash(m.password, { type: argon2.argon2id }), display],
+    );
+    // **승인이 만드는 상태를 그대로 만든다.** 개인 스페이스는 승인 시 생긴다(FR-309).
+    // 여기서 빼면 "화면을 안 거쳤을 뿐"인데 계정 상태가 달라져, 그것을 전제한 테스트가 깨진다
+    await c.query(
+      `INSERT INTO spaces (key, name, kind, status, description, created_by)
+       VALUES ($1, $2, 'personal', 'active', '', $3)`,
+      [`E2E${Date.now().toString(36).slice(-5).toUpperCase()}${Math.floor(Math.random() * 900 + 100)}`, `${display}의 공간`, rows[0].id],
+    );
+  } finally {
+    await c.end();
+  }
+}
+
+/**
  * 이번 실행이 만든 계정과 그 계정이 만든 것을 지운다. 감사로그는 append-only라 남는다 (그래야 맞다).
  *
  * **사용자만 지울 수는 없다.** Phase 2에서 승인 시 개인 스페이스가 자동으로 생기고(FR-309)
@@ -49,6 +79,10 @@ export async function cleanup(usernames: string[]): Promise<void> {
   try {
     const ids = (await c.query('SELECT id FROM users WHERE username = ANY($1)', [usernames])).rows.map((r: { id: string }) => r.id);
     if (!ids.length) return;
+    // Phase 3에서 첨부·댓글이 pages를 참조한다. 자식부터 거꾸로 지우는 순서를 지킨다
+    const pagesOfMine = 'SELECT id FROM pages WHERE created_by = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))';
+    await c.query(`DELETE FROM comments WHERE created_by = ANY($1) OR page_id IN (${pagesOfMine})`, [ids]);
+    await c.query(`DELETE FROM attachments WHERE uploaded_by = ANY($1) OR page_id IN (${pagesOfMine})`, [ids]);
     await c.query('DELETE FROM page_versions WHERE created_by = ANY($1) OR page_id IN (SELECT id FROM pages WHERE space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1)))', [ids]);
     await c.query('DELETE FROM pages WHERE created_by = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);
     await c.query('DELETE FROM space_members WHERE user_id = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);

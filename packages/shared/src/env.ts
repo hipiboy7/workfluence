@@ -91,6 +91,10 @@ export const envSchema = z
     WF_OIDC_PKCE: bool(true),
     WF_OIDC_ROLE_MAP: roleMap,
     WF_OIDC_MOCK: bool(false),
+
+    // --- Phase 3: 첨부 (P3_설계서_Content 4절) ---
+    WF_STORAGE_PATH: z.string().min(1).default('.local/attachments'),
+    WF_UPLOAD_MAX_MB: intString(1, 1024, 20),
   })
   .strict();
 

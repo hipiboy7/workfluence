@@ -3,12 +3,18 @@ import { parseDotenv, parseEnv, type AppEnv } from '@workfluence/shared';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+/**
+ * 저장소 루트. **상대 경로 설정값(`WF_STORAGE_PATH` 등)의 기준은 여기 한 곳이다.**
+ * `process.cwd()`를 쓰면 어느 디렉토리에서 띄웠는지에 따라 값이 달라진다 (P3 자체 점검 #2).
+ */
+export const REPO_ROOT = resolve(__dirname, '../../../..');
+
 export const APP_ENV = Symbol('APP_ENV');
 export type AppEnvToken = AppEnv;
 
 /** 저장소 루트의 .env를 읽는다. process.env가 우선한다. 운영 컨테이너는 .env 마운트 또는 환경변수 주입. */
 export function loadEnv(): AppEnv {
-  const candidates = [resolve(process.cwd(), '.env'), resolve(__dirname, '../../../../.env')];
+  const candidates = [resolve(process.cwd(), '.env'), resolve(REPO_ROOT, '.env')];
   const found = candidates.find((p) => existsSync(p));
   // 파싱은 shared의 parseDotenv 한 곳에서 한다 (CLAUDE.md 1.3절)
   const fromFile = found ? parseDotenv(readFileSync(found, 'utf8')) : {};

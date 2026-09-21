@@ -5,6 +5,7 @@ import { FindAccountPage } from './pages/FindAccountPage';
 import { PageEditorPage } from './pages/PageEditorPage';
 import { PageHistoryPage } from './pages/PageHistoryPage';
 import { PageViewPage } from './pages/PageViewPage';
+import { SearchPage } from './pages/SearchPage';
 import { SpacePage } from './pages/SpacePage';
 import { SpacesPage } from './pages/SpacesPage';
 import { LoginPage } from './pages/LoginPage';
@@ -29,6 +30,7 @@ export function App() {
           <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
           <Route path="/admin/users" element={<RequireAuth><AdminUsersPage /></RequireAuth>} />
           <Route path="/admin/audit" element={<RequireAuth><AdminAuditPage /></RequireAuth>} />
+          <Route path="/search" element={<RequireAuth><SearchPage /></RequireAuth>} />
           <Route path="/spaces/:id" element={<RequireAuth><SpacePage /></RequireAuth>} />
           <Route path="/pages/:id" element={<RequireAuth><PageViewPage /></RequireAuth>} />
           <Route path="/pages/:id/edit" element={<RequireAuth><PageEditorPage /></RequireAuth>} />

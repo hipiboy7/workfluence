@@ -150,6 +150,16 @@ export const movePageDto = z.object({
 });
 export type MovePageDto = z.infer<typeof movePageDto>;
 
+/** 댓글 (P3_설계서_Content 5절, FR-420·421). 본문은 페이지와 같은 문서 검증을 쓴다 */
+export const createCommentDto = z.object({
+  parentId: z.uuid().nullable().optional(),
+  body: documentSchema,
+});
+export type CreateCommentDto = z.infer<typeof createCommentDto>;
+
+export const updateCommentDto = z.object({ body: documentSchema });
+export type UpdateCommentDto = z.infer<typeof updateCommentDto>;
+
 export const searchQueryDto = z.object({
   q: z.string().trim().min(1).max(200),
   spaceId: z.uuid().optional(),
@@ -234,6 +244,28 @@ export type PageVersionView = {
   createdBy: string;
   createdByName: string;
   createdAt: string;
+};
+export type AttachmentView = {
+  id: string;
+  pageId: string;
+  filename: string;
+  mime: string;
+  size: number;
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: string;
+};
+export type CommentView = {
+  id: string;
+  pageId: string;
+  parentId: string | null;
+  body: DocNode;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  /** 지울 수 있는지. 화면이 규칙을 다시 구현하지 않게 서버가 판정해 내려 준다 */
+  canDelete: boolean;
 };
 export type SearchHit = { pageId: string; spaceId: string; spaceName: string; title: string; snippet: string; updatedAt: string };
 export type AuditEventView = {

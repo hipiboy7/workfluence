@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: Phase 0 진행 중. Phase 1~6 항목은 **계획**이며 각 Phase 착수 시 `P{N}_설계서_*.md`로 상세화한다
+- 상태: **Phase 3까지 구현 완료** (2026-09-22). `[P4]`·`[P5]`·`[P6]` 표기가 붙은 항목만 **계획**이며 각 Phase 착수 시 `P{N}_설계서_*.md`로 상세화한다
 
 ## 0. 범위 문서와의 경계
 
@@ -63,7 +63,8 @@ workfluence/
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
 │   │   │   ├── pages/            [P2] 페이지·버전
 │   │   │   ├── search/           [P3] 검색
-│   │   │   ├── attachments/      [P3] 첨부
+│   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
+│   │   │   ├── comments/         [P3] 댓글
 │   │   │   └── system/           [P4] root 시스템 정보
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
@@ -71,7 +72,7 @@ workfluence/
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,security,schemas}.ts
 ├── e2e/                          Playwright
-├── scripts/                      check-env · dev-db · verify-docs · e2e (tsx, OS 무관)
+├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · reindex · check-licenses (tsx, OS 무관)
 ├── deploy/                       Dockerfile · compose · nginx.conf
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
@@ -133,7 +134,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 - 식별자는 `uuid` (`gen_random_uuid()`). 순번 노출을 피하고 병합·이관이 쉽다.
 - 삭제는 `deleted_at` soft delete. 물리 삭제는 보존 기간 뒤 배치로, 감사로그에 남긴다.
 - **append-only 강제는 두 겹**: 앱 DB 계정에 `UPDATE`/`DELETE` 권한을 주지 않고(운영), 트리거로도 막는다(개발·실수 방지).
-- 파생 데이터(`search_text`)는 언제든 재생성 가능해야 한다. 재생성 명령을 Phase 3에서 제공한다.
+- 파생 데이터(`search_text`)는 언제든 재생성 가능해야 한다. 재생성은 `pnpm search:reindex`다 (`scripts/reindex.ts`).
 
 ### 3.3 마이그레이션
 
@@ -194,6 +195,7 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 | `dev:db` | 임베디드 PostgreSQL 기동 |
 | `db:generate` / `db:migrate` / `db:seed` | 마이그레이션 생성 / 적용 / 시드 |
 | `dev` / `build` / `start` | 개발 서버 / 빌드 / 실행 |
+| `search:reindex` | 검색 인덱스 재생성 (본문 JSON → `pages.search_text`) |
 | `lint` / `typecheck` / `test` / `test:cov` / `test:e2e` / `verify:docs` | 검사 |
 | `check` | lint + typecheck + test + verify:docs (CI와 동일) |
 

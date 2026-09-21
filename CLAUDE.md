@@ -34,7 +34,7 @@
 | DB | PostgreSQL + **Drizzle ORM**, 마이그레이션은 SQL 파일 |
 | 인증 | 로컬 ID/PW(argon2id) + 사내 IdP **OIDC** Authorization Code. 세션은 서버측 PG 테이블 |
 | 편집기 | TipTap(ProseMirror). 서버는 **JSON만** 수신·검증. HTML 수신 금지 |
-| 검색 | PostgreSQL 내장 tsvector + pg_trgm부터. pg_bigm은 보류 2 |
+| 검색 | PostgreSQL 내장. **`ILIKE` + `pg_trgm` GIN 인덱스**로 정했다 (Phase 3 실측, 보류 2 종료). tsvector는 쓰지 않는다 |
 | 로그 | 앱 로그는 pino JSON stdout. **감사로그는 별도 DB 테이블**(append-only) |
 | 테스트 | Vitest + 실제 PostgreSQL 통합 테스트 + Playwright E2E (3절) |
 | 배포 | 이미지 3종: app(Nest + SPA 정적), nginx(TLS), postgres. `docker save`/`load`로 반입 (8절) |
@@ -103,8 +103,8 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | # | 열린 결정 | 트리거 | 판정 방법 | 이정표 |
 |---|---|---|---|---|
 | 1 | IdP가 PKCE를 지원하는가 | Phase 1 착수 | Discovery 응답의 `code_challenge_methods_supported` 확인. 코드는 PKCE on/off를 설정으로 둔다 | `P1_설계서_Auth` |
-| 2 | pg_bigm 커스텀 DB 이미지. pg_trgm은 2글자 부분 일치에 인덱스를 못 쓴다 | Phase 3 검색 측정 후 | 2글자 한글 질의 재현율과 p95 지연 실측. 미달이면 pg_bigm 포함 이미지를 반입 목록에 추가 | `P3_검증기록_Search` |
-| 3 | 첨부 파일 바이러스 스캔(ClamAV 반입) | Phase 3 착수 | 사내 보안 정책 확인 (확인 필요 B). 요구하면 스캔 훅 구현, 아니면 훅 지점만 | `P3_설계서_Attachment` |
+| ~~2~~ | ~~pg_bigm 커스텀 DB 이미지~~ → **닫음 2026-09-22.** 실측 결과 필요 없다. 2글자 한글 질의는 예상대로 인덱스를 못 타고 `Seq Scan`이지만, 50,000건에서 **p95 66ms · 재현율 1.0**이다(2,000건은 5ms — 거의 선형이라 목표 1초에 닿으려면 약 75만 건이 필요하다). 300명 규모에서 도달하지 않는 수다. **반입 대상을 늘리지 않는다** | 종료 | — | `P3_검증기록_Content` |
+| 3 | 첨부 파일 바이러스 스캔(ClamAV 반입) | ~~Phase 3 착수~~ → **확인 필요 B가 답을 줄 때** (2026-09-22 갱신). Phase 3은 기본 가정대로 **훅 지점만** 뒀다 (`AttachmentScanner`) | 사내 보안 정책 확인. 요구하면 그 인터페이스에 ClamAV 구현을 끼운다 | `P3_설계서_Content` 3.3절 |
 | 4 | 실시간 편집 저장 모델 (Yjs 상태 vs JSON 정본) | Phase 6 착수 | Phase 2에서 문서 저장을 인터페이스 뒤에 두고 `page_versions.content_json`을 정본으로 유지. Phase 6은 실시간 상태를 별도 테이블로 | `P2_설계서_Page` |
 | 5 | 이미지 자동 빌드 (self-hosted runner) | 수동 빌드 3회 연속 성공 후 | 수동 절차가 안정되면 runner 등록 | 배포가이드 (Phase 5) |
 | 6 | 앱 서버 이중화 | Phase 5 부하 테스트 | 동시 50세션에서 p95 1초 초과 또는 가용성 요구가 있으면 2대 + 세션 공유 | `P5_검증기록_Load` |
@@ -221,6 +221,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `pnpm db:generate` / `pnpm db:migrate` / `pnpm db:seed` | 마이그레이션 생성 / 적용 / 시드 |
 | `pnpm test` / `pnpm test:cov` | A·B 테스트 / 커버리지 |
 | `pnpm test:e2e` | Playwright |
+| `pnpm search:reindex` | 검색 인덱스(`pages.search_text`) 재생성 |
 | `pnpm verify:docs` | 문서 검사 |
 | `pnpm check` | lint + typecheck + test + verify:docs (CI와 같은 검사) |
 | `pnpm build` | api·web 빌드 |
@@ -261,7 +262,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 첨부 | 내용 해시(SHA-256)로 저장, 원본 파일명은 메타데이터. MIME·확장자 화이트리스트, 크기 상한 |
 | 감사로그 | `audit_events` **append-only** (앱 DB 계정에 INSERT만 부여 + 트리거). 대상: 인증 성공·실패, 권한 변경, 스페이스·페이지·첨부·댓글의 생성·수정·삭제·이동·복원, 첨부 다운로드, 내보내기, 관리자 작업 |
 | 시각 | DB는 UTC `timestamptz`. 표시만 KST |
-| 검색 인덱스 | 본문 JSON에서 서버가 텍스트를 추출해 유지. 파생 데이터라 언제든 재생성 가능해야 한다 (Phase 3에서 명령 제공) |
+| 검색 인덱스 | 본문 JSON에서 서버가 텍스트를 추출해 유지. 파생 데이터라 언제든 재생성 가능해야 한다 — `pnpm search:reindex` |
 | 실데이터 | 실제 업무 문서·실제 직원 정보·실제 운영 로그는 저장소에 넣지 않는다. fixture·시드·스크린샷은 **합성 데이터만** |
 
 ## 7. 보안 규칙 (금융 폐쇄망)

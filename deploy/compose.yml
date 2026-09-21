@@ -61,6 +61,13 @@ services:
       WF_OIDC_PKCE: ${WF_OIDC_PKCE:-true}
       WF_OIDC_ROLE_MAP: ${WF_OIDC_ROLE_MAP:-{}}
       # WF_OIDC_MOCK은 넘기지 않는다 — 운영 이미지에서 모의 인증이 켜질 경로를 아예 만들지 않는다
+      # 첨부 (Phase 3). 저장 경로는 **볼륨 안**이어야 한다 — 컨테이너 파일시스템에 두면 재기동에 사라진다.
+      # 상한을 바꾸면 nginx의 client_max_body_size도 같이 바꾼다 (CLAUDE.md 8.3절)
+      WF_STORAGE_PATH: /data/attachments
+      WF_UPLOAD_MAX_MB: ${WF_UPLOAD_MAX_MB:-20}
+    volumes:
+      # 첨부는 컨테이너 밖에 남아야 한다. 백업 대상이기도 하다 (CLAUDE.md 8.3절)
+      - attachments:/data/attachments
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,3 +89,4 @@ services:
 
 volumes:
   postgres_data:
+  attachments:

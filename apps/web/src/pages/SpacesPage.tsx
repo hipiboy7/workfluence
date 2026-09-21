@@ -40,6 +40,7 @@ export function SpacesPage() {
         {me.displayName}님 ({me.role})
         {can(principal, 'user.manage') && <> · <Link to="/admin/users">사용자 관리</Link></>}
         {can(principal, 'audit.read') && <> · <Link to="/admin/audit">감사로그</Link></>}
+        {' · '}<Link to="/search">검색</Link>
         {' · '}<Link to="/change-password">비밀번호 변경</Link>
         {' · '}<button type="button" className="linklike" onClick={() => void logout()}>로그아웃</button>
       </p>
