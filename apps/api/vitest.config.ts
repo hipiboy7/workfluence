@@ -17,6 +17,16 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.spec.ts'],
+    /**
+     * **파일 병렬을 끈다.** 통합 테스트가 **하나의 테스트 DB**를 공유하고 각 테스트 앞에서
+     * TRUNCATE한다. 파일이 병렬로 돌면 한 파일의 정리가 다른 파일의 데이터를 지운다.
+     *
+     * 이것이 Phase 1에서 재현하지 못했던 간헐적 실패의 원인이다 — 그때는 DB를 쓰는 파일이
+     * 하나뿐이라 드물게만 났고, Phase 2에서 둘이 되자 매번 났다.
+     *
+     * 워커별 스키마 분리가 더 빠르지만 복잡하다. 전체가 15초 안쪽이라 순차로 둔다.
+     */
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       // **Phase를 늘릴 때 여기도 늘린다.** 빠뜨리면 새 코드가 조용히 측정 대상 밖에 있게 된다

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { ADMIN, cleanup, createAdmin } from './fixtures';
+import { cleanup, createAdmin, newAdmin } from './fixtures';
+
+const ADMIN = newAdmin('auth');
 
 /**
  * Phase 1 인수 기준을 브라우저에서 확인한다 (P1_설계서_Auth A.6절).
@@ -8,7 +10,7 @@ import { ADMIN, cleanup, createAdmin } from './fixtures';
 
 const member = { username: `e2e-user-${Date.now()}`, displayName: 'E2E 사용자', email: `e2e-${Date.now()}@example.internal`, password: 'E2e-User-2026!' };
 
-test.beforeAll(createAdmin);
+test.beforeAll(() => createAdmin(ADMIN));
 test.afterAll(() => cleanup([ADMIN.username, member.username]));
 
 test('가입 요청 → 승인 → 로그인 → 비밀번호 변경', async ({ page }) => {

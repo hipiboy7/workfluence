@@ -16,7 +16,9 @@ export function loadEnv(): AppEnv {
       const line = raw.trim();
       if (!line || line.startsWith('#')) continue;
       const idx = line.indexOf('=');
-      if (idx > 0) fromFile[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^"(.*)"$/, '$1');
+      // 홑·겹따옴표를 모두 벗긴다. JSON 값(WF_OIDC_ROLE_MAP)은 **홑따옴표로 감싸야** 이 파일을
+      // `source`할 때 셸이 쪼개지 않는다 — 겹따옴표는 안쪽 따옴표가 중첩되지 않아 값이 깨진다
+      if (idx > 0) fromFile[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
     }
   }
   return parseEnv({ ...fromFile, ...process.env });
