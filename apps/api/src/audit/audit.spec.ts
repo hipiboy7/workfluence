@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeDetail } from './audit.module';
+import { sanitizeDetail } from './audit.service';
 
 /** FR-238 — 감사로그에 비밀이 들어가지 않는 것을 테스트로 고정한다. */
 describe('sanitizeDetail', () => {

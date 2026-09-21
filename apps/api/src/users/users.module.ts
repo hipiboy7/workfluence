@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Global, Inject, Module, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { createUserDto, listLimitDto, updateUserRoleDto, type UserView } from '@workfluence/shared';
 import type { Request } from 'express';
-import { AuditService } from '../audit/audit.module';
+import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';

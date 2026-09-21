@@ -11,7 +11,7 @@ import {
 } from '@workfluence/shared';
 import { createHash, randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
-import { AuditService } from '../audit/audit.module';
+import { AuditService } from '../audit/audit.service';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { users, type UserRow } from '../db/schema';
