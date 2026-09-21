@@ -19,6 +19,13 @@ describe('applyPolicy — DB 값이 없으면 기본값 (FR-522)', () => {
     expect('whoKnows' in applyPolicy({ whoKnows: 1 } as Record<string, unknown>)).toBe(false);
   });
 
+  it('DB에 든 올바른 확장자 목록은 그대로 얹는다', () => {
+    // 이 분기가 비어 있어 A등급 브랜치 기준(90%)에 못 미쳤다 — 자체 점검 #6이 잡았다
+    expect(applyPolicy({ allowedExtensions: ['pdf', 'png'] }).allowedExtensions).toEqual(['pdf', 'png']);
+    // 목록 밖 확장자가 섞이면 통째로 버리고 기본값을 쓴다 (읽기는 던지지 않는다)
+    expect(applyPolicy({ allowedExtensions: ['pdf', 'exe'] }).allowedExtensions).toEqual(POLICY_DEFAULTS.allowedExtensions);
+  });
+
   it('**타입이 틀린 값은 버리고 기본값을 쓴다** — 관리 화면 밖에서 손댄 DB가 기동을 막지 않게', () => {
     expect(applyPolicy({ uploadMaxMb: 'big' } as Record<string, unknown>).uploadMaxMb).toBe(POLICY_DEFAULTS.uploadMaxMb);
     expect(applyPolicy({ uploadMaxMb: 0 } as Record<string, unknown>).uploadMaxMb).toBe(POLICY_DEFAULTS.uploadMaxMb);

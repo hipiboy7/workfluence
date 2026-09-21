@@ -70,7 +70,7 @@
 | FR-516 | 물리 삭제도 감사로그에 남긴다. 무엇을 몇 건 지웠는지 | |
 | FR-517 | 첨부 파일 실체는 **참조가 하나도 안 남을 때만** 지운다 | Phase 3 인계 7항 — 같은 내용을 여러 메타데이터가 참조한다 |
 
-## 운영 정책값 (FR-520 ~ FR-527)
+## 운영 정책값 (FR-520 ~ FR-528)
 
 | # | 요구 | 근거 |
 |---|---|---|
@@ -135,7 +135,7 @@
 | 휴지통 | `apps/api/src/trash/` | B | 목록·되살리기·물리 삭제 |
 | 정책값 | `apps/api/src/settings/` | B | 읽기 캐시·변경·감사 |
 | 라벨 | `apps/api/src/labels/` | B | 붙이기·떼기·찾기 |
-| 화면 | `apps/web/src/pages/admin/`, `components/` | B | 알림함·휴지통·정책 설정·라벨 |
+| 화면 | `apps/web/src/pages/` (알림함·휴지통·라벨 찾기) · `apps/web/src/pages/admin/` (정책 설정) · `apps/web/src/components/` (라벨 붙이기) | B | |
 | E2E | `e2e/admin.spec.ts` | C | 멘션 → 알림 → 휴지통 복원 → 정책 변경 |
 
 ---
