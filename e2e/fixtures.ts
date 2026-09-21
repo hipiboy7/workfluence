@@ -103,6 +103,8 @@ export async function cleanup(usernames: string[]): Promise<void> {
     await c.query('UPDATE settings SET updated_by = NULL WHERE updated_by = ANY($1)', [ids]);
     await c.query('UPDATE users SET approved_by = NULL WHERE approved_by = ANY($1)', [ids]);
     await c.query('DELETE FROM users WHERE id = ANY($1)', [ids]);
+    // 아무 페이지도 안 쓰게 된 라벨은 남기지 않는다. 안 그러면 개발 DB에 실행마다 쌓인다
+    await c.query('DELETE FROM labels WHERE NOT EXISTS (SELECT 1 FROM page_labels pl WHERE pl.label_id = labels.id)');
   } finally {
     await c.end();
   }

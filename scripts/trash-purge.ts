@@ -39,15 +39,33 @@ async function main(): Promise<void> {
       )
     ).rows.map((r) => r.id);
 
+    // **따로 지운 첨부·댓글도 대상이다** (쟁점 5 "페이지·첨부·댓글·스페이스 전부").
+    // 페이지는 살아 있는데 사용자가 첨부만 지운 경우, 페이지 기준으로만 모으면 영영 남는다
+    const oldAttachments = (
+      await c.query<{ id: string }>(`SELECT id FROM attachments WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff}`)
+    ).rows.map((r) => r.id);
+    const oldComments = (
+      await c.query<{ id: string }>(`SELECT id FROM comments WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff}`)
+    ).rows.map((r) => r.id);
+
     // 지울 첨부의 해시를 **미리** 모은다. 행을 지운 뒤에는 무엇을 참조했는지 알 수 없다
-    const shas = pageIds.length
-      ? (await c.query<{ sha256: string }>('SELECT DISTINCT sha256 FROM attachments WHERE page_id = ANY($1)', [pageIds])).rows.map((r) => r.sha256)
-      : [];
+    const shaRows = await c.query<{ sha256: string }>(
+      `SELECT DISTINCT sha256 FROM attachments WHERE page_id = ANY($1) OR id = ANY($2)`,
+      [pageIds, oldAttachments],
+    );
+    const shas = shaRows.rows.map((r) => r.sha256);
 
     const counts: Record<string, number> = {};
     const del = async (label: string, sql: string, params: unknown[] = []) => {
       counts[label] = (await c.query(sql, params)).rowCount ?? 0;
     };
+
+    // 페이지보다 먼저, 그리고 페이지와 무관하게 따로 지워진 것도 함께
+    if (oldComments.length) {
+      await del('notifications(댓글)', 'DELETE FROM notifications WHERE comment_id = ANY($1)', [oldComments]);
+      await del('comments(개별)', 'DELETE FROM comments WHERE id = ANY($1)', [oldComments]);
+    }
+    if (oldAttachments.length) await del('attachments(개별)', 'DELETE FROM attachments WHERE id = ANY($1)', [oldAttachments]);
 
     if (pageIds.length) {
       await del('notifications', 'DELETE FROM notifications WHERE page_id = ANY($1)', [pageIds]);
@@ -61,6 +79,9 @@ async function main(): Promise<void> {
     }
     await del('space_members', `DELETE FROM space_members WHERE space_id IN (SELECT id FROM spaces WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff})`);
     await del('spaces', `DELETE FROM spaces WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff}`);
+    // **아무 페이지도 안 쓰는 라벨은 남기지 않는다.** 서비스(`labels.service.ts`)가 뗄 때
+    // 하는 것과 같은 판단이다 — 자동완성 목록이 쓰레기로 찬다 (자체 점검 17)
+    await del('labels(고아)', 'DELETE FROM labels WHERE NOT EXISTS (SELECT 1 FROM page_labels pl WHERE pl.label_id = labels.id)');
 
     // 감사로그에 남긴다 (FR-516). 본 작업과 같은 트랜잭션이다
     await c.query(`INSERT INTO audit_events (action, target_type, detail) VALUES ('trash.purge', 'system', $1)`, [
