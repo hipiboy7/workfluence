@@ -25,6 +25,18 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      # 사내망 빌드 서버는 프록시 뒤에 있다. 도커 데몬에만 프록시가 설정돼 있으면
+      # 이미지 받기는 되지만 RUN 단계는 밖으로 못 나가, `npm install`이 몇 분 뒤
+      # ETIMEDOUT으로 죽는다. `git clone`은 호스트 셸이 프록시를 쓰므로 성공해서
+      # "네트워크는 된다"고 오판하기 쉽다. 값은 셸 환경에서 받아 오므로 저장소에
+      # 사내 주소가 남지 않고, 프록시가 없는 폐쇄망 반입 서버에서는 빈 값이라 무해하다.
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
     environment:
       WF_ENV: production
       WF_PORT: "3000"
