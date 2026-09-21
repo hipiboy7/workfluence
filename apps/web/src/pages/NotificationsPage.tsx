@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { NotificationView } from '@workfluence/shared';
+import { LIST_PAGE_LIMIT } from '@workfluence/shared';
 import { api } from '../api';
 
 /** 알림함 (P4_설계서_Admin C절). **자기 것만 본다** — 서버에 남의 것을 볼 경로가 없다 */
@@ -9,7 +10,7 @@ export function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api<NotificationView[]>('/api/notifications?limit=100')
+    api<NotificationView[]>(`/api/notifications?limit=${LIST_PAGE_LIMIT}`)
       .then(setRows)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);

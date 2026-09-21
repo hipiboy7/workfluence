@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import type { SearchHit } from '@workfluence/shared';
+import { LIST_PAGE_LIMIT } from '@workfluence/shared';
 import { api } from '../api';
 
 /** 라벨로 찾은 페이지 (FR-534). **볼 수 없는 것은 결과에 없다** — 서버가 질의에서 거른다 */
@@ -10,7 +11,7 @@ export function LabelPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<SearchHit[]>(`/api/labels/${encodeURIComponent(name)}/pages?limit=200`)
+    api<SearchHit[]>(`/api/labels/${encodeURIComponent(name)}/pages?limit=${LIST_PAGE_LIMIT}`)
       .then(setHits)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [name]);

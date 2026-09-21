@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { AuditEventView } from '@workfluence/shared';
+import { LIST_PAGE_LIMIT } from '@workfluence/shared';
 import { api } from '../../api';
 
 /** 감사로그 (FR-237, FR-243). append-only라 화면에도 조회만 있다 */
@@ -9,7 +10,7 @@ export function AdminAuditPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<AuditEventView[]>('/api/audit?limit=200')
+    api<AuditEventView[]>(`/api/audit?limit=${LIST_PAGE_LIMIT}`)
       .then(setRows)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);

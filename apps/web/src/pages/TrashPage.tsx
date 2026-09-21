@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { can, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
+import { LIST_PAGE_LIMIT, can, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
 import { api } from '../api';
 import { useAuth } from '../auth';
 
@@ -15,11 +15,11 @@ export function TrashPage() {
   const isAdmin = me ? can({ id: me.id, role: me.role }, 'space.manage') : false;
 
   const load = useCallback(() => {
-    api<TrashPageView[]>('/api/trash/pages?limit=200')
+    api<TrashPageView[]>(`/api/trash/pages?limit=${LIST_PAGE_LIMIT}`)
       .then(setPages)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     if (isAdmin) {
-      api<TrashSpaceView[]>('/api/trash/spaces?limit=200')
+      api<TrashSpaceView[]>(`/api/trash/spaces?limit=${LIST_PAGE_LIMIT}`)
         .then(setSpaces)
         .catch(() => undefined);
     }
