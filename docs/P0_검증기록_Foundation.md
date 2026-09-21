@@ -2,8 +2,8 @@
 
 - 상위 문서: [`docs/P0_설계서_Foundation.md`](P0_설계서_Foundation.md)
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) 4절 3단계 산출물. **수치와 실제 출력만 쓴다.** 시행착오의 경위는 [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md)에 있다
-- 실행일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 결과: **개발 환경 전 항목 통과. Linux 빌드 검증만 미완** (6절)
+- 실행일: 2026-09-16 (개발 환경) / 2026-09-21 (Linux 빌드, 6절) / 작성 LLM: Claude Opus 5
+- 결과: **전 항목 통과.** Linux 빌드·기동·헬스체크까지 실측으로 확인했다 (6절)
 
 > **개정 이력 (2026-09-16).** 원래 이름은 `P0_테스트결과서_Foundation.md`였고 415줄이었다. 그중 재작업 경위 9꼭지가 트러블슈팅 기록과 겹쳐 있었다. 한 사실은 한 곳에만 둔다는 규칙에 따라 경위를 전부 트러블슈팅으로 옮기고, 이 문서는 **측정과 실제 출력**만 남겼다. 근거는 [`docs/internal/검토서_방법론개정.md`](internal/검토서_방법론개정.md).
 
@@ -234,12 +234,12 @@ compose 전용 변수 3개는 앱에 전달되지 않으므로 앱 스키마에 
 | FR-080~084 | `check:env` READY, `dev:db` 초기화, `verify:docs` 0건, `test:e2e` 4건, `check` | PASS |
 | FR-090 | ESLint 대소문자 검사 규칙 적용, lint 통과 | PASS |
 | FR-091~094 | GitHub Actions 실제 실행 (3.8절) | PASS |
-| FR-100~104 | Dockerfile·compose·nginx 작성 | **미검증** (6절) |
+| FR-100~104 | Dockerfile·compose·nginx 작성 | PASS — Dockerfile·compose는 6절에서 실빌드·실기동. nginx는 TLS 인증서가 없어 미기동 |
 | FR-110, 111 | 에이전트 2 + 스킬 1 + `docs/internal/설계서_Agents.md` | PASS |
 | NFR-01, 02 | 2절 커버리지, skip 0 | PASS (측정 범위 한정 있음) |
-| NFR-03, 04 | 이미지 크기·기동 시간 | **미측정** (6절) |
+| NFR-03, 04 | 이미지 크기·기동 시간 | PASS — 384MB (≤400MB), 13초 (≤30초). 6절 |
 | NFR-05 | CI의 외부 URL 검사 단계 통과 | PASS |
-| NFR-06 | Windows에서 전 명령 동작 확인. Linux는 6절 | 부분 |
+| NFR-06 | Windows에서 전 명령 동작 확인. Linux는 6절 | PASS |
 | NFR-07 | CI의 의존성 설치가 lockfile 고정으로 통과 | PASS |
 | NFR-08 | `verify:docs` 0건 | PASS |
 | NFR-09 | `.env` 미커밋 + CI gitleaks success | PASS |
@@ -251,25 +251,85 @@ compose 전용 변수 3개는 앱에 전달되지 않으므로 앱 스키마에 
 
 `doc-consistency` 에이전트가 Phase 종료 재독에서 **어긋남 2건**을 보고했고 둘 다 사실이었다. CI를 단계별로 쪼갠 변경이 워크플로에는 반영됐는데 설계서와 요구사항정의서에는 옛 문구로 남아 있었다. 같은 사실을 세 곳에 적었기 때문이며, 이것이 두 문서를 합친 계기다.
 
-## 6. 미완 항목 — Linux 빌드 검증
+## 6. Linux 빌드 검증 — 완료 (2026-09-21)
 
-**Phase 0은 아직 닫히지 않았다.** 완료 기준의 마지막 항목이 남아 있다.
+**완료 기준의 마지막 항목을 채웠다.** 사내 리눅스 빌드 서버에서 `impl-phase0`(`3a0f589`)을
+받아 이미지를 만들고 띄워 여섯 개 값을 실측했다. 목표가 있는 네 항목 모두 충족했다.
 
-| 항목 | 상태 | 수행 주체 |
-|---|---|---|
-| Linux 서버에서 pull → 이미지 빌드 | 미수행 | 사용자 |
-| `docker compose up -d` → `/api/health` 200 | 미수행 | 사용자 |
-| 이미지 크기 실측 (목표 ≤400MB) | 미측정 | 사용자 |
-| 기동 시간 (목표 ≤30초) | 미측정 | 사용자 |
-| 재부팅 후 자동 기동 | 미확인 | 사용자 |
-| Docker 버전·디스크 여유 (확인 필요 D) | 미기록 | 사용자 |
-| ~~CI 실제 실행~~ | **완료 2026-09-16** (3.8절) | — |
+| 항목 | 실측 | 목표 | 판정 |
+|---|---|---|---|
+| Linux 서버에서 pull → 이미지 빌드 | 완료 (22초, `--no-cache` 25초) | — | — |
+| `docker compose up -d` → `/api/health` 200 | `HTTP 200` + `{"status":"ok","db":"ok",...}` | 200 + `ok` | 충족 |
+| 이미지 크기 | **384MB** | ≤400MB | 충족 |
+| 기동 시간 | **13초** | ≤30초 | 충족 |
+| 재부팅 후 자동 기동 | `unless-stopped` 둘 다 + 도커 데몬 `enabled`. **실제 재부팅은 미실시** | 정책 확인 | 충족 (11.1절 범위) |
+| Docker·Compose 버전, 디스크 여유 (확인 필요 D) | Docker 29.6.1 / Compose v5.3.1 / 여유 20GB | 24+ / v2 / 5GB+ | 충족 |
+| ~~CI 실제 실행~~ | **완료 2026-09-16** (3.8절) | — | — |
 
 ### 6.1 실행 절차
 
 절차와 명령은 [`docs/운영가이드_리눅스빌드.md`](운영가이드_리눅스빌드.md)에 있다. **여기에 다시 적지 않는다** — 같은 명령을 두 곳에 두면 한쪽이 상한다 (`CLAUDE.md` 1.3절).
 
-그 문서가 받아 오는 값은 여섯 개다. Docker·Compose 버전, 디스크 여유, 이미지 크기, 기동 시간, 헬스체크 응답 원문, 재부팅 후 자동 기동. 값이 오면 위 표를 채우고 `CLAUDE.md` 1.2절 확인 필요 D도 함께 답한다.
+### 6.2 받은 값 원문
+
+```
+Docker version 29.6.1, build 8900f1d
+Docker Compose version v5.3.1
+```
+
+```
+# 빌드 전
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vda4        39G   20G   20G  51% /
+# 빌드·기동·마이그레이션까지 끝난 뒤
+/dev/vda4        39G   22G   18G  55% /
+```
+
+```
+IMAGE                     ID             DISK USAGE   CONTENT SIZE   EXTRA
+workfluence-app:3a0f589   24f8abc48051        384MB         86.4MB
+workfluence-app:latest    24f8abc48051        384MB         86.4MB
+```
+
+```
+기동 시간: 13초
+```
+
+```
+HTTP 200
+{"status":"ok","db":"ok","time":"2026-09-21T06:41:48.904Z"}
+```
+
+```
+/workfluence-api restart=unless-stopped
+/workfluence-postgres restart=unless-stopped
+enabled
+```
+
+마이그레이션은 두 번 돌려 출력이 같았고(`[migrate] 1개 마이그레이션 적용 상태`), `down` 후
+다시 올렸을 때도 같았다. 볼륨이 살아 있고 멱등이라는 뜻이다.
+
+**측정에서 뺀 것.** `postgres:17`을 미리 받아 두고 기동 시간을 쟀다(받는 데 8.7초).
+가이드 5절은 앱 이미지만 빌드하므로, 처음 도는 서버에서 6절 스크립트를 그대로 쓰면
+이미지 내려받는 시간이 기동 시간에 섞인다.
+
+**이미지 크기의 근거.** Docker 29의 `docker images`에는 가이드가 말하는 `SIZE` 칸이 없고
+`DISK USAGE`(384MB)와 `CONTENT SIZE`(86.4MB)로 갈린다. 400MB 목표와 비교한 값은
+`--format '{{.Size}}'`가 가리키는 **384MB**다. 둘 중 큰 쪽으로 판정했다.
+
+### 6.3 첫 빌드는 실패했다 — 프록시가 빌드 컨테이너에 전달되지 않았다
+
+`RUN npm install -g pnpm`이 **471초 뒤 ETIMEDOUT**으로 죽었다. 도커 데몬에는 사내 프록시가
+설정돼 있어 **베이스 이미지 받기는 성공**하는데, 빌드 컨테이너 안의 `RUN` 단계는 프록시를
+물려받지 못해 레지스트리로 직접 나가려다 끊긴 것이다.
+
+조용히 잘못되기 쉬운 형태였다. `git clone`은 호스트 셸이 프록시를 쓰므로 **성공한다.**
+그래서 가이드 1절의 "`git clone`이 되는지"를 통과하고도 빌드에서 막힌다.
+
+`deploy/compose.yml`의 `api.build.args`에 프록시를 셸 환경에서 받아 넘기도록 해서 고쳤다.
+같은 단계가 **2.5초**로 끝난다. 값은 저장소에 박지 않고(`${HTTP_PROXY:-}`) 프록시가 없는
+폐쇄망 반입 서버에서는 빈 값이라 무해하다. 프록시 값이 이미지에 남지 않는 것도 확인했다
+(`docker history` 0건, `Config.Env`에 없음 — 도커가 predefined build arg로 처리해 제거한다).
 
 ## 7. 다음 Phase 인계
 
