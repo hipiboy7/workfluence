@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { settings, users } from '../db/schema';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
+import { UsersService } from '../users/users.service';
 import { SettingsService } from './settings.service';
 
 /** B등급 (P4_설계서_Admin E절). 실제 PostgreSQL. */
@@ -105,5 +106,31 @@ describe('변경 (FR-523~526)', () => {
     await svcWith().update({ trashRetentionDays: 7 }, me);
     const row = await db.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     expect(row?.updatedBy).toBe(me.id);
+  });
+});
+
+describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
+  it('**값을 만들었으면 소비 지점이 그 값을 받는다.** 비밀번호 최소 길이를 올리면 짧은 것이 막힌다', async () => {
+    const me = await admin();
+    const settings = svcWith();
+    const users = new UsersService(db, settings);
+
+    // 기본 8자에서는 통과하는 비밀번호
+    const pw = 'Abcd12ef';
+    await expect(
+      users.signup({ username: 'u1', displayName: 'u1', email: 'u1@example.internal', password: pw }, db),
+    ).resolves.toBeTruthy();
+
+    await settings.update({ passwordMinLength: 20 }, me);
+    await expect(
+      users.signup({ username: 'u2', displayName: 'u2', email: 'u2@example.internal', password: pw }, db),
+    ).rejects.toThrow(/20/);
+  });
+
+  it('잠금 임계도 살아 있는 값을 쓴다', async () => {
+    const me = await admin();
+    const settings = svcWith();
+    await settings.update({ lockoutThreshold: 3 }, me);
+    expect((await settings.get()).lockoutThreshold).toBe(3);
   });
 });

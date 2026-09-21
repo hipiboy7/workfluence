@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   canAssignRole,
+  checkPasswordPolicy,
   canManageUser,
   generateTemporaryPassword,
   type CreateUserDto,
@@ -113,7 +114,21 @@ export class UsersService {
   }
 
   /** 가입 요청 → 승인 대기 (FR-200) */
+  /**
+   * 비밀번호 강도를 **살아 있는 정책값으로** 다시 본다 (FR-521).
+   *
+   * `passwordSchema`(zod)도 같은 판정을 하지만 그것은 **파싱 시점에 코드 기본값을 읽는다** —
+   * 관리자가 화면에서 최소 길이를 올려도 거기까지는 닿지 않는다. 두 겹이 되는 것이 맞다:
+   * zod는 모양을, 여기서는 운영이 정한 세기를 본다.
+   */
+  private async assertPasswordStrength(pw: string, tx: Db): Promise<void> {
+    const p = await this.settings.get(tx);
+    const violations = checkPasswordPolicy(pw, { minLength: p.passwordMinLength, minCharClasses: p.passwordMinCharClasses });
+    if (violations.length) throw new BadRequestException(violations.join('; '));
+  }
+
   async signup(dto: SignupDto, tx: Db = this.db): Promise<UserRow> {
+    await this.assertPasswordStrength(dto.password, tx);
     await this.assertUnique(dto.username, dto.email);
     const [row] = await tx
       .insert(users)
@@ -247,6 +262,7 @@ export class UsersService {
     const user = await this.findById(id);
     if (!user?.passwordHash) throw new NotFoundException('사용자를 찾을 수 없다');
     if (!(await argon2.verify(user.passwordHash, currentPassword))) throw new BadRequestException('현재 비밀번호가 올바르지 않다');
+    await this.assertPasswordStrength(newPassword, tx);
     await tx
       .update(users)
       .set({ passwordHash: await hash(newPassword), mustChangePassword: false, updatedAt: sql`now()` })
