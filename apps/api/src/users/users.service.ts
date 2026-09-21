@@ -85,9 +85,28 @@ export class UsersService {
     return rows.map((r) => r.name);
   }
 
+  /**
+   * 가입 가능한 값인지 본다.
+   *
+   * **어느 쪽이 중복인지 알려 주지 않는다.** 아이디와 email의 존재 여부를 정확히 답하면
+   * 미인증 공격자가 "이 사람이 여기 있다"를 확인하는 오라클이 된다. 이 코드베이스는 다른
+   * 곳에서 열거를 막고 있는데(로그인 단일 문구·ID 찾기 마스킹) 여기만 새면 의미가 없다.
+   */
   private async assertUnique(username: string, email: string): Promise<void> {
-    if (await this.findByUsername(username)) throw new ConflictException('이미 있는 사용자명');
-    if (await this.findByEmail(email)) throw new ConflictException('이미 등록된 email');
+    if ((await this.findByUsername(username)) || (await this.findByEmail(email))) {
+      throw new ConflictException('이미 사용 중인 아이디이거나 등록된 email이다');
+    }
+  }
+
+  /**
+   * 그 사용자의 **모든 세션**을 파기한다 (CLAUDE.md 7절).
+   *
+   * `req.session.regenerate()`는 지금 요청의 세션 하나만 바꾼다. 다른 기기·다른 브라우저에
+   * 남아 있는 세션은 그대로 살아 있어서, 침해를 알아채고 비밀번호를 바꿔도 공격자의 세션이
+   * 만료될 때까지 끊기지 않는다. 비밀번호가 바뀌면 **전부** 끊는다.
+   */
+  async destroyAllSessions(userId: string, tx: Db = this.db): Promise<void> {
+    await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${userId}`);
   }
 
   /** 가입 요청 → 승인 대기 (FR-200) */
@@ -158,7 +177,12 @@ export class UsersService {
 
   /** 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다 */
   async resetPassword(id: string, actor: Principal, tx: Db = this.db): Promise<{ user: UserRow; temporaryPassword: string }> {
-    await this.getManaged(id, actor);
+    const target = await this.getManaged(id, actor);
+    // IdP 계정에 비밀번호를 붙이면 IdP가 강제하던 인증(사내 MFA·정책)을 건너뛰는 옆문이 생긴다.
+    // FR-217이 "IdP 계정은 비밀번호로 로그인할 수 없다"고 한 것을 초기화가 뚫으면 안 된다.
+    if (target.oidcSub !== null) {
+      throw new BadRequestException('사내 IdP 계정이다. 비밀번호를 부여하지 않는다 — IdP로 로그인한다');
+    }
     return this.applyTemporaryPassword(id, tx);
   }
 
@@ -176,6 +200,8 @@ export class UsersService {
       })
       .where(eq(users.id, id))
       .returning();
+    // 초기화는 "이 계정이 탈취됐을지 모른다"는 상황에서도 쓴다. 살아 있는 세션을 남기면 안 된다
+    await this.destroyAllSessions(id, tx);
     return { user, temporaryPassword };
   }
 
@@ -200,11 +226,18 @@ export class UsersService {
     });
   }
 
-  /** 비밀번호 찾기: ID + email 일치 시 임시 비밀번호. 불일치는 null (호출부가 같은 응답을 준다) */
-  async recoverPassword(username: string, email: string, tx: Db = this.db): Promise<{ user: UserRow; temporaryPassword: string } | null> {
+  /**
+   * 비밀번호 찾기 요청의 대상을 **조회만** 한다. 비밀번호를 바꾸지 않는다.
+   *
+   * **미인증 경로에서 비밀번호를 발급하지 않는다.** 아이디와 사내 email은 위키에서 사실상
+   * 공개 정보라 "둘을 아는 사람 = 본인"이 성립하지 않는다. 메일 같은 대역 외 전달 수단이
+   * 없는 폐쇄망에서는 자가 재설정을 안전하게 만들 방법이 없으므로 **기능을 두지 않고**
+   * 관리자 초기화(인증·권한 검사가 있는 경로)로 보낸다.
+   */
+  async findRecoveryTarget(username: string, email: string): Promise<UserRow | null> {
     const user = await this.findByUsername(username);
     if (!user || !user.email || user.email !== email.toLowerCase() || user.status !== 'active') return null;
-    return this.applyTemporaryPassword(user.id, tx);
+    return user;
   }
 
   async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db): Promise<void> {
@@ -215,6 +248,8 @@ export class UsersService {
       .update(users)
       .set({ passwordHash: await hash(newPassword), mustChangePassword: false, updatedAt: sql`now()` })
       .where(eq(users.id, id));
+    // 비밀번호가 바뀌면 그 사용자의 세션을 전부 끊는다. 호출부가 자기 세션은 다시 만든다
+    await this.destroyAllSessions(id, tx);
   }
 
   /**

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { users } from '../db/schema';
 import { UsersService } from '../users/users.service';
@@ -79,11 +79,15 @@ describe('가입 → 승인 → 로그인 (인수 기준 1)', () => {
     expect(user.username).toBe('alice');
   });
 
-  it('같은 사용자명·email은 거부된다', async () => {
+  it('같은 사용자명·email은 거부되지만 **어느 쪽인지 알려 주지 않는다**', async () => {
     await auth.signup(SIGNUP);
-    await expect(auth.signup(SIGNUP)).rejects.toThrow();
-    await expect(auth.signup({ ...SIGNUP, email: 'other@example.internal' })).rejects.toThrow(/사용자명/);
-    await expect(auth.signup({ ...SIGNUP, username: 'bob' })).rejects.toThrow(/email/);
+    const messages: string[] = [];
+    for (const dto of [SIGNUP, { ...SIGNUP, email: 'other@example.internal' }, { ...SIGNUP, username: 'bob' }]) {
+      await auth.signup(dto).catch((e: Error) => messages.push(e.message));
+    }
+    expect(messages).toHaveLength(3);
+    // 아이디 중복인지 email 중복인지가 갈리면 미인증 공격자의 존재 확인 오라클이 된다
+    expect(new Set(messages).size).toBe(1);
   });
 });
 
@@ -240,6 +244,78 @@ describe('비밀번호 변경 (FR-207)', () => {
     await auth.changePassword(alice.id, { currentPassword: temporaryPassword, newPassword: 'New-pw-2026' });
     expect((await usersSvc.findById(alice.id))?.mustChangePassword).toBe(false);
     await expect(auth.login({ username: 'alice', password: 'New-pw-2026' })).resolves.toBeDefined();
+  });
+});
+
+describe('계정 복구 — 미인증 경로는 비밀번호를 발급하지 않는다 (FR-209a)', () => {
+  it('요청은 항상 같은 응답이고 비밀번호가 바뀌지 않는다', async () => {
+    const alice = await approvedAlice();
+    const before = (await usersSvc.findById(alice.id))!.passwordHash;
+
+    expect(await auth.recoverPassword({ username: 'alice', email: SIGNUP.email })).toEqual({ ok: true });
+    expect(await auth.recoverPassword({ username: 'alice', email: 'wrong@example.internal' })).toEqual({ ok: true });
+    expect(await auth.recoverPassword({ username: 'nobody', email: SIGNUP.email })).toEqual({ ok: true });
+
+    // 가장 중요한 단정: 남의 비밀번호가 바뀌지 않았다
+    expect((await usersSvc.findById(alice.id))!.passwordHash).toBe(before);
+    await expect(auth.login({ username: 'alice', password: SIGNUP.password })).resolves.toBeDefined();
+  });
+
+  it('요청은 감사로그에 남아 관리자가 판단할 수 있다', async () => {
+    await approvedAlice();
+    await auth.recoverPassword({ username: 'alice', email: SIGNUP.email });
+    const e = (await audit.list(10)).find((x) => x.action === 'auth.password.recover');
+    expect(e?.detail).toMatchObject({ found: true, requested: true });
+  });
+});
+
+describe('IdP 계정에는 비밀번호를 부여하지 않는다 (FR-217)', () => {
+  it('관리자 초기화가 IdP 계정을 거부한다', async () => {
+    const s = await auth.oidcStart();
+    const idp = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: s.state }, { state: s.state, nonce: s.nonce });
+    expect(idp.passwordHash).toBeNull();
+    // 비밀번호를 붙이면 IdP가 강제하던 인증을 건너뛰는 옆문이 생긴다
+    await expect(usersSvc.resetPassword(idp.id, ROOT)).rejects.toThrow(/IdP/);
+    expect((await usersSvc.findById(idp.id))!.passwordHash).toBeNull();
+  });
+});
+
+describe('비밀번호가 바뀌면 그 사용자의 모든 세션이 끊긴다 (FR-224)', () => {
+  const sessionRow = (sid: string, userId: string) =>
+    db.execute(
+      sql`INSERT INTO sessions (sid, sess, expire) VALUES (${sid}, ${JSON.stringify({ userId, cookie: {} })}::jsonb, now() + interval '1 hour')`,
+    );
+  const countFor = async (userId: string) => {
+    const r = await db.execute(sql`SELECT count(*)::int AS n FROM sessions WHERE sess->>'userId' = ${userId}`);
+    return (r.rows[0] as { n: number }).n;
+  };
+
+  it('비밀번호 변경이 다른 기기의 세션까지 지운다', async () => {
+    const alice = await approvedAlice();
+    await sessionRow('other-device-1', alice.id);
+    await sessionRow('other-device-2', alice.id);
+    expect(await countFor(alice.id)).toBe(2);
+
+    await auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'New-pw-2026' });
+    expect(await countFor(alice.id)).toBe(0);
+  });
+
+  it('관리자 초기화도 세션을 끊는다 — 탈취를 의심하는 상황에서 쓰는 기능이다', async () => {
+    const alice = await approvedAlice();
+    await sessionRow('stolen', alice.id);
+    await usersSvc.resetPassword(alice.id, ROOT);
+    expect(await countFor(alice.id)).toBe(0);
+  });
+
+  it('다른 사용자의 세션은 건드리지 않는다', async () => {
+    const alice = await approvedAlice();
+    await auth.signup({ ...SIGNUP, username: 'bob', email: 'bob@example.internal' });
+    const bob = (await usersSvc.findByUsername('bob'))!;
+    await sessionRow('alice-s', alice.id);
+    await sessionRow('bob-s', bob.id);
+    await auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'New-pw-2026' });
+    expect(await countFor(alice.id)).toBe(0);
+    expect(await countFor(bob.id)).toBe(1);
   });
 });
 

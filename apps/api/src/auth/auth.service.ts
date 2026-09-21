@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import {
+  maskEmail,
   maskUsername,
   type ChangePasswordDto,
   type FindIdDto,
@@ -77,21 +78,32 @@ export class AuthService {
    */
   async findId(dto: FindIdDto, ip?: string): Promise<{ username: string | null }> {
     const user = await this.users.findByEmailAndName(dto.email, dto.displayName);
-    await this.audit.record({ action: 'auth.id.recover', targetType: 'email', targetId: dto.email, detail: { found: !!user, email: dto.email }, ip });
+    // target_id에도 마스킹한 값을 넣는다. detail만 가리고 여기에 원본을 두면 가린 의미가 없다 (FR-238)
+    await this.audit.record({ action: 'auth.id.recover', targetType: 'email', targetId: maskEmail(dto.email), detail: { found: !!user }, ip });
     return { username: user ? maskUsername(user.username) : null };
   }
 
-  /** 비밀번호 찾기 (FR-209). 일치하지 않아도 같은 모양으로 답한다 */
-  async recoverPassword(dto: RecoverPasswordDto, ip?: string): Promise<{ temporaryPassword: string | null }> {
-    const out = await this.db.transaction(async (tx) => {
-      const r = await this.users.recoverPassword(dto.username, dto.email, tx);
-      await this.audit.record(
-        { action: 'auth.password.recover', actorId: r?.user.id ?? null, targetType: 'username', targetId: dto.username, detail: { found: !!r }, ip },
-        tx,
-      );
-      return r;
+  /**
+   * 비밀번호 찾기 요청 (FR-209a). **비밀번호를 발급하지 않는다.**
+   *
+   * 미인증 경로에서 비밀번호를 바꿔 주면 "아이디와 사내 email을 아는 사람"이 곧 계정
+   * 소유자가 된다. 둘 다 위키에서 사실상 공개 정보다. 메일 같은 대역 외 전달 수단이 없는
+   * 폐쇄망에서는 자가 재설정을 안전하게 만들 수 없으므로 **요청만 기록하고 관리자에게 보낸다.**
+   *
+   * 응답은 일치 여부와 무관하게 항상 같다 — 여기서 갈라지면 계정 열거가 된다.
+   */
+  async recoverPassword(dto: RecoverPasswordDto, ip?: string): Promise<{ ok: true }> {
+    const user = await this.users.findRecoveryTarget(dto.username, dto.email);
+    await this.audit.record({
+      action: 'auth.password.recover',
+      actorId: user?.id ?? null,
+      targetType: 'username',
+      targetId: dto.username,
+      // 관리자가 "이 요청이 실제 계정에 대한 것이었나"를 볼 수 있어야 초기화를 판단한다
+      detail: { found: !!user, requested: true },
+      ip,
     });
-    return { temporaryPassword: out?.temporaryPassword ?? null };
+    return { ok: true };
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto, ip?: string): Promise<void> {

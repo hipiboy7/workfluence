@@ -89,7 +89,7 @@ export class AuthController {
   recoverPassword(
     @Body(new ZodPipe(recoverPasswordDto)) dto: ReturnType<typeof recoverPasswordDto.parse>,
     @Req() req: Request,
-  ): Promise<{ temporaryPassword: string | null }> {
+  ): Promise<{ ok: true }> {
     return this.auth.recoverPassword(dto, req.ip);
   }
 
@@ -102,7 +102,7 @@ export class AuthController {
     @Req() req: Request,
   ): Promise<{ ok: true }> {
     await this.auth.changePassword(user.id, dto, req.ip);
-    // 비밀번호를 바꿨으면 기존 세션을 버린다 (FR-224). 새 세션으로 다시 심는다
+    // 서비스가 그 사용자의 **모든** 세션을 이미 끊었다 (FR-224). 지금 요청만 새 세션으로 다시 심는다
     await startSession(req, user.id);
     return { ok: true };
   }

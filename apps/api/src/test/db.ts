@@ -40,4 +40,12 @@ export async function closeTestDb(): Promise<void> {
  */
 export async function resetTables(db: TestDb): Promise<void> {
   await db.execute(sql`TRUNCATE TABLE audit_events, settings, sessions, users RESTART IDENTITY CASCADE`);
+
+  // 비워졌는지 **확인한다.** 정리가 조용히 실패하면 앞 테스트가 남긴 계정 때문에 엉뚱한
+  // 테스트가 깨지고, 원인을 찾기 어려운 간헐적 실패로 나타난다. 실제로 한 번 겪었다 —
+  // 단독 실행은 통과하는데 `pnpm check`에서만 세 건이 깨졌고 재현되지 않았다.
+  // 여기서 막으면 다음에는 "정리가 안 됐다"로 바로 드러난다.
+  const r = await db.execute(sql`SELECT count(*)::int AS n FROM users`);
+  const n = (r.rows[0] as { n: number }).n;
+  if (n !== 0) throw new Error(`테스트 정리 실패: users에 ${n}행이 남았다. 앞 테스트의 상태가 샌다`);
 }
