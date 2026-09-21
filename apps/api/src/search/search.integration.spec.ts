@@ -3,7 +3,7 @@ import type { Principal } from '@workfluence/shared';
 import { pages, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { SearchService } from './search.module';
+import { SearchService } from './search.service';
 
 /** B등급 통합 테스트 (P3_설계서_Content 5절). 실제 PostgreSQL. */
 

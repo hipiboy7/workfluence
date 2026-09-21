@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import type { PageView, SpaceView } from '@workfluence/shared';
 import { api } from '../api';
+import { Attachments } from '../components/Attachments';
+import { Comments } from '../components/Comments';
 import { Editor } from '../components/Editor';
 
 /** 페이지 보기 */
@@ -51,6 +53,8 @@ export function PageViewPage() {
       <section className="card">
         <Editor value={page.content} editable={false} />
       </section>
+      <Attachments pageId={id} canWrite={space?.access.canWrite ?? false} />
+      <Comments pageId={id} canWrite={space?.access.canWrite ?? false} />
     </main>
   );
 }

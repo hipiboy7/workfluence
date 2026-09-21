@@ -3,9 +3,11 @@ import { APP_GUARD } from '@nestjs/core';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard } from './auth/auth.guard';
+import { CommentsModule } from './comments/comments.module';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
@@ -48,6 +50,8 @@ function resolveWebDist(): string {
     SpacesModule,
     PagesModule,
     SearchModule,
+    AttachmentsModule,
+    CommentsModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

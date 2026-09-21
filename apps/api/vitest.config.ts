@@ -38,6 +38,9 @@ export default defineConfig({
         'src/audit/**/*.ts',
         'src/spaces/**/*.ts',
         'src/pages/**/*.ts',
+        'src/search/**/*.ts',
+        'src/attachments/**/*.ts',
+        'src/comments/**/*.ts',
       ],
       exclude: ['src/auth/oidc/http.provider.ts', 'src/**/*.module.ts', 'src/**/*.spec.ts'],
       thresholds: {
@@ -48,6 +51,7 @@ export default defineConfig({
         // A등급은 90% (CLAUDE.md 3절). 디렉토리로 고정해 측정을 기계적으로 만든다
         'src/auth/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/pages/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/attachments/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

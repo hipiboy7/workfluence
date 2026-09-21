@@ -53,6 +53,12 @@ export const AUDIT_ACTIONS = [
   'page.delete',
   'page.restore',
   'page.version.restore',
+  'attachment.upload',
+  'attachment.download',
+  'attachment.delete',
+  'comment.create',
+  'comment.update',
+  'comment.delete',
   'settings.update',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

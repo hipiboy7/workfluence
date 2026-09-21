@@ -13,3 +13,6 @@ npm-debug.log*
 
 # 로컬 프로젝트 데이터 (CLAUDE.md 8.1절): PostgreSQL 데이터, 첨부, pnpm store, Playwright 브라우저, 임시 파일
 .local/
+
+# TLS 인증서는 저장소에 넣지 않는다 (CLAUDE.md 12.3절). 확인용 자체 서명본은 로컬에만 둔다
+deploy/certs/
