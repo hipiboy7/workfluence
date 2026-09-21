@@ -92,6 +92,8 @@ export async function cleanup(usernames: string[]): Promise<void> {
     );
     await c.query(`DELETE FROM comments WHERE created_by = ANY($1) OR page_id IN (${pagesOfMine})`, [ids]);
     await c.query(`DELETE FROM attachments WHERE uploaded_by = ANY($1) OR page_id IN (${pagesOfMine})`, [ids]);
+    // Phase 4의 라벨 연결도 pages를 참조한다
+    await c.query(`DELETE FROM page_labels WHERE page_id IN (${pagesOfMine})`, [ids]);
     await c.query('DELETE FROM page_versions WHERE created_by = ANY($1) OR page_id IN (SELECT id FROM pages WHERE space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1)))', [ids]);
     await c.query('DELETE FROM pages WHERE created_by = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);
     await c.query('DELETE FROM space_members WHERE user_id = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);
