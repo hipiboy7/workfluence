@@ -6,10 +6,12 @@ import {
   createCategoryDto,
   createPageDto,
   createSpaceDto,
+  createTemplateDto,
   createUserDto,
   findIdDto,
   loginDto,
   movePageDto,
+  updateTemplateDto,
   recoverPasswordDto,
   searchQueryDto,
   signupDto,
@@ -105,5 +107,33 @@ describe('페이지·검색 DTO', () => {
     expect(searchQueryDto.parse({ q: ' 배포 ' })).toEqual({ q: '배포', limit: 20 });
     expect(searchQueryDto.parse({ q: 'x', limit: '5' }).limit).toBe(5);
     expect(searchQueryDto.safeParse({ q: 'x', limit: '500' }).success).toBe(false);
+  });
+});
+
+describe('템플릿 DTO (P6 FR-740~745)', () => {
+  const doc = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph' }] };
+
+  it('이름과 본문이 있으면 통과한다', () => {
+    expect(createTemplateDto.safeParse({ name: '회의록', content: doc }).success).toBe(true);
+  });
+
+  it('이름이 비면 거부한다', () => {
+    expect(createTemplateDto.safeParse({ name: '  ', content: doc }).success).toBe(false);
+  });
+
+  it('**본문도 문서 스키마를 통과해야 한다** (FR-742) — 템플릿이 깨져 있으면 그것으로 만든 문서가 다 깨진다', () => {
+    expect(createTemplateDto.safeParse({ name: 'x', content: { type: 'doc', content: [{ type: 'iframe' }] } }).success).toBe(false);
+  });
+
+  it('고치기는 한 가지만 줘도 된다', () => {
+    for (const patch of [{ name: '새 이름' }, { description: '설명' }, { content: doc }]) {
+      expect(updateTemplateDto.safeParse(patch).success).toBe(true);
+    }
+  });
+
+  it('**빈 몸통은 거부한다** — 아무것도 안 바꾸는 요청이 200을 받으면 화면은 바뀐 줄 안다', () => {
+    const r = updateTemplateDto.safeParse({});
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toContain('바꿀 것을');
   });
 });
