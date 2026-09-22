@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import type { DocNode, PageView } from '@workfluence/shared';
 import { ApiError, api } from '../api';
+import { useAuth } from '../auth';
+import { CollabEditor, type CollabState } from '../components/CollabEditor';
 import { Editor } from '../components/Editor';
 
 type Conflict = { currentVersionNo: number; baseVersionNo: number; message: string };
@@ -15,6 +17,12 @@ type Conflict = { currentVersionNo: number; baseVersionNo: number; message: stri
 export function PageEditorPage() {
   const { id = '' } = useParams();
   const nav = useNavigate();
+  const { me } = useAuth();
+  // 실시간 편집이 켜져 있는지는 **서버가 말해 준다** (FR-711). 화면이 짐작하면
+  // 꺼진 서버에 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다
+  const [collab, setCollab] = useState<boolean | null>(null);
+  const [peers, setPeers] = useState<string[]>([]);
+  const [link, setLink] = useState<CollabState>('connecting');
   const [page, setPage] = useState<PageView | null>(null);
   const [doc, setDoc] = useState<DocNode | null>(null);
   const [title, setTitle] = useState('');
@@ -34,8 +42,32 @@ export function PageEditorPage() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   };
   useEffect(load, [id]);
+  useEffect(() => {
+    api<{ collabEnabled: boolean }>('/api/auth/config')
+      .then((c) => setCollab(c.collabEnabled))
+      .catch(() => setCollab(false)); // 못 물어보면 단독 편집으로 간다 — 못 쓰는 것보다 낫다
+  }, []);
+  const onPeers = useCallback((names: string[]) => setPeers(names), []);
+  const onState = useCallback((s: CollabState) => setLink(s), []);
 
   const save = async () => {
+    // **실시간 편집에서는 서버가 이미 저장하고 있다.** 여기서 또 PATCH를 보내면
+    // 화면이 들고 있는 낡은 문서로 덮어써 남의 편집을 지운다 — 보기로 가기만 한다
+    if (collab) {
+      // **지금 바로 남긴다.** 화면이 그렇게 약속했으므로 그대로 해야 한다 —
+      // 유휴를 기다리게 하면 눌러도 아무 일이 없는 것처럼 보인다
+      setBusy(true);
+      try {
+        await api(`/api/pages/${id}/collab/flush`, { method: 'POST' });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
+      nav(`/pages/${id}`);
+      return;
+    }
     if (!page || !doc) return;
     setBusy(true);
     setError(null);
@@ -55,7 +87,7 @@ export function PageEditorPage() {
   };
 
   if (error) return <main className="shell"><p className="badge fail" role="alert">{error}</p><Link to="/">← 목록</Link></main>;
-  if (!page || !doc) return <main className="shell"><p className="muted">불러오는 중…</p></main>;
+  if (!page || !doc || collab === null) return <main className="shell"><p className="muted">불러오는 중…</p></main>;
 
   return (
     <main className="shell">
@@ -80,11 +112,36 @@ export function PageEditorPage() {
         <input id="ed-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
         <label htmlFor="ed-body">본문</label>
         <div id="ed-body">
-          <Editor value={page.content} onChange={setDoc} />
+          {collab && me ? (
+            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} />
+          ) : (
+            <Editor value={page.content} onChange={setDoc} />
+          )}
         </div>
-        <p className="muted small">편집을 시작한 버전: v{page.currentVersionNo}</p>
+
+        {collab ? (
+          <>
+            <p className="muted small" role="status">
+              {link === 'live' && (peers.length ? `같이 보는 사람: ${peers.join(', ')}` : '같이 보는 사람 없음')}
+              {link === 'connecting' && '연결 중…'}
+              {/* **끊긴 것을 반드시 말한다.** 조용히 끊기면 계속 쓰는데 아무에게도 안 가고,
+                  새로고침하면 그 내용이 사라진다 — 가장 나쁜 실패다 */}
+              {link === 'offline' && (
+                <strong className="badge fail">
+                  연결이 끊겼다. 지금 쓰는 내용은 저장되지 않는다 — 다른 곳에 복사한 뒤 새로고침한다
+                </strong>
+              )}
+            </p>
+            <p className="muted small">
+              쓰는 대로 자동으로 저장된다. 저장 버튼은 <strong>지금 바로</strong> 남기고 보기로 갈 때 쓴다.
+            </p>
+          </>
+        ) : (
+          <p className="muted small">편집을 시작한 버전: v{page.currentVersionNo}</p>
+        )}
+
         <button type="button" onClick={() => void save()} disabled={busy || conflict !== null}>
-          {busy ? '저장 중…' : '저장'}
+          {busy ? '저장 중…' : collab ? '저장하고 보기로' : '저장'}
         </button>
       </section>
     </main>

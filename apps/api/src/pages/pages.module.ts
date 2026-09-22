@@ -25,6 +25,7 @@ export class PagesController {
   constructor(
     private readonly pages: PagesService,
     private readonly audit: AuditService,
+    private readonly collab: CollabGateway,
     @Inject(DB) private readonly db: Db,
   ) {}
 
@@ -107,6 +108,22 @@ export class PagesController {
     @CurrentUser() me: SessionUser,
   ): Promise<PageVersionView & { content: DocNode }> {
     return this.pages.version(id, no, me);
+  }
+
+  /**
+   * 실시간 편집 중인 문서를 **지금 바로** 버전으로 남긴다 (FR-706의 사람 쪽 문).
+   *
+   * 화면의 저장 버튼이 이것을 부른다. 유휴를 기다리게 하면 "지금 저장한다"는 약속과
+   * 동작이 어긋난다. 남길 것이 없으면(방이 없거나 내용이 그대로) 그냥 `saved: false`다 —
+   * 오류가 아니다.
+   */
+  @Post(':id/collab/flush')
+  async flush(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser): Promise<{ saved: boolean; currentVersionNo: number }> {
+    // **권한을 여기서 본다.** WebSocket을 거치지 않고 부를 수 있는 경로다
+    await this.pages.get(id, me);
+    const saved = await this.collab.flush(id);
+    const after = await this.pages.get(id, me);
+    return { saved, currentVersionNo: after.currentVersionNo };
   }
 
   /** 두 버전의 차이 (FR-720). 읽을 수 있으면 볼 수 있다 */

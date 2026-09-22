@@ -44,3 +44,24 @@ button {
   color: var(--fg);
 }
 button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* --- Phase 6: 버전 비교 (P6_설계서_Collab FR-720~725) --- */
+/* **색만으로 구분하지 않는다.** 왼쪽 막대와 기호를 함께 둔다 — 색각 이상이 있어도 읽힌다 */
+.diff p { margin: .3em 0; padding: .3em .6em; border-left: 3px solid transparent; white-space: pre-wrap }
+.diff-added { border-left-color: #16a34a; background: #f0fdf4 }
+.diff-removed { border-left-color: #dc2626; background: #fef2f2; text-decoration: line-through; color: #7f1d1d }
+.diff-changed { border-left-color: #ca8a04; background: #fefce8 }
+.diff-same { color: #71717a }
+.diff-added::before { content: '+ '; font-weight: 700; color: #16a34a }
+.diff-removed::before { content: '− '; font-weight: 700; color: #dc2626 }
+.diff-changed::before { content: '~ '; font-weight: 700; color: #ca8a04 }
+.w-added { background: #bbf7d0; border-radius: 2px }
+.w-removed { background: #fecaca; border-radius: 2px; text-decoration: line-through }
+
+/* --- Phase 6: 실시간 편집 커서 --- */
+/* 남의 커서는 **이름표와 함께** 보여야 한다. 색만 있으면 누구인지 모른다 */
+.collaboration-carets__caret { border-left: 1px solid; border-right: 1px solid; margin-left: -1px; margin-right: -1px; position: relative; word-break: normal }
+.collaboration-carets__label {
+  border-radius: 3px 3px 3px 0; color: #fff; font-size: .72rem; font-weight: 600;
+  left: -1px; line-height: 1; padding: .1rem .3rem; position: absolute; top: -1.3em; user-select: none; white-space: nowrap;
+}

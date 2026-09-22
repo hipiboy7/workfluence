@@ -69,8 +69,10 @@ export class AuthController {
   /** 화면이 OIDC 버튼을 보일지 정하는 데 쓴다 (FR-219) */
   @Get('config')
   @Public()
-  config(): { oidcEnabled: boolean } {
-    return { oidcEnabled: this.env.WF_OIDC_ENABLED };
+  config(): { oidcEnabled: boolean; collabEnabled: boolean } {
+    // 실시간 편집 여부를 화면이 알아야 한다 (FR-711). 꺼져 있으면 단독 편집기를 띄운다 —
+    // 화면이 모르면 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다
+    return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED };
   }
 
   @Post('signup')

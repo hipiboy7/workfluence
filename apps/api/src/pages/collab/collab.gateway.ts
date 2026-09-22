@@ -264,6 +264,7 @@ export class CollabGateway implements OnModuleDestroy {
       room.versionNo = current.currentVersionNo + 1;
       room.lastChangeAt = 0;
       await this.rememberState(pageId, room, room.versionNo);
+      // **사람이 남아 있으면 방을 닫지 않는다.** 저장 버튼이 편집을 끊으면 안 된다
       if (force) await this.finish(pageId, room);
     } finally {
       room.saving = false;
@@ -298,6 +299,19 @@ export class CollabGateway implements OnModuleDestroy {
     const cutoff = new Date(Date.now() - hours * 3_600_000);
     const r = await this.db.delete(pageRealtime).where(lt(pageRealtime.updatedAt, cutoff));
     return r.rowCount ?? 0;
+  }
+
+  /**
+   * **지금 바로 남긴다** (화면의 저장 버튼).
+   *
+   * 실시간 편집은 유휴를 기다려 저장하는데, 사람이 "저장하고 나가겠다"고 할 때까지
+   * 기다리게 하면 **화면의 약속과 동작이 어긋난다.** 방이 없으면 남길 것도 없다 —
+   * 그 경우 `false`를 돌려 호출부가 알게 한다.
+   */
+  async flush(pageId: string): Promise<boolean> {
+    if (!this.rooms.has(pageId)) return false;
+    await this.saveIfNeeded(pageId, true);
+    return true;
   }
 
   /** 지금 몇 명이 어느 페이지를 보고 있는지 (진단용) */

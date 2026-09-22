@@ -33,6 +33,12 @@ export function PageViewPage() {
       <h1>{page.title}</h1>
       <p className="muted small">
         버전 {page.currentVersionNo} · <Link to={`/pages/${id}/history`}>이력</Link>
+        {' · '}
+        {/* **평범한 링크다.** `fetch`로 받아 `Blob`을 만들면 파일 이름을 화면이 다시
+            정해야 하는데, 그 이름은 서버가 이미 안전하게 정했다 (FR-730) */}
+        <a href={`/api/pages/${id}/export`} download>
+          HTML로 내보내기
+        </a>
         {space?.access.canWrite && <> · <Link to={`/pages/${id}/edit`}>편집</Link></>}
         {space?.access.canWrite && (
           <>
