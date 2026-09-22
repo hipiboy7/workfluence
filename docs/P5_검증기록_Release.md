@@ -226,8 +226,23 @@ $ docker compose -f compose.yml --env-file .env run --rm api node dist/db/migrat
 
 ## 4. 부하 측정 → 보류 6 판정 (FR-620 ~ FR-623)
 
-명령: `pnpm load:test`. 대상은 **컨테이너 스택**(nginx → api → postgres)이고 TLS 검증을
-켠 채로 재었다(`NODE_EXTRA_CA_CERTS`). 합성 페이지 5,000건, 합성 계정 1개로 50세션.
+명령:
+
+```
+NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://localhost:8443 \
+  LOAD_USER=<합성 관리자> LOAD_PASSWORD=<비밀번호> LOAD_SESSIONS=50 LOAD_ROUNDS=10 \
+  pnpm load:test
+```
+
+대상은 **컨테이너 스택**(nginx → api → postgres)이고 TLS 검증을 켠 채로 재었다 —
+`NODE_EXTRA_CA_CERTS`로 개발 인증서를 신뢰시켰고 **검증을 끄지 않았다** (7절).
+합성 페이지 5,000건, 합성 계정 1개로 50세션.
+
+> 측정 당시 환경변수 이름은 `WF_LOAD_*`였고, 자체 점검 지적으로 `LOAD_*`로 바꿨다
+> (5절 규칙: `WF_*`는 앱 설정이고 스키마가 모르는 `WF_` 키를 보면 기동을 거부한다).
+> 이름을 바꾼 뒤 **같은 명령이 실제로 도는지** 작게 다시 확인했다 — 동시 10세션 × 3회,
+> 표본 120개, 오류 0건, 가장 느린 p95 113ms. 데이터가 적은 상태의 수치이므로
+> **판정 근거는 아래 50세션 측정 쪽이다.**
 
 ```
 동시 50세션 × 10회 — 표본 2000개, 오류 0개
