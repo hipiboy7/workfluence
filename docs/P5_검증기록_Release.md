@@ -374,6 +374,24 @@ $ docker compose -f compose.yml --env-file .env run --rm api node dist/db/migrat
 
 ---
 
+## 10.1 보안 검토가 찾은 것 (2026-09-22)
+
+`/security-review`가 **High 하나**를 올렸다. 복원이 표 이름을 `BACKUP.json`의 키에서
+읽어 SQL에 넣었고, 그 파일은 **체크섬 목록에 없었다** — 백업 파일을 고칠 수 있는
+사람이 DB 계정 없이 관리자 권한 SQL을 실행할 수 있었다 (T-029).
+
+세 겹으로 막고 **실제 백업으로 두 공격을 재현해** 둘 다 거부되는 것을 확인했다.
+
+| 재현 | 결과 |
+|---|---|
+| 체크섬 목록에서 `BACKUP.json`을 뺀 백업으로 복원 | `필수 파일이 체크섬 목록에 없다: BACKUP.json` |
+| 표 이름에 `users; DROP TABLE users; SELECT count(*) FROM users`를 넣고 체크섬을 다시 만든 백업 | `BACKUP.json의 users 행 수가 숫자가 아니다` |
+
+검토가 통과시킨 것과 보고 기준 아래로 남긴 것(묶음 서명)은
+[`docs/internal/P5_검토서_SelfReview.md`](internal/P5_검토서_SelfReview.md) 5절에 있다.
+
+---
+
 ## 11. 자체 점검·리뷰 결과
 
 `doc-consistency`·`self-reviewer`·`/code-review`·`/security-review`의 결과와 처리 내역은

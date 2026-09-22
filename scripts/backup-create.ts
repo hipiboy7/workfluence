@@ -1,4 +1,4 @@
-import { formatChecksums } from '@workfluence/shared';
+import { BACKUP_COUNTED_TABLES, BACKUP_REQUIRED_FILES, formatChecksums } from '@workfluence/shared';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -39,12 +39,9 @@ function main(): void {
   // 복원 쪽도 이 값을 하한으로 쓴다 — 완전 일치를 요구하면 백업 도중에 로그인 하나만
   // 들어와도 복원이 다 끝난 뒤에 실패로 뒤집힌다 (`backup-restore.ts`)
   const migrations = psql(`SELECT count(*) FROM drizzle.__drizzle_migrations`);
-  const counts = Object.fromEntries(
-    ['users', 'spaces', 'pages', 'page_versions', 'attachments', 'comments', 'audit_events', 'notifications'].map((t) => [
-      t,
-      Number(psql(`SELECT count(*) FROM ${t}`)),
-    ]),
-  );
+  // 표 목록은 `packages/shared`에 있다. **복원도 같은 목록을 쓴다** — 복원이 이 파일의
+  // 키를 읽어 SQL에 넣던 것이 주입 통로였다 (보안 검토 1)
+  const counts = Object.fromEntries(BACKUP_COUNTED_TABLES.map((t) => [t, Number(psql(`SELECT count(*) FROM ${t}`))]));
 
   writeFileSync(join(out, 'dump.pgc'), dc(['exec', '-T', 'postgres', 'pg_dump', '-U', 'workfluence', '-Fc', 'workfluence'], { capture: true }));
   // **`exec api`를 쓰지 않는다.** 복원 절차는 api를 멈춘 뒤에 돌 수 있어야 하고, 백업도
@@ -55,13 +52,17 @@ function main(): void {
     dc(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'api', '-cf', '-', '-C', '/data', 'attachments'], { capture: true }),
   );
 
-  const files = ['dump.pgc', 'attachments.tar'];
-  const sums = files.map((f) => ({ file: f, sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex') }));
-  writeFileSync(join(out, 'SHA256SUMS'), formatChecksums(sums));
+  // **`BACKUP.json`을 먼저 쓰고 그것까지 체크섬에 넣는다.** 예전에는 체크섬을 먼저 만들고
+  // 이 파일을 그 뒤에 써서, **대조 근거를 담은 파일이 무결성 검사 밖에** 있었다 (보안 검토 1)
   writeFileSync(
     join(out, 'BACKUP.json'),
     JSON.stringify({ createdAt: new Date().toISOString(), migrations: Number(migrations), counts }, null, 2) + '\n',
   );
+  const sums = BACKUP_REQUIRED_FILES.map((f) => ({
+    file: f,
+    sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex'),
+  }));
+  writeFileSync(join(out, 'SHA256SUMS'), formatChecksums(sums));
 
   // 감사로그에 남긴다 (FR-616). 백업을 언제 떴는지는 사고 뒤에 가장 먼저 찾는 것이다
   psql(`INSERT INTO audit_events (action, target_type, detail) VALUES ('backup.create','system','${JSON.stringify({ path: out }).replace(/'/g, "''")}')`);

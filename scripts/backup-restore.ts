@@ -1,4 +1,4 @@
-import { parseChecksums, verifyChecksums } from '@workfluence/shared';
+import { BACKUP_COUNTED_TABLES, BACKUP_REQUIRED_FILES, backupCounts, parseChecksums, verifyChecksums } from '@workfluence/shared';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -46,18 +46,27 @@ function main(): void {
   if (!process.argv[2]) throw new Error('복원할 백업 디렉토리를 인자로 준다: pnpm backup:restore <디렉토리>');
   console.log(`[restore] ${dir}`);
 
-  // 체크섬부터 본다. 상한 백업으로 복원하면 **부분 복원**이 되어 더 나쁘다
+  // 체크섬부터 본다. 상한 백업으로 복원하면 **부분 복원**이 되어 더 나쁘다.
+  // 필수 파일이 **체크섬 목록에 올라 있는지도** 본다 — 목록에 없는 파일은 검사를 받지 않고
+  // 통과하므로, 근거를 담은 파일이 빠져 있으면 대조 자체가 의미를 잃는다 (보안 검토 1)
   const expected = parseChecksums(readFileSync(join(dir, 'SHA256SUMS'), 'utf8'));
+  const listed = new Set(expected.map((e) => e.file));
+  const unlisted = BACKUP_REQUIRED_FILES.filter((f) => !listed.has(f));
+  if (unlisted.length) {
+    throw new Error(`백업의 필수 파일이 체크섬 목록에 없다: ${unlisted.join(', ')}. 검사받지 않은 파일로는 복원하지 않는다`);
+  }
   const actual = Object.fromEntries(
     readdirSync(dir).map((f) => [f, createHash('sha256').update(readFileSync(join(dir, f))).digest('hex')]),
   );
   const problems = verifyChecksums(expected, actual);
   if (problems.length) throw new Error(`백업이 온전하지 않다:\n  ${problems.join('\n  ')}`);
 
-  const meta = JSON.parse(readFileSync(join(dir, 'BACKUP.json'), 'utf8')) as {
-    migrations: number;
-    counts: Record<string, number>;
-  };
+  const raw = JSON.parse(readFileSync(join(dir, 'BACKUP.json'), 'utf8')) as { migrations?: unknown; counts?: unknown };
+  // **표 이름을 이 파일에서 읽지 않는다.** 예전에는 `counts`의 키를 그대로 SQL에 넣었고,
+  // 백업 파일을 고칠 수 있는 사람이 키 이름에 SQL을 적으면 복원할 때 DB 관리자 권한으로
+  // 실행됐다. 목록은 `packages/shared`의 것을 쓰고, 이 파일에서는 **숫자만** 받는다.
+  // 숫자가 아니면 `NaN`이 되어 어떤 비교에도 걸리지 않고 대조를 통째로 건너뛴다 (보안 검토 1)
+  const meta = { migrations: Number(raw.migrations), counts: backupCounts(raw.counts) };
 
   // **비어 있는지 확인한다.** public 스키마에 표가 하나라도 있으면 거부한다
   const tables = Number(psql(`SELECT count(*) FROM information_schema.tables WHERE table_schema='public'`));
@@ -78,7 +87,7 @@ function main(): void {
   // 끼어도 `audit_events`가 늘어난다. 완전 일치를 요구하면 **복원이 다 끝난 뒤에** 그걸
   // 불일치로 보고 예외를 던지고, DB는 이미 비어 있지 않아 다시 시도할 수도 없다.
   // 모자란 것만 실패로 본다. 넘치는 것은 알려 주기만 한다.
-  const after = Object.fromEntries(Object.keys(meta.counts).map((t) => [t, Number(psql(`SELECT count(*) FROM ${t}`))]));
+  const after = Object.fromEntries(BACKUP_COUNTED_TABLES.map((t) => [t, Number(psql(`SELECT count(*) FROM ${t}`))]));
   const missing = Object.entries(meta.counts).filter(([t, n]) => after[t] < n);
   const extra = Object.entries(meta.counts).filter(([t, n]) => after[t] > n);
   const files = Number(inAttachments(['sh', '-lc', 'find /data/attachments -type f | wc -l'], undefined, true).trim());

@@ -26,6 +26,56 @@ export const RELEASE_REQUIRED_FILES = [
   '반입절차.md',
 ] as const;
 
+/**
+ * 백업 묶음이 반드시 갖춰야 할 것. **`BACKUP.json`이 여기 들어 있는 것이 중요하다.**
+ *
+ * 예전에는 체크섬을 `dump.pgc`·`attachments.tar`에만 걸고 `BACKUP.json`은 그 뒤에 썼다.
+ * 그 파일은 **대조 근거**(표별 행 수)를 담는데 정작 무결성 검사 밖에 있었다 —
+ * 근거를 담은 파일을 검사하지 않으면 대조 자체가 의미를 잃는다.
+ */
+export const BACKUP_REQUIRED_FILES = ['dump.pgc', 'attachments.tar', 'BACKUP.json'] as const;
+
+/**
+ * 백업이 행 수를 세는 표 — **목록은 여기 한 곳에만 있다.**
+ *
+ * 예전에는 백업이 이 목록을 코드에 적고, 복원은 **`BACKUP.json`의 키에서 읽어** 그것을
+ * SQL에 그대로 넣었다. 백업 파일을 고칠 수 있는 사람(백업 공유 폴더·반입 매체)이 키 이름에
+ * SQL을 적어 넣으면 **복원할 때 DB 관리자 권한으로 실행된다.** 표 이름 같은 식별자는
+ * 파일에서 오면 안 된다 — 우리가 정한 목록에서만 온다.
+ *
+ * 순서는 의미가 없다. 여기 없는 표는 백업 대조에 쓰이지 않는다(`sessions`처럼 복원 뒤
+ * 달라지는 것이 정상인 표는 일부러 빼 두었다).
+ */
+export const BACKUP_COUNTED_TABLES = [
+  'users',
+  'spaces',
+  'pages',
+  'page_versions',
+  'attachments',
+  'comments',
+  'audit_events',
+  'notifications',
+] as const;
+
+/**
+ * `BACKUP.json`에서 읽은 행 수를 **숫자로만** 받는다.
+ *
+ * 숫자가 아니면 `NaN`이 되고, `NaN`은 어떤 비교에도 `false`라서 **"모자라다"도 "넘친다"도
+ * 아닌 것이 되어 대조를 통째로 건너뛴다.** 조용히 통과하는 길을 막는다.
+ */
+export function backupCounts(raw: unknown): Record<string, number> {
+  const src = (raw ?? {}) as Record<string, unknown>;
+  const out: Record<string, number> = {};
+  for (const t of BACKUP_COUNTED_TABLES) {
+    const v = src[t];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+      throw new Error(`BACKUP.json의 ${t} 행 수가 숫자가 아니다: ${JSON.stringify(v)}`);
+    }
+    out[t] = v;
+  }
+  return out;
+}
+
 const SHA256 = /^[0-9a-f]{64}$/;
 
 /** `sha256sum`과 같은 서식으로 쓴다 — 우리 도구가 없어도 표준 도구로 검사할 수 있어야 한다 */

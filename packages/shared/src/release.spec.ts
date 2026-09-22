@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { RELEASE_REQUIRED_FILES, formatChecksums, formatManifest, parseChecksums, parseManifest, verifyChecksums } from './release';
+import {
+  BACKUP_COUNTED_TABLES,
+  BACKUP_REQUIRED_FILES,
+  RELEASE_REQUIRED_FILES,
+  backupCounts,
+  formatChecksums,
+  formatManifest,
+  parseChecksums,
+  parseManifest,
+  verifyChecksums,
+} from './release';
 
 /** A등급 (P5_설계서_Release D절). 테스트를 먼저 썼다. */
 
@@ -83,5 +93,35 @@ describe('parseManifest — 모양이 어긋난 줄', () => {
     const m = parseManifest(`${text}\n이건 사람이 적은 메모다\n`);
     expect(m.version).toBe('0.1.0');
     expect(m.images).toEqual(['x:1']);
+  });
+});
+
+describe('백업 대조 계약 (보안 검토 1)', () => {
+  it('`BACKUP.json`이 필수 파일에 들어 있다 — 대조 근거를 담은 파일이 검사 밖에 있으면 안 된다', () => {
+    expect(BACKUP_REQUIRED_FILES).toContain('BACKUP.json');
+    expect(BACKUP_REQUIRED_FILES).toContain('dump.pgc');
+    expect(BACKUP_REQUIRED_FILES).toContain('attachments.tar');
+  });
+
+  it('표 목록은 **우리가 정한 것**이다. 파일에 없는 표를 요구하면 실패한다', () => {
+    expect(BACKUP_COUNTED_TABLES).toContain('audit_events');
+    expect(() => backupCounts({ users: 1 })).toThrow(/spaces/);
+  });
+
+  it('**표 이름에 SQL을 적어 넣어도 통하지 않는다** — 키를 읽지 않고 우리 목록만 본다', () => {
+    const evil = { "users; DROP TABLE users; SELECT count(*) FROM users": 1 };
+    expect(() => backupCounts(evil)).toThrow(/users/);
+  });
+
+  it('행 수가 숫자가 아니면 거부한다 — NaN은 어떤 비교에도 false라 대조를 건너뛴다', () => {
+    const base = Object.fromEntries(BACKUP_COUNTED_TABLES.map((t) => [t, 0]));
+    for (const bad of ['1', null, undefined, 1.5, -1, {}, [1]]) {
+      expect(() => backupCounts({ ...base, users: bad })).toThrow(/users/);
+    }
+  });
+
+  it('정상 값은 그대로 돌려준다. **여분의 키는 무시한다**', () => {
+    const base = Object.fromEntries(BACKUP_COUNTED_TABLES.map((t, i) => [t, i]));
+    expect(backupCounts({ ...base, 'sessions; DROP TABLE x': 9 })).toEqual(base);
   });
 });
