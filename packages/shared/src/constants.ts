@@ -63,6 +63,7 @@ export const AUDIT_ACTIONS = [
   'page.restore.trash',
   'space.restore',
   'trash.purge',
+  'audit.purge',
   'label.attach',
   'label.detach',
   'category.update',

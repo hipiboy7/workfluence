@@ -223,6 +223,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `pnpm test:e2e` | Playwright |
 | `pnpm search:reindex` | 검색 인덱스(`pages.search_text`) 재생성 |
 | `pnpm trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 |
+| `pnpm audit:purge` | 보존 기간을 넘긴 감사로그 삭제 (append-only의 좁은 예외) |
 | `pnpm verify:docs` | 문서 검사 |
 | `pnpm check` | lint + typecheck + test + verify:docs (CI와 같은 검사) |
 | `pnpm build` | api·web 빌드 |
