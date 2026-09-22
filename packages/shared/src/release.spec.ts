@@ -8,6 +8,7 @@ import {
   formatManifest,
   parseChecksums,
   parseManifest,
+  unlistedRequired,
   verifyChecksums,
 } from './release';
 
@@ -142,5 +143,40 @@ describe('backupCounts의 빈 입력', () => {
   it('`null`·`undefined`도 "대조할 것이 없다"로 거부한다 — 조용히 통과하지 않는다', () => {
     expect(() => backupCounts(undefined)).toThrow(/하나도 없다/);
     expect(() => backupCounts(null)).toThrow(/하나도 없다/);
+  });
+});
+
+/**
+ * **목록에 없는 것이 통과하는 검사는 검사하지 않는 것과 구분되지 않는다.**
+ *
+ * 체크섬 검사는 "적힌 것"만 본다. 그래서 `SHA256SUMS`가 비어 있으면 아무것도 검사하지
+ * 않고 통과했다 — 반입 검사가 `필수 9개 · 체크섬 0개 일치`로 종료 코드 0을 냈다.
+ */
+describe('unlistedRequired (코드 리뷰 1)', () => {
+  const sums = [{ file: 'a.tar', sha256: 'a'.repeat(64) }];
+
+  it('체크섬 목록이 비어 있으면 필수 파일 전부를 올린다', () => {
+    expect(unlistedRequired([], ['a.tar', 'b.txt'])).toEqual(['a.tar: 체크섬 목록에 없다', 'b.txt: 체크섬 목록에 없다']);
+  });
+
+  it('목록에 있는 것은 올리지 않는다', () => {
+    expect(unlistedRequired(sums, ['a.tar'])).toEqual([]);
+  });
+
+  it('일부만 빠져도 그것만 올린다 — **잘린 체크섬 파일이 이 모양이다**', () => {
+    expect(unlistedRequired(sums, ['a.tar', 'b.txt'])).toEqual(['b.txt: 체크섬 목록에 없다']);
+  });
+
+  it('필수 목록이 비면 올릴 것이 없다', () => {
+    expect(unlistedRequired(sums, [])).toEqual([]);
+  });
+});
+
+describe('verifyChecksums가 이상한 파일 이름에 터지지 않는다 (코드 리뷰 11)', () => {
+  it('`__proto__`·`constructor` 같은 이름도 "묶음에 없다"로 말한다', () => {
+    for (const name of ['__proto__', 'constructor', 'toString']) {
+      const out = verifyChecksums([{ file: name, sha256: 'a'.repeat(64) }], {});
+      expect(out).toEqual([`${name}: 묶음에 없다`]);
+    }
   });
 });
