@@ -76,3 +76,12 @@ describe('필수 파일 목록 (FR-601)', () => {
     expect(RELEASE_REQUIRED_FILES.length).toBeGreaterThan(5);
   });
 });
+
+describe('parseManifest — 모양이 어긋난 줄', () => {
+  it('`=`가 없는 줄은 **무시한다** — 사람이 메모를 끼워 넣어도 매니페스트가 깨지지 않는다', () => {
+    const text = formatManifest({ version: '0.1.0', gitSha: 'abc1234', builtAt: '2026-09-22T00:00:00.000Z', images: ['x:1'] });
+    const m = parseManifest(`${text}\n이건 사람이 적은 메모다\n`);
+    expect(m.version).toBe('0.1.0');
+    expect(m.images).toEqual(['x:1']);
+  });
+});

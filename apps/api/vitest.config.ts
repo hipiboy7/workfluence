@@ -29,6 +29,9 @@ export default defineConfig({
     fileParallelism: false,
     coverage: {
       provider: 'v8',
+      // **검증기록의 표를 손으로 쓰지 않는다.** `coverage-summary.json`에서 뽑는다 —
+      // P4에서 손으로 적다가 브랜치 89.28%를 100%로 잘못 적었다
+      reporter: ['text', 'json-summary'],
       /**
        * **디렉토리를 열거하지 않는다.** 전부 넣고 뺄 것만 이름으로 뺀다.
        *
