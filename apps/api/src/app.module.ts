@@ -8,11 +8,13 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard } from './auth/auth.guard';
 import { CommentsModule } from './comments/comments.module';
+import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { LabelsModule } from './labels/labels.module';
+import { TemplatesModule } from './templates/templates.module';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
 import { SettingsModule } from './settings/settings.module';
@@ -57,11 +59,14 @@ function resolveWebDist(): string {
     // SettingsModule은 @Global — 정책값을 쓰는 모든 모듈이 읽는다
     SettingsModule,
     AttachmentsModule,
+    // MailModule은 @Global — 알림을 만드는 곳이 커밋 뒤에 메일도 보낸다 (FR-754)
+    MailModule,
     // NotificationsModule은 @Global — 댓글·페이지 저장이 멘션 알림을 만든다
     NotificationsModule,
     CommentsModule,
     TrashModule,
     LabelsModule,
+    TemplatesModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

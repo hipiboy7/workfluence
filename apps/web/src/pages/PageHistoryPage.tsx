@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { DocNode, PageVersionView, SpaceView, PageView } from '@workfluence/shared';
+import type { DocNode, PageDiffView, PageVersionView, SpaceView, PageView } from '@workfluence/shared';
 import { api } from '../api';
 import { Editor } from '../components/Editor';
 
@@ -24,16 +24,67 @@ export function PageHistoryPage() {
   }, [id]);
   useEffect(load, [load]);
 
+  // 비교할 두 버전. 하나만 고르면 "다음 것을 고르세요"로 남는다
+  const [pick, setPick] = useState<number[]>([]);
+  const [diff, setDiff] = useState<PageDiffView | null>(null);
+  const toggle = (no: number): void => {
+    setDiff(null);
+    setPick((cur) => (cur.includes(no) ? cur.filter((x) => x !== no) : [...cur, no].slice(-2)));
+  };
+  const compare = (): void => {
+    const [a, b] = [...pick].sort((x, y) => x - y);
+    void api<PageDiffView>(`/api/pages/${id}/versions/${a}/diff/${b}`)
+      .then(setDiff)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  };
+
   return (
     <main className="shell">
       <p className="muted small"><Link to={`/pages/${id}`}>← 보기로</Link></p>
       <h1>버전 이력</h1>
       {error && <p className="badge fail" role="alert">{error}</p>}
+
+      <section className="card" aria-label="버전 비교">
+        <h2>두 버전 비교</h2>
+        <p className="muted small">
+          아래 목록에서 <strong>두 개</strong>를 고르면 무엇이 바뀌었는지 볼 수 있다. 지금 고른 것:{' '}
+          {pick.length ? pick.map((n) => `v${n}`).join(', ') : '없음'}
+        </p>
+        <button type="button" onClick={compare} disabled={pick.length !== 2}>
+          비교하기
+        </button>
+        {diff && (
+          <div className="diff">
+            <p className="muted small">
+              v{diff.from.versionNo} → v{diff.to.versionNo} · 변경 {diff.diff.modified} · 추가 {diff.diff.added} · 삭제 {diff.diff.removed}
+              {diff.titleChanged && ' · 제목도 바뀌었다'}
+            </p>
+            {!diff.diff.changed && <p>두 버전의 내용이 같다.</p>}
+            {diff.diff.blocks.map((b, i) => (
+              <p key={i} className={`diff-${b.kind}`}>
+                {b.kind === 'changed' && b.words
+                  ? b.words.map((w, j) => (
+                      <span key={j} className={`w-${w.kind}`}>
+                        {w.text}{' '}
+                      </span>
+                    ))
+                  : (b.after ?? b.before ?? '')}
+              </p>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="card">
         <ul>
           {versions.map((v) => (
             <li key={v.versionNo}>
+              {/* **체크박스를 버전 뒤에 둔다.** 앞에 두면 목록 항목이 "비교 v1…"로 시작해
+                  버전으로 항목을 찾던 기존 화면 테스트가 깨진다 — 읽는 순서도 이쪽이 자연스럽다 */}
               <strong>v{v.versionNo}</strong> {v.title} — {v.createdByName} · {new Date(v.createdAt).toLocaleString('ko-KR')}{' '}
+              <label>
+                <input type="checkbox" checked={pick.includes(v.versionNo)} onChange={() => toggle(v.versionNo)} /> 비교
+              </label>{' '}
               <button
                 type="button"
                 onClick={() =>

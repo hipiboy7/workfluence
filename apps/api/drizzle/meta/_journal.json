@@ -50,6 +50,13 @@
       "when": 1790042673661,
       "tag": "0006_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790052459181,
+      "tag": "0007_collab",
+      "breakpoints": true
     }
   ]
 }

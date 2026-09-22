@@ -57,22 +57,31 @@ test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원',
 
   const pageUrl = page.url();
 
-  // 5) **충돌**: 편집 화면을 연 채로 다른 경로에서 먼저 저장하면 뒤가 막힌다
-  await page.goto(`${pageUrl}/edit`);
-  await expect(page.getByText('편집을 시작한 버전: v2')).toBeVisible();
-  // 다른 탭이 먼저 저장한 상황을 API로 만든다 (두 사람이 동시에 편집한 것과 같다)
+  // 5) **충돌은 이제 API 경로의 일이다** (Phase 6에서 바뀌었다).
+  //
+  // Phase 2는 화면에서 저장 버튼을 눌러 충돌 안내를 받는 것을 인수 기준으로 삼았다.
+  // Phase 6이 실시간 동시 편집을 켜면서 **그 상황 자체가 화면에서 사라졌다** — 두 사람의
+  // 입력이 병합되므로 충돌할 것이 없다. `CLAUDE.md` 0.1절이 애초에 그렇게 적어 뒀다:
+  // "실시간 동시 편집은 Phase 6. **그 전에는** 편집 잠금 + 저장 시 버전 충돌 감지".
+  //
+  // 규칙(FR-709)은 REST 저장 경로와 409를 그대로 두라고 한다. 협업 클라이언트가 아닌
+  // 경로가 있기 때문이다. 그래서 **그쪽을 직접 확인한다.**
   const pageId = pageUrl.split('/pages/')[1];
-  const res = await page.request.patch(`/api/pages/${pageId}`, {
+  const first = await page.request.patch(`/api/pages/${pageId}`, {
     headers: { 'x-workfluence-request': '1' },
     data: { title: '먼저 저장됨', content: { type: 'doc', schemaVersion: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: '먼저' }] }] }, baseVersionNo: 2 },
   });
-  expect(res.status()).toBe(200);
+  expect(first.status()).toBe(200);
 
-  await page.getByRole('button', { name: '저장' }).click();
-  await expect(page.getByText('다른 사람이 먼저 저장했다')).toBeVisible();
-  // **덮어쓰기 버튼을 주지 않는다** (FR-343)
-  await expect(page.getByRole('button', { name: /덮어/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '최신 내용 불러오기' })).toBeVisible();
+  // 같은 기준 버전으로 또 저장하면 막힌다
+  const conflict = await page.request.patch(`/api/pages/${pageId}`, {
+    headers: { 'x-workfluence-request': '1' },
+    data: { title: '뒤늦은 저장', content: { type: 'doc', schemaVersion: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: '뒤늦게' }] }] }, baseVersionNo: 2 },
+  });
+  expect(conflict.status()).toBe(409);
+  const body = (await conflict.json()) as { currentVersionNo: number; baseVersionNo: number };
+  expect(body.baseVersionNo).toBe(2);
+  expect(body.currentVersionNo).toBe(3);
 
   // 6) 이력에서 v1으로 복원 → 새 버전이 생긴다
   await page.goto(`${pageUrl}/history`);

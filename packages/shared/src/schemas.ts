@@ -1,3 +1,4 @@
+import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
@@ -285,6 +286,46 @@ export type PageVersionView = {
   createdByName: string;
   createdAt: string;
 };
+/** 실시간 편집을 **지금 바로** 버전으로 남긴다 (P6_설계서_Collab). 제목도 함께 온다 */
+export const flushCollabDto = z.object({ title: z.string().trim().min(1).max(300).optional() });
+export type FlushCollabDto = z.infer<typeof flushCollabDto>;
+
+/** 페이지 템플릿 (P6_설계서_Collab FR-740) */
+export type PageTemplateView = {
+  id: string;
+  name: string;
+  description: string | null;
+  content: DocNode;
+  updatedAt: string;
+};
+
+export const createTemplateDto = z.object({
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(200).nullish(),
+  content: documentSchema,
+});
+export type CreateTemplateDto = z.infer<typeof createTemplateDto>;
+
+export const updateTemplateDto = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    description: z.string().trim().max(200).nullish(),
+    content: documentSchema.optional(),
+  })
+  // **빈 몸통을 거부한다.** 아무것도 안 바꾸는 요청이 200을 받으면 화면은 바뀐 줄 안다
+  .refine((v) => v.name !== undefined || v.description !== undefined || v.content !== undefined, {
+    message: '바꿀 것을 하나는 줘야 한다',
+  });
+export type UpdateTemplateDto = z.infer<typeof updateTemplateDto>;
+
+/** 두 버전을 나란히 볼 때 화면이 받는 것 (P6_설계서_Collab FR-720) */
+export type PageDiffView = {
+  from: { versionNo: number; title: string; createdByName: string; createdAt: string };
+  to: { versionNo: number; title: string; createdByName: string; createdAt: string };
+  titleChanged: boolean;
+  diff: DocDiff;
+};
+
 export type AttachmentView = {
   id: string;
   pageId: string;

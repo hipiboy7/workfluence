@@ -100,6 +100,27 @@ export const envSchema = z
     // **DB `settings`에 값이 있으면 그쪽이 이긴다** (FR-527). 여기 값은 DB가 비었을 때의 기본값이다
     WF_TRASH_RETENTION_DAYS: intString(1, 3650, 30),
     WF_AUDIT_RETENTION_DAYS: intString(1, 3650, 365),
+
+    // --- Phase 6: 실시간 편집·메일 (P6_설계서_Collab H절) ---
+    /** 끄면 Phase 2의 단독 편집으로 돌아간다 (FR-711). 운영에서 문제가 생기면 코드를 되돌리지 않고 끈다 */
+    WF_COLLAB_ENABLED: bool(true),
+    /** 이만큼 조용하면 버전을 남긴다 (FR-706). 짧으면 버전이 늘고 길면 잃는 양이 는다 */
+    WF_COLLAB_IDLE_SAVE_MS: intString(1_000, 600_000, 5_000),
+    /**
+     * 메일은 **기본이 꺼짐**이다. 주소도 토큰도 모르는 상태에서 켜져 있으면
+     * 기동은 되고 발송만 조용히 실패한다 (FR-757).
+     */
+    WF_MAIL_ENABLED: bool(false),
+    /** 모의 발송 — 보낸 내용을 로그로 남기고 실제로 보내지 않는다 (FR-752) */
+    WF_MAIL_MOCK: bool(true),
+    WF_MAIL_API_URL: z.string().default(''),
+    WF_MAIL_API_TOKEN: z.string().default(''),
+    WF_MAIL_FROM: z.string().default(''),
+    /**
+     * 사람이 눌러서 들어올 주소. **메일에 링크를 넣으려면 서버가 자기 주소를 알아야 한다** —
+     * 요청 헤더로 조립하지 않는다 (9.1절 `redirect_uri`와 같은 판단: 헤더는 위조된다)
+     */
+    WF_PUBLIC_URL: z.string().default(''),
   })
   .strict();
 

@@ -1,12 +1,15 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   PAGE_TREE_MAX_DEPTH,
+  diffDocs,
   extractText,
+  renderExportDocument,
   stampSchemaVersion,
   type CreatePageDto,
   type DocNode,
   type MovePageDto,
   type PageSummary,
+  type PageDiffView,
   type PageVersionView,
   type PageView,
   type Principal,
@@ -14,8 +17,9 @@ import {
 } from '@workfluence/shared';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
+import type { MentionOutcome } from '../notifications/notifications.service';
 import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
-import { pageVersions, pages, users, type PageRow } from '../db/schema';
+import { pageVersions, pages, spaces, users, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { checkMove, type TreeNode } from './domain/tree';
@@ -131,7 +135,7 @@ export class PagesService {
   }
 
   /** 저장 (FR-322, FR-323). 호출부가 트랜잭션을 준다 — 감사 기록과 같은 트랜잭션이어야 한다 */
-  async update(id: string, dto: UpdatePageDto, principal: Principal, tx: Db): Promise<PageView> {
+  async update(id: string, dto: UpdatePageDto, principal: Principal, tx: Db, onMentions?: (m: MentionOutcome) => void): Promise<PageView> {
     const current = await this.row(id, tx);
     await this.spaces.assertWrite(current.spaceId, principal, tx);
 
@@ -157,7 +161,9 @@ export class PagesService {
     // 본문의 멘션도 알림을 만든다 (FR-500 — 설계서는 "댓글·페이지 본문 둘 다"다).
     // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다.
     // **직전 내용을 함께 넘겨 새로 생긴 멘션만 부른다** (코드 리뷰 6)
-    await this.notifications.notifyMentions(
+    // **부른 사람들을 호출부에 넘긴다.** 메일은 커밋 뒤에 보내야 한다 (FR-754) —
+    // 여기서 보내면 트랜잭션이 남의 서버를 기다리고, 롤백되면 없던 일에 대한 메일이 나간다
+    const mentions = await this.notifications.notifyMentions(
       {
         doc: content,
         pageId: page.id,
@@ -168,7 +174,52 @@ export class PagesService {
       },
       tx,
     );
+    onMentions?.(mentions);
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
+  }
+
+  /**
+   * 실시간 편집의 자동 저장 (P6_설계서_Collab FR-706·712).
+   *
+   * **권한을 다시 보지 않는다.** WebSocket 업그레이드에서 이미 쓰기 권한을 판정했고
+   * (FR-703), 그 뒤로 그 연결은 닫히지 않는 한 같은 사람의 것이다. 여기서 또 보면
+   * "누구의 권한으로" 저장하는지가 애매해진다 — 자동 저장의 주체는 **마지막으로 고친
+   * 사람**이지 요청한 사람이 아니다.
+   *
+   * **충돌(409)을 보지 않는다.** 그것이 실시간 편집의 요지다 — Yjs가 이미 병합했고,
+   * 여기 오는 문서는 그 병합의 결과다. 대신 `FOR UPDATE`로 REST 저장과 줄을 세운다.
+   */
+  async saveCollabVersion(
+    id: string,
+    title: string,
+    content: DocNode,
+    actorId: string,
+    tx: Db,
+    onMentions?: (m: MentionOutcome) => void,
+  ): Promise<PageRow> {
+    const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');
+    if (!locked) throw new NotFoundException('페이지를 찾을 수 없다');
+    // 직전 내용을 **버전을 더하기 전에** 읽는다. 알림은 그 둘의 차이로 만든다
+    const previous = await tx.query.pageVersions.findFirst({
+      where: and(eq(pageVersions.pageId, id), eq(pageVersions.versionNo, locked.currentVersionNo)),
+    });
+    const page = await this.appendVersion(tx, locked, title, content, actorId);
+    // **협업 저장도 멘션을 만든다.** 이것이 없으면 실시간 편집이 기본인 지금
+    // 페이지 본문의 `@멘션`이 앱 알림·메일 모두 0건이 된다 — Phase 3 FR-500 회귀였다
+    // (자체 점검 4). REST 경로와 같은 함수를 쓴다
+    const mentions = await this.notifications.notifyMentions(
+      {
+        doc: content,
+        pageId: page.id,
+        commentId: null,
+        spaceId: page.spaceId,
+        actorId,
+        previousDoc: (previous?.contentJson as DocNode | undefined) ?? null,
+      },
+      tx,
+    );
+    onMentions?.(mentions);
+    return page;
   }
 
   private async appendVersion(tx: Db, locked: PageRow, title: string, raw: DocNode, actorId: string): Promise<PageRow> {
@@ -182,6 +233,45 @@ export class PagesService {
       .where(eq(pages.id, locked.id))
       .returning();
     return page;
+  }
+
+  /**
+   * 두 버전의 차이 (FR-720~726).
+   *
+   * 비교 자체는 `packages/shared`의 순수 함수가 한다. 여기서는 **권한과 조회**만 본다 —
+   * 읽을 수 있어야 하고(FR-737과 같은 판정), 두 버전이 다 있어야 한다.
+   */
+  async diff(id: string, from: number, to: number, principal: Principal): Promise<PageDiffView> {
+    const [a, b] = await Promise.all([this.version(id, from, principal), this.version(id, to, principal)]);
+    return {
+      from: { versionNo: a.versionNo, title: a.title, createdByName: a.createdByName, createdAt: a.createdAt },
+      to: { versionNo: b.versionNo, title: b.title, createdByName: b.createdByName, createdAt: b.createdAt },
+      titleChanged: a.title !== b.title,
+      diff: diffDocs(a.content, b.content),
+    };
+  }
+
+  /**
+   * 내보낼 HTML (FR-730~737).
+   *
+   * **읽기 권한과 같은 판정이다** (FR-737) — `get`이 그것을 한다. 버전을 주면 그 버전을,
+   * 안 주면 지금 것을 낸다.
+   */
+  async exportHtml(id: string, principal: Principal, versionNo?: number): Promise<{ filename: string; html: string; versionNo: number }> {
+    const page = await this.get(id, principal);
+    const target = versionNo === undefined ? null : await this.version(id, versionNo, principal);
+    const space = await this.db.query.spaces.findFirst({ where: eq(spaces.id, page.spaceId) });
+    const html = renderExportDocument({
+      title: target?.title ?? page.title,
+      doc: target?.content ?? page.content,
+      exportedAt: new Date().toISOString(),
+      spaceName: space?.name,
+      versionNo: target?.versionNo ?? page.currentVersionNo,
+    });
+    // **파일 이름에 제목을 그대로 쓰지 않는다.** 경로 구분자나 제어문자가 들어가면
+    // 내려받는 쪽에서 엉뚱한 곳에 저장된다. 안전한 글자만 남기고 비면 페이지 id를 쓴다
+    const safe = (target?.title ?? page.title).replace(/[^\p{L}\p{N}._-]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+    return { filename: `${safe || page.id}.html`, html, versionNo: target?.versionNo ?? page.currentVersionNo };
   }
 
   async versions(id: string, principal: Principal): Promise<PageVersionView[]> {

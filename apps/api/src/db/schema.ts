@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * 데이터 모델. 전체 그림은 docs/설계서_Architecture.md 3.1절이 단일 출처이고,
@@ -304,6 +304,44 @@ export const settings = pgTable('settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * 실시간 편집 상태 (P6_설계서_Collab D.1절, FR-701).
+ *
+ * **파생 데이터다.** 지워도 정본(`page_versions.content_json`)은 그대로다 —
+ * 다음에 열면 정본에서 다시 시작한다. 검색 인덱스와 같은 성격이다 (6절).
+ */
+export const pageRealtime = pgTable(
+  'page_realtime',
+  {
+    pageId: uuid('page_id')
+      .primaryKey()
+      .references(() => pages.id, { onDelete: 'cascade' }),
+    /** `Y.encodeStateAsUpdate`의 결과 */
+    state: customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' })('state').notNull(),
+    /** 이 상태가 어느 버전에서 시작했는가 */
+    versionNo: integer('version_no').notNull(),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('page_realtime_updated_idx').on(t.updatedAt)],
+);
+
+/** 페이지 템플릿 (FR-740~746). **전역이다** — 스페이스별로 두지 않는다 */
+export const pageTemplates = pgTable('page_templates', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: text('name').notNull().unique(),
+  description: text('description'),
+  contentJson: jsonb('content_json').notNull(),
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id),
+  updatedBy: uuid('updated_by')
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type CommentRow = typeof comments.$inferSelect;
 export type SpaceRow = typeof spaces.$inferSelect;
@@ -316,3 +354,5 @@ export type NewUserRow = typeof users.$inferInsert;
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type SettingRow = typeof settings.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
+export type PageRealtimeRow = typeof pageRealtime.$inferSelect;
+export type PageTemplateRow = typeof pageTemplates.$inferSelect;

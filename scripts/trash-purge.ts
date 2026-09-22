@@ -102,6 +102,13 @@ async function main(): Promise<void> {
     // **아무 페이지도 안 쓰는 라벨은 남기지 않는다.** 서비스(`labels.service.ts`)가 뗄 때
     // 하는 것과 같은 판단이다 — 자동완성 목록이 쓰레기로 찬다 (자체 점검 17)
     await del('labels(고아)', 'DELETE FROM labels WHERE NOT EXISTS (SELECT 1 FROM page_labels pl WHERE pl.label_id = labels.id)');
+    // **오래된 실시간 편집 상태도 치운다** (P6 FR-710의 뒷정리). 프로세스가 죽으면 상태가
+    // 남는데 그 자체는 문제가 아니다 — 다음에 열면 이어진다. **영구히 쌓이는 것**만 막는다.
+    // 하루를 기준으로 삼은 것은 그보다 오래 이어서 고치는 편집이 없기 때문이다
+    await del(
+      'page_realtime(고아)',
+      `DELETE FROM page_realtime WHERE updated_at < now() - interval '1 day'`,
+    );
 
     // 감사로그에 남긴다 (FR-516). 본 작업과 같은 트랜잭션이다
     await c.query(`INSERT INTO audit_events (action, target_type, detail) VALUES ('trash.purge', 'system', $1)`, [
