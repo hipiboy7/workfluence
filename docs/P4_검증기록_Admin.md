@@ -20,7 +20,7 @@
 | 대상 | 파일 | 건수 | skip |
 |---|---|---|---|
 | `packages/shared` | 6 | 71 | 0 |
-| `apps/api` | 26 | 266 | 0 |
+| `apps/api` | 27 | 273 | 0 |
 | E2E (`pnpm test:e2e`) | 5 | 17 | 0 |
 
 이번 Phase가 만든 모듈 (`pnpm test:cov`, v8):
@@ -32,13 +32,13 @@
 > 이 행은 **한 번 틀리게 적었다.** 처음에 100/100으로 썼는데 실측은 브랜치 89.28%였고,
 > A등급 기준(90%) 미달인데 패키지 합계가 가려 관문은 초록이었다. 자체 점검이 잡았다
 > (`internal/P4_검토서_SelfReview.md` 1절). 빈 분기에 테스트를 넣어 지금은 표대로다.
-| `apps/api/src/notifications/notifications.service.ts` | B | 100.00 | 93.93 | 100.00 |
+| `apps/api/src/notifications/notifications.service.ts` | B | 100.00 | 93.75 | 100.00 |
 | `apps/api/src/audit/audit.service.ts` | B | 100.00 | 96.55 | 100.00 |
-| `apps/api/src/trash/trash.service.ts` | B | 100.00 | 86.36 | 100.00 |
+| `apps/api/src/trash/trash.service.ts` | B | 100.00 | 87.50 | 100.00 |
 | `apps/api/src/settings/settings.service.ts` | B | 100.00 | 100.00 | 100.00 |
-| `apps/api/src/labels/labels.service.ts` | B | 100.00 | 84.61 | 100.00 |
+| `apps/api/src/labels/labels.service.ts` | B | 100.00 | 81.81 | 100.00 |
 
-전체: `apps/api` 라인 **93.57%** · 브랜치 82.29%, `packages/shared` 라인 **96.36%** · 브랜치 94.97%.
+전체: `apps/api` 라인 **93.80%** · 브랜치 82.89%, `packages/shared` 라인 **96.35%** · 브랜치 94.97%.
 `apps/web`은 테스트 0건·커버리지 0%다 (`CLAUDE.md` 3절 — web은 관문 없이 측정·기록만).
 
 > **이 표는 손으로 쓰지 않았다.** `coverage-summary.json`에서 뽑아 넣었다 — 한 번 손으로
@@ -143,7 +143,7 @@ psql: DELETE FROM audit_events       → ERROR: audit_events는 append-only다 (
 | 첨부 파일 실체 삭제 (FR-517) | 같은 이유 |
 | 감사로그 보존 정리 | `auditRetentionDays` 값만 있고 정리 명령이 없다 |
 | `apps/web` 커버리지 | 테스트 0건·0%. `CLAUDE.md` 3절은 web을 "측정·기록만"이라 하는데 기록을 빠뜨렸다 |
-| 보안 점검·코드 리뷰 | `/security-review`·`/code-review`를 돌리지 않았다. `doc-consistency`와 `self-reviewer`는 돌렸다 |
+| — | 1.1절 5단계의 자체 점검 **넷을 모두 돌렸다** (7절·`internal/P4_검토서_SelfReview.md`) |
 
 ---
 
@@ -152,11 +152,8 @@ psql: DELETE FROM audit_events       → ERROR: audit_events는 append-only다 (
 1. **관리 콘솔의 나머지** — FR-530(모든 스페이스 관리)·FR-531(감사로그 거르기)·FR-532(카테고리 관리)가 미착수.
 2. **감사로그 보존 정리 명령**.
 3. **컨테이너 검증** — 빌드·마이그레이션·실호출.
-4. **`/security-review`와 `/code-review`** — `self-reviewer`·`doc-consistency`는 돌렸고 결과를 반영했다(7절, `internal/P4_검토서_SelfReview.md`). **보안 점검은 Phase 4에 필수**다 (1.1절 5단계).
-5. **이전 Phase가 "Phase 4에서"로 넘긴 항목 10여 건** — P2·P3 검증기록과 SelfReview에 있는데 이 Phase 설계서가 받지 않았다. 받거나 다시 미루거나 **하나를 골라야** 사라지지 않는다 (7절).
-6. **관리자 세션 강제 종료** — 범위 문서가 Phase 4로 두었는데 설계서에 없다 (`scope-definition` 4.1절 #4).
-7. **P4 설계서에 API 계약·화면 흐름 절 추가** — 4절 1단계가 요구한다. P3 자체 점검이 "Phase 4 설계서부터"라고 약속했는데 지키지 못했다.
-8. **병합** — PR + `--no-ff`.
+4. **이전 Phase가 "Phase 4에서"로 넘긴 항목 10여 건** — P2·P3 검증기록과 SelfReview에 있는데 이 Phase 설계서가 받지 않았다. 받거나 다시 미루거나 **하나를 골라야** 사라지지 않는다 (7절).
+5. **병합** — PR + `--no-ff`.
 
 > **이후 진행** — 사용자가 상한을 $1,000으로 올려(2026-09-22) 작업을 이어갔다.
 > 위 목록 1~7 중 **1·2·6·7을 끝냈고**, 남은 것은 아래와 같다.
