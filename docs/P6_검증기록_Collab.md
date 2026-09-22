@@ -1,6 +1,6 @@
 # P6_검증기록_Collab — 실시간 편집·비교·내보내기·템플릿·메일 검증
 
-작성 2026-09-22. 브랜치 `impl-phase6`. 설계서는 [`docs/P6_설계서_Collab.md`](P6_설계서_Collab.md).
+작성 2026-09-22. 브랜치 `impl-phase6` → **`main`에 병합됨** (`e22c71f`, `--no-ff`). 설계서는 [`docs/P6_설계서_Collab.md`](P6_설계서_Collab.md).
 
 > 시행착오의 경위는 여기 쓰지 않는다 (4절). `docs/internal/검토서_트러블슈팅.md`를 가리킨다.
 
@@ -261,3 +261,20 @@ FR-709는 REST 저장 경로와 409를 **그대로 두라**고 하고, 그것은
 ## 12. 자체 점검·리뷰
 
 [`docs/internal/P6_검토서_SelfReview.md`](internal/P6_검토서_SelfReview.md).
+
+`self-reviewer`가 **34건**을 올렸고 **19건을 반영**했다. 그중 #1은 이 Phase를 그대로
+낼 수 없게 하는 것이었다 — 링크가 있는 문서는 협업 편집이 저장되지 않았고, 탭을
+닫으면 사라졌다. **우리 테스트는 그것을 전부 통과했다.**
+
+**`doc-consistency`·`/code-review`·`/security-review`는 돌리지 못했다** (사용량 상한).
+검토서 5절에 그 사실과 무엇이 덜 봐진 채 남았는지를 적었다. 다음 세션의 첫 작업이다.
+
+### 반영 뒤 최종 실측
+
+| 항목 | 값 |
+|---|---|
+| `packages/shared` | 159건 · 라인 99%대 |
+| `apps/api` | 364건 |
+| E2E | 19건 |
+| `pnpm check` · `pnpm test:cov` | 둘 다 종료 코드 0 |
+| CI | 초록 |
