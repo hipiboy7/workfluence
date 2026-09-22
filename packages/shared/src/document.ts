@@ -145,6 +145,16 @@ function checkAttrs(attrs: unknown, allowed: readonly string[], path: string, er
     return;
   }
   for (const [key, value] of Object.entries(attrs)) {
+    // **값이 `null`·`undefined`인 속성은 없는 속성과 같다.**
+    //
+    // ProseMirror는 선언된 속성에 기본값 `null`을 채워 내보낸다 — TipTap의 링크는
+    // `title: null`을, 표 칸은 `align: null`을 늘 달고 온다. 그것을 "허용되지 않는 속성"으로
+    // 거부하면 **링크가 하나라도 있는 문서는 저장이 안 된다.** 실시간 편집에서는 그 거부가
+    // 화면에 보이지도 않아(버전만 안 생긴다) 편집이 통째로 사라진다 (P6 자체 점검 1).
+    //
+    // 값이 없는 속성은 뜻도 없으므로 **허용 목록을 넓히는 대신 빈 값을 건너뛴다** —
+    // 목록을 넓히면 편집기가 새 속성을 더할 때마다 같은 일이 반복된다.
+    if (value === null || value === undefined) continue;
     if (!allowed.includes(key)) errors.push(`${path}: 허용되지 않는 속성 '${key}'`);
     if (!isPrimitiveOrPrimitiveArray(value)) errors.push(`${path}: 속성 '${key}' 값은 원시값 또는 원시값 배열`);
   }

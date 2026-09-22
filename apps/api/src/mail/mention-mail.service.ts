@@ -34,16 +34,21 @@ export class MentionMailService {
         `${actorName} 님이 ${where}에서 회원님을 불렀습니다.`,
         '',
         `문서: ${pageTitle}`,
-        `바로 가기: ${this.env.WF_PUBLIC_URL || '(주소 미설정)'}/pages/${outcome.pageId}`,
+        // 주소가 없으면 **링크 줄을 아예 빼고 보낸다.** `(주소 미설정)/pages/…`가
+        // 사람 메일함에 가면 안 된다 (자체 점검 21)
+        ...(this.env.WF_PUBLIC_URL ? [`바로 가기: ${this.env.WF_PUBLIC_URL}/pages/${outcome.pageId}`] : []),
         '',
         '내용은 위키에서 확인해 주세요.',
       ].join('\n');
 
-      const ok = await this.sender.send({
-        to: outcome.recipients.map((r) => r.email),
-        subject: `[위키] ${actorName} 님이 회원님을 불렀습니다`,
-        text,
-      });
+      // **한 통씩 따로 보낸다.** 한 `to`에 여럿을 넣으면 서로의 주소와 "누가 함께
+      // 불렸는지"가 드러난다 — 폐쇄망이라도 그것은 알려 줄 일이 아니다 (자체 점검 21)
+      const results = await Promise.all(
+        outcome.recipients.map((r) =>
+          this.sender.send({ to: [r.email], subject: `[위키] ${actorName} 님이 회원님을 불렀습니다`, text }),
+        ),
+      );
+      const ok = results.every(Boolean);
 
       // **결과를 감사로그에 남긴다** (FR-756). "메일이 안 왔다"는 신고에 답할 수 있어야 한다.
       // 주소는 담지 않는다 — 감사로그는 오래 남고 개인정보다 (7절)
@@ -51,7 +56,7 @@ export class MentionMailService {
         action: ok ? 'mail.send' : 'mail.fail',
         targetType: 'page',
         targetId: outcome.pageId,
-        detail: { recipients: outcome.recipients.length, kind: 'mention' },
+        detail: { recipients: outcome.recipients.length, sent: results.filter(Boolean).length, kind: 'mention' },
       });
     } catch (e) {
       // 여기까지 오면 감사 기록마저 실패한 것이다. 로그만 남기고 삼킨다

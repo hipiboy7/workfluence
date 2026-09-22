@@ -101,8 +101,10 @@ export function CollabEditor({
 
     return () => {
       ydoc.off('update', onDocUpdate);
-      awareness.off('update', onAwareness);
+      // **퇴장을 먼저 알리고 그다음에 듣기를 멈춘다.** 순서를 뒤집으면 내가 나간 것이
+      // 전파되지 않아 남의 화면에 내 이름과 커서가 30초까지 남는다 (자체 점검 29)
       removeAwarenessStates(awareness, [ydoc.clientID], 'unmount');
+      awareness.off('update', onAwareness);
       ws.close();
     };
   }, [pageId, ydoc, awareness, me.displayName]);

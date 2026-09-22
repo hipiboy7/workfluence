@@ -189,10 +189,37 @@ export class PagesService {
    * **충돌(409)을 보지 않는다.** 그것이 실시간 편집의 요지다 — Yjs가 이미 병합했고,
    * 여기 오는 문서는 그 병합의 결과다. 대신 `FOR UPDATE`로 REST 저장과 줄을 세운다.
    */
-  async saveCollabVersion(id: string, title: string, content: DocNode, actorId: string, tx: Db): Promise<PageRow> {
+  async saveCollabVersion(
+    id: string,
+    title: string,
+    content: DocNode,
+    actorId: string,
+    tx: Db,
+    onMentions?: (m: MentionOutcome) => void,
+  ): Promise<PageRow> {
     const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');
     if (!locked) throw new NotFoundException('페이지를 찾을 수 없다');
-    return this.appendVersion(tx, locked, title, content, actorId);
+    // 직전 내용을 **버전을 더하기 전에** 읽는다. 알림은 그 둘의 차이로 만든다
+    const previous = await tx.query.pageVersions.findFirst({
+      where: and(eq(pageVersions.pageId, id), eq(pageVersions.versionNo, locked.currentVersionNo)),
+    });
+    const page = await this.appendVersion(tx, locked, title, content, actorId);
+    // **협업 저장도 멘션을 만든다.** 이것이 없으면 실시간 편집이 기본인 지금
+    // 페이지 본문의 `@멘션`이 앱 알림·메일 모두 0건이 된다 — Phase 3 FR-500 회귀였다
+    // (자체 점검 4). REST 경로와 같은 함수를 쓴다
+    const mentions = await this.notifications.notifyMentions(
+      {
+        doc: content,
+        pageId: page.id,
+        commentId: null,
+        spaceId: page.spaceId,
+        actorId,
+        previousDoc: (previous?.contentJson as DocNode | undefined) ?? null,
+      },
+      tx,
+    );
+    onMentions?.(mentions);
+    return page;
   }
 
   private async appendVersion(tx: Db, locked: PageRow, title: string, raw: DocNode, actorId: string): Promise<PageRow> {

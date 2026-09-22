@@ -11,6 +11,8 @@ import { DB, type Db } from '../../db/db.module';
 import { pageRealtime, pageVersions, pages } from '../../db/schema';
 import { SpacesService } from '../../spaces/spaces.service';
 import { UsersService } from '../../users/users.service';
+import { MentionMailService } from '../../mail/mention-mail.service';
+import type { MentionOutcome } from '../../notifications/notifications.service';
 import { PagesService } from '../pages.service';
 import { shouldSaveVersion } from '../domain/realtime';
 import { docFromYDoc, yDocFromDoc } from '../domain/ydoc';
@@ -44,12 +46,21 @@ type Room = {
   /** 마지막으로 바꾼 사람. 자동 저장의 `createdBy`가 된다 (FR-712) */
   lastActor: string | null;
   saving: boolean;
+  /** 저장 중에 들어온 강제 저장 요청. 끝난 뒤 한 번 더 본다 */
+  pendingForce: boolean;
+  /** 사람이 고친 제목. 없으면 DB의 것을 쓴다 */
+  title: string | null;
 };
 
 @Injectable()
 export class CollabGateway implements OnModuleDestroy {
   private readonly log = new Logger('Collab');
   private readonly rooms = new Map<string, Room>();
+  /**
+   * 만드는 중인 방. **없으면 같은 페이지에 두 업그레이드가 동시에 와서 방이 둘 생기고,
+   * 뒤의 것이 앞을 덮어 앞사람은 아무에게도 안 닿는 고아 방에서 편집한다** (자체 점검 5)
+   */
+  private readonly pending = new Map<string, Promise<Room>>();
   private wss?: WebSocketServer;
   private timer?: NodeJS.Timeout;
 
@@ -60,6 +71,7 @@ export class CollabGateway implements OnModuleDestroy {
     private readonly users: UsersService,
     private readonly pagesSvc: PagesService,
     private readonly audit: AuditService,
+    private readonly mentionMail: MentionMailService,
   ) {}
 
   /** `main.ts`가 부른다. HTTP 서버 하나에 붙어 같은 포트를 쓴다 — nginx 설정이 하나로 끝난다 */
@@ -92,8 +104,15 @@ export class CollabGateway implements OnModuleDestroy {
    */
   private async upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const pageId = readPageId(req.url);
-    // **우리 경로가 아니면 손대지 않는다.** 다른 업그레이드 처리기가 붙을 수 있다
-    if (!pageId || !this.wss) return;
+    // **우리 경로가 아니면 닫는다.** 처음에는 "다른 처리기가 붙을 수 있으니 손대지
+    // 않는다"로 두었는데, 처리기가 하나라도 있으면 Node는 기본 404를 주지 않는다 —
+    // **아무도 응답하지 않아 소켓이 인증 없이 열린 채 남는다** (자체 점검 13).
+    // 이 서버에 다른 업그레이드 처리기가 생기면 그때 경로로 갈라 쓴다
+    if (!pageId || !this.wss) {
+      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
 
     const deny = (): void => {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -134,6 +153,14 @@ export class CollabGateway implements OnModuleDestroy {
   private async room(pageId: string, versionNo: number): Promise<Room> {
     const existing = this.rooms.get(pageId);
     if (existing) return existing;
+    const inflight = this.pending.get(pageId);
+    if (inflight) return inflight;
+    const p = this.createRoom(pageId, versionNo).finally(() => this.pending.delete(pageId));
+    this.pending.set(pageId, p);
+    return p;
+  }
+
+  private async createRoom(pageId: string, versionNo: number): Promise<Room> {
 
     const saved = await this.db.query.pageRealtime.findFirst({ where: eq(pageRealtime.pageId, pageId) });
     let doc: Y.Doc;
@@ -150,7 +177,7 @@ export class CollabGateway implements OnModuleDestroy {
       if (saved) this.log.warn(`실시간 상태가 낡아 정본에서 다시 시작한다 (page=${pageId})`);
     }
 
-    const room: Room = { doc, members: new Set(), versionNo, lastChangeAt: 0, lastActor: null, saving: false };
+    const room: Room = { doc, members: new Set(), versionNo, lastChangeAt: 0, lastActor: null, saving: false, pendingForce: false, title: null };
     this.rooms.set(pageId, room);
     return room;
   }
@@ -216,16 +243,33 @@ export class CollabGateway implements OnModuleDestroy {
    */
   private async saveIfNeeded(pageId: string, force: boolean): Promise<void> {
     const room = this.rooms.get(pageId);
-    if (!room || room.saving) return;
+    if (!room) return;
+    if (room.saving) {
+      // **저장 중에 온 강제 요청을 버리지 않는다.** 버리면 마지막 사람이 나간 것이
+      // 아무에게도 전달되지 않아 방이 영영 남는다 (자체 점검 8)
+      if (force) room.pendingForce = true;
+      return;
+    }
     // 아무도 아무것도 안 고쳤으면 볼 것도 없다
     if (!room.lastChangeAt && !force) return;
 
     room.saving = true;
+    const changedAt = room.lastChangeAt;
     try {
       const next = docFromYDoc(room.doc);
       const current = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId) });
       if (!current) {
         this.rooms.delete(pageId);
+        return;
+      }
+      // **정본이 우리보다 앞서 있으면 저장하지 않는다.** 그 사이 누가 REST로 저장했거나
+      // 이력에서 복원했다는 뜻이고, 우리가 들고 있는 것으로 덮으면 **그 저장을 되돌린다**
+      // (자체 점검 7). 방을 버리면 다음에 열 때 정본에서 다시 시작한다
+      if (current.currentVersionNo !== room.versionNo) {
+        this.log.warn(`정본이 앞서 있어 협업 상태를 버린다 (page=${pageId}, 방 v${room.versionNo} < 정본 v${current.currentVersionNo})`);
+        this.rooms.delete(pageId);
+        for (const m of room.members) m.socket.close();
+        await this.db.delete(pageRealtime).where(eq(pageRealtime.pageId, pageId));
         return;
       }
       const version = await this.db.query.pageVersions.findFirst({
@@ -246,25 +290,42 @@ export class CollabGateway implements OnModuleDestroy {
           this.log.warn(`검증 실패로 저장하지 않았다 (page=${pageId}): ${decision.errors.slice(0, 3).join(' / ')}`);
         }
         await this.rememberState(pageId, room, current.currentVersionNo);
-        if (force) await this.finish(pageId, room);
+        // **검증에 실패한 상태는 지우지 않는다.** 지우면 고칠 기회가 사라진다 —
+        // 사람이 다시 열어 화면에서 고치면 다음 유휴에 저장된다 (자체 점검 6).
+        // 방은 메모리에서 비우되 DB의 상태는 남긴다
+        if (force) {
+          if (decision.errors.length) this.rooms.delete(pageId);
+          else await this.finish(pageId, room);
+        }
         return;
       }
 
       const actor = room.lastActor ?? current.updatedBy;
+      const collected: MentionOutcome[] = [];
+      const actorName = (await this.users.findById(actor))?.displayName ?? '누군가';
       await this.db.transaction(async (tx) => {
-        await this.pagesSvc.saveCollabVersion(pageId, current.title, next, actor, tx);
+        await this.pagesSvc.saveCollabVersion(pageId, room.title ?? current.title, next, actor, tx, (m) => collected.push(m));
         await this.audit.record(
           { action: 'page.collab.save', actorId: actor, targetType: 'page', targetId: pageId, detail: { versionNo: current.currentVersionNo + 1, force } },
           tx,
         );
       });
+      // 메일은 **커밋 뒤에** 보낸다 (FR-754). 기다리지 않는다
+      const mentions = collected[0];
+      if (mentions?.count) void this.mentionMail.notify(mentions, actorName, room.title ?? current.title);
       room.versionNo = current.currentVersionNo + 1;
-      room.lastChangeAt = 0;
+      // **저장하는 동안 들어온 변경은 그대로 둔다.** 무조건 0으로 밀면 그 변경은
+      // 다음 타이핑이나 퇴장까지 저장되지 않는다 (자체 점검 12)
+      if (room.lastChangeAt === changedAt) room.lastChangeAt = 0;
       await this.rememberState(pageId, room, room.versionNo);
       // **사람이 남아 있으면 방을 닫지 않는다.** 저장 버튼이 편집을 끊으면 안 된다
       if (force) await this.finish(pageId, room);
     } finally {
       room.saving = false;
+    }
+    if (room.pendingForce) {
+      room.pendingForce = false;
+      await this.saveIfNeeded(pageId, true);
     }
   }
 
@@ -294,14 +355,14 @@ export class CollabGateway implements OnModuleDestroy {
    * 기다리게 하면 **화면의 약속과 동작이 어긋난다.** 방이 없으면 남길 것도 없다 —
    * 그 경우 `false`를 돌려 호출부가 알게 한다.
    */
-  async flush(pageId: string): Promise<boolean> {
-    if (!this.rooms.has(pageId)) return false;
+  async flush(pageId: string, title?: string): Promise<boolean> {
+    const room = this.rooms.get(pageId);
+    if (!room) return false;
+    // **제목도 함께 남긴다.** 협업 모드에서도 제목은 평범한 입력칸이고, 그것을 안 보내면
+    // 사람이 고친 제목이 조용히 버려진다 (자체 점검 3)
+    if (title) room.title = title;
     await this.saveIfNeeded(pageId, true);
     return true;
   }
 
-  /** 지금 몇 명이 어느 페이지를 보고 있는지 (진단용) */
-  presence(): { pageId: string; names: string[] }[] {
-    return [...this.rooms.entries()].map(([pageId, room]) => ({ pageId, names: [...room.members].map((m) => m.name) }));
-  }
 }

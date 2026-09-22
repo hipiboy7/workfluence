@@ -286,6 +286,10 @@ export type PageVersionView = {
   createdByName: string;
   createdAt: string;
 };
+/** 실시간 편집을 **지금 바로** 버전으로 남긴다 (P6_설계서_Collab). 제목도 함께 온다 */
+export const flushCollabDto = z.object({ title: z.string().trim().min(1).max(300).optional() });
+export type FlushCollabDto = z.infer<typeof flushCollabDto>;
+
 /** 페이지 템플릿 (P6_설계서_Collab FR-740) */
 export type PageTemplateView = {
   id: string;

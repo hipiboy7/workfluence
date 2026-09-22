@@ -20,7 +20,8 @@ export const COLLAB_FIELD = 'default';
 function marksToAttributes(marks: DocMark[] | undefined): Record<string, unknown> | null {
   if (!marks?.length) return null;
   const out: Record<string, unknown> = {};
-  for (const m of marks) out[m.type] = m.attrs ?? {};
+  // 마크 속성도 **빈 값은 떨어뜨린다.** 편집기의 링크는 `title: null`을 늘 달고 온다
+  for (const m of marks) out[m.type] = Object.fromEntries(Object.entries(m.attrs ?? {}).filter(([, v]) => v !== null && v !== undefined));
   return out;
 }
 
@@ -35,6 +36,45 @@ function attributesToMarks(attrs: Record<string, unknown> | undefined): DocMark[
   return marks.length ? marks : undefined;
 }
 
+/**
+ * 자식들을 Yjs 노드로 바꾼다. **연속된 글자 노드는 `Y.XmlText` 하나로 묶는다.**
+ *
+ * 처음에는 글자 노드마다 `Y.XmlText`를 따로 만들었다. 그러면 편집기(y-prosemirror)가
+ * 보는 구조와 달라져, **각 클라이언트의 첫 편집이 문단을 통째로 다시 쓴다** — 둘이
+ * 겹치면 Yjs가 둘 다 살려 `"Hello worldworld"`처럼 글자가 복제된다. 다른 문단만
+ * 고쳐도 일어난다 (자체 점검 2, 실측으로 재현됐다).
+ *
+ * 편집기가 만드는 모양과 **같게** 만드는 것이 이 함수의 일이다 — 서버가 만든 문서를
+ * 편집기가 손대지 않아야 한다.
+ */
+function toYChildren(nodes: readonly DocNode[]): (Y.XmlElement | Y.XmlText)[] {
+  const out: (Y.XmlElement | Y.XmlText)[] = [];
+  let run: Y.XmlText | null = null;
+  // **넣은 길이를 직접 센다.** 문서에 붙기 전 `Y.XmlText.length`는 0이라, 그것을 쓰면
+  // 모든 조각이 맨 앞에 꽂혀 **글자 순서가 뒤집힌다** (테스트가 바로 잡았다)
+  let offset = 0;
+  for (const node of nodes) {
+    if (node.type === 'text') {
+      if (!run) {
+        run = new Y.XmlText();
+        offset = 0;
+        out.push(run);
+      }
+      const text = node.text ?? '';
+      if (text) {
+        // **서식을 항상 명시한다.** 생략하면 Yjs가 **앞 글자의 서식을 물려준다** —
+        // 굵은 글자 뒤의 평범한 글자가 같이 굵어진다 (테스트가 잡았다)
+        run.insert(offset, text, marksToAttributes(node.marks) ?? {});
+        offset += text.length;
+      }
+      continue;
+    }
+    run = null;
+    out.push(toYNode(node));
+  }
+  return out;
+}
+
 function toYNode(node: DocNode): Y.XmlElement | Y.XmlText {
   if (node.type === 'text') {
     const text = new Y.XmlText();
@@ -43,11 +83,13 @@ function toYNode(node: DocNode): Y.XmlElement | Y.XmlText {
   }
   const el = new Y.XmlElement(node.type);
   for (const [k, v] of Object.entries(node.attrs ?? {})) {
-    // `undefined`는 넣지 않는다 — Yjs가 문자열 `"undefined"`로 굳힌다
-    if (v === undefined) continue;
+    // **빈 값은 넣지 않는다.** `undefined`는 Yjs가 문자열 `"undefined"`로 굳히고,
+    // `null`은 편집기가 기본값으로 채워 보내는 것이라 뜻이 없다 — 남겨 두면 REST로
+    // 저장한 문서와 협업으로 저장한 문서가 **글자가 같은데 다르게** 보인다 (자체 점검 18)
+    if (v === undefined || v === null) continue;
     el.setAttribute(k, v as never);
   }
-  const kids = (node.content ?? []).map(toYNode);
+  const kids = toYChildren(node.content ?? []);
   if (kids.length) el.push(kids);
   return el;
 }
@@ -56,7 +98,7 @@ function toYNode(node: DocNode): Y.XmlElement | Y.XmlText {
 export function yDocFromDoc(doc: DocNode): Y.Doc {
   const ydoc = new Y.Doc();
   const fragment = ydoc.getXmlFragment(COLLAB_FIELD);
-  const kids = (doc.content ?? []).map(toYNode);
+  const kids = toYChildren(doc.content ?? []);
   if (kids.length) fragment.push(kids);
   return ydoc;
 }
@@ -76,7 +118,8 @@ function fromYNode(node: Y.XmlElement | Y.XmlText | Y.XmlHook): DocNode[] {
   // `Y.XmlHook`은 **우리가 만들지 않는다.** 만드는 코드가 없으므로 여기 올 수 없다 —
   // 타입에는 있으니 좁히기는 하되, 닿지 않는 분기를 남겨 두지 않는다 (`diff.ts`와 같은 판단)
   const el = node as Y.XmlElement;
-  const attrs = el.getAttributes() as Record<string, unknown>;
+  // 편집기 쪽에서 온 `null` 기본값을 여기서 떨어뜨린다 (자체 점검 1·18)
+  const attrs = Object.fromEntries(Object.entries(el.getAttributes() as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined));
   const content: DocNode[] = [];
   for (const child of el.toArray()) content.push(...fromYNode(child as Y.XmlElement | Y.XmlText));
 

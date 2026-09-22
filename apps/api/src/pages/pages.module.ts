@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Inject, Module, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import {
   createPageDto,
+  flushCollabDto,
   movePageDto,
   updatePageDto,
   type DocNode,
@@ -17,6 +18,7 @@ import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
 import { PagesService } from './pages.service';
 import { CollabGateway } from './collab/collab.gateway';
+import { SpacesService } from '../spaces/spaces.service';
 import { MentionMailService } from '../mail/mention-mail.service';
 import type { MentionOutcome } from '../notifications/notifications.service';
 
@@ -29,6 +31,7 @@ export class PagesController {
     private readonly audit: AuditService,
     private readonly collab: CollabGateway,
     private readonly mentionMail: MentionMailService,
+    private readonly spaces: SpacesService,
     @Inject(DB) private readonly db: Db,
   ) {}
 
@@ -66,9 +69,9 @@ export class PagesController {
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<PageView> {
-    let mentions: MentionOutcome | null = null;
+    const collected: MentionOutcome[] = [];
     const page = await this.db.transaction(async (tx) => {
-      const p = await this.pages.update(id, dto, me, tx, (m) => (mentions = m));
+      const p = await this.pages.update(id, dto, me, tx, (m) => collected.push(m));
       await this.audit.record(
         { action: 'page.update', actorId: me.id, targetType: 'page', targetId: id, detail: { versionNo: p.currentVersionNo }, ip: req.ip },
         tx,
@@ -77,7 +80,8 @@ export class PagesController {
     });
     // **커밋된 뒤에 보낸다** (FR-754). 기다리지 않는다 — 메일이 느려도 저장 응답은 나가야 한다.
     // 실패해도 던지지 않는 것은 `MentionMailService`가 보장한다 (FR-753)
-    if (mentions) void this.mentionMail.notify(mentions, me.displayName, page.title);
+    const mentions = collected[0];
+    if (mentions?.count) void this.mentionMail.notify(mentions, me.displayName, page.title);
     return page;
   }
 
@@ -126,10 +130,16 @@ export class PagesController {
    * 오류가 아니다.
    */
   @Post(':id/collab/flush')
-  async flush(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser): Promise<{ saved: boolean; currentVersionNo: number }> {
-    // **권한을 여기서 본다.** WebSocket을 거치지 않고 부를 수 있는 경로다
-    await this.pages.get(id, me);
-    const saved = await this.collab.flush(id);
+  async flush(
+    @Param('id', UuidPipe) id: string,
+    @Body(new ZodPipe(flushCollabDto)) dto: ReturnType<typeof flushCollabDto.parse>,
+    @CurrentUser() me: SessionUser,
+  ): Promise<{ saved: boolean; currentVersionNo: number }> {
+    // **쓰기 권한을 본다.** WebSocket을 거치지 않고 부를 수 있는 경로이고,
+    // 읽기만 되는 사람이 강제 저장을 일으키면 유휴 묶음(FR-707)이 무력해진다 (자체 점검 16)
+    const page = await this.pages.get(id, me);
+    await this.spaces.assertWrite(page.spaceId, me);
+    const saved = await this.collab.flush(id, dto.title);
     const after = await this.pages.get(id, me);
     return { saved, currentVersionNo: after.currentVersionNo };
   }

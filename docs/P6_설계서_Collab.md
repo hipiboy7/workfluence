@@ -234,7 +234,12 @@ page_templates(
 | `PATCH` | `/api/templates/:id` | `space.manage` | 이름·설명·본문 고치기 |
 | `DELETE` | `/api/templates/:id` | `space.manage` | 지우기 |
 
-`POST /api/pages`는 `templateId`를 **선택적으로** 받는다 (FR-741). 없으면 지금과 같다.
+~~`POST /api/pages`는 `templateId`를 선택적으로 받는다~~ → **API를 바꾸지 않았다**
+(2026-09-22). `createPageDto`가 이미 `content`를 받으므로 **화면이 고른 템플릿 내용을
+넣는다** — 서버에 분기를 더할 이유가 없었다. 안 고르면 지금처럼 빈 문서다 (FR-741).
+
+`POST /api/pages/:id/collab/flush`가 표에 빠져 있었다 (자체 점검 16). 실시간 편집을
+**지금 바로** 버전으로 남긴다. 쓰기 권한을 요구하고 제목을 함께 받는다.
 
 ---
 

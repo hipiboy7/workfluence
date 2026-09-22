@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import type { DocNode } from '@workfluence/shared';
+import { validateDocument, type DocNode } from '@workfluence/shared';
 import { COLLAB_FIELD, docFromYDoc, yDocFromDoc } from './ydoc';
 
 /**
@@ -14,9 +14,10 @@ const doc = (...c: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion
 // **빈 문단에는 `content` 키를 넣지 않는다.** `emptyDocument()`가 그렇게 만들고
 // 편집기도 그렇게 낸다 — 왕복이 `content: []`를 만들어 내면 정본의 모양이 달라진다
 const p = (...c: DocNode[]): DocNode => (c.length ? { type: 'paragraph', content: c } : { type: 'paragraph' });
-const t = (text: string, marks?: { type: string; attrs?: Record<string, unknown> }[]): DocNode =>
+const tx = (text: string, marks?: { type: string; attrs?: Record<string, unknown> }[]): DocNode =>
   marks ? { type: 'text', text, marks } : { type: 'text', text };
 
+const t = tx;
 const roundTrip = (d: DocNode): DocNode => docFromYDoc(yDocFromDoc(d));
 
 describe('왕복 — 넣은 것이 그대로 나온다', () => {
@@ -147,5 +148,51 @@ describe('경계 — 값이 아예 없을 때', () => {
     el.push([text]);
     ydoc.getXmlFragment(COLLAB_FIELD).push([el]);
     expect(docFromYDoc(ydoc)).toEqual(doc(p(t('가'))));
+  });
+});
+
+/**
+ * **편집기가 실제로 만드는 모양** (P6 자체 점검 1·2·18).
+ *
+ * 이 셋은 왕복 테스트를 전부 통과하면서도 운영에서 편집을 통째로 잃게 하던 것들이다.
+ * 서버끼리의 왕복만 보면 안 보인다 — **편집기가 붙이는 것**을 넣어 봐야 한다.
+ */
+describe('편집기가 붙이는 것들', () => {
+  it('**링크의 `title: null`이 검증을 막지 않는다** — 이것 때문에 링크 있는 문서는 버전이 안 생겼다', () => {
+    const withLink: DocNode = {
+      type: 'doc',
+      attrs: { schemaVersion: 1 },
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: '보기', marks: [{ type: 'link', attrs: { href: '/a', title: null, target: null } }] }] }],
+    };
+    const back = roundTrip(withLink);
+    expect(validateDocument(back).ok).toBe(true);
+    // 빈 값은 떨어뜨린다 — 남기면 REST 저장본과 협업 저장본이 "글자는 같은데 다른" 문서가 된다
+    expect(back.content![0].content![0].marks![0].attrs).toEqual({ href: '/a' });
+  });
+
+  it('표 칸의 `align: null`도 마찬가지다', () => {
+    const t: DocNode = {
+      type: 'doc',
+      attrs: { schemaVersion: 1 },
+      content: [{ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', attrs: { colspan: 1, align: null }, content: [p(tx('칸'))] }] }] }],
+    };
+    expect(validateDocument(roundTrip(t)).ok).toBe(true);
+  });
+
+  it('**연속된 글자는 `Y.XmlText` 하나로 묶인다** — 나뉘어 있으면 동시 편집에서 글자가 복제된다', () => {
+    const d = doc(p(tx('앞'), tx('뒤')));
+    const y = yDocFromDoc(d);
+    const kids = y.getXmlFragment(COLLAB_FIELD).toArray()[0] as Y.XmlElement;
+    expect(kids.toArray().length).toBe(1);
+    expect(docFromYDoc(y).content![0].content).toEqual([{ type: 'text', text: '앞뒤' }]);
+  });
+
+  it('서식이 다른 글자는 묶여도 **서식이 번지지 않는다**', () => {
+    const d = doc(p(tx('굵게', [{ type: 'bold' }]), tx('보통')));
+    const back = roundTrip(d);
+    expect(back.content![0].content).toEqual([
+      { type: 'text', text: '굵게', marks: [{ type: 'bold' }] },
+      { type: 'text', text: '보통' },
+    ]);
   });
 });

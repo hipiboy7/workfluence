@@ -58,7 +58,7 @@ export function PageEditorPage() {
       // 유휴를 기다리게 하면 눌러도 아무 일이 없는 것처럼 보인다
       setBusy(true);
       try {
-        await api(`/api/pages/${id}/collab/flush`, { method: 'POST' });
+        await api(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setBusy(false);

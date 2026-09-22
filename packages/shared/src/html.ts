@@ -69,9 +69,11 @@ function wrapMarks(text: string, marks: DocMark[] | undefined): string {
   for (const mark of marks ?? []) {
     if (!(mark.type in ALLOWED_MARKS)) continue;
     if (mark.type === 'link') {
-      const href = typeof mark.attrs?.href === 'string' ? mark.attrs.href : '';
+      // **검증과 같은 기준으로 본다** — `document.ts`가 `trim()` 뒤에 검사하므로
+      // 여기서 안 하면 "저장은 되는데 내보내면 링크가 빠지는" 문서가 생긴다 (자체 점검 34)
+      const href = (typeof mark.attrs?.href === 'string' ? mark.attrs.href : '').trim();
       // 통과하지 못하면 **링크로 만들지 않는다.** 글자는 남는다 (FR-734)
-      if (!ALLOWED_LINK_HREF.test(href)) continue;
+      if (!href || !ALLOWED_LINK_HREF.test(href)) continue;
       // `rel`을 강제로 붙인다 — 내보낸 파일은 우리 헤더가 닿지 않는 곳에서 열린다
       out = `<a href="${escapeHtml(href)}" rel="noopener noreferrer">${out}</a>`;
       continue;
