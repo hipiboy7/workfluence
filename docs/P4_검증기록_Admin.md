@@ -20,8 +20,8 @@
 | 대상 | 파일 | 건수 | skip |
 |---|---|---|---|
 | `packages/shared` | 6 | 71 | 0 |
-| `apps/api` | 23 | 256 | 0 |
-| E2E (`pnpm test:e2e`) | 5 | 16 | 0 |
+| `apps/api` | 26 | 266 | 0 |
+| E2E (`pnpm test:e2e`) | 5 | 17 | 0 |
 
 이번 Phase가 만든 모듈 (`pnpm test:cov`, v8):
 
@@ -33,11 +33,12 @@
 > A등급 기준(90%) 미달인데 패키지 합계가 가려 관문은 초록이었다. 자체 점검이 잡았다
 > (`internal/P4_검토서_SelfReview.md` 1절). 빈 분기에 테스트를 넣어 지금은 표대로다.
 | `apps/api/src/notifications/notifications.service.ts` | B | 100.00 | 93.93 | 100.00 |
+| `apps/api/src/audit/audit.service.ts` | B | 100.00 | 96.55 | 100.00 |
 | `apps/api/src/trash/trash.service.ts` | B | 100.00 | 86.36 | 100.00 |
 | `apps/api/src/settings/settings.service.ts` | B | 100.00 | 100.00 | 100.00 |
 | `apps/api/src/labels/labels.service.ts` | B | 100.00 | 84.61 | 100.00 |
 
-전체: `apps/api` 라인 **93.89%** · 브랜치 82.86%, `packages/shared` 라인 **96.33%** · 브랜치 94.97%.
+전체: `apps/api` 라인 **93.57%** · 브랜치 82.29%, `packages/shared` 라인 **96.36%** · 브랜치 94.97%.
 `apps/web`은 테스트 0건·커버리지 0%다 (`CLAUDE.md` 3절 — web은 관문 없이 측정·기록만).
 
 > **이 표는 손으로 쓰지 않았다.** `coverage-summary.json`에서 뽑아 넣었다 — 한 번 손으로
@@ -69,6 +70,23 @@ Running 16 tests using 1 worker
 **대상이 지워진 알림**은 "(지워진 글)"로 뜬다 (FR-506) — 알림은 남되 갈 곳이 없음을 말한다.
 
 ---
+
+## 2.2 컨테이너 검증 (2026-09-22)
+
+반입 형상 그대로 확인했다: 이미지 빌드 → 마이그레이션 → nginx TLS를 통한 실호출.
+
+```
+docker compose build api            → EXIT=0, workfluence-app:latest 389MB
+run --rm api node dist/db/migrate.js → [migrate] 6개 마이그레이션 적용 상태
+GET  /api/notifications/unread-count → 200 {"count":0}
+GET  /api/trash/pages?limit=10       → 200 0건
+GET  /api/settings/policy            → 200 uploadMaxMb 20 · 천장 20 · 키 11개
+GET  /api/audit?action=auth.login.success → 200 5건, 전부 auth.login.success
+psql: DELETE FROM audit_events       → ERROR: audit_events는 append-only다 (시도: DELETE)
+```
+
+마지막 줄이 중요하다 — **append-only 예외는 정해진 절차 밖에서는 열리지 않는다.**
+컨테이너 안에서 DB에 직접 붙어 지우려 해도 막힌다.
 
 ## 2.1 비기능 실측
 
@@ -121,7 +139,6 @@ Running 16 tests using 1 worker
 
 | 것 | 왜 |
 |---|---|
-| **컨테이너에서의 동작** | 이번 Phase는 `docker compose build`·기동을 하지 않았다. 마이그레이션 `0004_admin`을 컨테이너에서 적용해 보지 않았다 |
 | `pnpm trash:purge`의 실제 삭제 | 보존 기간을 넘긴 데이터가 없어 **0건 경로만** 확인했다. 실제로 지우는 경로는 미확인 |
 | 첨부 파일 실체 삭제 (FR-517) | 같은 이유 |
 | 감사로그 보존 정리 | `auditRetentionDays` 값만 있고 정리 명령이 없다 |
@@ -141,7 +158,10 @@ Running 16 tests using 1 worker
 7. **P4 설계서에 API 계약·화면 흐름 절 추가** — 4절 1단계가 요구한다. P3 자체 점검이 "Phase 4 설계서부터"라고 약속했는데 지키지 못했다.
 8. **병합** — PR + `--no-ff`.
 
-> **이 Phase는 여기서 멈췄다.** 사용량 상한($500)에 가까워졌기 때문이고, 기능이 막혀서가
+> **이후 진행** — 사용자가 상한을 $1,000으로 올려(2026-09-22) 작업을 이어갔다.
+> 위 목록 1~7 중 **1·2·6·7을 끝냈고**, 남은 것은 아래와 같다.
+>
+> **이 Phase는 한 번 여기서 멈췄었다.** 사용량 상한($500)에 가까워졌기 때문이고, 기능이 막혀서가
 > 아니다. 멈춘 시점의 상태는 `pnpm check` 종료 코드 0, E2E 16건 통과, 모든 작업이
 > `impl-phase4`에 커밋·푸시된 상태다. **`main`은 Phase 3까지다.**
 
