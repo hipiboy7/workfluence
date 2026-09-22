@@ -40,13 +40,17 @@ export class PolicyController {
 
   @Patch()
   @RequireAction('settings.manage')
-  update(@Body(new ZodPipe(policyPatchDto)) patch: PolicyPatchDto, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
-    return this.db.transaction(async (tx) => {
+  async update(@Body(new ZodPipe(policyPatchDto)) patch: PolicyPatchDto, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
+    await this.db.transaction(async (tx) => {
       const { before, after } = await this.svc.update(patch, me, tx);
       // **바뀐 키의 이전·이후를 남긴다** (FR-525). "누가 바꿨다"만으로는 되돌릴 수 없다
       await this.audit.record({ action: 'settings.update', actorId: me.id, targetType: 'settings', targetId: 'policy', detail: { before, after }, ip: req.ip }, tx);
-      return { ok: true as const };
     });
+    // **커밋된 뒤에 캐시를 버린다** (코드 리뷰 2). 트랜잭션 안에서 버리면 그 사이 들어온
+    // 요청이 커밋 전 값을 읽어 굳혀 버린다 — `AuthGuard`가 요청마다 `get()`을 부르므로
+    // 그 틈은 실제로 밟힌다
+    this.svc.invalidate();
+    return { ok: true };
   }
 }
 

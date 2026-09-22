@@ -43,6 +43,9 @@ export class TrashService {
          AND s.status = 'active'
          AND (${isAdmin}
               OR (s.kind = 'team' AND m.role IN ('owner','editor'))
+              -- 팀 스페이스의 생성자는 Crew 행이 없어도 owner로 본다 (spaceAccess가 그렇게
+              -- 판정한다). 여기만 빠지면 되살릴 수는 있는데 목록에 안 보인다 (코드 리뷰 13)
+              OR (s.kind = 'team' AND s.created_by = ${principal.id})
               OR (s.kind = 'personal' AND s.created_by = ${principal.id}))
        ORDER BY p.deleted_at DESC
        LIMIT ${limit}
@@ -73,9 +76,20 @@ export class TrashService {
       const parent = await tx.query.pages.findFirst({ where: and(eq(pages.id, row.parentId), isNull(pages.deletedAt)) });
       if (!parent) movedToRoot = true;
     }
+    // 최상위로 올릴 때는 **자리도 다시 잡는다.** 예전 형제들 사이의 번호를 그대로 들고 오면
+    // 최상위의 다른 페이지와 번호가 겹쳐 순서가 뒤죽박죽이 된다 — "찾을 수 있게 한다"는
+    // FR-512의 취지에 어긋난다 (코드 리뷰 12)
+    let position = row.position;
+    if (movedToRoot) {
+      const [{ maxPos }] = await tx
+        .select({ maxPos: sql<number>`coalesce(max(${pages.position}), -1)::int` })
+        .from(pages)
+        .where(and(eq(pages.spaceId, row.spaceId), isNull(pages.parentId), isNull(pages.deletedAt)));
+      position = maxPos + 1;
+    }
     const [next] = await tx
       .update(pages)
-      .set({ deletedAt: null, parentId: movedToRoot ? null : row.parentId, updatedBy: principal.id, updatedAt: new Date() })
+      .set({ deletedAt: null, parentId: movedToRoot ? null : row.parentId, position, updatedBy: principal.id, updatedAt: new Date() })
       .where(eq(pages.id, id))
       .returning();
     return { page: next, movedToRoot };
@@ -104,8 +118,9 @@ export class TrashService {
     if (!can(principal, 'space.manage')) throw new ForbiddenException('스페이스 되살리기는 관리자만 한다');
     const row = await tx.query.spaces.findFirst({ where: and(eq(spaces.id, id), isNotNull(spaces.deletedAt)) });
     if (!row) throw new NotFoundException('휴지통에서 찾을 수 없다');
-    // **안에 있던 페이지는 함께 살아나지 않는다.** 스페이스와 함께 지워진 것인지 그 전에
-    // 따로 지운 것인지 구분할 방법이 없어서다. 페이지는 페이지 휴지통에서 하나씩 되살린다
+    // **안에 있던 페이지는 함께 다시 보인다.** 스페이스 삭제는 `spaces.deleted_at`만 건드리고
+    // 페이지는 그대로 두기 때문이다 — 둘을 구분하는 것이 `pages.deleted_at`이다.
+    // 따로 지운 페이지만 페이지 휴지통에 남는다 (코드 리뷰 5: 예전 주석은 정반대였다)
     const [next] = await tx.update(spaces).set({ deletedAt: null }).where(eq(spaces.id, id)).returning();
     return next;
   }

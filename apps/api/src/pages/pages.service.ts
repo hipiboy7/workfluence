@@ -148,11 +148,23 @@ export class PagesService {
     // 응답은 **저장된 것과 같아야 한다.** dto.content를 그대로 돌려주면 버전이 찍히기 전 모양이
     // 나가고, 클라이언트가 그것을 다음 저장의 기준으로 쓴다
     const content = stampSchemaVersion(dto.content);
+    // 직전 내용을 **버전을 더하기 전에** 읽는다. 알림은 그 둘의 차이로 만든다
+    const previous = await tx.query.pageVersions.findFirst({
+      where: and(eq(pageVersions.pageId, id), eq(pageVersions.versionNo, locked.currentVersionNo)),
+    });
     const page = await this.appendVersion(tx, locked, dto.title, content, principal.id);
     // 본문의 멘션도 알림을 만든다 (FR-500 — 설계서는 "댓글·페이지 본문 둘 다"다).
-    // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다
+    // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다.
+    // **직전 내용을 함께 넘겨 새로 생긴 멘션만 부른다** (코드 리뷰 6)
     await this.notifications.notifyMentions(
-      { doc: content, pageId: page.id, commentId: null, spaceId: page.spaceId, actorId: principal.id },
+      {
+        doc: content,
+        pageId: page.id,
+        commentId: null,
+        spaceId: page.spaceId,
+        actorId: principal.id,
+        previousDoc: (previous?.contentJson as DocNode | undefined) ?? null,
+      },
       tx,
     );
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };

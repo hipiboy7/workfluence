@@ -82,10 +82,12 @@ export class SettingsService {
     }
     if (errors.length) throw new BadRequestException(errors.join('; '));
 
-    const current = await this.get(tx);
-    // **줄을 세운다** (자체 점검 12). 읽기-병합-쓰기 사이에 다른 관리자가 끼어들면 한쪽
-    // 변경이 조용히 사라지고, 감사로그에는 둘 다 남아 기록과 실제가 어긋난다
+    // **줄을 먼저 세운다** (자체 점검 12). 읽기-병합-쓰기 사이에 다른 관리자가 끼어들면
+    // 한쪽 변경이 조용히 사라지고, 감사로그에는 둘 다 남아 기록과 실제가 어긋난다.
+    // **`current`도 잠금 뒤에 읽는다** — 앞에서 읽으면 감사로그의 "이전 값"이 남의 변경
+    // 이전 값이 되어 되짚을 수 없다 (코드 리뷰 9)
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${SETTINGS_KEYS.policy}))`);
+    const current = await this.get(tx);
     const row = await tx.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     const stored = (row?.value as Record<string, unknown> | undefined) ?? {};
     const merged = { ...stored, ...patch };
@@ -95,9 +97,11 @@ export class SettingsService {
       .values({ key: SETTINGS_KEYS.policy, value: merged, updatedBy: principal.id, updatedAt: new Date() })
       .onConflictDoUpdate({ target: settings.key, set: { value: merged, updatedBy: principal.id, updatedAt: new Date() } });
 
-    // **캐시를 버리는 것이 "즉시 반영"의 전부다** (FR-523, NFR-40). 재기동을 요구하지 않는다.
-    // 다음 값은 캐시를 거치지 않고 계산한다 — 아직 커밋되지 않았기 때문이다
-    this.invalidate();
+    // **여기서 캐시를 버리지 않는다.** 아직 커밋 전이라, 버린 직후 다른 요청이 `get()`을
+    // 부르면 **커밋되지 않은 옛 값**을 읽어 캐시에 굳힌다 — 그러면 DB는 새 값인데 모든
+    // 요청이 옛 값을 쓰는, FR-523이 막으려던 바로 그 상태가 된다 (코드 리뷰 2).
+    // 무효화는 **커밋 뒤에** 호출부가 한다 (`PolicyController.update`).
+    // 다음 값은 캐시를 거치지 않고 계산한다
     const next = this.clamp(applyPolicy({ ...this.fromEnv(), ...merged }));
 
     const before: Partial<Policy> = {};

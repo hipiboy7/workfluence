@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CommentsService } from '../comments/comments.service';
 import { PagesService } from '../pages/pages.service';
-import { comments, pages, spaces, users } from '../db/schema';
+import { comments, pages, spaceMembers, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { InAppChannel, NotificationsService } from './notifications.service';
@@ -171,6 +171,23 @@ describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
     expect(list[0]).toMatchObject({ pageId: created.id, commentId: null, actorName: 'owner' });
   });
 
+  it('**같은 사람을 저장할 때마다 다시 부르지 않는다** (코드 리뷰 6)', async () => {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+    const created = await pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('@mate 확인') }, owner, db);
+    expect(await svc.list(mate, 20)).toHaveLength(1);
+
+    // 오타 고치듯 두 번 더 저장한다. 멘션은 그대로다
+    let v = created.currentVersionNo;
+    for (const t of ['@mate 확인 부탁', '@mate 확인 부탁드립니다']) {
+      const r = await pagesSvc.update(created.id, { title: 'T', content: body(t), baseVersionNo: v }, owner, db);
+      v = r.currentVersionNo;
+    }
+    expect(await svc.list(mate, 20)).toHaveLength(1);
+  });
+
   it('저장(수정)에서도 만든다', async () => {
     const owner = await user('owner');
     const mate = await user('mate');
@@ -206,5 +223,49 @@ describe('대상이 사라진 알림 (FR-506 — 자체 점검 9)', () => {
     const { mate, sp } = await mentioned();
     await db.update(spaces).set({ deletedAt: new Date() }).where(eq(spaces.id, sp.id));
     expect((await svc.list(mate, 20))[0].pageTitle).toBeNull();
+  });
+});
+
+describe('권한이 회수되면 제목이 가려진다 (보안 검토 3)', () => {
+  it('**Crew에서 빠진 뒤에는 바뀐 제목이 흘러나가지 않는다**', async () => {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+    const pid = await page(sp.id, owner.id);
+    await commentsSvc.create(pid, { body: body('@mate 확인') }, owner);
+
+    // Crew일 때는 제목이 보인다
+    expect((await svc.list(mate, 20))[0].pageTitle).toBe('T');
+
+    // Crew에서 빠지고, 그 뒤 제목이 바뀐다
+    await db.delete(spaceMembers).where(eq(spaceMembers.spaceId, sp.id));
+    await db.update(pages).set({ title: '3분기 감사 지적사항' }).where(eq(pages.id, pid));
+
+    const after = await svc.list(mate, 20);
+    expect(after).toHaveLength(1); // 알림 행은 남는다 (FR-506)
+    expect(after[0].pageTitle).toBeNull(); // 제목은 가려진다
+    expect(after[0].actorName).toBe('owner');
+  });
+
+  it('관리자는 Crew가 아니어도 제목을 본다 — 판정을 공유 함수가 한다', async () => {
+    const owner = await user('owner');
+    const admin = await user('adm', 'admin');
+    const sp = await team(owner);
+    const pid = await page(sp.id, owner.id);
+    await commentsSvc.create(pid, { body: body('@adm 확인') }, owner);
+    expect((await svc.list(admin, 20))[0].pageTitle).toBe('T');
+  });
+
+  it('개인 스페이스의 생성자는 계속 본다', async () => {
+    const me = await user('me');
+    const other = await user('other', 'admin');
+    const [sp] = await db
+      .insert(spaces)
+      .values({ key: 'PERS01', name: '내 공간', kind: 'personal', status: 'active', description: '', createdBy: me.id })
+      .returning();
+    const pid = await page(sp.id, me.id);
+    await commentsSvc.create(pid, { body: body('@me 메모') }, other);
+    expect((await svc.list(me, 20))[0].pageTitle).toBe('T');
   });
 });

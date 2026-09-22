@@ -21,6 +21,18 @@ const env = (over: Record<string, unknown> = {}) =>
 
 const svcWith = (over: Record<string, unknown> = {}) => new SettingsService(db, env(over));
 
+/**
+ * **컨트롤러와 같은 절차를 밟는다** — 트랜잭션으로 감싸고, **커밋된 뒤에** 캐시를 버린다.
+ *
+ * 예전 테스트는 `svc.update(patch, me)`를 tx 없이 불렀는데 그것은 실제 경로가 아니다.
+ * 그래서 "커밋 전에 캐시가 옛 값으로 다시 채워지는" 구멍을 볼 수 없었다 (코드 리뷰 2·10b).
+ */
+async function applyPatch(svc: SettingsService, patch: Record<string, unknown>, me: Principal) {
+  const r = await db.transaction((tx) => svc.update(patch, me, tx));
+  svc.invalidate();
+  return r;
+}
+
 async function admin(): Promise<Principal> {
   const [u] = await db.insert(users).values({ username: 'adm', displayName: 'adm', passwordHash: 'x', role: 'admin', status: 'active' }).returning();
   return { id: u.id, role: 'admin' };
@@ -46,7 +58,7 @@ describe('세 겹의 출처 (FR-522·527)', () => {
   it('DB 값이 환경변수를 덮는다', async () => {
     const me = await admin();
     const svc = svcWith({ WF_UPLOAD_MAX_MB: 100 });
-    await svc.update({ uploadMaxMb: 5 }, me);
+    await applyPatch(svc, { uploadMaxMb: 5 }, me);
     expect((await svc.get()).uploadMaxMb).toBe(5);
   });
 
@@ -63,28 +75,28 @@ describe('변경 (FR-523~526)', () => {
     const me = await admin();
     const svc = svcWith();
     expect((await svc.get()).sessionIdleMinutes).toBe(30);
-    await svc.update({ sessionIdleMinutes: 90 }, me);
+    await applyPatch(svc, { sessionIdleMinutes: 90 }, me);
     expect((await svc.get()).sessionIdleMinutes).toBe(90);
   });
 
   it('바뀐 키의 이전·이후를 돌려준다 — 감사로그에 그대로 들어간다 (FR-525)', async () => {
     const me = await admin();
-    const { before, after } = await svcWith().update({ sessionIdleMinutes: 90 }, me);
+    const { before, after } = await applyPatch(svcWith(), { sessionIdleMinutes: 90 }, me);
     expect(before).toEqual({ sessionIdleMinutes: 30 });
     expect(after).toEqual({ sessionIdleMinutes: 90 });
   });
 
   it('**안 바꾼 키는 이전·이후에 없다** — 감사로그가 전체 덤프가 되면 무엇이 바뀌었는지 안 보인다', async () => {
     const me = await admin();
-    const { after } = await svcWith().update({ trashRetentionDays: 7 }, me);
+    const { after } = await applyPatch(svcWith(), { trashRetentionDays: 7 }, me);
     expect(Object.keys(after)).toEqual(['trashRetentionDays']);
   });
 
   it('두 번 바꾸면 앞의 것이 남는다 — 통째로 덮어쓰지 않는다', async () => {
     const me = await admin();
     const svc = svcWith();
-    await svc.update({ sessionIdleMinutes: 90 }, me);
-    await svc.update({ trashRetentionDays: 7 }, me);
+    await applyPatch(svc, { sessionIdleMinutes: 90 }, me);
+    await applyPatch(svc, { trashRetentionDays: 7 }, me);
     const p = await svc.get();
     expect(p.sessionIdleMinutes).toBe(90);
     expect(p.trashRetentionDays).toBe(7);
@@ -92,18 +104,18 @@ describe('변경 (FR-523~526)', () => {
 
   it('범위를 벗어나면 400', async () => {
     const me = await admin();
-    await expect(svcWith().update({ uploadMaxMb: 0 }, me)).rejects.toThrow(/uploadMaxMb/);
-    await expect(svcWith().update({}, me)).rejects.toThrow(/바꿀 값이 없다/);
+    await expect(applyPatch(svcWith(), { uploadMaxMb: 0 }, me)).rejects.toThrow(/uploadMaxMb/);
+    await expect(applyPatch(svcWith(), {}, me)).rejects.toThrow(/바꿀 값이 없다/);
   });
 
   it('**업로드 상한은 이 서버의 천장을 못 넘는다** — 넘으면 multer가 앞에서 자르고 "바꿨는데 안 먹는" 상태가 된다', async () => {
     const me = await admin();
-    await expect(svcWith({ WF_UPLOAD_MAX_MB: 20 }).update({ uploadMaxMb: 50 }, me)).rejects.toThrow(/천장/);
+    await expect(applyPatch(svcWith({ WF_UPLOAD_MAX_MB: 20 }), { uploadMaxMb: 50 }, me)).rejects.toThrow(/천장/);
   });
 
   it('누가 바꿨는지 남는다', async () => {
     const me = await admin();
-    await svcWith().update({ trashRetentionDays: 7 }, me);
+    await applyPatch(svcWith(), { trashRetentionDays: 7 }, me);
     const row = await db.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     expect(row?.updatedBy).toBe(me.id);
   });
@@ -113,7 +125,7 @@ describe('캐시·천장 (자체 점검 3·5)', () => {
   it('**트랜잭션 안에서 읽은 값은 캐시하지 않는다** — 롤백되면 DB와 메모리가 어긋난다', async () => {
     const me = await admin();
     const svc = svcWith();
-    await svc.update({ trashRetentionDays: 7 }, me);
+    await applyPatch(svc, { trashRetentionDays: 7 }, me);
     svc.invalidate();
 
     // 트랜잭션 안에서 다른 값을 써 놓고 롤백한다
@@ -130,7 +142,7 @@ describe('캐시·천장 (자체 점검 3·5)', () => {
 
   it('**읽기에서도 천장을 건다** — DB에 50이 있는데 환경변수를 20으로 내려도 20이다', async () => {
     const me = await admin();
-    await svcWith({ WF_UPLOAD_MAX_MB: 100 }).update({ uploadMaxMb: 50 }, me);
+    await applyPatch(svcWith({ WF_UPLOAD_MAX_MB: 100 }), { uploadMaxMb: 50 }, me);
     // 같은 DB를 천장 20짜리 서버가 읽는다 (환경변수를 내리고 재기동한 상황)
     expect((await svcWith({ WF_UPLOAD_MAX_MB: 20 }).get()).uploadMaxMb).toBe(20);
   });
@@ -148,26 +160,46 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
       users.signup({ username: 'u1', displayName: 'u1', email: 'u1@example.internal', password: pw }, db),
     ).resolves.toBeTruthy();
 
-    await settings.update({ passwordMinLength: 20 }, me);
+    await applyPatch(settings, { passwordMinLength: 20 }, me);
     await expect(
       users.signup({ username: 'u2', displayName: 'u2', email: 'u2@example.internal', password: pw }, db),
     ).rejects.toThrow(/20/);
   });
 
-  it('**문자 종류를 낮추는 방향도 먹는다** (자체 점검 2) — 계약은 바닥만 본다', async () => {
+  it('**낮추는 방향도 먹는다** (자체 점검 2) — 계약은 바닥만 본다', async () => {
     const me = await admin();
     const settings = svcWith();
     const users = new UsersService(db, settings);
-    const oneClass = 'abcdefgh'; // 8자·소문자만
+    const twelve = 'Abcd12efGh34'; // 12자·2종
 
+    // 20자로 올리면 12자가 막힌다
+    await applyPatch(settings, { passwordMinLength: 20 }, me);
     await expect(
-      users.signup({ username: 'lax1', displayName: 'lax1', email: 'lax1@example.internal', password: oneClass }, db),
-    ).rejects.toThrow(/2종/);
+      users.signup({ username: 'lax1', displayName: 'lax1', email: 'lax1@example.internal', password: twelve }, db),
+    ).rejects.toThrow(/20/);
 
-    await settings.update({ passwordMinCharClasses: 1 }, me);
+    // **다시 내리면 통과한다.** 예전에는 zod가 파싱 시점에 굳혀 이 방향이 안 먹었다
+    await applyPatch(settings, { passwordMinLength: 10 }, me);
     await expect(
-      users.signup({ username: 'lax2', displayName: 'lax2', email: 'lax2@example.internal', password: oneClass }, db),
+      users.signup({ username: 'lax2', displayName: 'lax2', email: 'lax2@example.internal', password: twelve }, db),
     ).resolves.toBeTruthy();
+  });
+
+  it('**바닥 아래로는 내릴 수 없다** — 문자 2종은 사용자 결정(2026-09-15)이다 (보안 검토 1)', async () => {
+    const me = await admin();
+    await expect(applyPatch(svcWith(), { passwordMinCharClasses: 1 }, me)).rejects.toThrow(/passwordMinCharClasses/);
+    await expect(applyPatch(svcWith(), { passwordMinLength: 4 }, me)).rejects.toThrow(/passwordMinLength/);
+    // 감사로그 보존도 바닥이 있다 — 1일로 내려 추적을 지우는 길을 막는다 (보안 검토 2)
+    await expect(applyPatch(svcWith(), { auditRetentionDays: 1 }, me)).rejects.toThrow(/auditRetentionDays/);
+  });
+
+  it('**관리자가 만든 계정도 강도를 지킨다** (보안 검토 1) — 이 경로만 검사가 없었다', async () => {
+    const me = await admin();
+    const settings = svcWith();
+    const users = new UsersService(db, settings);
+    await expect(
+      users.create({ username: 'svc', displayName: 'svc', email: 'svc@example.internal', password: 'abcdefgh', role: 'member' }, me, db),
+    ).rejects.toThrow(/2종/);
   });
 
   it('**잠금 임계도 살아 있는 값을 쓴다 — 실제로 실패시켜 본다** (자체 점검 7)', async () => {
@@ -177,7 +209,7 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
     await users.signup({ username: 'lockme', displayName: 'lockme', email: 'l@example.internal', password: 'Abcd12ef' }, db);
 
     // 기본 임계는 5다. 3으로 낮추면 세 번째 실패에서 잠겨야 한다
-    await settings.update({ lockoutThreshold: 3 }, me);
+    await applyPatch(settings, { lockoutThreshold: 3 }, me);
     // 승인 전이라도 비밀번호 검증은 돈다 — 우리가 보는 것은 잠금 누적이다
     for (let i = 0; i < 2; i++) await users.verifyCredentials('lockme', '틀린비밀번호');
     expect((await users.findByUsername('lockme'))?.lockedUntil).toBeNull();

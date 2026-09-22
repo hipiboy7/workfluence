@@ -1,4 +1,4 @@
-import { POLICY_DEFAULTS, SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
+import { POLICY_DEFAULTS, POLICY_FLOOR, SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
 import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
 
@@ -25,7 +25,9 @@ async function main(): Promise<void> {
       auditRetentionDays: env.WF_AUDIT_RETENTION_DAYS,
       ...((stored.rows[0]?.value as Record<string, unknown>) ?? {}),
     });
-    const days = policy.auditRetentionDays ?? POLICY_DEFAULTS.auditRetentionDays;
+    // **스크립트 단독으로도 바닥 아래로 못 간다.** DB 값이 어떤 경로로 낮아졌든
+    // 여기서 다시 막는다 — 정리 명령은 흔적을 지우는 도구이므로 이중으로 건다
+    const days = Math.max(policy.auditRetentionDays ?? POLICY_DEFAULTS.auditRetentionDays, POLICY_FLOOR.auditRetentionDays);
 
     await c.query('BEGIN');
     const { rows: cut } = await c.query<{ before: string }>(`SELECT (now() - interval '${days} days')::text AS before`);

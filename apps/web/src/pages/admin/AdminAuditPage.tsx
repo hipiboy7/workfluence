@@ -17,9 +17,12 @@ export function AdminAuditPage() {
   const load = useCallback(() => {
     const q = new URLSearchParams({ limit: String(LIST_PAGE_LIMIT) });
     if (action) q.set('action', action);
-    if (from) q.set('from', from);
+    // **지역 시간(KST)의 0시**로 만들어 보낸다. `new Date('2026-09-22')`는 UTC 0시라
+    // 화면이 KST로 보여 주는 것과 **9시간 어긋난다** — 그날 새벽 기록이 빠지고 다음 날
+    // 새벽 기록이 들어온다 (코드 리뷰 3). `T00:00`을 붙이면 지역 시간으로 읽힌다
+    if (from) q.set('from', new Date(`${from}T00:00`).toISOString());
     // 끝 날짜는 **그날을 포함**하도록 다음 날 0시로 보낸다. 서버는 `to` 미만으로 거른다
-    if (to) q.set('to', new Date(new Date(to).getTime() + 86_400_000).toISOString());
+    if (to) q.set('to', new Date(new Date(`${to}T00:00`).getTime() + 86_400_000).toISOString());
     api<AuditEventView[]>(`/api/audit?${q.toString()}`)
       .then(setRows)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));

@@ -11,7 +11,7 @@ import {
   type SpaceMemberView,
   type SpaceView,
 } from '@workfluence/shared';
-import { and, count, eq, isNull } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
@@ -203,8 +203,12 @@ export class CategoriesController {
     await this.db.transaction(async (tx) => {
       const row = await tx.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, id) });
       if (!row) throw new NotFoundException('분류를 찾을 수 없다');
-      const [{ n }] = await tx.select({ n: count() }).from(spaces).where(and(eq(spaces.categoryId, id), isNull(spaces.deletedAt)));
-      if (n > 0) throw new ConflictException(`이 분류를 쓰는 스페이스가 ${n}개 있다. 먼저 옮긴 뒤 지운다`);
+      // **지워진 스페이스도 센다.** soft delete는 `category_id`를 그대로 두고 FK도 살아
+      // 있어서, 빼고 세면 검사를 통과한 뒤 DELETE가 FK로 터져 **500**이 된다 —
+      // "막고 이유를 말한다"는 FR-538의 취지가 불투명한 오류로 무너진다 (코드 리뷰 4).
+      // 게다가 그 `category_id`는 스페이스를 되살릴 때 필요하다
+      const [{ n }] = await tx.select({ n: count() }).from(spaces).where(eq(spaces.categoryId, id));
+      if (n > 0) throw new ConflictException(`이 분류를 쓰는 스페이스가 ${n}개 있다(휴지통 포함). 먼저 옮긴 뒤 지운다`);
       await tx.delete(spaceCategories).where(eq(spaceCategories.id, id));
       await this.audit.record({ action: 'category.delete', actorId: me.id, targetType: 'category', targetId: id, detail: { name: row.name }, ip: req.ip }, tx);
     });

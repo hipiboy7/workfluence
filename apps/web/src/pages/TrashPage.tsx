@@ -19,9 +19,11 @@ export function TrashPage() {
       .then(setPages)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     if (isAdmin) {
+      // **오류를 삼키지 않는다.** 여기는 이미 관리자만 오므로 실패는 진짜 고장이다 —
+      // 삼키면 "되살릴 스페이스가 없다"로 보여 휴지통이 빈 것으로 오해한다 (코드 리뷰 11)
       api<TrashSpaceView[]>(`/api/trash/spaces?limit=${LIST_PAGE_LIMIT}`)
         .then(setSpaces)
-        .catch(() => undefined);
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     }
   }, [isAdmin]);
   useEffect(load, [load]);
@@ -61,7 +63,7 @@ export function TrashPage() {
       {isAdmin && (
         <section className="card" aria-label="지운 스페이스">
           <h2>지운 스페이스</h2>
-          <p className="muted small">스페이스를 되살려도 **안에 있던 페이지는 함께 살아나지 않는다.** 페이지는 위에서 하나씩 되살린다.</p>
+          <p className="muted small">스페이스를 되살리면 <strong>안에 있던 문서도 함께 다시 보인다.</strong> 따로 지운 문서만 위 목록에 남는다.</p>
           {spaces.length === 0 ? (
             <p className="muted small">되살릴 스페이스가 없다.</p>
           ) : (

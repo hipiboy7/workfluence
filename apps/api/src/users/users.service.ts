@@ -147,6 +147,9 @@ export class UsersService {
   /** 관리자가 직접 생성 → 바로 활성 (FR-231) */
   async create(dto: CreateUserDto, actor: Principal, tx: Db = this.db): Promise<UserRow> {
     if (!canAssignRole(actor, dto.role)) throw new ForbiddenException(`'${dto.role}' 역할을 부여할 권한이 없다`);
+    // **여기도 강도를 본다.** 계약(zod)이 바닥만 보게 바뀐 뒤로 이 경로만 검사가 없었다 —
+    // 관리자가 만든 계정은 바로 활성이라, 비어 있으면 가장 센 계정이 가장 약한 비밀번호를 갖는다
+    await this.assertPasswordStrength(dto.password, tx);
     await this.assertUnique(dto.username, dto.email);
     const [row] = await tx
       .insert(users)

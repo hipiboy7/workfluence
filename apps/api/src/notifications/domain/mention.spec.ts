@@ -32,13 +32,22 @@ describe('extractMentions', () => {
     expect(extractMentions(doc('(@kim) "@lee" [@park]'))).toEqual(['kim', 'lee', 'park']);
   });
 
-  it('뒤에 붙은 문장부호는 아이디에 넣지 않는다', () => {
-    expect(extractMentions(doc('@kim, @lee. @park?'))).toEqual(['kim', 'lee', 'park']);
-    expect(extractMentions(doc('@kim...'))).toEqual(['kim']);
+  it('**뒤쪽 구분자는 자를 수도 안 자를 수도 있으므로 둘 다 후보로 낸다**', () => {
+    // `.`·`-`·`_`는 아이디에도 쓰이고 문장부호로도 쓰인다. `@kim_`을 무조건 잘라
+    // `kim`에게 보내면 **엉뚱한 사람이 불린다** (코드 리뷰 7). 실제 사용자와 맞추는 것은
+    // 부르는 쪽의 일이고, 여기서는 자르지 않은 것을 **먼저** 둔다
+    expect(extractMentions(doc('@kim_ 확인'))).toEqual(['kim_', 'kim']);
+    expect(extractMentions(doc('@kim, @lee. @park?'))).toEqual(['kim', 'lee.', 'lee', 'park']);
+    expect(extractMentions(doc('@kim...'))).toEqual(['kim...', 'kim']);
   });
 
-  it('한글 바로 뒤에 붙은 것도 멘션이다 — 한국어는 조사가 붙는다', () => {
+  it('한글 **조사가 뒤에 붙어도** 아이디만 뽑는다', () => {
     expect(extractMentions(doc('담당자는 @kim님입니다'))).toEqual(['kim']);
+  });
+
+  it('**앞이 글자면 멘션이 아니다** — 메일 주소가 알림을 만들면 안 된다', () => {
+    // 이 경계는 앞쪽만 막는다. 뒤쪽을 막으면 한국어 조사에서 깨진다
+    expect(extractMentions(doc('담당자는@kim'))).toEqual([]);
   });
 
   it('아이디 규칙(소문자·숫자·._- 2~64자)을 벗어나면 뽑지 않는다', () => {

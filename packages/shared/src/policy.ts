@@ -30,7 +30,20 @@ export const POLICY_DEFAULTS = {
  * zod 계약은 이 바닥만 강제하고, 그 위의 세기는 살아 있는 정책값으로 서비스가 본다 —
  * zod가 파싱 시점에 현재 정책을 강제하면 **낮추는 방향이 영영 안 먹는다** (P4 자체 점검 2).
  */
-export const POLICY_FLOOR = { passwordMinLength: 8 } as const;
+export const POLICY_FLOOR = {
+  passwordMinLength: 8,
+  /** 사용자 결정(2026-09-15)은 "8자 이상 **+ 2종 이상**"이다. 바닥이 그 절반만 강제하면 안 된다 */
+  passwordMinCharClasses: 2,
+  /**
+   * 감사로그 보존의 바닥.
+   *
+   * 이 값을 1일까지 내릴 수 있으면 **감사 추적 파기를 HTTP API만으로 예약**할 수 있다 —
+   * 흔적을 남기는 일을 하고 보존을 1일로 내린 뒤 정리를 돌리면 된다. append-only 트리거가
+   * 막으려던 결과를 권한 하나로 얻는 길이라 막는다. 사내 보존 정책(확인 필요 B)이
+   * 확인되면 그 값으로 올린다 — **내리는 방향은 열지 않는다.**
+   */
+  auditRetentionDays: 90,
+} as const;
 
 export type Policy = typeof POLICY_DEFAULTS;
 export const POLICY_KEYS = Object.keys(POLICY_DEFAULTS) as (keyof Policy)[];
@@ -41,11 +54,11 @@ const RANGES: Record<string, { min: number; max: number }> = {
   sessionIdleMinutes: { min: 1, max: 1440 },
   sessionAbsoluteHours: { min: 1, max: 720 },
   passwordMinLength: { min: POLICY_FLOOR.passwordMinLength, max: 128 }, // 사용자 결정(2026-09-15)인 8자 아래로는 못 내린다
-  passwordMinCharClasses: { min: 1, max: 4 },
+  passwordMinCharClasses: { min: POLICY_FLOOR.passwordMinCharClasses, max: 4 },
   lockoutThreshold: { min: 3, max: 100 },
   lockoutMinutes: { min: 1, max: 1440 },
   trashRetentionDays: { min: 1, max: 3650 },
-  auditRetentionDays: { min: 1, max: 3650 },
+  auditRetentionDays: { min: POLICY_FLOOR.auditRetentionDays, max: 3650 },
 };
 
 const isValidInt = (key: string, v: unknown): v is number => {
