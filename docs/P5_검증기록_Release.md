@@ -12,7 +12,7 @@
 | 호스트 | 사내 Linux 서버 (RHEL 9). 개발·빌드 공용, 다른 프로젝트와 공유 |
 | Docker / Compose | 29.6.1 / v5.3.1 |
 | Node | v24.21.0 (`~/.local/node`, 빌드 이미지와 같은 버전) |
-| 디스크 | 전체 39GB · 사용 27GB · **여유 13GB** (`df -h /`) |
+| 디스크 | 전체 39GB · 사용 28GB · **여유 11GB** (`df -h /`, 작업 종료 시점) |
 | 컨테이너 PostgreSQL | 17 (`postgres:17`) |
 | 테스트 PostgreSQL | 임베디드 17.10 (`.local/pgdata`, 테스트 DB 분리) |
 | git | `c9c953e` |
@@ -26,7 +26,7 @@
 | 패키지 | 테스트 | skip | 라인 | 브랜치 | 함수 | 구문 | 관문 |
 |---|---|---|---|---|---|---|---|
 | `packages/shared` (A등급) | 91건 | 0 | **99.02%** | **97.92%** | 98.14% | 98.87% | ≥90%, **파일 단위** |
-| `apps/api` (A+B) | 290건 | 0 | **94.52%** | **83.41%** | 91.47% | 90.30% | ≥70% (패키지 합계) |
+| `apps/api` (A+B) | 292건 | 0 | **94.52%** | **83.59%** | 91.47% | 90.30% | ≥70% (패키지 합계) |
 | `apps/web` | 0건 | 0 | 측정만 | — | — | — | 관문 없음 (3절) |
 | E2E (`pnpm test:e2e`) | **17건** | 0 | — | — | — | — | 측정 제외 |
 
@@ -43,7 +43,7 @@
 | `apps/api/src/attachments/domain/blob-path.ts` (A, 신규) | 100% | 100% | 100% |
 | `apps/api/src/pages/reindex.ts` (신규) | 100% | 100% | 100% |
 | `apps/api/src/common/uuid.pipe.ts` | 100% | 100% | 100% |
-| `apps/api/src/common/rate-limit.guard.ts` | 100% | 79.16% | 87.5% |
+| `apps/api/src/common/rate-limit.guard.ts` | 100% | 83.33% | 87.5% |
 | `apps/api/src/auth/auth.service.ts` | 95.77% | 79.54% | 89.47% |
 | `apps/api/src/users/users.service.ts` | 81.11% | 75.90% | 75.86% |
 
@@ -76,7 +76,7 @@ api는 규칙이 **패키지 합계 70%**이므로(3절) `perFile`을 켜지 않
 | 묶음 만들기 시간 | **7.4초** (NFR-51 목표 5분) |
 | 묶음 크기 | **264MB** · 파일 9개 |
 | `images.tar` | 264MB (이미지 3종) |
-| app 이미지 | **389MB** (8.2절 예산 400MB 이하 — **통과**) |
+| app 이미지 | **390MB** (8.2절 예산 400MB 이하 — **통과**. 여유 10MB) |
 | postgres:17 | 641MB |
 | nginx:1.27-alpine | 73MB |
 | SBOM | CycloneDX 1.5 · 부품 **199개** |
