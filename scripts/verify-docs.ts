@@ -212,6 +212,46 @@ function checkShellScripts(findings: Finding[]): void {
   }
 }
 
+/**
+ * **nginx의 본문 상한이 앱의 업로드 상한보다 작지 않은지 본다** (P3 자체 점검 #5, FR-627).
+ *
+ * 두 값이 어긋나면 **앱은 허락하고 nginx가 거절한다.** 사용자에게는 413이 가고, 앱 로그에는
+ * 아무것도 남지 않는다 — 어느 쪽이 막았는지 알 수 없는 유형이다. 사람이 두 파일을 번갈아
+ * 보는 것으로는 계속 놓치므로 기계가 본다.
+ *
+ * nginx는 `20m`처럼 적고 앱은 `20`(MB)으로 적는다. 단위를 맞춰 비교한다.
+ */
+function checkUploadLimits(findings: Finding[]): void {
+  const conf = resolve(ROOT, 'deploy/nginx.conf');
+  const example = resolve(ROOT, '.env.example');
+  if (!existsSync(conf) || !existsSync(example)) return;
+
+  const m = /client_max_body_size\s+(\d+)([kKmMgG]?)\s*;/.exec(readFileSync(conf, 'utf8'));
+  if (!m) {
+    findings.push({ file: 'deploy/nginx.conf', line: 0, kind: 'client_max_body_size 없음', detail: '업로드 상한과 대조할 수 없다' });
+    return;
+  }
+  const unit = { '': 1 / 1024 / 1024, k: 1 / 1024, m: 1, g: 1024 }[m[2].toLowerCase()] ?? 1;
+  const nginxMb = Number(m[1]) * unit;
+
+  const env = /^WF_UPLOAD_MAX_MB=(\d+)/m.exec(readFileSync(example, 'utf8'));
+  if (!env) {
+    findings.push({ file: '.env.example', line: 0, kind: 'WF_UPLOAD_MAX_MB 없음', detail: 'nginx 상한과 대조할 수 없다' });
+    return;
+  }
+  const appMb = Number(env[1]);
+
+  // nginx가 더 작으면 앱이 허락한 파일이 프록시에서 막힌다. 같거나 더 크면 된다
+  if (nginxMb < appMb) {
+    findings.push({
+      file: 'deploy/nginx.conf',
+      line: 0,
+      kind: '업로드 상한 불일치',
+      detail: `client_max_body_size ${m[1]}${m[2]} (= ${nginxMb}MB) < WF_UPLOAD_MAX_MB ${appMb}MB — 앱은 받고 nginx가 413으로 막는다`,
+    });
+  }
+}
+
 function main(): void {
   const argPath = process.argv.indexOf('--path');
   const scripts = packageScripts();
@@ -230,7 +270,10 @@ function main(): void {
     checkFile(doc, scripts, tracked, findings);
     checked++;
   }
-  if (argPath < 0) checkShellScripts(findings);
+  if (argPath < 0) {
+    checkShellScripts(findings);
+    checkUploadLimits(findings);
+  }
 
   if (findings.length === 0) {
     console.log(`verify:docs — 문서 ${checked}개 검사, 위반 없음`);

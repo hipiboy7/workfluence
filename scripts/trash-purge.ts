@@ -1,8 +1,9 @@
 import { SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
 import { rm } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { blobPath } from '../apps/api/src/attachments/domain/blob-path';
 
 /**
  * 휴지통 물리 삭제 (P4_설계서_Admin FR-515~517, `scope-definition` 위험 7).
@@ -111,7 +112,8 @@ async function main(): Promise<void> {
     for (const sha of shas) {
       const still = await c.query('SELECT 1 FROM attachments WHERE sha256 = $1 LIMIT 1', [sha]);
       if (still.rowCount) continue;
-      await rm(join(root, sha.slice(0, 2), sha), { force: true });
+      // 자리 계산은 앱과 **같은 함수**를 쓴다. 따로 적으면 한쪽만 바뀌어도 아무도 못 본다
+      await rm(blobPath(root, sha), { force: true });
       files += 1;
     }
 

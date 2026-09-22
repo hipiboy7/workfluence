@@ -1,34 +1,21 @@
-import { extractText, type DocNode } from '@workfluence/shared';
 import { Client } from 'pg';
 import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { REINDEX_SELECT_SQL, REINDEX_UPDATE_SQL, reindexRows, type ReindexRow } from '../apps/api/src/pages/reindex';
 
 /**
  * 검색 인덱스 재생성 (P3_설계서_Content 2절, FR-408).
  *
- * `pages.search_text`는 **파생 데이터**다 (CLAUDE.md 6절). 본문 JSON이 정본이고, 여기서
- * 언제든 다시 만들 수 있어야 한다. 추출 규칙이 바뀌거나 인덱스가 어긋났을 때 이것을 돌린다.
- *
- * 추출은 `packages/shared`의 `extractText` **한 곳**을 쓴다 — 저장 경로와 재색인이 서로 다른
- * 규칙을 쓰면, 재색인한 뒤에 검색 결과가 조용히 달라진다.
+ * **무엇을 골라 무엇을 쓰는지는 `apps/api/src/pages/reindex.ts`에만 있다.** 이 파일은
+ * "어떻게 실행하는가"만 안다 — 앱을 띄우지 않고 DB에 직접 붙는다. 질의를 여기에 한 번 더
+ * 적으면 앱 쪽과 범위가 어긋나고, 어긋난 것을 아무도 보지 못한다 (CLAUDE.md 1.3절).
  */
 async function main(): Promise<void> {
   const env = loadEnv();
   const c = new Client(databaseUrl(env));
   await c.connect();
   try {
-    const { rows } = await c.query<{ id: string; content_json: DocNode }>(
-      // 지워진 페이지는 건너뛴다 — `PagesService.reindexAll`(FR-333)과 **같은 범위**여야 한다.
-      // 둘이 다르면 어느 쪽으로 돌렸느냐에 따라 결과가 달라지고, 그 차이를 아무도 못 본다
-      `SELECT p.id, v.content_json
-         FROM pages p
-         JOIN page_versions v ON v.page_id = p.id AND v.version_no = p.current_version_no
-        WHERE p.deleted_at IS NULL`,
-    );
-    let n = 0;
-    for (const r of rows) {
-      await c.query('UPDATE pages SET search_text = $2 WHERE id = $1', [r.id, extractText(r.content_json)]);
-      n += 1;
-    }
+    const { rows } = await c.query<ReindexRow>(REINDEX_SELECT_SQL);
+    const n = await reindexRows(rows, (id, text) => c.query(REINDEX_UPDATE_SQL, [id, text]));
     console.log(`재색인 완료: ${n}개 페이지`);
   } finally {
     await c.end();

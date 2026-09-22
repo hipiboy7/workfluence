@@ -107,7 +107,7 @@ rate-limit 환불에 증폭이 없다는 것, `terminateSessions`의 랭크 비�
 | 무엇 | 왜 |
 |---|---|
 | 멘션 후보가 둘 나올 때 **둘 다** 부른다 (`@kim.` → `kim.`과 `kim`) | 실제 사용자와 맞추는 일은 부르는 쪽이 한다. 둘 다 존재하는 드문 경우 둘에게 가지만, **엉뚱한 한 사람에게 가는 것보다 낫다**. 각자 권한 판정은 그대로 거친다 |
-| `trash-purge`가 블롭 경로를 다시 만든다 (`LocalDiskStorage`와 중복) | 스크립트는 Nest DI 밖에서 돈다. 묶으려면 구조를 건드려야 해 Phase 5로 넘긴다 |
+| `trash-purge`가 블롭 경로를 다시 만든다 (`LocalDiskStorage`와 중복) | ~~Phase 5로 넘긴다~~ → **Phase 5에서 했다.** 규칙을 `attachments/domain/blob-path.ts`(A등급 순수 함수)로 떼어내 둘이 같은 것을 부른다 |
 
 ## 7. 이 검토들이 말해 준 것
 

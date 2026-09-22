@@ -43,6 +43,13 @@
       "when": 1790036447352,
       "tag": "0005_audit_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790042673661,
+      "tag": "0006_constraints",
+      "breakpoints": true
     }
   ]
 }
