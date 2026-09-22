@@ -11,7 +11,7 @@ import {
 import type { Request } from 'express';
 import 'express-session';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
-import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
+import { RateLimit, RateLimitGuard, RateLimitStore } from '../common/rate-limit.guard';
 import { ZodPipe } from '../common/zod.pipe';
 import { UsersModule } from '../users/users.module';
 import { AllowPendingPasswordChange, AuthGuard, CurrentUser, Public, type SessionUser } from './auth.guard';
@@ -34,7 +34,9 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     @Inject(APP_ENV) private readonly env: AppEnvToken,
-    private readonly rateLimit: RateLimitGuard,
+    // **가드가 아니라 저장소를 주입받는다.** 가드는 Nest가 provider와 별개로 만들어서
+    // 여기서 가드를 받으면 요청을 센 인스턴스와 다른 것이 온다 — 환불이 조용히 사라진다 (T-027)
+    private readonly rateLimit: RateLimitStore,
   ) {}
 
   @Post('login')
@@ -147,8 +149,8 @@ export class AuthController {
   controllers: [AuthController],
   providers: [
     AuthService,
-    // 가드를 **주입 가능한 provider로도** 둔다. 성공한 로그인이 제한 예산을 돌려주려면
-    // 컨트롤러가 그 인스턴스를 잡아야 한다 (@UseGuards의 클래스 참조와 같은 싱글턴이다)
+    // 센 것을 담는 저장소는 **provider 하나**다. 가드가 몇 개로 만들어지든 예산은 하나다 (T-027)
+    RateLimitStore,
     RateLimitGuard,
     MockOidcProvider,
     HttpOidcProvider,
