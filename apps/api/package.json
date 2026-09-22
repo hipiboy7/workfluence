@@ -13,8 +13,8 @@
     "dev": "tsc -p tsconfig.build.json && concurrently -k -n tsc,node \"tsc -p tsconfig.build.json -w --preserveWatchOutput\" \"node --enable-source-maps --watch-path=dist dist/main.js\"",
     "start": "node --enable-source-maps dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "test:cov": "vitest run --passWithNoTests --coverage",
+    "test": "vitest run",
+    "test:cov": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts"
