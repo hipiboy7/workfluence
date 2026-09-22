@@ -86,6 +86,9 @@ jobs:
         #   - react.dev         : React 프로덕션 번들의 오류 안내 문구(`https://react.dev/errors/...`)
         #   - reactrouter.com   : react-router의 오류 문구(`... must be used within a data router. See https://...`)
         #   - prosemirror.net   : ProseMirror 스키마 검증 오류 문구(`... (see https://prosemirror.net/docs/guide/#generatable)`)
+        #   - tiptap.dev        : CollaborationCaret 확장의 **deprecation 경고 문구**
+        #                         (`... is deprecated. Please use ... Read more: https://tiptap.dev/api/extensions/collaboration-caret`).
+        #                         `console.warn`에 담긴 문자열이고 부르는 코드는 없다 (Phase 6에서 확인)
         #   - github.com        : react-router가 IE11 폴리필을 안내하는 문구 안의 주소
         #   - example.com/internal, localhost, 127.0.0.1 : 예시·로컬 주소
         # 새 항목을 넣을 때는 **왜 요청이 아닌지**를 여기에 적는다. 이유 없이 넓히면 관문이 무의미해진다.
@@ -93,7 +96,7 @@ jobs:
         run: |
           set -e
           hits=$(grep -rIoE 'https?://[a-zA-Z0-9.-]+' apps/web/dist apps/api/dist \
-            | grep -vE '(127\.0\.0\.1|localhost|www\.w3\.org|schema\.org|react\.dev|reactrouter\.com|prosemirror\.net|github\.com|example\.(com|internal))' \
+            | grep -vE '(127\.0\.0\.1|localhost|www\.w3\.org|schema\.org|react\.dev|reactrouter\.com|prosemirror\.net|tiptap\.dev|github\.com|example\.(com|internal))' \
             | sort -u || true)
           if [ -n "$hits" ]; then
             echo "빌드 산출물이 외부 자원을 참조한다:"; echo "$hits"; exit 1
