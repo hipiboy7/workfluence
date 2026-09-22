@@ -15,7 +15,7 @@
 | 디스크 | 전체 39GB · 사용 28GB · **여유 11GB** (`df -h /`, 작업 종료 시점) |
 | 컨테이너 PostgreSQL | 17 (`postgres:17`) |
 | 테스트 PostgreSQL | 임베디드 17.10 (`.local/pgdata`, 테스트 DB 분리) |
-| git | `c9c953e` |
+| git | `8ff6949` (검증 시점. 이후 커밋은 문서·검토 반영이다) |
 
 ---
 
@@ -80,7 +80,8 @@ api는 규칙이 **패키지 합계 70%**이므로(3절) `perFile`을 켜지 않
 | postgres:17 | 641MB |
 | nginx:1.27-alpine | 73MB |
 | SBOM | CycloneDX 1.5 · 부품 **199개** |
-| 라이선스 목록 | 201줄 |
+| 라이선스 구성 | MIT 184 · ISC 9 · Apache-2.0 3 · BSD-3-Clause 2 · 0BSD 1 — **전부 7절 허용 범위** |
+| `pnpm licenses:check` | `production 의존성 199개, 허용 라이선스만 사용` (종료 코드 0) |
 | 매니페스트 | `version=0.1.0` · `gitSha` · `builtAt` · `image=` 3줄 |
 
 ### 2.1 검사가 실제로 잡는지 확인했다 — **세 가지를 일부러 깨뜨려 봤다**
