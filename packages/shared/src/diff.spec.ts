@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffDocs, type BlockDiff } from './diff';
+import { diffDocs, diffWords, type BlockDiff } from './diff';
 import type { DocNode } from './document';
 
 /**
@@ -146,5 +146,30 @@ describe('diffDocs — 이상한 입력', () => {
     const r = diffDocs(doc(p('가'), p('나')), doc());
     expect(kinds(r.blocks)).toEqual(['removed', 'removed']);
     expect(r.removed).toBe(2);
+  });
+});
+
+describe('diffWords 를 직접 쓰는 경우', () => {
+  it('한쪽이 비면 전부 한 종류다', () => {
+    expect(diffWords('', '가 나').every((w) => w.kind === 'added')).toBe(true);
+    expect(diffWords('가 나', '').every((w) => w.kind === 'removed')).toBe(true);
+    expect(diffWords('', '')).toEqual([]);
+  });
+
+  it('공백만 다른 것은 차이가 아니다 — 사람이 묻는 차이가 아니다', () => {
+    expect(diffWords('가  나', '가 나').every((w) => w.kind === 'same')).toBe(true);
+  });
+});
+
+describe('블록 텍스트는 블록 하나의 것이다', () => {
+  it('같은 문서의 문단 둘이 한 덩어리로 합쳐지지 않는다', () => {
+    const r = diffDocs(doc(p('가'), p('나')), doc(p('가'), p('나')));
+    // same 블록의 텍스트는 블록 하나의 것이어야 한다 — 문서 전체가 아니다
+    expect(r.blocks.map((b) => b.after)).toEqual(['가', '나']);
+  });
+
+  it('**`after.content`가 없어도** 다룬다 — 삭제만 있는 비교', () => {
+    const r = diffDocs(doc(p('가')), { type: 'doc' });
+    expect(kinds(r.blocks)).toEqual(['removed']);
   });
 });

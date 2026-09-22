@@ -256,8 +256,8 @@ page_templates(
 
 | 모듈 | 경로 | 등급 | 하는 일 |
 |---|---|---|---|
-| 문서 비교 | packages/shared/src/diff.ts | **A (신규)** | 문서 JSON 둘 → 블록·낱말 단위 차이. 순수 함수 |
-| HTML 렌더 | packages/shared/src/html.ts | **A (신규)** | 문서 JSON → HTML. 허용 목록·이스케이프 |
+| 문서 비교 | `packages/shared/src/diff.ts` | **A (신규)** | 문서 JSON 둘 → 블록·낱말 단위 차이. 순수 함수 |
+| HTML 렌더 | `packages/shared/src/html.ts` | **A (신규)** | 문서 JSON → HTML. 허용 목록·이스케이프 |
 | 실시간 상태 변환 | apps/api/src/pages/domain/realtime.ts | **A (신규)** | 버전을 만들지 말지 판정 (유휴·동일 내용·검증) |
 | 협업 게이트웨이 | apps/api/src/pages/collab.gateway.ts | B | WS 인증·중계·저장 |
 | 내보내기 | apps/api/src/pages/export.controller.ts | B | HTML 응답 + 감사 기록 |

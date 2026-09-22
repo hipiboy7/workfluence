@@ -129,3 +129,70 @@ describe('renderExportDocument — 한 파일로 (FR-730·735)', () => {
     expect(html).toContain('2026-09-22');
   });
 });
+
+describe('renderDocHtml — 속성 (FR-732·733)', () => {
+  it('허용된 속성만 나온다. `textAlign`은 나오고 모르는 키는 빠진다', () => {
+    const out = renderDocHtml(doc({ type: 'paragraph', attrs: { textAlign: 'center', onclick: 'x()' }, content: [t('가운데')] }));
+    expect(out).toContain('textAlign="center"');
+    expect(out).not.toContain('onclick');
+  });
+
+  it('**`schemaVersion`과 `colwidth`는 내보내지 않는다** — 편집기 내부 상태이지 문서가 아니다', () => {
+    const out = renderDocHtml(
+      doc({ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', attrs: { colwidth: [120], colspan: 2 }, content: [p(t('칸'))] }] }] }),
+    );
+    expect(out).not.toContain('colwidth');
+    expect(out).toContain('colspan="2"');
+  });
+
+  it('속성이 `null`이면 적지 않는다 — `x="null"`이 나가면 안 된다', () => {
+    const out = renderDocHtml(doc({ type: 'paragraph', attrs: { textAlign: null }, content: [t('가')] }));
+    expect(out).toBe('<p>가</p>');
+  });
+
+  it('속성값의 따옴표를 이스케이프한다', () => {
+    const out = renderDocHtml(doc({ type: 'codeBlock', attrs: { language: 'ts" onload="x' }, content: [t('코드')] }));
+    expect(out).not.toContain('onload="x"');
+    expect(out).toContain('&quot;');
+  });
+
+  it('제목 수준이 범위 밖이면 h1로 떨어뜨린다 — `<h9>`는 없는 태그다', () => {
+    expect(renderDocHtml(doc({ type: 'heading', attrs: { level: 9 }, content: [t('가')] }))).toContain('<h1>');
+    expect(renderDocHtml(doc({ type: 'heading', attrs: { level: 0 }, content: [t('가')] }))).toContain('<h1>');
+    expect(renderDocHtml(doc({ type: 'heading', content: [t('가')] }))).toContain('<h1>');
+  });
+
+  it('줄바꿈 노드는 `<br />`', () => {
+    expect(renderDocHtml(doc(p(t('위'), { type: 'hardBreak' }, t('아래'))))).toContain('<br />');
+  });
+
+  it('`text`에 글자가 없어도 터지지 않는다', () => {
+    expect(renderDocHtml(doc(p({ type: 'text' })))).toBe('<p></p>');
+  });
+
+  it('허용됐지만 태그가 없는 노드는 **자식만 그린다**', () => {
+    // `taskItem`은 li로 매핑돼 있으므로, 매핑이 없는 경우를 직접 만든다
+    const out = renderDocHtml(doc({ type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [p(t('할 일'))] }] }));
+    expect(out).toContain('할 일');
+    expect(out).toContain('checked="true"');
+  });
+});
+
+describe('renderExportDocument — 머리말', () => {
+  it('공간 이름과 버전을 주면 적는다', () => {
+    const html = renderExportDocument({ title: 'T', doc: doc(), exportedAt: '2026-09-22', spaceName: '팀 공간', versionNo: 3 });
+    expect(html).toContain('공간: 팀 공간');
+    expect(html).toContain('버전 3');
+  });
+
+  it('**공간 이름도 이스케이프한다**', () => {
+    const html = renderExportDocument({ title: 'T', doc: doc(), exportedAt: '2026-09-22', spaceName: '<b>x</b>' });
+    expect(html).not.toContain('<b>x</b>');
+  });
+
+  it('없으면 그 줄을 적지 않는다', () => {
+    const html = renderExportDocument({ title: 'T', doc: doc(), exportedAt: '2026-09-22' });
+    expect(html).not.toContain('공간:');
+    expect(html).not.toContain('버전 ');
+  });
+});
