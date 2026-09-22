@@ -29,20 +29,24 @@ export default defineConfig({
     fileParallelism: false,
     coverage: {
       provider: 'v8',
-      // **Phase를 늘릴 때 여기도 늘린다.** 빠뜨리면 새 코드가 조용히 측정 대상 밖에 있게 된다
-      include: [
-        'src/common/**/*.ts',
-        'src/health/**/*.ts',
-        'src/auth/**/*.ts',
-        'src/users/**/*.ts',
-        'src/audit/**/*.ts',
-        'src/spaces/**/*.ts',
-        'src/pages/**/*.ts',
-        'src/search/**/*.ts',
-        'src/attachments/**/*.ts',
-        'src/comments/**/*.ts',
+      /**
+       * **디렉토리를 열거하지 않는다.** 전부 넣고 뺄 것만 이름으로 뺀다.
+       *
+       * 예전에는 Phase마다 여기에 디렉토리를 더해야 했고, 두 번 연속으로 빠뜨렸다
+       * (T-020: Phase 3의 search·attachments·comments, 그리고 Phase 4의 notifications·
+       * trash·settings·labels). 빠뜨려도 **관문은 초록이다** — 측정 대상 밖의 코드는
+       * 0%가 아니라 집계되지 않기 때문이다. 기억에 기대는 목록은 또 틀린다.
+       */
+      include: ['src/**/*.ts'],
+      exclude: [
+        'src/**/*.module.ts', // 모듈 조립·컨트롤러 (위 주석)
+        'src/**/*.spec.ts',
+        'src/auth/oidc/http.provider.ts', // 실 IdP 없이는 의미 있는 테스트를 쓸 수 없다 (보류 11)
+        'src/main.ts', // 부트스트랩
+        'src/db/**', // 스키마 선언·마이그레이션 실행·시드. 동작은 통합 테스트가 본다
+        'src/test/**', // 테스트 도구 자체
+        'src/config/config.module.ts', // 설정 로딩. `.env` 없는 환경을 합성해야 해 통합 테스트가 본다
       ],
-      exclude: ['src/auth/oidc/http.provider.ts', 'src/**/*.module.ts', 'src/**/*.spec.ts'],
       thresholds: {
         lines: 70,
         branches: 70,
@@ -52,6 +56,7 @@ export default defineConfig({
         'src/auth/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/pages/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/attachments/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/notifications/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

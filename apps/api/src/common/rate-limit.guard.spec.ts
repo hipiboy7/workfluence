@@ -5,10 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RateLimitGuard, type RateLimitSpec } from './rate-limit.guard';
 
 /** 가드는 Reflector로 핸들러 메타데이터를 읽고 요청에서 IP를 본다. 그 둘만 흉내 낸다. */
-function makeContext(ip: string, handlerName = 'h', className = 'C'): ExecutionContext {
+function makeContext(ip: string, handlerName = 'h', className = 'C', req: Record<string, unknown> = {}): ExecutionContext {
   const handler = { name: handlerName };
+  Object.assign(req, { ip });
   return {
-    switchToHttp: () => ({ getRequest: () => ({ ip }) }),
+    switchToHttp: () => ({ getRequest: () => req }),
     getHandler: () => handler,
     getClass: () => ({ name: className }),
   } as unknown as ExecutionContext;
@@ -71,5 +72,40 @@ describe('RateLimitGuard (FR-061)', () => {
     const ctx = { switchToHttp: () => ({ getRequest: () => ({}) }), getHandler: () => ({ name: 'h' }), getClass: () => ({ name: 'C' }) } as unknown as ExecutionContext;
     expect(guard.canActivate(ctx)).toBe(true);
     expect(() => guard.canActivate(ctx)).toThrow(HttpException);
+  });
+});
+
+describe('성공한 요청은 예산을 돌려준다 (T-023)', () => {
+  it('**성공을 세지 않으면 사내 NAT 뒤 정상 사용자가 막히지 않는다**', () => {
+    const guard = new RateLimitGuard(makeReflector({ max: 3, windowSec: 60 }));
+    // 세 번 성공하면 세 번 다 돌려받으므로 계속 통과한다
+    for (let i = 0; i < 10; i++) {
+      const req: Record<string, unknown> = {};
+      expect(guard.canActivate(makeContext('1.1.1.1', 'h', 'C', req))).toBe(true);
+      guard.refund(req as never);
+    }
+  });
+
+  it('실패는 그대로 센다 — 무차별 대입은 여전히 막힌다', () => {
+    const guard = new RateLimitGuard(makeReflector({ max: 3, windowSec: 60 }));
+    for (let i = 0; i < 3; i++) expect(guard.canActivate(makeContext('2.2.2.2'))).toBe(true);
+    expect(() => guard.canActivate(makeContext('2.2.2.2'))).toThrow(HttpException);
+  });
+
+  it('돌려주기를 두 번 불러도 남의 몫까지 지우지 않는다', () => {
+    const guard = new RateLimitGuard(makeReflector({ max: 2, windowSec: 60 }));
+    const req: Record<string, unknown> = {};
+    guard.canActivate(makeContext('3.3.3.3', 'h', 'C', req)); // 성공
+    guard.canActivate(makeContext('3.3.3.3')); // 실패로 남는다
+    guard.refund(req as never);
+    guard.refund(req as never);
+    // 실패 1건만 남아 있어야 한다 — 한 번 더 통과하고 그다음이 막힌다
+    expect(guard.canActivate(makeContext('3.3.3.3'))).toBe(true);
+    expect(() => guard.canActivate(makeContext('3.3.3.3'))).toThrow(HttpException);
+  });
+
+  it('제한이 없는 핸들러에서 돌려주기를 불러도 아무 일도 없다', () => {
+    const guard = new RateLimitGuard(makeReflector(undefined));
+    expect(() => guard.refund({} as never)).not.toThrow();
   });
 });

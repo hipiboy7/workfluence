@@ -1,5 +1,5 @@
 import { Controller, Get, Global, Module, Query, UseGuards } from '@nestjs/common';
-import { listLimitDto, type AuditEventView } from '@workfluence/shared';
+import { auditQueryDto, type AuditEventView, type AuditQueryDto } from '@workfluence/shared';
 import { ZodPipe } from '../common/zod.pipe';
 import { AuthGuard, RequireAction } from '../auth/auth.guard';
 import { AuditService } from './audit.service';
@@ -11,9 +11,9 @@ export class AuditController {
 
   @Get()
   @RequireAction('audit.read')
-  list(@Query(new ZodPipe(listLimitDto)) q: { limit: number }): Promise<AuditEventView[]> {
+  list(@Query(new ZodPipe(auditQueryDto)) q: AuditQueryDto): Promise<AuditEventView[]> {
     // 매직 넘버 대신 shared의 계약을 쓴다 (CLAUDE.md 5절·7절). UsersController와 같은 스키마다
-    return this.audit.list(q.limit);
+    return this.audit.list(q);
   }
 }
 

@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
-  PASSWORD_POLICY,
   ROLES,
   SPACE_KINDS,
   SPACE_MEMBER_ROLES,
@@ -9,7 +8,7 @@ import {
   USER_STATUSES,
 } from './constants';
 import { validateDocument, type DocNode } from './document';
-import { checkPasswordPolicy } from './permissions';
+import { POLICY_FLOOR } from './policy';
 
 /** API 요청·응답 계약. 서버(zod 파이프)와 클라이언트(타입)가 같은 정의를 쓴다. */
 
@@ -21,9 +20,14 @@ export const documentSchema = z
   })
   .transform((v) => v as DocNode);
 
-export const passwordSchema = z.string().superRefine((pw, ctx) => {
-  for (const reason of checkPasswordPolicy(pw, PASSWORD_POLICY)) ctx.addIssue({ code: 'custom', message: reason });
-});
+/**
+ * 비밀번호 **계약**. 바닥(8자)만 본다.
+ *
+ * 세기(최소 길이·문자 종류)는 운영이 조절하는 값이라 **서비스가 살아 있는 정책값으로**
+ * 판정한다 (`users.service.ts`의 `assertPasswordStrength`). 여기서 현재 정책을 강제하면
+ * 파싱 시점에 굳어, 관리자가 기준을 **낮춰도** 영영 안 먹는다 (P4 자체 점검 2).
+ */
+export const passwordSchema = z.string().min(POLICY_FLOOR.passwordMinLength, `${POLICY_FLOOR.passwordMinLength}자 이상`);
 
 export const usernameSchema = z.string().trim().regex(/^[a-z0-9._-]{2,64}$/, '소문자·숫자·._- 2~64자');
 // zod 4의 z.email()은 검증만 하므로 정규화(trim·소문자)를 먼저 하고 파이프한다. TLD는 2자 이상이어야 통과한다
@@ -124,6 +128,22 @@ export const spaceListQueryDto = z.object({
 });
 export type SpaceListQueryDto = z.infer<typeof spaceListQueryDto>;
 
+/**
+ * 감사로그 조회 조건 (FR-531).
+ *
+ * **거를 수 없으면 "추적한다"가 성립하지 않는다** — 수만 건에서 눈으로 찾을 수는 없다.
+ */
+export const auditQueryDto = z.object({
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+  action: z.string().trim().max(60).optional(),
+  actorId: z.uuid().optional(),
+  /** 포함. 날짜만 주면 그날 00:00부터 */
+  from: z.coerce.date().optional(),
+  /** 제외. 날짜만 주면 그날 00:00까지 */
+  to: z.coerce.date().optional(),
+});
+export type AuditQueryDto = z.infer<typeof auditQueryDto>;
+
 export const listLimitDto = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) });
 
 // ---- 페이지 ----
@@ -159,6 +179,26 @@ export type CreateCommentDto = z.infer<typeof createCommentDto>;
 
 export const updateCommentDto = z.object({ body: documentSchema });
 export type UpdateCommentDto = z.infer<typeof updateCommentDto>;
+
+/** 정책값 변경. **모양만** 본다 — 범위·허용값 판정은 `validatePolicyPatch`(A등급)가 한다 */
+export const policyPatchDto = z
+  .object({
+    uploadMaxMb: z.number().int().optional(),
+    allowedExtensions: z.array(z.string()).optional(),
+    sessionIdleMinutes: z.number().int().optional(),
+    sessionAbsoluteHours: z.number().int().optional(),
+    passwordMinLength: z.number().int().optional(),
+    passwordMinCharClasses: z.number().int().optional(),
+    lockoutThreshold: z.number().int().optional(),
+    lockoutMinutes: z.number().int().optional(),
+    trashRetentionDays: z.number().int().optional(),
+    auditRetentionDays: z.number().int().optional(),
+  })
+  .strict();
+export type PolicyPatchDto = z.infer<typeof policyPatchDto>;
+
+export const attachLabelDto = z.object({ name: z.string().trim().min(1).max(40) });
+export type AttachLabelDto = z.infer<typeof attachLabelDto>;
 
 export const searchQueryDto = z.object({
   q: z.string().trim().min(1).max(200),
@@ -266,6 +306,20 @@ export type CommentView = {
   updatedAt: string;
   /** 지울 수 있는지. 화면이 규칙을 다시 구현하지 않게 서버가 판정해 내려 준다 */
   canDelete: boolean;
+};
+export type LabelView = { id: string; name: string };
+export type TrashPageView = { id: string; title: string; spaceId: string; spaceName: string; deletedAt: string; deletedByName: string };
+export type TrashSpaceView = { id: string; key: string; name: string; deletedAt: string; createdByName: string };
+export type NotificationView = {
+  id: string;
+  kind: 'mention';
+  pageId: string | null;
+  commentId: string | null;
+  actorName: string;
+  /** 대상이 지워졌으면 null이다 (FR-506) — 알림은 남되 링크는 대상이 없음을 알린다 */
+  pageTitle: string | null;
+  readAt: string | null;
+  createdAt: string;
 };
 export type SearchHit = { pageId: string; spaceId: string; spaceName: string; title: string; snippet: string; updatedAt: string };
 export type AuditEventView = {

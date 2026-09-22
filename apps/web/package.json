@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "preview": "vite preview",
+    "_comment_test": "web은 아직 테스트가 0건이라 --passWithNoTests가 필요하다. 커버리지 관문도 없다 (CLAUDE.md 3절). api에서는 뺐다 — 거기서는 테스트가 사라지면 실패해야 한다",
     "test": "vitest run --passWithNoTests",
     "test:cov": "vitest run --passWithNoTests --coverage"
   },

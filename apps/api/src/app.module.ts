@@ -8,12 +8,16 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard } from './auth/auth.guard';
 import { CommentsModule } from './comments/comments.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
+import { LabelsModule } from './labels/labels.module';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
+import { SettingsModule } from './settings/settings.module';
 import { SpacesModule } from './spaces/spaces.module';
+import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
 
 // SPA 정적 서빙 여부는 모듈 구성 시점에 알아야 하므로 같은 로더를 한 번 더 호출한다 (순수 함수라 결과가 같다)
@@ -50,8 +54,14 @@ function resolveWebDist(): string {
     SpacesModule,
     PagesModule,
     SearchModule,
+    // SettingsModule은 @Global — 정책값을 쓰는 모든 모듈이 읽는다
+    SettingsModule,
     AttachmentsModule,
+    // NotificationsModule은 @Global — 댓글·페이지 저장이 멘션 알림을 만든다
+    NotificationsModule,
     CommentsModule,
+    TrashModule,
+    LabelsModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

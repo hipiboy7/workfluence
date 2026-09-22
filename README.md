@@ -34,7 +34,7 @@ apps/web/          React + Vite SPA
 packages/shared/   서버·클라이언트 공유 계약 (환경 스키마·상수·문서 검증·권한·DTO)
 e2e/               Playwright
 deploy/            Dockerfile · compose · nginx (Linux 서버에서 빌드)
-scripts/           check-env · setup-env · dev-db · verify-docs · e2e · reindex · check-licenses (tsx, OS 무관)
+scripts/           check-env · setup-env · dev-db · verify-docs · e2e · reindex · trash-purge · check-licenses (tsx, OS 무관)
 docs/              운영·인수인계 산출물 / docs/internal 작업 기록 / docs/prompts 요청 원문
 .local/            (git 무시) PostgreSQL 데이터·pnpm store·Playwright 브라우저 — 전부 저장소 안
 ```

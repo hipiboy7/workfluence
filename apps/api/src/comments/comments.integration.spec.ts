@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { comments, pages, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
+import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { CommentsService } from './comments.service';
 
 /** B등급 (P3_설계서_Content 5절). 실제 PostgreSQL. */
@@ -30,7 +31,8 @@ const team = (me: Principal) => spacesSvc.create({ name: '팀', kind: 'team', ca
 beforeAll(async () => {
   ({ db } = await openTestDb());
   spacesSvc = new SpacesService(db);
-  svc = new CommentsService(db, spacesSvc);
+  // 알림은 실제 구현을 쓴다 — 댓글 저장이 알림을 만드는 것까지가 이 모듈의 동작이다
+  svc = new CommentsService(db, spacesSvc, new NotificationsService(db, new InAppChannel()));
 });
 afterAll(closeTestDb);
 beforeEach(() => resetTables(db));

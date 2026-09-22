@@ -2,5 +2,6 @@ export * from './constants';
 export * from './env';
 export * from './document';
 export * from './permissions';
+export * from './policy';
 export * from './schemas';
 export * from './security';

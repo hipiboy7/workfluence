@@ -36,50 +36,53 @@ function ctx(session: Record<string, unknown> | undefined, meta: Record<string, 
 const usersOf = (u: Partial<UserRow> | undefined) => ({ findById: vi.fn().mockResolvedValue(u) }) as unknown as UsersService;
 const ENV = { WF_SESSION_ABSOLUTE_HOURS: 12 } as never;
 
+/** 정책은 대역이다. 이 테스트가 보는 것은 **세션 판정**이지 값의 출처가 아니다 */
+const POLICY_STUB = { get: async () => ({ sessionIdleMinutes: 30, sessionAbsoluteHours: 12 }) } as never;
+
 describe('AuthGuard', () => {
   it('세션이 없으면 401', async () => {
     const c = ctx(undefined);
-    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV).canActivate(c.exec)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV, POLICY_STUB).canActivate(c.exec)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('userId가 없으면 401', async () => {
     const c = ctx({});
-    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV).canActivate(c.exec)).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV, POLICY_STUB).canActivate(c.exec)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('@Public이면 세션 없이 통과한다', async () => {
     const c = ctx(undefined, { 'wf:public': true });
-    await expect(new AuthGuard(c.reflector, usersOf(undefined), ENV).canActivate(c.exec)).resolves.toBe(true);
+    await expect(new AuthGuard(c.reflector, usersOf(undefined), ENV, POLICY_STUB).canActivate(c.exec)).resolves.toBe(true);
   });
 
   it('절대 타임아웃을 넘으면 세션을 파기하고 401 (FR-223)', async () => {
     const c = ctx({ userId: 'u1', createdAt: Date.now() - 13 * 3600_000 });
-    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV).canActivate(c.exec)).rejects.toThrow(/절대 타임아웃/);
+    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV, POLICY_STUB).canActivate(c.exec)).rejects.toThrow(/절대 타임아웃/);
     expect(c.destroy).toHaveBeenCalled();
   });
 
   it('createdAt이 아예 없으면 만료로 본다 — 모르는 세션을 통과시키지 않는다', async () => {
     const c = ctx({ userId: 'u1' });
-    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV).canActivate(c.exec)).rejects.toThrow(/절대 타임아웃/);
+    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV, POLICY_STUB).canActivate(c.exec)).rejects.toThrow(/절대 타임아웃/);
   });
 
   it('계정이 없어졌거나 비활성이면 세션을 파기하고 401', async () => {
     for (const u of [undefined, { ...ACTIVE, status: 'pending' }]) {
       const c = ctx({ userId: 'u1', createdAt: Date.now() });
-      await expect(new AuthGuard(c.reflector, usersOf(u), ENV).canActivate(c.exec)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(new AuthGuard(c.reflector, usersOf(u), ENV, POLICY_STUB).canActivate(c.exec)).rejects.toBeInstanceOf(UnauthorizedException);
       expect(c.destroy).toHaveBeenCalled();
     }
   });
 
   it('정상 세션은 통과하고 req.user를 채운다', async () => {
     const c = ctx({ userId: 'u1', createdAt: Date.now() });
-    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV).canActivate(c.exec)).resolves.toBe(true);
+    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV, POLICY_STUB).canActivate(c.exec)).resolves.toBe(true);
     expect(c.req.user).toMatchObject({ id: 'u1', username: 'alice', role: 'member' });
   });
 
   it('비밀번호 변경이 강제면 막는다 (FR-207)', async () => {
     const c = ctx({ userId: 'u1', createdAt: Date.now() });
-    const guard = new AuthGuard(c.reflector, usersOf({ ...ACTIVE, mustChangePassword: true }), ENV);
+    const guard = new AuthGuard(c.reflector, usersOf({ ...ACTIVE, mustChangePassword: true }), ENV, POLICY_STUB);
     await expect(guard.canActivate(c.exec)).rejects.toBeInstanceOf(ForbiddenException);
     try {
       await guard.canActivate(c.exec);
@@ -90,18 +93,18 @@ describe('AuthGuard', () => {
 
   it('@AllowPendingPasswordChange면 변경 강제 중에도 통과한다 — 아니면 빠져나올 수 없다', async () => {
     const c = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:allow-pending-password': true });
-    const guard = new AuthGuard(c.reflector, usersOf({ ...ACTIVE, mustChangePassword: true }), ENV);
+    const guard = new AuthGuard(c.reflector, usersOf({ ...ACTIVE, mustChangePassword: true }), ENV, POLICY_STUB);
     await expect(guard.canActivate(c.exec)).resolves.toBe(true);
   });
 
   it('요구 행위에 권한이 없으면 403 — 판정은 shared의 can()이 한다', async () => {
     const c = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'user.manage' });
-    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV).canActivate(c.exec)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(new AuthGuard(c.reflector, usersOf(ACTIVE), ENV, POLICY_STUB).canActivate(c.exec)).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('권한이 있으면 통과한다', async () => {
     const c = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'user.manage' });
-    await expect(new AuthGuard(c.reflector, usersOf({ ...ACTIVE, role: 'admin' }), ENV).canActivate(c.exec)).resolves.toBe(true);
+    await expect(new AuthGuard(c.reflector, usersOf({ ...ACTIVE, role: 'admin' }), ENV, POLICY_STUB).canActivate(c.exec)).resolves.toBe(true);
   });
 });
 

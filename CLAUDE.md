@@ -108,10 +108,10 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 4 | 실시간 편집 저장 모델 (Yjs 상태 vs JSON 정본) | Phase 6 착수 | Phase 2에서 문서 저장을 인터페이스 뒤에 두고 `page_versions.content_json`을 정본으로 유지. Phase 6은 실시간 상태를 별도 테이블로 | `P2_설계서_Page` |
 | 5 | 이미지 자동 빌드 (self-hosted runner) | 수동 빌드 3회 연속 성공 후 | 수동 절차가 안정되면 runner 등록 | 배포가이드 (Phase 5) |
 | 6 | 앱 서버 이중화 | Phase 5 부하 테스트 | 동시 50세션에서 p95 1초 초과 또는 가용성 요구가 있으면 2대 + 세션 공유 | `P5_검증기록_Load` |
-| 7 | PDF 내보내기 (헤드리스 브라우저 추가) | Phase 6 | 사용자 요구가 있을 때. Phase 4는 HTML + 인쇄 CSS | `P4_설계서_Export` |
+| 7 | PDF 내보내기 (헤드리스 브라우저 추가) | Phase 6 | 사용자 요구가 있을 때. HTML + 인쇄 CSS가 먼저다 — 그것도 아직 없다 (아래 참고) | Phase 6 설계서 |
 | 8 | 중앙 로그 수집 사이드카 | Phase 5 | 운영 측 수집 인프라 유무 확인. 없으면 stdout JSON + `docker logs` | 운영이관 가이드 (Phase 5) |
 | 9 | ~~저장소 공개 여부~~ → **public 유지 (2026-09-14, 사용자)**. 12.3절을 엄격히 적용 | 종료 | — | 이 문서 12.3절 |
-| 10 | 공유 계약(`packages/shared`)의 미사용 DTO를 언제 확정하나 | Phase 1·2에서 실제 호출부가 붙을 때 | 호출부를 붙이면서 계약을 고친다. 호출자 없는 코드의 커버리지는 근거가 아니다 (3절) | 각 Phase 설계서 |
+| ~~10~~ | ~~공유 계약의 미사용 DTO를 언제 확정하나~~ → **닫음 2026-09-22.** 마지막까지 호출자가 없던 `labels`·`page_labels`에 Phase 4가 호출부를 붙였다. 남은 미사용 계약은 없다 | 종료 | — | `P4_검증기록_Admin` |
 | 11 | **사내 IdP 실연동 확인** — Phase 1은 모의 OIDC로만 검증했다 | 개발 서버가 IdP에 나갈 수 있게 되는 날 (확인 필요 A) | Discovery 응답을 실제로 받아 `code_challenge_methods_supported`(보류 1)와 `groups` 클레임의 실제 형태를 확인한다. 모의 서버 통과는 완료가 아니다 (9.1절) | `P1_검증기록_Auth` 갱신 |
 
 **확인 필요 (사용자 답변 대기)**
@@ -222,6 +222,8 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `pnpm test` / `pnpm test:cov` | A·B 테스트 / 커버리지 |
 | `pnpm test:e2e` | Playwright |
 | `pnpm search:reindex` | 검색 인덱스(`pages.search_text`) 재생성 |
+| `pnpm trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 |
+| `pnpm audit:purge` | 보존 기간을 넘긴 감사로그 삭제 (append-only의 좁은 예외) |
 | `pnpm verify:docs` | 문서 검사 |
 | `pnpm check` | lint + typecheck + test + verify:docs (CI와 같은 검사) |
 | `pnpm build` | api·web 빌드 |
@@ -260,7 +262,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 페이지 버전 | `page_versions`는 **append-only**. 수정은 새 버전 추가. 저장 시 클라이언트가 기준 버전을 보내고 불일치면 409 |
 | 삭제 | soft delete + 휴지통. 물리 삭제는 보존 기간 뒤 배치로, 감사로그에 남김 |
 | 첨부 | 내용 해시(SHA-256)로 저장, 원본 파일명은 메타데이터. MIME·확장자 화이트리스트, 크기 상한 |
-| 감사로그 | `audit_events` **append-only** (앱 DB 계정에 INSERT만 부여 + 트리거). 대상: 인증 성공·실패, 권한 변경, 스페이스·페이지·첨부·댓글의 생성·수정·삭제·이동·복원, 첨부 다운로드, 내보내기, 관리자 작업 |
+| 감사로그 | `audit_events` **append-only** (앱 DB 계정에 INSERT만 부여 + 트리거). 대상: 인증 성공·실패, 권한 변경, 스페이스·페이지·첨부·댓글·라벨의 생성·수정·삭제·이동·복원, 첨부 다운로드, 휴지통 물리 삭제, 정책값 변경, 관리자 작업. (내보내기는 아직 기능 자체가 없다) |
 | 시각 | DB는 UTC `timestamptz`. 표시만 KST |
 | 검색 인덱스 | 본문 JSON에서 서버가 텍스트를 추출해 유지. 파생 데이터라 언제든 재생성 가능해야 한다 — `pnpm search:reindex` |
 | 실데이터 | 실제 업무 문서·실제 직원 정보·실제 운영 로그는 저장소에 넣지 않는다. fixture·시드·스크린샷은 **합성 데이터만** |

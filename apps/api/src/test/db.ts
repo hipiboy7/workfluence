@@ -39,7 +39,11 @@ export async function closeTestDb(): Promise<void> {
  * DELETE는 거부된다. 행 단위 BEFORE 트리거는 TRUNCATE에 반응하지 않으므로 이쪽으로 비운다.
  */
 export async function resetTables(db: TestDb): Promise<void> {
-  await db.execute(sql`TRUNCATE TABLE audit_events, settings, sessions, users RESTART IDENTITY CASCADE`);
+  // `users`를 지우면 그것을 참조하는 것들이 CASCADE로 함께 지워진다. 그런데 **`labels`는
+  // users로 이어지는 FK가 없어** 그 사슬에 걸리지 않는다 — 따로 적지 않으면 테스트 사이에
+  // 라벨이 쌓이고, "다른 파일을 함께 돌릴 때만 깨지는" 실패가 된다 (P4에서 실제로 겪었다).
+  // 표를 늘릴 때는 **그것이 users에 닿는지**를 보고, 안 닿으면 여기 적는다
+  await db.execute(sql`TRUNCATE TABLE audit_events, settings, sessions, labels, users RESTART IDENTITY CASCADE`);
 
   // 비워졌는지 **확인한다.** 정리가 조용히 실패하면 앞 테스트가 남긴 계정 때문에 엉뚱한
   // 테스트가 깨지고, 원인을 찾기 어려운 간헐적 실패로 나타난다. 실제로 한 번 겪었다 —

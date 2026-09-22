@@ -3,6 +3,7 @@ import { can, stampSchemaVersion, type CommentView, type CreateCommentDto, type 
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { comments, pages, users, type CommentRow, type PageRow } from '../db/schema';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
 
 /**
@@ -16,6 +17,7 @@ export class CommentsService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly spaces: SpacesService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async page(pageId: string, tx: Db): Promise<PageRow> {
@@ -71,6 +73,11 @@ export class CommentsService {
       // 페이지와 같은 이유로 **서버가 버전을 찍는다** (P2 자체 점검 #2). 클라이언트가 빠뜨려도 정본에는 남는다
       .values({ pageId, parentId: dto.parentId ?? null, bodyJson: stampSchemaVersion(dto.body), createdBy: principal.id })
       .returning();
+    // 멘션 알림은 **같은 트랜잭션**이다 — 댓글이 롤백되면 알림도 롤백돼야 한다
+    await this.notifications.notifyMentions(
+      { doc: dto.body, pageId, commentId: row.id, spaceId: page.spaceId, actorId: principal.id },
+      tx,
+    );
     return this.view(row, principal, this.moderates(ctx.access, principal), tx);
   }
 

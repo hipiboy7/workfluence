@@ -5,12 +5,16 @@ import { FindAccountPage } from './pages/FindAccountPage';
 import { PageEditorPage } from './pages/PageEditorPage';
 import { PageHistoryPage } from './pages/PageHistoryPage';
 import { PageViewPage } from './pages/PageViewPage';
+import { LabelPage } from './pages/LabelPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { SearchPage } from './pages/SearchPage';
+import { TrashPage } from './pages/TrashPage';
 import { SpacePage } from './pages/SpacePage';
 import { SpacesPage } from './pages/SpacesPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
+import { AdminPolicyPage } from './pages/admin/AdminPolicyPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 
 /**
@@ -31,6 +35,10 @@ export function App() {
           <Route path="/admin/users" element={<RequireAuth><AdminUsersPage /></RequireAuth>} />
           <Route path="/admin/audit" element={<RequireAuth><AdminAuditPage /></RequireAuth>} />
           <Route path="/search" element={<RequireAuth><SearchPage /></RequireAuth>} />
+          <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
+          <Route path="/trash" element={<RequireAuth><TrashPage /></RequireAuth>} />
+          <Route path="/labels/:name" element={<RequireAuth><LabelPage /></RequireAuth>} />
+          <Route path="/admin/policy" element={<RequireAuth><AdminPolicyPage /></RequireAuth>} />
           <Route path="/spaces/:id" element={<RequireAuth><SpacePage /></RequireAuth>} />
           <Route path="/pages/:id" element={<RequireAuth><PageViewPage /></RequireAuth>} />
           <Route path="/pages/:id/edit" element={<RequireAuth><PageEditorPage /></RequireAuth>} />

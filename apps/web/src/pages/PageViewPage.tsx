@@ -4,6 +4,7 @@ import type { PageView, SpaceView } from '@workfluence/shared';
 import { api } from '../api';
 import { Attachments } from '../components/Attachments';
 import { Comments } from '../components/Comments';
+import { Labels } from '../components/Labels';
 import { Editor } from '../components/Editor';
 
 /** 페이지 보기 */
@@ -53,6 +54,7 @@ export function PageViewPage() {
       <section className="card">
         <Editor value={page.content} editable={false} />
       </section>
+      <Labels pageId={id} canWrite={space?.access.canWrite ?? false} />
       <Attachments pageId={id} canWrite={space?.access.canWrite ?? false} />
       <Comments pageId={id} canWrite={space?.access.canWrite ?? false} />
     </main>

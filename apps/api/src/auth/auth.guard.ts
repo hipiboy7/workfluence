@@ -14,6 +14,7 @@ import type { Request } from 'express';
 // 타입 확장(declare module)을 하려면 그 모듈이 먼저 로드돼야 한다. Request.session도 여기서 붙는다
 import 'express-session';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
+import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
 
 /**
@@ -60,6 +61,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly users: UsersService,
     @Inject(APP_ENV) private readonly env: AppEnvToken,
+    private readonly settings: SettingsService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -70,7 +72,12 @@ export class AuthGuard implements CanActivate {
     if (!session?.userId) throw new UnauthorizedException('로그인이 필요하다');
 
     // 절대 타임아웃은 쿠키 maxAge로 못 지킨다 — rolling이 갱신해 버린다 (FR-223)
-    const absoluteMs = this.env.WF_SESSION_ABSOLUTE_HOURS * 3600_000;
+    // **운영이 조절한 값을 쓴다** (FR-521). 기동 시점 값이 아니라 지금 값이다
+    const policy = await this.settings.get();
+    // 유휴 시간은 쿠키 maxAge다. 기동 시점에 한 번 정해지므로 **요청마다 다시 얹는다** —
+    // 안 그러면 관리 화면에서 바꿔도 이미 뜬 서버에서는 영영 안 먹는다
+    if (session.cookie) session.cookie.maxAge = policy.sessionIdleMinutes * 60_000;
+    const absoluteMs = policy.sessionAbsoluteHours * 3600_000;
     if (!session.createdAt || Date.now() - session.createdAt > absoluteMs) {
       await new Promise<void>((resolve) => session.destroy(() => resolve()));
       throw new UnauthorizedException('세션이 만료됐다 (절대 타임아웃)');

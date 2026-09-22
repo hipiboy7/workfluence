@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  PASSWORD_POLICY,
   canAssignRole,
+  checkPasswordPolicy,
   canManageUser,
   generateTemporaryPassword,
   type CreateUserDto,
@@ -15,6 +15,7 @@ import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import { afterFailure, afterSuccess, isLocked } from '../auth/domain/lockout';
 import { DB, type Db } from '../db/db.module';
+import { SettingsService } from '../settings/settings.service';
 import { users, type UserRow } from '../db/schema';
 
 /**
@@ -52,7 +53,10 @@ const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2FsdA$QkNERU
 
 @Injectable()
 export class UsersService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly settings: SettingsService,
+  ) {}
 
   findById(id: string): Promise<UserRow | undefined> {
     return this.db.query.users.findFirst({ where: eq(users.id, id) });
@@ -110,7 +114,21 @@ export class UsersService {
   }
 
   /** 가입 요청 → 승인 대기 (FR-200) */
+  /**
+   * 비밀번호 강도를 **살아 있는 정책값으로** 다시 본다 (FR-521).
+   *
+   * `passwordSchema`(zod)도 같은 판정을 하지만 그것은 **파싱 시점에 코드 기본값을 읽는다** —
+   * 관리자가 화면에서 최소 길이를 올려도 거기까지는 닿지 않는다. 두 겹이 되는 것이 맞다:
+   * zod는 모양을, 여기서는 운영이 정한 세기를 본다.
+   */
+  private async assertPasswordStrength(pw: string, tx: Db): Promise<void> {
+    const p = await this.settings.get(tx);
+    const violations = checkPasswordPolicy(pw, { minLength: p.passwordMinLength, minCharClasses: p.passwordMinCharClasses });
+    if (violations.length) throw new BadRequestException(violations.join('; '));
+  }
+
   async signup(dto: SignupDto, tx: Db = this.db): Promise<UserRow> {
+    await this.assertPasswordStrength(dto.password, tx);
     await this.assertUnique(dto.username, dto.email);
     const [row] = await tx
       .insert(users)
@@ -129,6 +147,9 @@ export class UsersService {
   /** 관리자가 직접 생성 → 바로 활성 (FR-231) */
   async create(dto: CreateUserDto, actor: Principal, tx: Db = this.db): Promise<UserRow> {
     if (!canAssignRole(actor, dto.role)) throw new ForbiddenException(`'${dto.role}' 역할을 부여할 권한이 없다`);
+    // **여기도 강도를 본다.** 계약(zod)이 바닥만 보게 바뀐 뒤로 이 경로만 검사가 없었다 —
+    // 관리자가 만든 계정은 바로 활성이라, 비어 있으면 가장 센 계정이 가장 약한 비밀번호를 갖는다
+    await this.assertPasswordStrength(dto.password, tx);
     await this.assertUnique(dto.username, dto.email);
     const [row] = await tx
       .insert(users)
@@ -240,10 +261,25 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * 관리자 강제 종료 (`scope-definition` 4.1절 #4, FR-539).
+   *
+   * **서버측 세션을 파기한다.** 쿠키만 지우게 하면 훔친 세션이 계속 산다 — 로그아웃·비밀번호
+   * 변경과 같은 판단이다 (FR-224). `sess`는 connect-pg-simple가 넣은 세션 객체 전체다.
+   */
+  async terminateSessions(id: string, actor: Principal, tx: Db = this.db): Promise<number> {
+    const target = await this.findById(id);
+    if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
+    if (!canManageUser(actor, target.role as Role)) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
+    const r = await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
+    return r.rowCount ?? 0;
+  }
+
   async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db): Promise<void> {
     const user = await this.findById(id);
     if (!user?.passwordHash) throw new NotFoundException('사용자를 찾을 수 없다');
     if (!(await argon2.verify(user.passwordHash, currentPassword))) throw new BadRequestException('현재 비밀번호가 올바르지 않다');
+    await this.assertPasswordStrength(newPassword, tx);
     await tx
       .update(users)
       .set({ passwordHash: await hash(newPassword), mustChangePassword: false, updatedAt: sql`now()` })
@@ -269,7 +305,8 @@ export class UsersService {
     if (isLocked(state, now)) return { ok: false, reason: 'locked' };
 
     if (!(await argon2.verify(user.passwordHash, password))) {
-      const next = afterFailure(state, now, PASSWORD_POLICY);
+      // **운영이 조절한 값을 쓴다** (FR-521). 코드 기본값은 DB가 비었을 때만 쓰인다
+      const next = afterFailure(state, now, await this.settings.get(tx));
       await tx
         .update(users)
         .set({ failedAttempts: next.failedAttempts, lockedUntil: next.lockedUntil, updatedAt: sql`now()` })

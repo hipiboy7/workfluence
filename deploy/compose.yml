@@ -65,6 +65,9 @@ services:
       # 상한을 바꾸면 nginx의 client_max_body_size도 같이 바꾼다 (CLAUDE.md 8.3절)
       WF_STORAGE_PATH: /data/attachments
       WF_UPLOAD_MAX_MB: ${WF_UPLOAD_MAX_MB:-20}
+      # 보존 기간 (Phase 4). 관리 화면에서 바꾸면 DB 값이 이긴다
+      WF_TRASH_RETENTION_DAYS: ${WF_TRASH_RETENTION_DAYS:-30}
+      WF_AUDIT_RETENTION_DAYS: ${WF_AUDIT_RETENTION_DAYS:-365}
     volumes:
       # 첨부는 컨테이너 밖에 남아야 한다. 백업 대상이기도 하다 (CLAUDE.md 8.3절)
       - attachments:/data/attachments

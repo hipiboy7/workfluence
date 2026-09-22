@@ -65,14 +65,17 @@ workfluence/
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
-│   │   │   └── system/           [P4] root 시스템 정보
+│   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계)
+│   │   │   ├── trash/            [P4] 휴지통·되살리기
+│   │   │   ├── labels/           [P4] 라벨
+│   │   │   └── settings/         [P4] 운영 정책값 (세 겹 출처 · 캐시)
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
 │       └── src/{components,pages,api.ts,auth.tsx}
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
-│   └── src/{env,constants,document,permissions,security,schemas}.ts
+│   └── src/{env,constants,document,permissions,policy,security,schemas}.ts
 ├── e2e/                          Playwright
-├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · reindex · check-licenses (tsx, OS 무관)
+├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · reindex · trash-purge · check-licenses (tsx, OS 무관)
 ├── deploy/                       Dockerfile · compose · nginx.conf
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
@@ -196,6 +199,7 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 | `db:generate` / `db:migrate` / `db:seed` | 마이그레이션 생성 / 적용 / 시드 |
 | `dev` / `build` / `start` | 개발 서버 / 빌드 / 실행 |
 | `search:reindex` | 검색 인덱스 재생성 (본문 JSON → `pages.search_text`) |
+| `trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 |
 | `lint` / `typecheck` / `test` / `test:cov` / `test:e2e` / `verify:docs` | 검사 |
 | `check` | lint + typecheck + test + verify:docs (CI와 동일) |
 

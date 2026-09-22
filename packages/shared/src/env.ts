@@ -95,6 +95,11 @@ export const envSchema = z
     // --- Phase 3: 첨부 (P3_설계서_Content 4절) ---
     WF_STORAGE_PATH: z.string().min(1).default('.local/attachments'),
     WF_UPLOAD_MAX_MB: intString(1, 1024, 20),
+
+    // --- Phase 4: 보존 기간 (P4_설계서_Admin F절) ---
+    // **DB `settings`에 값이 있으면 그쪽이 이긴다** (FR-527). 여기 값은 DB가 비었을 때의 기본값이다
+    WF_TRASH_RETENTION_DAYS: intString(1, 3650, 30),
+    WF_AUDIT_RETENTION_DAYS: intString(1, 3650, 365),
   })
   .strict();
 

@@ -67,6 +67,20 @@ export class UsersController {
     });
   }
 
+  /** 관리자 강제 종료 (FR-539). 지금 열려 있는 세션을 전부 끊는다 */
+  @Post(':id/terminate-sessions')
+  @RequireAction('user.manage')
+  async terminateSessions(@Param('id') id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<{ count: number }> {
+    return this.db.transaction(async (tx) => {
+      const count = await this.users.terminateSessions(id, actor, tx);
+      await this.audit.record(
+        { action: 'user.sessions.terminate', actorId: actor.id, targetType: 'user', targetId: id, detail: { count }, ip: req.ip },
+        tx,
+      );
+      return { count };
+    });
+  }
+
   /** 임시 비밀번호는 **이 응답에 한 번만** 실린다. 저장하지 않고 감사로그에도 남기지 않는다 (FR-209, FR-238) */
   @Post(':id/reset-password')
   @RequireAction('user.manage')
