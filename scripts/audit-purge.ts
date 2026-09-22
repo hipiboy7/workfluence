@@ -1,6 +1,6 @@
 import { POLICY_FLOOR, SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
-import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { databaseUrl, describeDatabaseUrl, loadEnv } from '../apps/api/src/config/config.module';
 
 /**
  * 감사로그 보존 정리 (P4_설계서_Admin FR-540, `scope-definition` 위험 7).
@@ -17,7 +17,11 @@ import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
  */
 async function main(): Promise<void> {
   const env = loadEnv();
-  const c = new Client(databaseUrl(env));
+  const url = databaseUrl(env);
+  // **어디를 만지는지 먼저 말한다.** `.env`가 가리키는 곳으로 붙으므로,
+  // 컨테이너 DB를 기대하고 불렀는데 개발 DB를 만지는 일이 조용히 일어날 수 있다
+  console.log(`[audit] 대상 DB: ${describeDatabaseUrl(url)}`);
+  const c = new Client(url);
   await c.connect();
   try {
     const stored = await c.query<{ value: unknown }>('SELECT value FROM settings WHERE key = $1', [SETTINGS_KEYS.policy]);

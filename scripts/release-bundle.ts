@@ -34,12 +34,62 @@ function main(): void {
   copyFileSync('deploy/nginx.conf', join(out, 'nginx.conf'));
   copyFileSync('docs/운영가이드_반입.md', join(out, '반입절차.md'));
 
-  // `.env` 템플릿에는 **값이 하나도 없다** (FR-606). 키와 설명만 간다
-  const template = readFileSync('.env.example', 'utf8')
-    .split('\n')
-    .map((l) => (/^[A-Z_]+=/.test(l) ? `${l.split('=')[0]}=` : l))
+  // `.env` 템플릿에는 **값이 하나도 없다** (FR-606). 키와 설명만 간다.
+  //
+  // **개발용 `.env.example`을 그대로 쓰지 않는다.** 그 파일은 `pnpm dev`가 쓰는 키(임베디드
+  // DB 경로·테스트 DB URL·모의 OIDC 같은 것)를 담고 있고, compose는 그것을 읽지 않는다 —
+  // 작업자가 채워도 아무 효과가 없다. 반대로 **compose가 요구하는 키가 빠져 있었다**
+  // (`WF_PG_PASSWORD` 등). 값이 없으면 `${VAR:?}` 때문에 기동이 거부되는데, 템플릿에
+  // 그 키가 없으니 작업자는 무엇을 채워야 하는지 알 수 없다. 그래서 **compose 파일에서
+  // 실제로 참조하는 변수**를 뽑아 그것만 넣는다 — 목록이 코드와 어긋날 수 없다.
+  // **`build:` 블록 안은 뺀다.** 거기 있는 것은 이미지를 만들 때 쓰는 값(사내 프록시)이고,
+  // 폐쇄망에서는 채울 것도 채울 이유도 없다. 이름 목록으로 빼지 않고 **위치로** 뺀다 —
+  // 목록은 손으로 관리해야 하고 그러면 또 틀린다 (T-024)
+  const composeText = readFileSync('deploy/compose.yml', 'utf8');
+  const referenced = new Set<string>();
+  {
+    let skipIndent: number | null = null;
+    for (const line of composeText.split('\n')) {
+      if (!line.trim() || line.trim().startsWith('#')) continue;
+      const indent = line.length - line.trimStart().length;
+      if (skipIndent !== null && indent <= skipIndent) skipIndent = null;
+      if (/^\s*build:\s*$/.test(line)) {
+        skipIndent = indent;
+        continue;
+      }
+      if (skipIndent !== null) continue;
+      for (const m of line.matchAll(/\$\{([A-Z_][A-Z0-9_]*)/g)) referenced.add(m[1]);
+    }
+  }
+  const exampleComments = new Map<string, string>();
+  {
+    let pending: string[] = [];
+    for (const line of readFileSync('.env.example', 'utf8').split('\n')) {
+      if (line.startsWith('#')) pending.push(line);
+      else if (/^[A-Z_]+=/.test(line)) {
+        exampleComments.set(line.split('=')[0], pending.join('\n'));
+        pending = [];
+      } else pending = [];
+    }
+  }
+  const keys = [...referenced].sort();
+  const body = keys
+    .map((k) => {
+      const c = exampleComments.get(k);
+      return `${c ? `${c}\n` : ''}${k}=`;
+    })
     .join('\n');
-  writeFileSync(join(out, 'env.template'), `# 폐쇄망에서 값을 채운다. 비어 있는 키는 기동 시 스키마가 잡는다\n${template}`);
+  writeFileSync(
+    join(out, 'env.template'),
+    [
+      '# 폐쇄망에서 값을 채운다. 비어 있으면 기동 시 거부된다.',
+      '# 이 목록은 deploy/compose.yml이 실제로 참조하는 변수에서 뽑았다 — 여기 없는 키는 이 배포가 쓰지 않는다.',
+      '',
+      body,
+      '',
+    ].join('\n'),
+  );
+  console.log(`[release] env.template — compose가 요구하는 키 ${keys.length}개`);
 
   // SBOM·라이선스 — 설치된 의존성에서 만든다. 네트워크를 쓰지 않는다
   console.log('[release] SBOM 생성 중…');

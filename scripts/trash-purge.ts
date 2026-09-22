@@ -2,7 +2,7 @@ import { SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
 import { rm } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
-import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { databaseUrl, describeDatabaseUrl, loadEnv } from '../apps/api/src/config/config.module';
 import { blobPath } from '../apps/api/src/attachments/domain/blob-path';
 
 /**
@@ -23,7 +23,11 @@ import { blobPath } from '../apps/api/src/attachments/domain/blob-path';
  */
 async function main(): Promise<void> {
   const env = loadEnv();
-  const c = new Client(databaseUrl(env));
+  const url = databaseUrl(env);
+  // **어디를 만지는지 먼저 말한다.** `.env`가 가리키는 곳으로 붙으므로,
+  // 컨테이너 DB를 기대하고 불렀는데 개발 DB를 만지는 일이 조용히 일어날 수 있다
+  console.log(`[purge] 대상 DB: ${describeDatabaseUrl(url)}`);
+  const c = new Client(url);
   await c.connect();
   try {
     // 정책값은 DB가 이긴다 (FR-527). 없으면 환경변수, 그것도 없으면 코드 기본값

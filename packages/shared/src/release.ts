@@ -7,10 +7,17 @@
 
 export type ChecksumEntry = { file: string; sha256: string };
 
-/** 묶음이 반드시 갖춰야 할 것 (FR-601). **사람이 모으면 빠뜨린다** */
+/**
+ * 묶음이 반드시 갖춰야 할 것 (FR-601). **사람이 모으면 빠뜨린다.**
+ *
+ * `images.tar`가 **빠져 있었다.** 가장 중요한 파일인데 체크섬 목록에 우연히 들어 있는
+ * 것으로만 간접 확인됐다 — 체크섬을 만드는 쪽이 파일을 못 찾아 건너뛰면 필수 검사도
+ * 같이 조용해진다. 있어야 하는 것은 **있어야 한다고 적어 두는 쪽**에서 판정한다.
+ */
 export const RELEASE_REQUIRED_FILES = [
   'MANIFEST.txt',
   'SHA256SUMS',
+  'images.tar',
   'compose.yml',
   'nginx.conf',
   'env.template',

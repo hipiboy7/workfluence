@@ -240,7 +240,10 @@ export class UsersService {
     if (!canAssignRole(actor, role)) throw new ForbiddenException(`'${role}' 역할을 부여할 권한이 없다`);
     // 마지막 root를 강등하면 아무도 root 권한을 되돌릴 수 없다 (FR-233). 순수 함수로 두기 어려워 여기서 센다
     if (target.role === 'root' && role !== 'root') {
-      const [{ n }] = await this.db.select({ n: count() }).from(users).where(and(eq(users.role, 'root'), eq(users.status, 'active')));
+      // **`tx`로 센다.** `this.db`는 풀이라, 트랜잭션 안에서 부르면 연결을 하나 쥔 채
+      // 두 번째를 달라고 한다 — 동시 요청이 풀 크기에 닿으면 서로를 기다린다 (T-026).
+      // 지금은 10초 뒤 500으로 끝나지만 그것은 증상을 시끄럽게 만든 것이고 원인은 이 줄이다
+      const [{ n }] = await tx.select({ n: count() }).from(users).where(and(eq(users.role, 'root'), eq(users.status, 'active')));
       if (n <= 1) throw new BadRequestException('마지막 root는 강등할 수 없다');
     }
     const [row] = await tx.update(users).set({ role, updatedAt: sql`now()` }).where(eq(users.id, id)).returning();

@@ -28,8 +28,9 @@ ALTER TABLE space_members ADD CONSTRAINT space_members_role_chk CHECK (role IN (
 --
 -- **UPDATE만 막고 DELETE는 막지 않는다.** 이 규칙이 지키려는 것은 "이미 저장된 버전의
 -- 내용이 나중에 달라지지 않는다"다. 그것을 깨는 것은 UPDATE다. DELETE는 성격이 다르다 —
--- 페이지가 물리 삭제되면(`pnpm trash:purge`, 보존 기간 경과) 그 버전들도 FK CASCADE로
--- 함께 사라져야 하고, 그것이 맞다. 여기서 DELETE를 막으면 정리 배치가 돌지 않는다.
+-- 페이지가 물리 삭제되면(`pnpm trash:purge`, 보존 기간 경과) 그 버전들도 함께 사라져야
+-- 하고, 그것이 맞다. FK는 `ON DELETE no action`이라(0002) **정리 명령이 버전을 먼저**
+-- 지운다 — 여기서 DELETE를 막으면 그 명령이 영영 돌지 않는다.
 --
 -- `audit_events`와 다르게 대하는 이유가 이것이다. 감사로그는 **대상이 사라져도 남아야**
 -- 하는 기록이고, 페이지 버전은 **대상에 딸린 내용**이다. 둘의 append-only는 같은 말이

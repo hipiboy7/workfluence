@@ -22,7 +22,7 @@
 ### 0.1 무엇을 만드는가
 
 - 스페이스 → 계층 페이지 → WYSIWYG 편집·버전 이력·검색·첨부·댓글·라벨, 스페이스·페이지 권한, 관리 콘솔, 감사로그.
-- 사용자 약 **300명**, 동시 세션은 수십 수준. 단일 앱 서버 + PostgreSQL 1대. 이중화는 보류 6.
+- 사용자 약 **300명**, 동시 세션은 수십 수준. 단일 앱 서버 + PostgreSQL 1대. **이중화는 하지 않는다** (보류 6 닫음 2026-09-22, 실측 근거).
 - 실시간 동시 편집은 **Phase 6**. 그 전에는 편집 잠금 + 저장 시 버전 충돌 감지.
 
 ### 0.2 확정된 기술 결정 (2026-09-14)
@@ -115,6 +115,10 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 9 | ~~저장소 공개 여부~~ → **public 유지 (2026-09-14, 사용자)**. 12.3절을 엄격히 적용 | 종료 | — | 이 문서 12.3절 |
 | ~~10~~ | ~~공유 계약의 미사용 DTO를 언제 확정하나~~ → **닫음 2026-09-22.** 마지막까지 호출자가 없던 `labels`·`page_labels`에 Phase 4가 호출부를 붙였다. 남은 미사용 계약은 없다 | 종료 | — | `P4_검증기록_Admin` |
 | 11 | **사내 IdP 실연동 확인** — Phase 1은 모의 OIDC로만 검증했다 | 개발 서버가 IdP에 나갈 수 있게 되는 날 (확인 필요 A) | Discovery 응답을 실제로 받아 `code_challenge_methods_supported`(보류 1)와 `groups` 클레임의 실제 형태를 확인한다. 모의 서버 통과는 완료가 아니다 (9.1절) | `P1_검증기록_Auth` 갱신 |
+| 12 | **DB 계정 분리** — 앱/마이그레이션 계정을 나누고 감사로그에 INSERT만 준다. `WF_ROOT_PASSWORD`가 api 컨테이너에 넘어가는 것도 같이 본다 | 반입 후 **운영 절차가 한 번 돌아간 뒤** (P1 → P5 → 여기. **두 번 미뤘다**) | `information_schema.role_table_grants`로 앱 계정에 `audit_events` UPDATE·DELETE가 없는지 확인 | 운영이관 가이드 갱신 + `P5_설계서_Release` G.2 |
+| 13 | 세션 절대 타임아웃 12시간이 **실제로** 끊는가 | 반입 후 운영 중 | 12시간 지난 세션으로 요청해 401을 받는다. 시각을 기록한다 | `P1_검증기록_Auth` 갱신 |
+| 14 | **쓰기·고장 상황 측정** — 페이지 저장 p95, 트리 깊이, 동시 업로드, 디스크 찬 상태, 재색인 대량 실행 | 운영 규모 데이터가 쌓인 뒤 (P2·P3가 Phase 5로 넘겼고 Phase 5는 읽기만 쟀다) | `pnpm load:test`에 쓰기 시나리오를 더해 재고, 디스크는 볼륨 쿼터로 합성 | `P5_검증기록_Release` 갱신 |
+| 15 | 이미지 취약점 스캔(Trivy 등) 반입 | 사내 보안 검토가 요구할 때 (보류 5가 닫혀 트리거를 잃었다) | 스캐너와 DB를 반입 목록에 더할 값어치가 있는지 본다. 없으면 SBOM 제출로 갈음 | 운영이관 가이드 |
 
 **확인 필요 (사용자 답변 대기)**
 
@@ -211,7 +215,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 - **문서의 모든 실행 명령은 `pnpm <script>` 형태로만 적는다.** 구현은 TypeScript(`tsx`)로 두 OS에서 같게 동작하게 한다. `.sh`는 `deploy/`(Linux 전용)에만 둔다.
 - 편집기에서 복사한 명령을 터미널에 그대로 붙여 실행한다. 오류 메시지는 실제 출력을 복사한다.
-- 기계가 검사한다: `pnpm verify:docs` — pnpm 스크립트 존재, 백틱 경로가 **저장소에 커밋돼 있는지**(대소문자까지), 마크다운 링크, 표 열 수, `deploy/*.sh` 실행 비트. `pnpm check`에 포함된다.
+- 기계가 검사한다: `pnpm verify:docs` — pnpm 스크립트 존재, 백틱 경로가 **저장소에 커밋돼 있는지**(대소문자까지), 마크다운 링크, 표 열 수, `deploy/*.sh` 실행 비트, **nginx `client_max_body_size`와 `WF_UPLOAD_MAX_MB`의 대조**. `pnpm check`에 포함된다.
 - 아직 만들지 않은 산출물을 백틱 경로로 쓰지 않는다. 검사가 잡는다.
 
 표준 스크립트 (이름은 여기서 고정한다):
@@ -224,6 +228,10 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `pnpm test` / `pnpm test:cov` | A·B 테스트 / 커버리지 |
 | `pnpm test:e2e` | Playwright |
 | `pnpm search:reindex` | 검색 인덱스(`pages.search_text`) 재생성 |
+| `pnpm trash:purge` / `pnpm audit:purge` | 보존 기간이 지난 휴지통·감사기록 물리 삭제 |
+| `pnpm backup:create` / `pnpm backup:restore` | 백업(DB 덤프+첨부) 만들기 / 되살리기 |
+| `pnpm release:bundle` / `pnpm release:verify` | 반입 묶음 만들기 / 검사 |
+| `pnpm load:test` | 부하 측정 (동시 N세션) |
 | `pnpm trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 |
 | `pnpm audit:purge` | 보존 기간을 넘긴 감사로그 삭제 (append-only의 좁은 예외) |
 | `pnpm verify:docs` | 문서 검사 |
@@ -261,7 +269,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 마이그레이션 | Drizzle가 생성한 **SQL 파일**을 커밋. forward-only. 운영에서는 기동 시 자동 적용하지 않고 배포 절차의 명시적 단계(`pnpm db:migrate`). 개발만 `WF_DB_AUTO_MIGRATE=true` 허용 |
 | 시드 | 멱등. 두 번 실행해도 결과가 같다. "있으면 건너뜀"으로 끝내지 않고 **빠진 필드를 채우는 것**까지 포함 |
 | 페이지 본문 | ProseMirror JSON. `packages/shared`의 스키마로 서버가 검증. 문서에 `schemaVersion` 포함. 검증 실패는 400 |
-| 페이지 버전 | `page_versions`는 **append-only**. 수정은 새 버전 추가. 저장 시 클라이언트가 기준 버전을 보내고 불일치면 409 |
+| 페이지 버전 | `page_versions`는 **고쳐 쓰지 않는다**(트리거가 UPDATE를 막는다). 수정은 새 버전 추가. 저장 시 클라이언트가 기준 버전을 보내고 불일치면 409. **DELETE는 막지 않는다** — 페이지가 물리 삭제되면 버전도 함께 사라져야 한다. `audit_events`의 append-only와 다른 점이 이것이다 (`0006_constraints`) |
 | 삭제 | soft delete + 휴지통. 물리 삭제는 보존 기간 뒤 배치로, 감사로그에 남김 |
 | 첨부 | 내용 해시(SHA-256)로 저장, 원본 파일명은 메타데이터. MIME·확장자 화이트리스트, 크기 상한 |
 | 감사로그 | `audit_events` **append-only** (앱 DB 계정에 INSERT만 부여 + 트리거). 대상: 인증 성공·실패, 권한 변경, 스페이스·페이지·첨부·댓글·라벨의 생성·수정·삭제·이동·복원, 첨부 다운로드, 휴지통 물리 삭제, 정책값 변경, 관리자 작업. (내보내기는 아직 기능 자체가 없다) |
@@ -308,7 +316,9 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
   | 첨부 스토리지 | `.local/attachments/` | `WF_STORAGE_PATH` (Phase 3) |
   | pnpm store | `.local/pnpm-store/` | `pnpm-workspace.yaml`의 `storeDir`. pnpm 12는 `.npmrc`의 pnpm 설정을 읽지 않는다 |
   | Playwright 브라우저 | `.local/ms-playwright/` | `PLAYWRIGHT_BROWSERS_PATH` |
-  | 임시·로그·DB 덤프 | `.local/tmp/`, `.local/logs/`, `.local/dumps/` | 스크립트 기본값 |
+  | 임시·로그 | `.local/tmp/`, `.local/logs/` | 스크립트 기본값 |
+  | 백업 (DB 덤프 + 첨부) | `.local/backups/<UTC 시각>/` | `pnpm backup:create`의 기본값. 인자로 다른 곳을 줄 수 있다 |
+  | 반입 묶음 | `.local/release/<날짜>/` | `pnpm release:bundle`의 기본값 |
 
   **이 서버는 디스크가 `/` 하나다.** Windows 때의 "시스템 드라이브(C:)와 분리" 규칙은 대응물이 없다. 대신 지켜야 할 사실은 **개발 데이터와 도커 이미지가 같은 디스크를 나눠 쓴다**는 것이다. 개발 쪽이 불어나면 **빌드가 먼저 깨진다** (8.2절). `pnpm check:env`가 여유 3GB 미만이면 실패로 알린다. 분기마다 `pnpm store prune`으로 정리한다.
 
@@ -324,7 +334,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 ### 8.3 운영 (폐쇄망)
 
-- 반입 묶음은 이미지 tar 3종, 체크섬, 운영용 compose·nginx 설정, `.env` 템플릿, 마이그레이션 절차, SBOM·라이선스 목록이다. 목록의 단일 출처는 Phase 5의 배포가이드다.
+- 반입 묶음의 **구성 목록은 `packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`가 단일 출처다** — 문서가 아니라 코드가 들고, `pnpm release:verify`가 그것으로 판정한다. 이미지는 `docker save`가 만든 **tar 하나**에 세 개가 함께 들어간다(따로 두면 하나만 빠뜨린 채 반입된다). 반입 당일의 절차는 [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md)다.
 - `docker load` → `.env` 작성 → `pnpm db:migrate` → `docker compose up -d` → 사후 검증.
 - 모든 서비스 `restart: unless-stopped` + 헬스체크. 재부팅 후 자동 기동을 실제로 확인한다.
 - nginx는 TLS를 종단하고 `absolute_redirect off`, `X-Forwarded-*` 전달, WebSocket `Upgrade` 프록시를 둔다. `client_max_body_size`는 첨부 상한과 일치시킨다.

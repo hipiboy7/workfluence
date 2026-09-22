@@ -27,6 +27,20 @@ function dc(args: string[], input?: Buffer, capture = false): string {
 const psql = (sql: string) =>
   dc(['exec', '-T', 'postgres', 'psql', '-U', 'workfluence', '-d', 'workfluence', '-tAc', sql], undefined, true).trim();
 
+/**
+ * 첨부 볼륨을 만지는 명령. **`exec api`를 쓰지 않는다.**
+ *
+ * 복원 절차의 첫 단계는 "사람들이 계속 쓰지 못하게 api를 멈추는 것"이다
+ * (`운영가이드_장애대응.md` 7.18절). 그런데 `docker compose exec`는 **떠 있는 컨테이너에만**
+ * 붙는다 — 멈춘 뒤에 부르면 실패한다. 그러면 `pg_restore`는 이미 끝나 있고 첨부만 빠진
+ * **절반 복원**으로 끝난다. 다시 돌리려 해도 "비어 있지 않다"로 거부되어 되돌릴 길이 없다.
+ *
+ * `run --rm --no-deps`는 **새 컨테이너를 띄운다.** api가 떠 있든 멈춰 있든 같게 동작하고,
+ * 볼륨 이름을 손으로 적지 않아도 compose가 같은 마운트를 붙여 준다.
+ */
+const inAttachments = (args: string[], input?: Buffer, capture = false) =>
+  dc(['run', '--rm', '--no-deps', '-T', '--entrypoint', args[0], 'api', ...args.slice(1)], input, capture);
+
 function main(): void {
   const dir = resolve(process.argv[2] ?? '');
   if (!process.argv[2]) throw new Error('복원할 백업 디렉토리를 인자로 준다: pnpm backup:restore <디렉토리>');
@@ -55,12 +69,19 @@ function main(): void {
   }
 
   dc(['exec', '-T', 'postgres', 'pg_restore', '-U', 'workfluence', '-d', 'workfluence', '--no-owner'], readFileSync(join(dir, 'dump.pgc')));
-  dc(['exec', '-T', 'api', 'tar', '-xf', '-', '-C', '/data'], readFileSync(join(dir, 'attachments.tar')));
+  inAttachments(['tar', '-xf', '-', '-C', '/data'], readFileSync(join(dir, 'attachments.tar')));
 
-  // 대조 (FR-614). 하나라도 어긋나면 **성공이라고 말하지 않는다**
+  // 대조 (FR-614). **백업 시점의 수치는 하한이다.**
+  //
+  // 백업은 세는 것을 덤프보다 먼저 한다(`backup-create.ts`). 그래서 백업 도중에 쓰기가
+  // 들어오면 **덤프가 더 많이** 담는다 — 주간 백업은 서비스가 도는 채로 뜨므로 로그인 하나만
+  // 끼어도 `audit_events`가 늘어난다. 완전 일치를 요구하면 **복원이 다 끝난 뒤에** 그걸
+  // 불일치로 보고 예외를 던지고, DB는 이미 비어 있지 않아 다시 시도할 수도 없다.
+  // 모자란 것만 실패로 본다. 넘치는 것은 알려 주기만 한다.
   const after = Object.fromEntries(Object.keys(meta.counts).map((t) => [t, Number(psql(`SELECT count(*) FROM ${t}`))]));
-  const mism = Object.entries(meta.counts).filter(([t, n]) => after[t] !== n);
-  const files = Number(dc(['exec', '-T', 'api', 'sh', '-lc', 'find /data/attachments -type f | wc -l'], undefined, true).trim());
+  const missing = Object.entries(meta.counts).filter(([t, n]) => after[t] < n);
+  const extra = Object.entries(meta.counts).filter(([t, n]) => after[t] > n);
+  const files = Number(inAttachments(['sh', '-lc', 'find /data/attachments -type f | wc -l'], undefined, true).trim());
   // **행 수가 아니라 서로 다른 해시 수와 비교한다** (FR-615). 같은 내용을 여러 메타데이터가
   // 가리키므로(FR-413) 행 수와 파일 수는 원래 다르다 — 그것을 불일치로 읽으면 매번 거짓 경보다
   const blobs = Number(psql(`SELECT count(DISTINCT sha256) FROM attachments WHERE deleted_at IS NULL`));
@@ -73,12 +94,19 @@ function main(): void {
   if (files > blobs) {
     console.log(`[restore] 참고: 아무도 안 쓰는 파일이 ${files - blobs}개 있다 (pnpm trash:purge가 정리한다)`);
   }
-  if (mism.length) {
-    throw new Error(`복원 뒤 수치가 백업 시점과 다르다: ${mism.map(([t, n]) => `${t} ${n}→${after[t]}`).join(', ')}`);
+  if (missing.length) {
+    throw new Error(
+      `복원 뒤 행이 모자란다: ${missing.map(([t, n]) => `${t} ${n} → ${after[t]}`).join(', ')}. ` +
+        `백업 시점의 수치는 하한이므로 이것은 실제 손실이다`,
+    );
+  }
+  if (extra.length) {
+    // 백업을 뜨는 동안 들어온 쓰기다. 손실이 아니므로 실패로 보지 않는다
+    console.log(`[restore] 참고: 백업 도중 들어온 쓰기 — ${extra.map(([t, n]) => `${t} ${n} → ${after[t]}`).join(', ')}`);
   }
 
   psql(`INSERT INTO audit_events (action, target_type, detail) VALUES ('backup.restore','system','${JSON.stringify({ from: dir }).replace(/'/g, "''")}')`);
-  console.log('[restore] 완료 — 백업 시점과 모든 행 수가 같다');
+  console.log('[restore] 완료 — 백업 시점의 행 수를 모두 채웠다');
 }
 
 main();

@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 3까지 구현 완료** (2026-09-22). `[P4]`·`[P5]`·`[P6]` 표기가 붙은 항목만 **계획**이며 각 Phase 착수 시 `P{N}_설계서_*.md`로 상세화한다
+- 상태: **Phase 5까지 구현 완료** (2026-09-22). `[P4]`·`[P5]`·`[P6]` 표기가 붙은 항목만 **계획**이며 각 Phase 착수 시 `P{N}_설계서_*.md`로 상세화한다
 
 ## 0. 범위 문서와의 경계
 
@@ -43,7 +43,7 @@
 
 ### 1.2 왜 단일 앱 서버인가
 
-300명·동시 수십 세션 규모에서 이중화는 세션·파일·검색 동기화 비용을 먼저 지불하게 만든다. 세션을 처음부터 PostgreSQL에 두어 **나중에 대수를 늘려도 코드가 바뀌지 않게** 해 둔다. 판단은 Phase 5 부하 실측 (`CLAUDE.md` 보류 6).
+300명·동시 수십 세션 규모에서 이중화는 세션·파일·검색 동기화 비용을 먼저 지불하게 만든다. 세션을 처음부터 PostgreSQL에 두어 **나중에 대수를 늘려도 코드가 바뀌지 않게** 해 둔다. ~~판단은 Phase 5 부하 실측~~ → **하지 않는다** (보류 6 닫음 2026-09-22. p95 602ms / 목표 1,000ms).
 
 ## 2. 코드 구조
 
@@ -75,7 +75,9 @@ workfluence/
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,policy,security,schemas}.ts
 ├── e2e/                          Playwright
-├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · reindex · trash-purge · check-licenses (tsx, OS 무관)
+├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · check-licenses
+│                                 reindex · trash-purge · audit-purge · backup-create · backup-restore
+│                                 release-bundle · release-verify · load-test   (전부 tsx, OS 무관)
 ├── deploy/                       Dockerfile · compose · nginx.conf
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
@@ -136,8 +138,9 @@ shared  ←  api(config → db → common → 기능 모듈)
 - 모든 시각은 UTC `timestamptz`. 표시만 KST로 변환한다. 서버가 여러 대가 되거나 서머타임 지역이 섞여도 비교가 깨지지 않는다.
 - 식별자는 `uuid` (`gen_random_uuid()`). 순번 노출을 피하고 병합·이관이 쉽다.
 - 삭제는 `deleted_at` soft delete. 물리 삭제는 보존 기간 뒤 배치로, 감사로그에 남긴다.
-- **append-only 강제는 두 겹**: 앱 DB 계정에 `UPDATE`/`DELETE` 권한을 주지 않고(운영), 트리거로도 막는다(개발·실수 방지).
-- 파생 데이터(`search_text`)는 언제든 재생성 가능해야 한다. 재생성은 `pnpm search:reindex`다 (`scripts/reindex.ts`).
+- **append-only 강제는 지금 트리거 한 겹이다.** 계정 분리(앱 계정에 `UPDATE`/`DELETE`를 주지 않는 것)는 아직 하지 않았다 — Phase 1이 Phase 5로 넘겼는데 Phase 5도 받지 않고 반입 후로 다시 미뤘다 (보류 12, `P5_검증기록_Release` 10절).
+- **`page_versions`는 UPDATE만 막는다.** DELETE는 허용한다 — 페이지가 물리 삭제되면 버전도 함께 사라져야 한다. `audit_events`(UPDATE·DELETE 모두 차단, 보존 정리만 예외)와 뜻이 다르다 (`0006_constraints`).
+- 파생 데이터(`search_text`)는 언제든 재생성 가능해야 한다. 재생성은 `pnpm search:reindex`다. **무엇을 골라 무엇을 쓰는지는 `apps/api/src/pages/reindex.ts` 한 곳에 있고**, 앱(`PagesService.reindexAll`)과 스크립트(`scripts/reindex.ts`)가 그것을 쓴다 — 실행 방법만 둘이다.
 
 ### 3.3 마이그레이션
 
@@ -199,7 +202,11 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 | `db:generate` / `db:migrate` / `db:seed` | 마이그레이션 생성 / 적용 / 시드 |
 | `dev` / `build` / `start` | 개발 서버 / 빌드 / 실행 |
 | `search:reindex` | 검색 인덱스 재생성 (본문 JSON → `pages.search_text`) |
-| `trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 |
+| `trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 (첨부 파일 실체까지) |
+| `audit:purge` | 보존 기간을 넘긴 감사기록 삭제. `0005`의 예외를 열어 그 구간만 지운다 |
+| `backup:create` / `backup:restore` | 백업(DB 덤프 + 첨부) 만들기 / 되살리기. 복원은 **빈 볼륨에만** |
+| `release:bundle` / `release:verify` | 반입 묶음 만들기 / 필수 파일·체크섬·매니페스트 검사 |
+| `load:test` | 동시 N세션 읽기 시나리오. p50·p95·max와 오류 수 |
 | `lint` / `typecheck` / `test` / `test:cov` / `test:e2e` / `verify:docs` | 검사 |
 | `check` | lint + typecheck + test + verify:docs (CI와 동일) |
 
@@ -234,7 +241,7 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 - 이미지 3종: `app`(Nest + SPA), `nginx`, `postgres`.
 - 빌드 스테이지에서 의존성 설치·빌드, 런타임 스테이지에는 산출물과 production 의존성만. 베이스는 `node:24-bookworm-slim` (alpine은 네이티브 모듈 호환 위험).
 - 컨테이너는 non-root, 헬스체크, `restart: unless-stopped`.
-- 반입 묶음 목록의 단일 출처는 Phase 5에서 작성하는 배포가이드다.
+- 반입 묶음 구성의 단일 출처는 **코드**다 (`packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`). 반입 당일의 절차는 [`docs/운영가이드_반입.md`](운영가이드_반입.md)다.
 
 ## 10. Phase별 추가 지점
 

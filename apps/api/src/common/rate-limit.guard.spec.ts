@@ -145,3 +145,44 @@ describe('가드 인스턴스가 달라도 같은 예산을 본다 (T-027)', () 
     expect(other.canActivate(makeContext('9.9.9.9'))).toBe(true);
   });
 });
+
+/**
+ * **긴 창을 쓰는 제한이 짧은 창의 트래픽에 리셋되지 않는다.**
+ *
+ * 청소가 "지금 들어온 요청의 창"으로 모든 키를 판정하고 있었다. 로그인은 60초 창이고
+ * 가입은 600초 창이라, **로그인 한 번이 들어오면** 최근 60초에 히트가 없는 가입 키를
+ * 통째로 지웠다 — 무차별 대입을 막으려고 둔 장치가 **평범한 트래픽만 있으면 풀린다.**
+ */
+describe('창 길이가 다른 제한이 서로를 지우지 않는다', () => {
+  it('짧은 창 요청이 긴 창 예산을 리셋하지 않는다', () => {
+    vi.useFakeTimers();
+    const store = new RateLimitStore();
+    const signup = new RateLimitGuard(makeReflector({ max: 2, windowSec: 600 }), store);
+    const login = new RateLimitGuard(makeReflector({ max: 20, windowSec: 60 }), store);
+
+    // 가입 예산을 다 쓴다
+    expect(signup.canActivate(makeContext('1.1.1.1', 'signup'))).toBe(true);
+    expect(signup.canActivate(makeContext('1.1.1.1', 'signup'))).toBe(true);
+    expect(() => signup.canActivate(makeContext('1.1.1.1', 'signup'))).toThrow(HttpException);
+
+    // 2분 뒤 — 가입 창(600초)은 아직 살아 있고 로그인 창(60초)은 지났다
+    vi.advanceTimersByTime(120_000);
+    expect(login.canActivate(makeContext('1.1.1.1', 'login'))).toBe(true);
+
+    // **가입은 여전히 막혀 있어야 한다.** 예전 코드에서는 여기서 통과했다
+    expect(store.countFor('C.signup:1.1.1.1')).toBe(2);
+    expect(() => signup.canActivate(makeContext('1.1.1.1', 'signup'))).toThrow(HttpException);
+    vi.useRealTimers();
+  });
+
+  it('자기 창이 지나면 정상적으로 다시 허용한다 — 청소가 아예 안 되는 것은 아니다', () => {
+    vi.useFakeTimers();
+    const store = new RateLimitStore();
+    const signup = new RateLimitGuard(makeReflector({ max: 1, windowSec: 600 }), store);
+    expect(signup.canActivate(makeContext('2.2.2.2', 'signup'))).toBe(true);
+    expect(() => signup.canActivate(makeContext('2.2.2.2', 'signup'))).toThrow(HttpException);
+    vi.advanceTimersByTime(601_000);
+    expect(signup.canActivate(makeContext('2.2.2.2', 'signup'))).toBe(true);
+    vi.useRealTimers();
+  });
+});

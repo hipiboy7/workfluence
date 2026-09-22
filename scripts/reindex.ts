@@ -1,5 +1,5 @@
 import { Client } from 'pg';
-import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { databaseUrl, describeDatabaseUrl, loadEnv } from '../apps/api/src/config/config.module';
 import { REINDEX_SELECT_SQL, REINDEX_UPDATE_SQL, reindexRows, type ReindexRow } from '../apps/api/src/pages/reindex';
 
 /**
@@ -11,7 +11,11 @@ import { REINDEX_SELECT_SQL, REINDEX_UPDATE_SQL, reindexRows, type ReindexRow } 
  */
 async function main(): Promise<void> {
   const env = loadEnv();
-  const c = new Client(databaseUrl(env));
+  const url = databaseUrl(env);
+  // **어디를 만지는지 먼저 말한다.** `.env`가 가리키는 곳으로 붙으므로,
+  // 컨테이너 DB를 기대하고 불렀는데 개발 DB를 만지는 일이 조용히 일어날 수 있다
+  console.log(`[reindex] 대상 DB: ${describeDatabaseUrl(url)}`);
+  const c = new Client(url);
   await c.connect();
   try {
     const { rows } = await c.query<ReindexRow>(REINDEX_SELECT_SQL);

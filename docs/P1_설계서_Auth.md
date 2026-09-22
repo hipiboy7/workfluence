@@ -384,7 +384,7 @@ CREATE TRIGGER audit_events_no_update BEFORE UPDATE OR DELETE ON audit_events
   FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
 ```
 
-`CLAUDE.md` 6절은 운영에서 앱 DB 계정 권한으로도 막으라고 한다. **Phase 1에서는 하지 않았다** — 앱·마이그레이션·시드가 모두 소유자 계정 하나를 쓴다. 계정 분리는 운영화 단계(Phase 5)에서 배포 절차와 함께 한다. 지금 막고 있는 것은 **트리거 한 겹뿐**이고, 그 사실을 여기 적어 둔다.
+`CLAUDE.md` 6절은 운영에서 앱 DB 계정 권한으로도 막으라고 한다. **Phase 1에서는 하지 않았다** — 앱·마이그레이션·시드가 모두 소유자 계정 하나를 쓴다. 계정 분리는 ~~Phase 5에서~~ **아직 하지 않았다** — Phase 5가 받지 않고 반입 후로 다시 미뤘다 (`P5_검증기록_Release` 10절, 보류 12). 지금 막고 있는 것은 **트리거 한 겹뿐**이고, 그 사실을 여기 적어 둔다.
 
 **남기지 않는 것 (FR-238).** 비밀번호·임시 비밀번호·토큰·세션 ID. `email`은 `maskEmail`로 줄여 넣는다.
 
@@ -397,7 +397,7 @@ CREATE TRIGGER audit_events_no_update BEFORE UPDATE OR DELETE ON audit_events
 | CSRF | 상태 변경 메서드 전체 | 전역 가드. `CSRF_HEADER`가 없으면 403. 값이 아니라 **헤더의 존재**가 방어다(교차 출처에서 커스텀 헤더를 붙이면 preflight가 걸린다) |
 | 요청 제한 | `/api/auth/*` 공개 엔드포인트 | `RateLimitGuard` (P0에 있다). `RATE_LIMITS`의 키별 설정 |
 
-요청 제한은 **프로세스 메모리**에 있다. 단일 인스턴스 전제이고, 이중화는 보류 6이다.
+요청 제한은 **프로세스 메모리**에 있다(`RateLimitStore`). 단일 인스턴스 전제이고, **이중화는 하지 않기로 했다**(보류 6 닫음 2026-09-22).
 
 ---
 

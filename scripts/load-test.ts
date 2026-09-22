@@ -8,9 +8,23 @@ import { CSRF_HEADER, CSRF_HEADER_VALUE } from '@workfluence/shared';
  *
  * **합성 데이터만 쓰고 끝나면 지운다** (FR-622, `CLAUDE.md` 6절).
  */
-const BASE = process.env.WF_LOAD_BASE ?? 'http://127.0.0.1:3000';
-const SESSIONS = Number(process.env.WF_LOAD_SESSIONS ?? 50);
-const ROUNDS = Number(process.env.WF_LOAD_ROUNDS ?? 10);
+/**
+ * **`WF_` 접두사를 쓰지 않는다** (CLAUDE.md 5절).
+ *
+ * `WF_*`는 앱 설정이고, `packages/shared`의 스키마가 **모르는 `WF_` 키를 보면 기동을
+ * 거부한다.** 이 값들은 측정 도구의 인자일 뿐이라 스키마에 넣을 것이 아니고, 그렇다고
+ * `WF_LOAD_*`로 두면 누군가 `.env`에 적는 순간 앱이 안 뜬다. 접두사를 떼어 **앱 설정이
+ * 아님을 이름으로 드러낸다.**
+ */
+/** 기본 대상은 개발 서버의 api다. 컨테이너 스택을 재려면 `LOAD_BASE`를 준다 */
+const DEFAULT_BASE = 'http://127.0.0.1:3000';
+/** 판정선 — NFR-50 (P5_설계서_Release). 이 값이 보류 6의 기준이었다 */
+const TARGET_P95_MS = 1000;
+
+const BASE = process.env.LOAD_BASE ?? DEFAULT_BASE;
+const SESSIONS = Number(process.env.LOAD_SESSIONS ?? 50);
+const ROUNDS = Number(process.env.LOAD_ROUNDS ?? 10);
+const LOGIN_CHUNK = Number(process.env.LOAD_LOGIN_CHUNK ?? 5);
 
 type Sample = { step: string; ms: number; ok: boolean };
 
@@ -54,9 +68,9 @@ function report(samples: Sample[]): { worstP95: number; errors: number } {
 }
 
 async function main(): Promise<void> {
-  const username = process.env.WF_LOAD_USER;
-  const password = process.env.WF_LOAD_PASSWORD;
-  if (!username || !password) throw new Error('WF_LOAD_USER·WF_LOAD_PASSWORD를 주고 돌린다 (합성 계정)');
+  const username = process.env.LOAD_USER;
+  const password = process.env.LOAD_PASSWORD;
+  if (!username || !password) throw new Error('LOAD_USER·LOAD_PASSWORD를 주고 돌린다 (합성 계정). 감사로그 단계가 있어 관리자 계정이 필요하다');
 
   // 세션을 **미리 다 연다.** 측정 중에 로그인이 섞이면 재려던 것(읽기 지연)이 흐려진다.
   //
@@ -65,7 +79,6 @@ async function main(): Promise<void> {
   // 한도를 넘는다. 조금씩 나눠 열면 앞의 성공이 환불되어 걸리지 않는다.
   // 실제로는 50명이 서로 다른 주소에서 들어오므로 이 제한은 재려는 대상이 아니다.
   const cookies: string[] = [];
-  const LOGIN_CHUNK = Number(process.env.WF_LOAD_LOGIN_CHUNK ?? 5);
   for (let i = 0; i < SESSIONS; i += LOGIN_CHUNK) {
     const n = Math.min(LOGIN_CHUNK, SESSIONS - i);
     cookies.push(...(await Promise.all(Array.from({ length: n }, () => login(username, password)))));
@@ -85,7 +98,7 @@ async function main(): Promise<void> {
   }
 
   const { worstP95, errors } = report(samples);
-  const target = 1000;
+  const target = TARGET_P95_MS;
   console.log(
     `\n[load] 판정 (보류 6): 가장 느린 단계의 p95 ${worstP95.toFixed(0)}ms ` +
       `${worstP95 < target && errors === 0 ? `< ${target}ms → **이중화 불필요**` : `— 목표 ${target}ms 미달 또는 오류 발생 → 이중화 검토`}`,

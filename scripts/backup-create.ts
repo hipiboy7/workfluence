@@ -35,7 +35,9 @@ function main(): void {
   console.log(`[backup] ${out}`);
 
   // 세는 것을 **먼저** 한다. 덤프 도중 쓰기가 들어오면 수치와 덤프가 어긋나는데,
-  // 먼저 세면 "적어도 이만큼은 있어야 한다"는 하한이 되어 복원 검사가 거짓 통과하지 않는다
+  // 먼저 세면 "적어도 이만큼은 있어야 한다"는 **하한**이 되어 복원 검사가 거짓 통과하지 않는다.
+  // 복원 쪽도 이 값을 하한으로 쓴다 — 완전 일치를 요구하면 백업 도중에 로그인 하나만
+  // 들어와도 복원이 다 끝난 뒤에 실패로 뒤집힌다 (`backup-restore.ts`)
   const migrations = psql(`SELECT count(*) FROM drizzle.__drizzle_migrations`);
   const counts = Object.fromEntries(
     ['users', 'spaces', 'pages', 'page_versions', 'attachments', 'comments', 'audit_events', 'notifications'].map((t) => [
@@ -45,7 +47,13 @@ function main(): void {
   );
 
   writeFileSync(join(out, 'dump.pgc'), dc(['exec', '-T', 'postgres', 'pg_dump', '-U', 'workfluence', '-Fc', 'workfluence'], { capture: true }));
-  writeFileSync(join(out, 'attachments.tar'), dc(['exec', '-T', 'api', 'tar', '-cf', '-', '-C', '/data', 'attachments'], { capture: true }));
+  // **`exec api`를 쓰지 않는다.** 복원 절차는 api를 멈춘 뒤에 돌 수 있어야 하고, 백업도
+  // 같은 이유로 떠 있는 컨테이너에 기대지 않는다 — `run --rm --no-deps`는 새 컨테이너를
+  // 띄우므로 api가 멈춰 있어도 같게 동작한다 (`backup-restore.ts`의 같은 판단)
+  writeFileSync(
+    join(out, 'attachments.tar'),
+    dc(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'api', '-cf', '-', '-C', '/data', 'attachments'], { capture: true }),
+  );
 
   const files = ['dump.pgc', 'attachments.tar'];
   const sums = files.map((f) => ({ file: f, sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex') }));
