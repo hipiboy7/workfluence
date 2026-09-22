@@ -27,13 +27,17 @@ export class LabelsService {
   }
 
   /** 라벨 이름은 유일하다 (FR-425). 같은 이름을 다시 붙이면 **새로 만들지 않고 그것을 쓴다** */
-  private async ensure(name: string, tx: Db): Promise<string> {
+  private async ensure(name: string, tx: Db): Promise<{ id: string; name: string }> {
     const normalized = name.trim().toLowerCase();
     if (!normalized) throw new BadRequestException('라벨 이름이 비어 있다');
-    const found = await tx.query.labels.findFirst({ where: eq(labels.name, normalized) });
-    if (found) return found.id;
-    const [created] = await tx.insert(labels).values({ name: normalized }).returning();
-    return created.id;
+    // **upsert로 한 번에 한다.** 찾고-없으면-넣기는 두 사람이 같은 새 라벨을 동시에 붙일 때
+    // 한쪽이 unique 위반으로 죽는다 — 흔한 일은 아니지만 이유 없이 실패할 자리다
+    const [row] = await tx
+      .insert(labels)
+      .values({ name: normalized })
+      .onConflictDoUpdate({ target: labels.name, set: { name: normalized } })
+      .returning();
+    return { id: row.id, name: row.name };
   }
 
   async forPage(pageId: string, principal: Principal, tx: Db = this.db): Promise<LabelView[]> {
@@ -51,11 +55,10 @@ export class LabelsService {
   async attach(pageId: string, name: string, principal: Principal, tx: Db = this.db): Promise<LabelView> {
     const page = await this.page(pageId, tx);
     await this.spaces.assertWrite(page.spaceId, principal, tx);
-    const labelId = await this.ensure(name, tx);
+    const label = await this.ensure(name, tx);
     // 이미 붙어 있으면 조용히 넘어간다 — 두 번 눌렀다고 오류를 보일 일이 아니다
-    await tx.insert(pageLabels).values({ pageId, labelId }).onConflictDoNothing();
-    const row = await tx.query.labels.findFirst({ where: eq(labels.id, labelId) });
-    return { id: row!.id, name: row!.name };
+    await tx.insert(pageLabels).values({ pageId, labelId: label.id }).onConflictDoNothing();
+    return label;
   }
 
   async detach(pageId: string, labelId: string, principal: Principal, tx: Db = this.db): Promise<void> {

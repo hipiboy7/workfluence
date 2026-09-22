@@ -180,8 +180,6 @@ export type CreateCommentDto = z.infer<typeof createCommentDto>;
 export const updateCommentDto = z.object({ body: documentSchema });
 export type UpdateCommentDto = z.infer<typeof updateCommentDto>;
 
-export const labelNameDto = z.object({ name: z.string().trim().min(1).max(40) });
-
 /** 정책값 변경. **모양만** 본다 — 범위·허용값 판정은 `validatePolicyPatch`(A등급)가 한다 */
 export const policyPatchDto = z
   .object({

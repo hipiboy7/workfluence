@@ -1,4 +1,4 @@
-import { POLICY_DEFAULTS, SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
+import { SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
 import { rm } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -10,7 +10,14 @@ import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
  * **자동으로 돌지 않는다.** 사람이 부르는 명령이다 (쟁점 6) — 자동 실행 주기는 운영 환경을
  * 알아야 정할 수 있어 Phase 5 배포가이드로 넘긴다.
  *
- * 지우는 것은 **보존 기간을 넘긴 것뿐**이다. `deleted_at`이 비어 있는 행은 건드리지 않는다.
+ * **지우는 것은 두 갈래다.**
+ *   ① 보존 기간을 넘겨 **직접 지워진** 페이지·첨부·댓글·스페이스
+ *   ② 보존 기간을 넘긴 스페이스에 **딸린 페이지 전부** — 지워지지 않은 것까지 포함한다
+ *
+ * ②를 빼면 스페이스 행을 지울 수 없어서(FK) 스페이스가 영영 남는다. 그래서 필요한
+ * 동작이지만, **"휴지통만 건드린다"고 오해하면 살아 있던 문서를 잃는다** — 스페이스를
+ * 되살리면 안에 있던 문서도 함께 돌아오기 때문이다 (코드 리뷰 5·8). 출력에서 둘을 나눠 센다.
+ *
  * 순서는 자식부터다 — 알림·라벨 연결·댓글·첨부·버전·페이지·스페이스.
  */
 async function main(): Promise<void> {
@@ -24,20 +31,27 @@ async function main(): Promise<void> {
       trashRetentionDays: env.WF_TRASH_RETENTION_DAYS,
       ...((stored.rows[0]?.value as Record<string, unknown>) ?? {}),
     });
-    const days = policy.trashRetentionDays ?? POLICY_DEFAULTS.trashRetentionDays;
+    const days = policy.trashRetentionDays;
     const cutoff = `now() - interval '${days} days'`;
     console.log(`[purge] 보존 기간 ${days}일. 그보다 오래된 휴지통 항목을 지운다`);
 
     await c.query('BEGIN');
 
     // 지울 페이지: 직접 지워진 것 + 지워진 스페이스에 속한 것
-    const pageIds = (
+    const direct = (
+      await c.query<{ id: string }>(`SELECT id FROM pages WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff}`)
+    ).rows.map((r) => r.id);
+    // 보존 기간을 넘긴 스페이스에 딸린 것 — **지워지지 않은 페이지까지** 포함된다
+    const viaSpace = (
       await c.query<{ id: string }>(
-        `SELECT id FROM pages
-          WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff}
-             OR space_id IN (SELECT id FROM spaces WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff})`,
+        `SELECT id FROM pages WHERE deleted_at IS NULL
+           AND space_id IN (SELECT id FROM spaces WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoff})`,
       )
     ).rows.map((r) => r.id);
+    const pageIds = [...new Set([...direct, ...viaSpace])];
+    if (viaSpace.length) {
+      console.log(`[purge] 주의: 지워진 스페이스에 딸린 **살아 있던** 페이지 ${viaSpace.length}건도 함께 지운다`);
+    }
 
     // **따로 지운 첨부·댓글도 대상이다** (쟁점 5 "페이지·첨부·댓글·스페이스 전부").
     // 페이지는 살아 있는데 사용자가 첨부만 지운 경우, 페이지 기준으로만 모으면 영영 남는다
@@ -101,7 +115,10 @@ async function main(): Promise<void> {
       files += 1;
     }
 
-    console.log(`[purge] 완료: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ')} · 파일 ${files}`);
+    console.log(
+      `[purge] 완료: 직접 지운 페이지 ${direct.length}건 · 스페이스에 딸린 페이지 ${viaSpace.length}건 · ` +
+        `${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ')} · 파일 ${files}`,
+    );
   } catch (e) {
     await c.query('ROLLBACK').catch(() => undefined);
     throw e;

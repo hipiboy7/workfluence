@@ -76,7 +76,7 @@ export class NotificationsService {
     if (!space) return 0;
 
     const members = await tx.query.spaceMembers.findMany({ where: eq(spaceMembers.spaceId, args.spaceId) });
-    const [{ n }] = await tx.select({ n: count() }).from(spaceMembers).where(eq(spaceMembers.spaceId, args.spaceId));
+    const n = members.length; // 같은 것을 두 번 세지 않는다
     const like = { ...space, kind: space.kind as SpaceRow['kind'] & ('personal' | 'team'), status: space.status as 'active' | 'suspended' };
 
     const drafts: NotificationDraft[] = [];
