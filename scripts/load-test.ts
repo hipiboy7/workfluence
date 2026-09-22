@@ -99,10 +99,15 @@ async function main(): Promise<void> {
 
   const { worstP95, errors } = report(samples);
   const target = TARGET_P95_MS;
+  const pass = worstP95 < target && errors === 0;
   console.log(
     `\n[load] 판정 (보류 6): 가장 느린 단계의 p95 ${worstP95.toFixed(0)}ms ` +
-      `${worstP95 < target && errors === 0 ? `< ${target}ms → **이중화 불필요**` : `— 목표 ${target}ms 미달 또는 오류 발생 → 이중화 검토`}`,
+      `${pass ? `< ${target}ms → **이중화 불필요**` : `— 목표 ${target}ms 미달 또는 오류 발생 → 이중화 검토`}`,
   );
+  // **판정을 종료 코드로 낸다** (CLAUDE.md 12.2절). 콘솔 문자열만 내면 CI나 감싸는
+  // 스크립트에서는 p95가 3초여도 "통과"가 된다 — 사람이 스크롤해야만 읽히는 판정은
+  // 판정이 아니다 (코드 리뷰 4)
+  if (!pass) process.exitCode = 1;
 }
 
 void main().catch((e: unknown) => {

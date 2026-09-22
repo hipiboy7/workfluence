@@ -13,12 +13,21 @@ import * as schema from '../db/schema';
  */
 export type TestDb = NodePgDatabase<typeof schema>;
 
+/**
+ * 테스트 풀 크기. **테스트가 이 값을 읽어 동시 요청 수를 정한다** (T-026 회귀 테스트).
+ *
+ * 예전에는 테스트가 "8개를 동시에 던진다"를 직접 적어 두고 주석에 "풀은 4"라고 썼다.
+ * 누가 이 값을 16으로 올리면 **8은 전부 통과하고 결함이 되살아난 채 테스트가 초록이 된다** —
+ * 두 숫자를 묶어 두지 않으면 조용히 무장해제된다 (코드 리뷰 5).
+ */
+export const TEST_POOL_MAX = 4;
+
 let pool: Pool | undefined;
 let migrated = false;
 
 export async function openTestDb(): Promise<{ db: TestDb; pool: Pool }> {
   const env = loadEnv();
-  pool ??= new Pool({ connectionString: databaseUrl({ ...env, WF_ENV: 'test' }), max: 4 });
+  pool ??= new Pool({ connectionString: databaseUrl({ ...env, WF_ENV: 'test' }), max: TEST_POOL_MAX });
   if (!migrated) {
     await runMigrations(pool);
     migrated = true;

@@ -1,5 +1,6 @@
 import { Client } from 'pg';
-import { databaseUrl, describeDatabaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { describeDatabaseUrl } from '../apps/api/src/common/db-url';
 import { REINDEX_SELECT_SQL, REINDEX_UPDATE_SQL, reindexRows, type ReindexRow } from '../apps/api/src/pages/reindex';
 
 /**

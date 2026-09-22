@@ -232,7 +232,8 @@ function checkUploadLimits(findings: Finding[]): void {
     return;
   }
   const unit = { '': 1 / 1024 / 1024, k: 1 / 1024, m: 1, g: 1024 }[m[2].toLowerCase()] ?? 1;
-  const nginxMb = Number(m[1]) * unit;
+  // nginx에서 `0`은 **무제한**이다. 곱하면 0이 되어 "가장 작다"로 읽히므로 따로 본다
+  const nginxMb = Number(m[1]) === 0 ? Infinity : Number(m[1]) * unit;
 
   const env = /^WF_UPLOAD_MAX_MB=(\d+)/m.exec(readFileSync(example, 'utf8'));
   if (!env) {
@@ -240,6 +241,21 @@ function checkUploadLimits(findings: Finding[]): void {
     return;
   }
   const appMb = Number(env[1]);
+
+  // **compose의 기본값도 본다.** 상한이 세 곳에 있다 — nginx, `.env.example`, compose의
+  // `${WF_UPLOAD_MAX_MB:-20}`. 둘만 맞춰 두면 세 번째가 조용히 어긋난다
+  const composePath = resolve(ROOT, 'deploy/compose.yml');
+  if (existsSync(composePath)) {
+    const c = /WF_UPLOAD_MAX_MB:\s*\$\{WF_UPLOAD_MAX_MB:-(\d+)\}/.exec(readFileSync(composePath, 'utf8'));
+    if (c && Number(c[1]) !== appMb) {
+      findings.push({
+        file: 'deploy/compose.yml',
+        line: 0,
+        kind: '업로드 상한 기본값 불일치',
+        detail: `compose 기본값 ${c[1]}MB ≠ .env.example ${appMb}MB — .env를 안 쓰면 이 값이 쓰인다`,
+      });
+    }
+  }
 
   // nginx가 더 작으면 앱이 허락한 파일이 프록시에서 막힌다. 같거나 더 크면 된다
   if (nginxMb < appMb) {

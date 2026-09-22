@@ -103,14 +103,26 @@ describe('백업 대조 계약 (보안 검토 1)', () => {
     expect(BACKUP_REQUIRED_FILES).toContain('attachments.tar');
   });
 
-  it('표 목록은 **우리가 정한 것**이다. 파일에 없는 표를 요구하면 실패한다', () => {
-    expect(BACKUP_COUNTED_TABLES).toContain('audit_events');
-    expect(() => backupCounts({ users: 1 })).toThrow(/spaces/);
+  it('운영 정책·Crew·라벨도 대조 대상이다 — 조용히 비어 있으면 알 수 없는 표들이다', () => {
+    for (const t of ['settings', 'space_members', 'labels', 'page_labels', 'space_categories', 'audit_events']) {
+      expect(BACKUP_COUNTED_TABLES).toContain(t);
+    }
+    // 세션은 **일부러 뺀다.** 복원 뒤 달라지는 것이 정상이고, 남아 있으면 오히려 문제다
+    expect(BACKUP_COUNTED_TABLES).not.toContain('sessions');
   });
 
-  it('**표 이름에 SQL을 적어 넣어도 통하지 않는다** — 키를 읽지 않고 우리 목록만 본다', () => {
+  it('**표 이름에 SQL을 적어 넣으면 거부한다** — 모르는 이름은 통과하지 못한다', () => {
     const evil = { "users; DROP TABLE users; SELECT count(*) FROM users": 1 };
-    expect(() => backupCounts(evil)).toThrow(/users/);
+    expect(() => backupCounts(evil)).toThrow(/모르는 표 이름/);
+  });
+
+  it('**목록이 늘어난 뒤에도 예전 백업을 복원할 수 있다** — 없는 키는 대조하지 않는다', () => {
+    const old = { users: 3, pages: 7 };
+    expect(backupCounts(old)).toEqual(old);
+  });
+
+  it('대조할 것이 하나도 없으면 거부한다 — 빈 대조는 통과가 아니다', () => {
+    expect(() => backupCounts({})).toThrow(/하나도 없다/);
   });
 
   it('행 수가 숫자가 아니면 거부한다 — NaN은 어떤 비교에도 false라 대조를 건너뛴다', () => {
@@ -120,8 +132,15 @@ describe('백업 대조 계약 (보안 검토 1)', () => {
     }
   });
 
-  it('정상 값은 그대로 돌려준다. **여분의 키는 무시한다**', () => {
+  it('정상 값은 그대로 돌려준다', () => {
     const base = Object.fromEntries(BACKUP_COUNTED_TABLES.map((t, i) => [t, i]));
-    expect(backupCounts({ ...base, 'sessions; DROP TABLE x': 9 })).toEqual(base);
+    expect(backupCounts(base)).toEqual(base);
+  });
+});
+
+describe('backupCounts의 빈 입력', () => {
+  it('`null`·`undefined`도 "대조할 것이 없다"로 거부한다 — 조용히 통과하지 않는다', () => {
+    expect(() => backupCounts(undefined)).toThrow(/하나도 없다/);
+    expect(() => backupCounts(null)).toThrow(/하나도 없다/);
   });
 });

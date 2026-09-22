@@ -1,6 +1,6 @@
-import { RELEASE_REQUIRED_FILES, parseChecksums, parseManifest, verifyChecksums } from '@workfluence/shared';
+import { RELEASE_REQUIRED_FILES, parseChecksums, parseManifest, unlistedRequired, verifyChecksums } from '@workfluence/shared';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /**
@@ -16,10 +16,24 @@ function main(): void {
   const present = readdirSync(dir);
   const missing = RELEASE_REQUIRED_FILES.filter((f) => !present.includes(f));
   const expected = parseChecksums(readFileSync(join(dir, 'SHA256SUMS'), 'utf8'));
+  // **디렉토리는 건너뛴다.** `readFileSync`가 디렉토리에서 `EISDIR`로 터진다 —
+  // 같은 날짜 디렉토리에 다시 만들거나 누가 폴더를 하나 넣어 두면 검사가 죽는다
   const actual = Object.fromEntries(
-    present.filter((f) => f !== 'SHA256SUMS').map((f) => [f, createHash('sha256').update(readFileSync(join(dir, f))).digest('hex')]),
+    present
+      .filter((f) => f !== 'SHA256SUMS' && statSync(join(dir, f)).isFile())
+      .map((f) => [f, createHash('sha256').update(readFileSync(join(dir, f))).digest('hex')]),
   );
-  const problems = [...missing.map((f) => `${f}: 필수 파일이 없다`), ...verifyChecksums(expected, actual)];
+  // **체크섬 목록 자체를 먼저 본다.** 목록이 비어 있으면 아무것도 검사하지 않고 통과한다 —
+  // 옮기다 잘린 `SHA256SUMS`가 그 줄들을 잃은 채 통과하던 길이다
+  const problems = [
+    ...missing.map((f) => `${f}: 필수 파일이 없다`),
+    // `SHA256SUMS` 자신은 목록에 담을 수 없다 — 담으면 자기 해시를 자기 안에 적어야 한다
+    ...unlistedRequired(
+      expected,
+      RELEASE_REQUIRED_FILES.filter((f) => f !== 'SHA256SUMS'),
+    ),
+    ...verifyChecksums(expected, actual),
+  ];
 
   // **매니페스트를 읽어서 본다** (FR-603). 예전에는 그냥 출력만 했다 — 버전이나 git sha가
   // 빠져 있어도 검사가 통과했고, 폐쇄망 안에서 "무엇이 들어왔나"를 답할 수 없게 된다.

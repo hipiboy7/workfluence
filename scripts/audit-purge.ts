@@ -1,6 +1,7 @@
 import { POLICY_FLOOR, SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
-import { databaseUrl, describeDatabaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { describeDatabaseUrl } from '../apps/api/src/common/db-url';
 
 /**
  * 감사로그 보존 정리 (P4_설계서_Admin FR-540, `scope-definition` 위험 7).

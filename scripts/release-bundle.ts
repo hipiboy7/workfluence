@@ -12,7 +12,22 @@ import { join, resolve } from 'node:path';
  *
  * **인터넷을 쓰지 않는다** (FR-607). 이미 받아 둔 이미지와 설치된 의존성만 쓴다.
  */
-const IMAGES = ['workfluence-app:latest', 'postgres:17', 'nginx:1.27-alpine'] as const;
+/**
+ * 이미지 목록을 **compose에게 물어본다** (`config --images`).
+ *
+ * 예전에는 여기에 세 이름을 적어 뒀다. 그러면 compose의 태그를 올리는 순간 **`docker save`는
+ * 옛 이미지를 저장하고**(로컬에 있으니 오류도 안 난다) 매니페스트도 같은 상수에서 나오므로
+ * 검사가 어긋남을 못 잡는다. 폐쇄망에서 `up -d`가 "이미지 없음"으로 죽고, 거기서는 두 번째
+ * 시도가 없다 (코드 리뷰 3). 이제 **compose가 요구하는 것만** 저장된다.
+ */
+function composeImages(): string[] {
+  return sh('docker', [...COMPOSE_ARGS, 'config', '--images'], true)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+const COMPOSE_ARGS = ['compose', '-f', 'deploy/compose.yml', '--env-file', 'deploy/.env'] as const;
 
 const sh = (cmd: string, args: string[], capture = false): string => {
   const r = execFileSync(cmd, args, { maxBuffer: 1024 * 1024 * 1024, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
@@ -26,9 +41,11 @@ function main(): void {
   const version = (JSON.parse(readFileSync('package.json', 'utf8')) as { version: string }).version;
   console.log(`[release] ${out} — ${version} / ${gitSha}`);
 
-  // 이미지 세 개를 **하나의 tar로** 묶는다. 셋을 따로 두면 하나만 빠뜨린 채 반입된다
-  console.log('[release] 이미지 저장 중…');
-  sh('docker', ['save', '-o', join(out, 'images.tar'), ...IMAGES]);
+  // 이미지를 **하나의 tar로** 묶는다. 따로 두면 하나만 빠뜨린 채 반입된다
+  const images = composeImages();
+  if (images.length === 0) throw new Error('compose가 요구하는 이미지를 하나도 찾지 못했다');
+  console.log(`[release] 이미지 저장 중… (${images.join(', ')})`);
+  sh('docker', ['save', '-o', join(out, 'images.tar'), ...images]);
 
   copyFileSync('deploy/compose.yml', join(out, 'compose.yml'));
   copyFileSync('deploy/nginx.conf', join(out, 'nginx.conf'));
@@ -42,37 +59,32 @@ function main(): void {
   // (`WF_PG_PASSWORD` 등). 값이 없으면 `${VAR:?}` 때문에 기동이 거부되는데, 템플릿에
   // 그 키가 없으니 작업자는 무엇을 채워야 하는지 알 수 없다. 그래서 **compose 파일에서
   // 실제로 참조하는 변수**를 뽑아 그것만 넣는다 — 목록이 코드와 어긋날 수 없다.
-  // **`build:` 블록 안은 뺀다.** 거기 있는 것은 이미지를 만들 때 쓰는 값(사내 프록시)이고,
-  // 폐쇄망에서는 채울 것도 채울 이유도 없다. 이름 목록으로 빼지 않고 **위치로** 뺀다 —
-  // 목록은 손으로 관리해야 하고 그러면 또 틀린다 (T-024)
-  const composeText = readFileSync('deploy/compose.yml', 'utf8');
-  const referenced = new Set<string>();
-  {
-    let skipIndent: number | null = null;
-    for (const line of composeText.split('\n')) {
-      if (!line.trim() || line.trim().startsWith('#')) continue;
-      const indent = line.length - line.trimStart().length;
-      if (skipIndent !== null && indent <= skipIndent) skipIndent = null;
-      if (/^\s*build:\s*$/.test(line)) {
-        skipIndent = indent;
-        continue;
-      }
-      if (skipIndent !== null) continue;
-      for (const m of line.matchAll(/\$\{([A-Z_][A-Z0-9_]*)/g)) referenced.add(m[1]);
-    }
-  }
+  // 변수 목록도 **compose에게 물어본다** (`config --variables`). YAML을 우리가 파싱하면
+  // `build:` 뒤에 주석이 붙는 것만으로 헤매고, 중괄호 없는 `$VAR`는 아예 놓친다 —
+  // 놓치는 쪽이 위험하다. 키가 템플릿에 없으면 작업자가 채우지 않고, 값이 빈 채로
+  // **앱이 잘못 설정된 상태로 뜬다** (코드 리뷰 7).
+  //
+  // 걸러내는 기준은 이름 목록이 아니라 **규칙**이다: 앱 설정은 전부 `WF_` 접두사다
+  // (CLAUDE.md 5절). `WF_`가 아닌 것(프록시 등)은 빌드·인프라 배선이고 폐쇄망에서
+  // 채울 것이 아니다. 손으로 관리하는 제외 목록을 두지 않는다 (T-024).
+  const referenced = sh('docker', [...COMPOSE_ARGS, 'config', '--variables'], true)
+    .split(/\r?\n/)
+    .slice(1)
+    .map((l) => l.trim().split(/\s+/)[0])
+    .filter((n) => /^WF_[A-Z0-9_]*$/.test(n));
+
   const exampleComments = new Map<string, string>();
   {
     let pending: string[] = [];
     for (const line of readFileSync('.env.example', 'utf8').split('\n')) {
       if (line.startsWith('#')) pending.push(line);
-      else if (/^[A-Z_]+=/.test(line)) {
+      else if (/^[A-Z][A-Z0-9_]*=/.test(line)) {
         exampleComments.set(line.split('=')[0], pending.join('\n'));
         pending = [];
       } else pending = [];
     }
   }
-  const keys = [...referenced].sort();
+  const keys = [...new Set(referenced)].sort();
   const body = keys
     .map((k) => {
       const c = exampleComments.get(k);
@@ -112,10 +124,11 @@ function main(): void {
   );
   writeFileSync(join(out, 'LICENSES.txt'), `workfluence ${version} (${gitSha}) — production 의존성 ${components.length}개\n\n${lines.sort().join('\n')}\n`);
 
-  writeFileSync(join(out, 'MANIFEST.txt'), formatManifest({ version, gitSha, builtAt: new Date().toISOString(), images: [...IMAGES] }));
+  writeFileSync(join(out, 'MANIFEST.txt'), formatManifest({ version, gitSha, builtAt: new Date().toISOString(), images }));
 
   // 체크섬은 **마지막에**. SHA256SUMS 자신은 목록에 넣지 않는다
-  const files = readdirSync(out).filter((f) => f !== 'SHA256SUMS');
+  // 디렉토리는 건너뛴다. `readFileSync`가 디렉토리에서 `EISDIR`로 터진다
+  const files = readdirSync(out).filter((f) => f !== 'SHA256SUMS' && statSync(join(out, f)).isFile());
   writeFileSync(
     join(out, 'SHA256SUMS'),
     formatChecksums(files.sort().map((f) => ({ file: f, sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex') }))),
@@ -124,7 +137,7 @@ function main(): void {
   const missing = RELEASE_REQUIRED_FILES.filter((f) => !readdirSync(out).includes(f));
   if (missing.length) throw new Error(`묶음에 빠진 것이 있다: ${missing.join(', ')}`);
 
-  const bytes = readdirSync(out).reduce((n, f) => n + statSync(join(out, f)).size, 0);
+  const bytes = readdirSync(out).reduce((n, f) => n + (statSync(join(out, f)).isFile() ? statSync(join(out, f)).size : 0), 0);
   console.log(`[release] 완료 — ${readdirSync(out).length}개 파일 · ${(bytes / 1024 / 1024).toFixed(0)}MB`);
   console.log(`[release] 반입 직전·직후에 'pnpm release:verify ${out}'를 돌린다`);
 }

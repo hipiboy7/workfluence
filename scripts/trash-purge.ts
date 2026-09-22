@@ -2,7 +2,8 @@ import { SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
 import { rm } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
-import { databaseUrl, describeDatabaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { describeDatabaseUrl } from '../apps/api/src/common/db-url';
 import { blobPath } from '../apps/api/src/attachments/domain/blob-path';
 
 /**

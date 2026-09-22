@@ -43,19 +43,40 @@ export const BACKUP_REQUIRED_FILES = ['dump.pgc', 'attachments.tar', 'BACKUP.jso
  * SQL을 적어 넣으면 **복원할 때 DB 관리자 권한으로 실행된다.** 표 이름 같은 식별자는
  * 파일에서 오면 안 된다 — 우리가 정한 목록에서만 온다.
  *
- * 순서는 의미가 없다. 여기 없는 표는 백업 대조에 쓰이지 않는다(`sessions`처럼 복원 뒤
- * 달라지는 것이 정상인 표는 일부러 빼 두었다).
+ * 순서는 의미가 없다. **여기 없는 표는 대조되지 않는다** — `pg_dump`는 전부 담지만
+ * "복원 뒤에 그대로인지"를 확인하지 않으므로, 조용히 비어 있어도 알 수 없다.
+ * `sessions`만 일부러 뺐다. 복원 뒤 달라지는 것이 정상이고, 오히려 남아 있으면
+ * 옛 세션이 되살아나는 것이라 대조 대상이 아니다.
  */
 export const BACKUP_COUNTED_TABLES = [
   'users',
   'spaces',
+  'space_members',
+  'space_categories',
   'pages',
   'page_versions',
   'attachments',
   'comments',
+  'labels',
+  'page_labels',
   'audit_events',
   'notifications',
+  'settings',
 ] as const;
+
+/**
+ * **필수 파일이 체크섬 목록에 올라 있는지** 본다.
+ *
+ * 체크섬 검사는 "목록에 적힌 것"만 본다. 그래서 `SHA256SUMS`가 **비어 있으면 아무것도
+ * 검사하지 않고 통과한다** — 옮기다 잘린 체크섬 파일은 그 줄들을 잃은 채 통과한다.
+ * 실제로 `release-verify`가 `필수 9개 · 체크섬 0개 일치`로 종료 코드 0을 낼 수 있었다.
+ *
+ * **목록에 없는 것이 통과하는 검사는 검사하지 않는 것과 구분되지 않는다** (T-029와 같은 판단).
+ */
+export function unlistedRequired(expected: readonly ChecksumEntry[], required: readonly string[]): string[] {
+  const listed = new Set(expected.map((e) => e.file));
+  return required.filter((f) => !listed.has(f)).map((f) => `${f}: 체크섬 목록에 없다`);
+}
 
 /**
  * `BACKUP.json`에서 읽은 행 수를 **숫자로만** 받는다.
@@ -65,14 +86,26 @@ export const BACKUP_COUNTED_TABLES = [
  */
 export function backupCounts(raw: unknown): Record<string, number> {
   const src = (raw ?? {}) as Record<string, unknown>;
+  const known = new Set<string>(BACKUP_COUNTED_TABLES);
   const out: Record<string, number> = {};
+
+  // **모르는 이름은 거부한다.** 이것이 주입을 막는 곳이다 — 통과한 이름만 질의에 쓰인다
+  for (const k of Object.keys(src)) {
+    if (!known.has(k)) throw new Error(`BACKUP.json에 모르는 표 이름이 있다: ${JSON.stringify(k)}`);
+  }
+
+  // **없는 키는 대조하지 않는다.** 표 목록이 늘어난 뒤에도 예전 백업을 복원할 수 있어야
+  // 한다 — 여기서 실패시키면 "되살릴 수 있었던 백업"을 못 쓰게 만든다. 대조가 좁아지는
+  // 것은 조용한 실패가 아니다: 복원이 무엇을 대조했는지 출력한다
   for (const t of BACKUP_COUNTED_TABLES) {
+    if (!(t in src)) continue;
     const v = src[t];
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
       throw new Error(`BACKUP.json의 ${t} 행 수가 숫자가 아니다: ${JSON.stringify(v)}`);
     }
     out[t] = v;
   }
+  if (Object.keys(out).length === 0) throw new Error('BACKUP.json에 대조할 행 수가 하나도 없다');
   return out;
 }
 
@@ -108,8 +141,11 @@ export function parseChecksums(text: string): ChecksumEntry[] {
 export function verifyChecksums(expected: readonly ChecksumEntry[], actual: Record<string, string>): string[] {
   const problems: string[] = [];
   for (const e of expected) {
-    const got = actual[e.file];
-    if (got === undefined) problems.push(`${e.file}: 묶음에 없다`);
+    // **`Object.hasOwn`으로 본다.** 이름이 `__proto__`·`constructor`인 줄이 있으면 평범한
+    // 객체에서 **상속된 값**이 잡혀 `undefined`가 아니게 되고, 그 뒤 `.slice`에서 터진다.
+    // 이 입력은 반입 매체에서 온다 — 터지는 것보다 "묶음에 없다"로 말하는 것이 맞다
+    const got = Object.hasOwn(actual, e.file) ? actual[e.file] : undefined;
+    if (typeof got !== 'string') problems.push(`${e.file}: 묶음에 없다`);
     else if (got !== e.sha256) problems.push(`${e.file}: 체크섬이 다르다 (기대 ${e.sha256.slice(0, 12)}…, 실제 ${got.slice(0, 12)}…)`);
   }
   return problems;

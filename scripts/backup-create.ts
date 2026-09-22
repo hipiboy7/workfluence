@@ -15,15 +15,16 @@ import { join, resolve } from 'node:path';
  */
 const COMPOSE = ['compose', '-f', 'deploy/compose.yml', '--env-file', 'deploy/.env'];
 
-function dc(args: string[], opts: { capture?: boolean } = {}): Buffer {
+function dc(args: string[], opts: { capture?: boolean; input?: Buffer } = {}): Buffer {
   return execFileSync('docker', [...COMPOSE, ...args], {
+    input: opts.input,
     maxBuffer: 1024 * 1024 * 512,
-    stdio: opts.capture ? ['ignore', 'pipe', 'inherit'] : ['ignore', 'inherit', 'inherit'],
+    stdio: [opts.input ? 'pipe' : 'ignore', opts.capture ? 'pipe' : 'inherit', 'inherit'],
   }) as Buffer;
 }
 
 function psql(sql: string): string {
-  return dc(['exec', '-T', 'postgres', 'psql', '-U', 'workfluence', '-d', 'workfluence', '-tAc', sql], { capture: true })
+  return dc(['exec', '-T', 'postgres', 'psql', '-U', 'workfluence', '-d', 'workfluence', '-v', 'ON_ERROR_STOP=1', '-tAc', sql], { capture: true })
     .toString()
     .trim();
 }
@@ -58,6 +59,15 @@ function main(): void {
     join(out, 'BACKUP.json'),
     JSON.stringify({ createdAt: new Date().toISOString(), migrations: Number(migrations), counts }, null, 2) + '\n',
   );
+  // **떠 놓은 tar를 한 번 열어 본다.** 아카이브가 compose의 stdout을 타고 오므로,
+  // 무언가 섞이면 **추출할 때까지 모른다** — 조용히 깨지는 모양이다 (코드 리뷰 확인 필요 3)
+  const listed = dc(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'api', '-tf', '-'], {
+    capture: true,
+    input: readFileSync(join(out, 'attachments.tar')),
+  }).toString();
+  if (!listed.trim()) throw new Error('attachments.tar를 열 수 없거나 비어 있다. 백업을 믿을 수 없다');
+  console.log(`[backup] attachments.tar 확인 — 항목 ${listed.trim().split('\n').length}개`);
+
   const sums = BACKUP_REQUIRED_FILES.map((f) => ({
     file: f,
     sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex'),

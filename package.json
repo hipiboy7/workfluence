@@ -17,7 +17,7 @@
     "start": "pnpm --filter @workfluence/api start",
     "build:shared": "pnpm --filter @workfluence/shared build",
     "lint": "eslint .",
-    "typecheck": "pnpm build:shared && pnpm -r run typecheck",
+    "typecheck": "pnpm build:shared && pnpm -r run typecheck && pnpm typecheck:scripts",
     "test": "pnpm build:shared && pnpm -r run test",
     "test:cov": "pnpm build:shared && pnpm -r run test:cov",
     "test:e2e": "tsx scripts/e2e.ts",
@@ -34,7 +34,8 @@
     "release:bundle": "pnpm build:shared && tsx scripts/release-bundle.ts",
     "release:verify": "pnpm build:shared && tsx scripts/release-verify.ts",
     "load:test": "pnpm build:shared && tsx scripts/load-test.ts",
-    "licenses:check": "tsx scripts/check-licenses.ts"
+    "licenses:check": "tsx scripts/check-licenses.ts",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

@@ -1,4 +1,11 @@
-import { BACKUP_COUNTED_TABLES, BACKUP_REQUIRED_FILES, backupCounts, parseChecksums, verifyChecksums } from '@workfluence/shared';
+import {
+  BACKUP_COUNTED_TABLES,
+  BACKUP_REQUIRED_FILES,
+  backupCounts,
+  parseChecksums,
+  unlistedRequired,
+  verifyChecksums,
+} from '@workfluence/shared';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -25,7 +32,7 @@ function dc(args: string[], input?: Buffer, capture = false): string {
 }
 
 const psql = (sql: string) =>
-  dc(['exec', '-T', 'postgres', 'psql', '-U', 'workfluence', '-d', 'workfluence', '-tAc', sql], undefined, true).trim();
+  dc(['exec', '-T', 'postgres', 'psql', '-U', 'workfluence', '-d', 'workfluence', '-v', 'ON_ERROR_STOP=1', '-tAc', sql], undefined, true).trim();
 
 /**
  * 첨부 볼륨을 만지는 명령. **`exec api`를 쓰지 않는다.**
@@ -50,10 +57,9 @@ function main(): void {
   // 필수 파일이 **체크섬 목록에 올라 있는지도** 본다 — 목록에 없는 파일은 검사를 받지 않고
   // 통과하므로, 근거를 담은 파일이 빠져 있으면 대조 자체가 의미를 잃는다 (보안 검토 1)
   const expected = parseChecksums(readFileSync(join(dir, 'SHA256SUMS'), 'utf8'));
-  const listed = new Set(expected.map((e) => e.file));
-  const unlisted = BACKUP_REQUIRED_FILES.filter((f) => !listed.has(f));
+  const unlisted = unlistedRequired(expected, BACKUP_REQUIRED_FILES);
   if (unlisted.length) {
-    throw new Error(`백업의 필수 파일이 체크섬 목록에 없다: ${unlisted.join(', ')}. 검사받지 않은 파일로는 복원하지 않는다`);
+    throw new Error(`백업의 필수 파일이 검사받지 않는다:\n  ${unlisted.join('\n  ')}`);
   }
   const actual = Object.fromEntries(
     readdirSync(dir).map((f) => [f, createHash('sha256').update(readFileSync(join(dir, f))).digest('hex')]),
@@ -77,7 +83,13 @@ function main(): void {
     );
   }
 
-  dc(['exec', '-T', 'postgres', 'pg_restore', '-U', 'workfluence', '-d', 'workfluence', '--no-owner'], readFileSync(join(dir, 'dump.pgc')));
+  // **`--single-transaction --exit-on-error`.** 도중에 실패하면 **아무것도 들어가지 않는다.**
+  // 없으면 절반만 들어간 채로 끝나고, 그 뒤에는 "비어 있지 않다" 검사가 재시도를 막는다 —
+  // 되살릴 수 있었던 백업을 못 쓰게 만드는 길이다 (코드 리뷰 8)
+  dc(
+    ['exec', '-T', 'postgres', 'pg_restore', '-U', 'workfluence', '-d', 'workfluence', '--no-owner', '--single-transaction', '--exit-on-error'],
+    readFileSync(join(dir, 'dump.pgc')),
+  );
   inAttachments(['tar', '-xf', '-', '-C', '/data'], readFileSync(join(dir, 'attachments.tar')));
 
   // 대조 (FR-614). **백업 시점의 수치는 하한이다.**
@@ -95,8 +107,37 @@ function main(): void {
   // 가리키므로(FR-413) 행 수와 파일 수는 원래 다르다 — 그것을 불일치로 읽으면 매번 거짓 경보다
   const blobs = Number(psql(`SELECT count(DISTINCT sha256) FROM attachments WHERE deleted_at IS NULL`));
 
+  // **스키마 버전을 실제로 대조한다** (FR-611). 예전에는 `migrations`를 읽어 두고 **한 번도
+  // 보지 않았다** — 옛 백업을 새 스키마에 부으면 `pg_restore`는 성공하고 행 수도 맞는데
+  // 앱은 없는 컬럼을 찾는다. 그걸 잡을 단 하나의 신호를 모아 두고 버렸던 것이다 (코드 리뷰 2)
+  const restoredMigrations = Number(psql(`SELECT count(*) FROM drizzle.__drizzle_migrations`));
+  const expectedMigrations = Number.isInteger(meta.migrations) ? meta.migrations : null;
+
   console.log(`[restore] 행 수 대조: ${Object.entries(after).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+  console.log(
+    `[restore] 대조하지 않은 표: ${BACKUP_COUNTED_TABLES.filter((t) => !(t in meta.counts)).join(', ') || '없음'}`,
+  );
+  console.log(`[restore] 마이그레이션 — 백업 ${expectedMigrations ?? '(기록 없음)'}개 · 복원 후 ${restoredMigrations}개`);
   console.log(`[restore] 첨부 — DB가 가리키는 파일 ${blobs}개 · 디스크에 있는 파일 ${files}개`);
+  // **감사 기록을 여기서 남긴다 — 실패 전에.** 예전에는 대조 예외 뒤에 있었고, 그러면
+  // DB를 통째로 갈아 끼운 뒤에 **복원이 있었다는 사실이 아무 데도 남지 않았다.**
+  // 이 시스템에서 가장 파괴적인 관리자 작업이다 (6절) — 결과가 나쁘더라도 기록은 남는다
+  const verdict = {
+    from: dir,
+    migrations: { expected: expectedMigrations, restored: restoredMigrations },
+    missing: Object.fromEntries(missing),
+    extra: Object.fromEntries(extra),
+    attachments: { blobs, files },
+    comparedTables: Object.keys(meta.counts).length,
+  };
+  psql(`INSERT INTO audit_events (action, target_type, detail) VALUES ('backup.restore','system','${JSON.stringify(verdict).replace(/'/g, "''")}')`);
+
+  if (expectedMigrations !== null && restoredMigrations !== expectedMigrations) {
+    throw new Error(
+      `스키마 버전이 다르다: 백업은 마이그레이션 ${expectedMigrations}개, 복원 후 ${restoredMigrations}개. ` +
+        `옛 백업을 새 스키마에 부으면 행 수는 맞는데 앱이 없는 컬럼을 찾는다 — 'pnpm db:migrate'로 맞추고 다시 확인한다`,
+    );
+  }
   if (files < blobs) {
     throw new Error(`첨부 파일이 ${blobs - files}개 모자란다. DB는 있는데 실체가 없는 첨부가 생긴다`);
   }
@@ -114,8 +155,7 @@ function main(): void {
     console.log(`[restore] 참고: 백업 도중 들어온 쓰기 — ${extra.map(([t, n]) => `${t} ${n} → ${after[t]}`).join(', ')}`);
   }
 
-  psql(`INSERT INTO audit_events (action, target_type, detail) VALUES ('backup.restore','system','${JSON.stringify({ from: dir }).replace(/'/g, "''")}')`);
-  console.log('[restore] 완료 — 백업 시점의 행 수를 모두 채웠다');
+  console.log(`[restore] 완료 — 대조한 표 ${Object.keys(meta.counts).length}개의 행 수를 모두 채웠다`);
 }
 
 main();

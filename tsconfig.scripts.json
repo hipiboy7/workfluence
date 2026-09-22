@@ -1,0 +1,17 @@
+{
+  "//": "`scripts/**`는 `pnpm typecheck`가 보지 않는 곳이었다 — tsx는 실행할 때 타입을 보지 않고, lint는 문법만 본다. 그래서 없는 상수를 참조하는 코드가 검사를 통과했다 (코드 리뷰 13). 반입 도구 전부가 여기 있다. `module: esnext` + `moduleResolution: bundler`는 **tsx가 실제로 그렇게 동작하기 때문이다** — 스크립트는 `import.meta`를 쓰고 ESM 전용 의존성도 부른다.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@workfluence/shared": ["packages/shared/dist/index.d.ts"]
+    }
+  },
+  "include": ["scripts/**/*.ts"]
+}
