@@ -14,6 +14,7 @@ import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { LabelsModule } from './labels/labels.module';
+import { TemplatesModule } from './templates/templates.module';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
 import { SettingsModule } from './settings/settings.module';
@@ -65,6 +66,7 @@ function resolveWebDist(): string {
     CommentsModule,
     TrashModule,
     LabelsModule,
+    TemplatesModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

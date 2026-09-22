@@ -246,7 +246,7 @@ page_templates(
 | 페이지 보기 (`PageViewPage`) | "HTML로 내보내기" |
 | 이력 (`PageHistoryPage`) | 버전 둘을 골라 **나란히 비교** |
 | 페이지 만들기 | 템플릿 선택 (없으면 빈 문서) |
-| 관리 콘솔 | 템플릿 관리 |
+| 페이지 보기 (관리자) | **이 문서를 템플릿으로** 저장·목록·지우기. 별도 관리 화면을 두지 않는다 — 템플릿이 되는 것은 언제나 "잘 쓴 문서 하나"이고 그 판단은 그것을 보고 있을 때 내린다 |
 
 ---
 
@@ -263,7 +263,7 @@ page_templates(
 | WS 인증 | `apps/api/src/pages/collab/session-auth.ts` | B | 쿠키에서 세션을 읽고 경로의 uuid를 검사 |
 | 협업 게이트웨이 | `apps/api/src/pages/collab/collab.gateway.ts` | B | WS 중계·유휴 저장·상태 보관 |
 | 내보내기·비교 | `apps/api/src/pages/pages.service.ts` | B | HTML 응답·차이 계산 (컨트롤러는 `pages.module.ts`) |
-| 템플릿 | apps/api/src/templates/ | B | CRUD + 감사 기록 |
+| 템플릿 | `apps/api/src/templates/` | B | CRUD + 감사 기록 |
 | 메일 발송 | `apps/api/src/mail/` | B | 인터페이스 + 모의 + 사내 API 어댑터 + 멘션 배선 |
 | 화면 | `apps/web/src/pages/` | B | 위 F절 |
 

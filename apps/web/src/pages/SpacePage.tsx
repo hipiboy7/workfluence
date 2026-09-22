@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { PageSummary, SpaceMemberView, SpaceView } from '@workfluence/shared';
+import type { PageTemplateView, PageSummary, SpaceMemberView, SpaceView } from '@workfluence/shared';
 import { api } from '../api';
 import { EMPTY_DOC } from '../components/Editor';
 
@@ -13,6 +13,8 @@ export function SpacePage() {
   const [crew, setCrew] = useState<SpaceMemberView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
+  const [templates, setTemplates] = useState<PageTemplateView[]>([]);
+  const [templateId, setTemplateId] = useState('');
   const [username, setUsername] = useState('');
 
   const load = useCallback(() => {
@@ -26,6 +28,12 @@ export function SpacePage() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [id]);
   useEffect(load, [load]);
+  useEffect(() => {
+    // 목록이 없어도 페이지는 만들 수 있어야 한다. 실패를 화면 오류로 올리지 않는다
+    api<PageTemplateView[]>('/api/templates')
+      .then(setTemplates)
+      .catch(() => setTemplates([]));
+  }, []);
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -40,7 +48,10 @@ export function SpacePage() {
   const addPage = async (e: FormEvent) => {
     e.preventDefault();
     await act(async () => {
-      const p = await api<PageSummary>('/api/pages', { method: 'POST', json: { spaceId: id, title, content: EMPTY_DOC } });
+      // **템플릿을 고르면 그 내용으로 시작한다** (FR-741). 안 고르면 지금처럼 빈 문서다 —
+      // 기존 흐름을 깨지 않는 것이 이 기능의 조건이었다
+      const picked = templates.find((t) => t.id === templateId);
+      const p = await api<PageSummary>('/api/pages', { method: 'POST', json: { spaceId: id, title, content: picked?.content ?? EMPTY_DOC } });
       setTitle('');
       nav(`/pages/${p.id}/edit`);
     });
@@ -77,6 +88,20 @@ export function SpacePage() {
           <form onSubmit={addPage}>
             <label htmlFor="pg-title">새 페이지 제목</label>
             <input id="pg-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
+            {templates.length > 0 && (
+              <>
+                <label htmlFor="pg-template">템플릿</label>
+                <select id="pg-template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+                  <option value="">빈 문서로 시작</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {t.description ? ` — ${t.description}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <button type="submit">만들기</button>
           </form>
         )}
