@@ -15,6 +15,7 @@ import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
 import { PagesService } from './pages.service';
+import { CollabGateway } from './collab/collab.gateway';
 
 /** 페이지 API (P2_설계서_Page 3절). 권한은 스페이스 판정을 따른다 — 여기서 다시 판정하지 않는다 */
 @Controller('api/pages')
@@ -126,8 +127,9 @@ export class PagesController {
 }
 
 @Module({
-  providers: [PagesService],
+  providers: [PagesService, CollabGateway],
   controllers: [PagesController],
-  exports: [PagesService],
+  // 게이트웨이를 내보낸다 — `main.ts`가 HTTP 서버에 붙이고 정리 명령이 고아 상태를 지운다
+  exports: [PagesService, CollabGateway],
 })
 export class PagesModule {}

@@ -171,6 +171,23 @@ export class PagesService {
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
+  /**
+   * 실시간 편집의 자동 저장 (P6_설계서_Collab FR-706·712).
+   *
+   * **권한을 다시 보지 않는다.** WebSocket 업그레이드에서 이미 쓰기 권한을 판정했고
+   * (FR-703), 그 뒤로 그 연결은 닫히지 않는 한 같은 사람의 것이다. 여기서 또 보면
+   * "누구의 권한으로" 저장하는지가 애매해진다 — 자동 저장의 주체는 **마지막으로 고친
+   * 사람**이지 요청한 사람이 아니다.
+   *
+   * **충돌(409)을 보지 않는다.** 그것이 실시간 편집의 요지다 — Yjs가 이미 병합했고,
+   * 여기 오는 문서는 그 병합의 결과다. 대신 `FOR UPDATE`로 REST 저장과 줄을 세운다.
+   */
+  async saveCollabVersion(id: string, title: string, content: DocNode, actorId: string, tx: Db): Promise<PageRow> {
+    const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');
+    if (!locked) throw new NotFoundException('페이지를 찾을 수 없다');
+    return this.appendVersion(tx, locked, title, content, actorId);
+  }
+
   private async appendVersion(tx: Db, locked: PageRow, title: string, raw: DocNode, actorId: string): Promise<PageRow> {
     const nextNo = locked.currentVersionNo + 1;
     const content = stampSchemaVersion(raw);

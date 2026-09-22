@@ -258,8 +258,10 @@ page_templates(
 |---|---|---|---|
 | 문서 비교 | `packages/shared/src/diff.ts` | **A (신규)** | 문서 JSON 둘 → 블록·낱말 단위 차이. 순수 함수 |
 | HTML 렌더 | `packages/shared/src/html.ts` | **A (신규)** | 문서 JSON → HTML. 허용 목록·이스케이프 |
-| 실시간 상태 변환 | apps/api/src/pages/domain/realtime.ts | **A (신규)** | 버전을 만들지 말지 판정 (유휴·동일 내용·검증) |
-| 협업 게이트웨이 | apps/api/src/pages/collab.gateway.ts | B | WS 인증·중계·저장 |
+| 저장 판정 | `apps/api/src/pages/domain/realtime.ts` | **A (신규)** | 버전을 만들지 말지 판정 (유휴·동일 내용·검증) |
+| 상태↔JSON 변환 | `apps/api/src/pages/domain/ydoc.ts` | **A (신규)** | Yjs 상태와 정본 JSON 사이의 왕복 |
+| WS 인증 | `apps/api/src/pages/collab/session-auth.ts` | B | 쿠키에서 세션을 읽고 경로의 uuid를 검사 |
+| 협업 게이트웨이 | `apps/api/src/pages/collab/collab.gateway.ts` | B | WS 중계·유휴 저장·상태 보관 |
 | 내보내기 | apps/api/src/pages/export.controller.ts | B | HTML 응답 + 감사 기록 |
 | 템플릿 | apps/api/src/templates/ | B | CRUD + 감사 기록 |
 | 메일 발송 | apps/api/src/mail/ | B | 인터페이스 + 모의 + 사내 API 어댑터 |

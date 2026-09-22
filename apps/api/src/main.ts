@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import type { Server } from 'node:http';
+import { CollabGateway } from './pages/collab/collab.gateway';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import connectPgSimple from 'connect-pg-simple';
 import type { NextFunction, Request, Response } from 'express';
@@ -75,6 +77,11 @@ async function bootstrap(): Promise<void> {
   );
 
   await app.listen(env.WF_PORT, '0.0.0.0');
+
+  // **실시간 편집을 같은 HTTP 서버에 붙인다** (P6_설계서_Collab C.2절). 포트를 따로 열면
+  // nginx 설정이 둘이 되고 방화벽 규칙도 둘이 된다 — 폐쇄망에서 늘릴 이유가 없다.
+  // `listen` 뒤에 붙이는 것은 그때 서버 객체가 실제로 듣고 있기 때문이다
+  app.get(CollabGateway).attach(app.getHttpServer() as Server);
   logger.info({ port: env.WF_PORT, env: env.WF_ENV, serveWeb: env.WF_SERVE_WEB }, 'workfluence api 기동');
 }
 
