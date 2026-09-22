@@ -14,6 +14,7 @@ import {
 } from '@workfluence/shared';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
+import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
 import { pageVersions, pages, users, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
@@ -294,16 +295,20 @@ export class PagesService {
     return h;
   }
 
-  /** `search_text` 재생성 (FR-333). 파생 데이터는 언제든 다시 만들 수 있어야 한다 */
+  /**
+   * `search_text` 재생성 (FR-333). 파생 데이터는 언제든 다시 만들 수 있어야 한다.
+   *
+   * **정의는 `reindex.ts` 한 곳에 있다** — `pnpm search:reindex`와 같은 질의·같은 범위를
+   * 쓴다. 예전에는 둘이 따로 적혀 있었고, 어긋나도 아무도 못 봤다.
+   *
+   * **아직 운영 호출자가 없다.** 관리 화면에서 부를 자리가 설계에 있지만(FR-333) 화면이
+   * 없다. 실제 재색인 경로는 스크립트다 — 이 메서드의 커버리지는 "정의가 옳다"까지만
+   * 보증한다 (3절·보류 10).
+   */
   async reindexAll(): Promise<number> {
-    const rows = await this.db
-      .select({ id: pages.id, content: pageVersions.contentJson })
-      .from(pages)
-      .innerJoin(pageVersions, and(eq(pageVersions.pageId, pages.id), eq(pageVersions.versionNo, pages.currentVersionNo)))
-      .where(isNull(pages.deletedAt));
-    for (const r of rows) {
-      await this.db.update(pages).set({ searchText: extractText(r.content as DocNode) }).where(eq(pages.id, r.id));
-    }
-    return rows.length;
+    const rows = await this.db.execute<ReindexRow>(sql.raw(REINDEX_SELECT_SQL));
+    return reindexRows(rows.rows, (id, text) =>
+      this.db.update(pages).set({ searchText: text }).where(eq(pages.id, id)),
+    );
   }
 }

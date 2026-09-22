@@ -29,6 +29,9 @@ export default defineConfig({
     fileParallelism: false,
     coverage: {
       provider: 'v8',
+      // **검증기록의 표를 손으로 쓰지 않는다.** `coverage-summary.json`에서 뽑는다 —
+      // P4에서 손으로 적다가 브랜치 89.28%를 100%로 잘못 적었다
+      reporter: ['text', 'json-summary'],
       /**
        * **디렉토리를 열거하지 않는다.** 전부 넣고 뺄 것만 이름으로 뺀다.
        *
@@ -52,11 +55,13 @@ export default defineConfig({
         branches: 70,
         functions: 70,
         statements: 70,
-        // A등급은 90% (CLAUDE.md 3절). 디렉토리로 고정해 측정을 기계적으로 만든다
-        'src/auth/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
-        'src/pages/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
-        'src/attachments/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
-        'src/notifications/domain/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        // A등급은 90% (CLAUDE.md 3절). 디렉토리로 고정해 측정을 기계적으로 만든다.
+        // **`perFile`을 켠다** — shared와 같은 이유다. 합계로만 재면 새 domain 파일이 0%로
+        // 들어와도 옆 파일이 덮어 준다 (코드 리뷰 14)
+        'src/auth/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/pages/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/attachments/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/notifications/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

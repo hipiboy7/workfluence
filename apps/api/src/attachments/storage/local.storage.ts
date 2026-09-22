@@ -1,12 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { APP_ENV, REPO_ROOT, type AppEnvToken } from '../../config/config.module';
+import { blobPath } from '../domain/blob-path';
 import type { StorageProvider } from './storage.provider';
-
-/** 해시가 아닌 이름은 받지 않는다. 경로를 만드는 값이라 **여기서 한 번 더 막는다** (FR-412) */
-const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 /**
  * 로컬 디스크 구현 (P3_설계서_Content 3.1절).
@@ -29,9 +27,9 @@ export class LocalDiskStorage implements StorageProvider {
     this.root = isAbsolute(env.WF_STORAGE_PATH) ? env.WF_STORAGE_PATH : resolve(REPO_ROOT, env.WF_STORAGE_PATH);
   }
 
+  /** 자리 계산은 `domain/blob-path.ts` 한 곳이다. 정리 명령도 같은 함수를 쓴다 */
   private pathOf(sha256: string): string {
-    if (!SHA256_HEX.test(sha256)) throw new Error(`저장소 키가 SHA-256 16진수가 아니다: ${sha256}`);
-    return join(this.root, sha256.slice(0, 2), sha256);
+    return blobPath(this.root, sha256);
   }
 
   /**

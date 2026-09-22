@@ -1,8 +1,10 @@
 import { SETTINGS_KEYS, applyPolicy } from '@workfluence/shared';
 import { Client } from 'pg';
 import { rm } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
+import { describeDatabaseUrl } from '../apps/api/src/common/db-url';
+import { blobPath } from '../apps/api/src/attachments/domain/blob-path';
 
 /**
  * 휴지통 물리 삭제 (P4_설계서_Admin FR-515~517, `scope-definition` 위험 7).
@@ -22,7 +24,11 @@ import { databaseUrl, loadEnv } from '../apps/api/src/config/config.module';
  */
 async function main(): Promise<void> {
   const env = loadEnv();
-  const c = new Client(databaseUrl(env));
+  const url = databaseUrl(env);
+  // **어디를 만지는지 먼저 말한다.** `.env`가 가리키는 곳으로 붙으므로,
+  // 컨테이너 DB를 기대하고 불렀는데 개발 DB를 만지는 일이 조용히 일어날 수 있다
+  console.log(`[purge] 대상 DB: ${describeDatabaseUrl(url)}`);
+  const c = new Client(url);
   await c.connect();
   try {
     // 정책값은 DB가 이긴다 (FR-527). 없으면 환경변수, 그것도 없으면 코드 기본값
@@ -111,7 +117,8 @@ async function main(): Promise<void> {
     for (const sha of shas) {
       const still = await c.query('SELECT 1 FROM attachments WHERE sha256 = $1 LIMIT 1', [sha]);
       if (still.rowCount) continue;
-      await rm(join(root, sha.slice(0, 2), sha), { force: true });
+      // 자리 계산은 앱과 **같은 함수**를 쓴다. 따로 적으면 한쪽만 바뀌어도 아무도 못 본다
+      await rm(blobPath(root, sha), { force: true });
       files += 1;
     }
 

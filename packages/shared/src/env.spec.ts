@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ENV_KEYS, EnvValidationError, extractEnvExampleKeys, parseEnv } from './env';
+import { ENV_KEYS, EnvValidationError, extractEnvExampleKeys, parseDotenv, parseEnv } from './env';
 
 /** 필수 키 최소 집합. Phase 1에서 세션 서명 키와 최초 계정 비밀번호가 필수로 늘었다. */
 const valid = {
@@ -118,5 +118,48 @@ describe('.env.example ↔ 스키마 키 집합 (FR-015)', () => {
 
   it('extractEnvExampleKeys는 주석·빈 줄을 무시한다', () => {
     expect(extractEnvExampleKeys('# c\n\nA=1\n  B = 2 \n#D=4')).toEqual(['A', 'B']);
+  });
+});
+
+/**
+ * `parseDotenv`는 **테스트가 없었다** (P5 검증에서 발견).
+ *
+ * 하필 이 함수의 주석에 "앱·`check:env`·`dev:db`가 각자 파싱하고 있었고, 따옴표 처리를
+ * 한 곳만 고쳤다가 `pnpm check:env`가 조용히 깨졌다"고 적혀 있다. 한 곳으로 모으는 것까지
+ * 하고 **거기에 테스트를 두는 것을 안 했다** — 합계 커버리지가 90%를 넘겨 관문이 초록이었다.
+ */
+describe('parseDotenv', () => {
+  it('키=값을 읽고 앞뒤 공백을 버린다', () => {
+    expect(parseDotenv('A=1\n  B = 2  ')).toEqual({ A: '1', B: '2' });
+  });
+
+  it('주석과 빈 줄을 건너뛴다', () => {
+    expect(parseDotenv('# 설명\n\nA=1\n#B=2')).toEqual({ A: '1' });
+  });
+
+  it('**따옴표를 벗긴다** — 홑·겹 둘 다. 짝이 맞을 때만', () => {
+    expect(parseDotenv(`A="1"\nB='2'\nC="3\nD=4"`)).toEqual({ A: '1', B: '2', C: '"3', D: '4"' });
+  });
+
+  it('JSON 값이 홑따옴표로 감싸여 와도 안쪽은 그대로 남는다 — 셸에서 `source`하기 위한 규칙이다', () => {
+    expect(parseDotenv(`WF_OIDC_ROLE_MAP='{"wf-users":"member"}'`)).toEqual({
+      WF_OIDC_ROLE_MAP: '{"wf-users":"member"}',
+    });
+  });
+
+  it('값에 `=`가 들어 있어도 **첫 `=`에서만** 자른다 — 비밀번호나 base64가 그렇다', () => {
+    expect(parseDotenv('WF_SESSION_SECRET=a=b=c')).toEqual({ WF_SESSION_SECRET: 'a=b=c' });
+  });
+
+  it('`=`가 없는 줄과 `=`로 시작하는 줄은 버린다', () => {
+    expect(parseDotenv('그냥글자\n=값만있다\nA=1')).toEqual({ A: '1' });
+  });
+
+  it('값이 비어 있어도 키는 남는다 — "비워 뒀다"와 "안 적었다"는 다르다', () => {
+    expect(parseDotenv('A=\nB=1')).toEqual({ A: '', B: '1' });
+  });
+
+  it('줄바꿈이 CRLF여도 같게 읽는다', () => {
+    expect(parseDotenv('A=1\r\nB=2\r\n')).toEqual({ A: '1', B: '2' });
   });
 });

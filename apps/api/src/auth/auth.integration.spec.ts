@@ -7,7 +7,7 @@ import { SpacesService } from '../spaces/spaces.service';
 import { loadEnv } from '../config/config.module';
 import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
-import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
+import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { AuthService } from './auth.service';
 import { DEV_IDENTITY, encodeMockCode } from './oidc/mock.provider';
 import type { OidcProvider } from './oidc/oidc.provider';
@@ -401,5 +401,42 @@ describe('역할 (FR-232, FR-233)', () => {
   it('자기 자신의 역할은 바꿀 수 없다', async () => {
     const alice = await approvedAlice();
     await expect(usersSvc.changeRole(alice.id, 'admin', { id: alice.id, role: 'root' })).rejects.toThrow(/자기 자신/);
+  });
+});
+
+/**
+ * **풀 크기보다 많은 동시 로그인** (T-026).
+ *
+ * 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면, 동시 요청이 풀 크기에 닿는 순간
+ * 열려 있는 트랜잭션끼리 서로의 연결을 기다려 **영원히 풀리지 않는다.** 부하 측정에서
+ * 실제로 앱 전체가 멈췄다.
+ *
+ * **동시 요청 수를 풀 크기에서 계산한다.** 숫자를 직접 적어 두면 누가 풀을 키웠을 때
+ * 결함이 되살아난 채로 테스트가 초록이 된다 — 두 숫자가 묶여 있지 않으면 조용히
+ * 무장해제된다 (코드 리뷰 5).
+ *
+ * 이 테스트는 **느려지면 실패한다.** 데드락은 오류를 내지 않고 조용히 멈추기 때문에
+ * "던졌더니 다 돌아왔다"를 시간 안에 확인하는 것 말고는 잡을 방법이 없다.
+ */
+describe('동시 로그인이 연결 풀을 잠그지 않는다 (T-026)', () => {
+  const CONCURRENT = TEST_POOL_MAX * 2;
+
+  it('풀 크기의 두 배를 동시에 던져도 전부 돌아온다', { timeout: 20_000 }, async () => {
+    // 설정이 흘러가 버리면 이 테스트는 아무것도 재현하지 않는다
+    expect(CONCURRENT).toBeGreaterThan(TEST_POOL_MAX);
+    await approvedAlice();
+    const results = await Promise.all(
+      Array.from({ length: CONCURRENT }, () => auth.login({ username: 'alice', password: SIGNUP.password })),
+    );
+    expect(results).toHaveLength(CONCURRENT);
+    expect(results.every((u) => u.username === 'alice')).toBe(true);
+  });
+
+  it('실패하는 로그인도 마찬가지다 — 실패 경로는 갱신까지 해서 더 오래 잡는다', { timeout: 20_000 }, async () => {
+    await approvedAlice();
+    const settled = await Promise.allSettled(
+      Array.from({ length: CONCURRENT }, () => auth.login({ username: 'alice', password: 'wrong-password' })),
+    );
+    expect(settled.every((r) => r.status === 'rejected')).toBe(true);
   });
 });

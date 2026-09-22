@@ -62,7 +62,7 @@
 | FR-305 | 개인 스페이스는 Crew를 두지 않는다. 소유자와 admin만 본다 | `spaceAccess` |
 | FR-306 | 상태는 `active`·`suspended`. 중지된 스페이스는 읽기만 된다 | |
 | FR-307 | 삭제는 soft delete. **Crew가 둘 이상이면 소유자도 지울 수 없다** | `spaceAccess.canDelete` |
-| FR-308 | 카테고리는 이름 유일. 생성은 `category.create` 권한 | |
+| FR-308 | 카테고리는 이름 유일. 생성은 `category.create` 권한. **이미 있는 이름으로 만들면 409가 아니라 그 카테고리를 돌려준다**(멱등) — 화면에서는 "만들거나 고른다"가 한 동작이고, 두 사람이 같은 이름을 동시에 넣었을 때 한쪽만 실패할 이유가 없다 (문구 정정 2026-09-22, P5 FR-627) | |
 | FR-309 | **사용자 승인 시 개인 스페이스를 자동 생성한다** | 쟁점 3 |
 | FR-310 | 스페이스 목록은 `scope`(personal/team/all)로 거른다. `all`은 `space.manage` 권한자만 | |
 | FR-311 | Crew 추가·역할 변경·제거는 `canManageMembers`가 참일 때만 | |
