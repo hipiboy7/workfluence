@@ -17,6 +17,7 @@ import {
 } from '@workfluence/shared';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
+import type { MentionOutcome } from '../notifications/notifications.service';
 import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
 import { pageVersions, pages, spaces, users, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -134,7 +135,7 @@ export class PagesService {
   }
 
   /** 저장 (FR-322, FR-323). 호출부가 트랜잭션을 준다 — 감사 기록과 같은 트랜잭션이어야 한다 */
-  async update(id: string, dto: UpdatePageDto, principal: Principal, tx: Db): Promise<PageView> {
+  async update(id: string, dto: UpdatePageDto, principal: Principal, tx: Db, onMentions?: (m: MentionOutcome) => void): Promise<PageView> {
     const current = await this.row(id, tx);
     await this.spaces.assertWrite(current.spaceId, principal, tx);
 
@@ -160,7 +161,9 @@ export class PagesService {
     // 본문의 멘션도 알림을 만든다 (FR-500 — 설계서는 "댓글·페이지 본문 둘 다"다).
     // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다.
     // **직전 내용을 함께 넘겨 새로 생긴 멘션만 부른다** (코드 리뷰 6)
-    await this.notifications.notifyMentions(
+    // **부른 사람들을 호출부에 넘긴다.** 메일은 커밋 뒤에 보내야 한다 (FR-754) —
+    // 여기서 보내면 트랜잭션이 남의 서버를 기다리고, 롤백되면 없던 일에 대한 메일이 나간다
+    const mentions = await this.notifications.notifyMentions(
       {
         doc: content,
         pageId: page.id,
@@ -171,6 +174,7 @@ export class PagesService {
       },
       tx,
     );
+    onMentions?.(mentions);
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 

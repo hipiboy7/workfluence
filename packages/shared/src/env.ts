@@ -116,6 +116,11 @@ export const envSchema = z
     WF_MAIL_API_URL: z.string().default(''),
     WF_MAIL_API_TOKEN: z.string().default(''),
     WF_MAIL_FROM: z.string().default(''),
+    /**
+     * 사람이 눌러서 들어올 주소. **메일에 링크를 넣으려면 서버가 자기 주소를 알아야 한다** —
+     * 요청 헤더로 조립하지 않는다 (9.1절 `redirect_uri`와 같은 판단: 헤더는 위조된다)
+     */
+    WF_PUBLIC_URL: z.string().default(''),
   })
   .strict();
 

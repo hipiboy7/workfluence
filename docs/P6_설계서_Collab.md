@@ -264,7 +264,7 @@ page_templates(
 | 협업 게이트웨이 | `apps/api/src/pages/collab/collab.gateway.ts` | B | WS 중계·유휴 저장·상태 보관 |
 | 내보내기·비교 | `apps/api/src/pages/pages.service.ts` | B | HTML 응답·차이 계산 (컨트롤러는 `pages.module.ts`) |
 | 템플릿 | apps/api/src/templates/ | B | CRUD + 감사 기록 |
-| 메일 발송 | apps/api/src/mail/ | B | 인터페이스 + 모의 + 사내 API 어댑터 |
+| 메일 발송 | `apps/api/src/mail/` | B | 인터페이스 + 모의 + 사내 API 어댑터 + 멘션 배선 |
 | 화면 | `apps/web/src/pages/` | B | 위 F절 |
 
 ---
@@ -281,6 +281,7 @@ page_templates(
 | `WF_MAIL_API_URL` | (없음) | 사내 메일 API 주소 |
 | `WF_MAIL_API_TOKEN` | (없음) | 그 API의 인증 토큰 |
 | `WF_MAIL_FROM` | (없음) | 보내는 주소 |
+| `WF_PUBLIC_URL` | (없음) | 메일 링크에 쓸 주소. **요청 헤더로 조립하지 않는다** — 헤더는 위조된다 (9.1절 `redirect_uri`와 같은 판단) |
 
 기본값을 **끄는 쪽으로** 둔 것은 메일뿐이다. 주소도 토큰도 모르는 상태에서 켜져 있으면
 기동은 되고 발송만 조용히 실패한다.

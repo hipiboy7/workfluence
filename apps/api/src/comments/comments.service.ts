@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { can, stampSchemaVersion, type CommentView, type CreateCommentDto, type DocNode, type Principal, type UpdateCommentDto } from '@workfluence/shared';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
+import type { MentionOutcome } from '../notifications/notifications.service';
 import { comments, pages, users, type CommentRow, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
@@ -57,7 +58,7 @@ export class CommentsService {
     return Promise.all(rows.map((r) => this.view(r, principal, canModerate, tx)));
   }
 
-  async create(pageId: string, dto: CreateCommentDto, principal: Principal, tx: Db = this.db): Promise<CommentView> {
+  async create(pageId: string, dto: CreateCommentDto, principal: Principal, tx: Db = this.db, onMentions?: (m: MentionOutcome) => void): Promise<CommentView> {
     const page = await this.page(pageId, tx);
     const ctx = await this.spaces.assertWrite(page.spaceId, principal, tx);
 
@@ -73,11 +74,13 @@ export class CommentsService {
       // 페이지와 같은 이유로 **서버가 버전을 찍는다** (P2 자체 점검 #2). 클라이언트가 빠뜨려도 정본에는 남는다
       .values({ pageId, parentId: dto.parentId ?? null, bodyJson: stampSchemaVersion(dto.body), createdBy: principal.id })
       .returning();
-    // 멘션 알림은 **같은 트랜잭션**이다 — 댓글이 롤백되면 알림도 롤백돼야 한다
-    await this.notifications.notifyMentions(
+    // 멘션 알림은 **같은 트랜잭션**이다 — 댓글이 롤백되면 알림도 롤백돼야 한다.
+    // **메일만 밖으로 뺀다** (FR-754): 부른 사람들을 호출부에 넘기고 커밋 뒤에 보낸다
+    const mentions = await this.notifications.notifyMentions(
       { doc: dto.body, pageId, commentId: row.id, spaceId: page.spaceId, actorId: principal.id },
       tx,
     );
+    onMentions?.(mentions);
     return this.view(row, principal, this.moderates(ctx.access, principal), tx);
   }
 

@@ -20,6 +20,20 @@ export interface NotificationChannel {
   send(drafts: NotificationDraft[], tx: Db): Promise<void>;
 }
 
+/**
+ * 부른 사람들 — **커밋 뒤에** 메일을 보내려고 돌려준다 (FR-754).
+ *
+ * 외부 호출을 트랜잭션 안에 두면 연결을 쥔 채 남의 서버를 기다린다 (T-026과 같은 모양).
+ * 게다가 롤백되면 **없던 일에 대한 메일이 나간다** — 메일은 되돌릴 수 없다.
+ */
+export type MentionOutcome = {
+  count: number;
+  pageId: string;
+  commentId: string | null;
+  /** email이 있는 사람만. 없는 계정은 앱 안 알림함으로만 받는다 */
+  recipients: { email: string; displayName: string }[];
+};
+
 /** 앱 안 알림함. 받는 사람이 화면에서 본다 */
 @Injectable()
 export class InAppChannel implements NotificationChannel {
@@ -57,7 +71,7 @@ export class NotificationsService {
       previousDoc?: DocNode | null;
     },
     tx: Db = this.db,
-  ): Promise<number> {
+  ): Promise<MentionOutcome> {
     let names = extractMentions(args.doc);
     if (args.previousDoc) {
       // **이미 불렸던 사람을 저장할 때마다 다시 부르지 않는다.** 오타 하나 고치려고 여섯 번
@@ -65,31 +79,34 @@ export class NotificationsService {
       const before = new Set(extractMentions(args.previousDoc));
       names = names.filter((n) => !before.has(n));
     }
-    if (names.length === 0) return 0;
+    const none: MentionOutcome = { count: 0, pageId: args.pageId, commentId: args.commentId ?? null, recipients: [] };
+    if (names.length === 0) return none;
 
     const mentioned = await tx.query.users.findMany({ where: inArray(users.username, names) });
     // 자기 자신은 부르지 않는다 (FR-503)
     const candidates = mentioned.filter((u) => u.id !== args.actorId && u.status === 'active');
-    if (candidates.length === 0) return 0;
+    if (candidates.length === 0) return none;
 
     const space = await tx.query.spaces.findFirst({ where: and(eq(spaces.id, args.spaceId), isNull(spaces.deletedAt)) });
-    if (!space) return 0;
+    if (!space) return none;
 
     const members = await tx.query.spaceMembers.findMany({ where: eq(spaceMembers.spaceId, args.spaceId) });
     const n = members.length; // 같은 것을 두 번 세지 않는다
     const like = { ...space, kind: space.kind as SpaceRow['kind'] & ('personal' | 'team'), status: space.status as 'active' | 'suspended' };
 
     const drafts: NotificationDraft[] = [];
+    const recipients: { email: string; displayName: string }[] = [];
     for (const u of candidates) {
       const principal: Principal = { id: u.id, role: u.role as Role };
       const membership = (members.find((m) => m.userId === u.id)?.role as SpaceMemberRole | undefined) ?? null;
       // 판정은 `shared`의 한 함수가 한다 — 여기서 다시 구현하면 검색·목록과 어긋난다
       if (!spaceAccess(principal, { kind: like.kind, status: like.status, createdBy: space.createdBy }, membership, n).canRead) continue;
       drafts.push({ userId: u.id, kind: 'mention', pageId: args.pageId, commentId: args.commentId ?? null, actorId: args.actorId });
+      if (u.email) recipients.push({ email: u.email, displayName: u.displayName });
     }
 
     await this.channel.send(drafts, tx);
-    return drafts.length;
+    return { count: drafts.length, pageId: args.pageId, commentId: args.commentId ?? null, recipients };
   }
 
   /**

@@ -17,6 +17,8 @@ import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
 import { PagesService } from './pages.service';
 import { CollabGateway } from './collab/collab.gateway';
+import { MentionMailService } from '../mail/mention-mail.service';
+import type { MentionOutcome } from '../notifications/notifications.service';
 
 /** 페이지 API (P2_설계서_Page 3절). 권한은 스페이스 판정을 따른다 — 여기서 다시 판정하지 않는다 */
 @Controller('api/pages')
@@ -26,6 +28,7 @@ export class PagesController {
     private readonly pages: PagesService,
     private readonly audit: AuditService,
     private readonly collab: CollabGateway,
+    private readonly mentionMail: MentionMailService,
     @Inject(DB) private readonly db: Db,
   ) {}
 
@@ -57,20 +60,25 @@ export class PagesController {
   }
 
   @Patch(':id')
-  update(
+  async update(
     @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(updatePageDto)) dto: ReturnType<typeof updatePageDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<PageView> {
-    return this.db.transaction(async (tx) => {
-      const page = await this.pages.update(id, dto, me, tx);
+    let mentions: MentionOutcome | null = null;
+    const page = await this.db.transaction(async (tx) => {
+      const p = await this.pages.update(id, dto, me, tx, (m) => (mentions = m));
       await this.audit.record(
-        { action: 'page.update', actorId: me.id, targetType: 'page', targetId: id, detail: { versionNo: page.currentVersionNo }, ip: req.ip },
+        { action: 'page.update', actorId: me.id, targetType: 'page', targetId: id, detail: { versionNo: p.currentVersionNo }, ip: req.ip },
         tx,
       );
-      return page;
+      return p;
     });
+    // **커밋된 뒤에 보낸다** (FR-754). 기다리지 않는다 — 메일이 느려도 저장 응답은 나가야 한다.
+    // 실패해도 던지지 않는 것은 `MentionMailService`가 보장한다 (FR-753)
+    if (mentions) void this.mentionMail.notify(mentions, me.displayName, page.title);
+    return page;
   }
 
   @Patch(':id/move')
