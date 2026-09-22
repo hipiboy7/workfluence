@@ -1,6 +1,6 @@
 # P5_검증기록_Release — 운영화·반입 검증
 
-작성 2026-09-22. 대상 브랜치 `impl-phase5`. 설계서는 [`docs/P5_설계서_Release.md`](P5_설계서_Release.md).
+작성 2026-09-22. 대상 브랜치 `impl-phase5` → **`main`에 병합됨** (`cb9c2e5`, `--no-ff`). 설계서는 [`docs/P5_설계서_Release.md`](P5_설계서_Release.md).
 
 > **시행착오의 경위는 여기 쓰지 않는다** (CLAUDE.md 4절). `docs/internal/검토서_트러블슈팅.md`의
 > T-025·T-026·T-027·T-028을 가리킨다.
