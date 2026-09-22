@@ -1,12 +1,15 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   PAGE_TREE_MAX_DEPTH,
+  diffDocs,
   extractText,
+  renderExportDocument,
   stampSchemaVersion,
   type CreatePageDto,
   type DocNode,
   type MovePageDto,
   type PageSummary,
+  type PageDiffView,
   type PageVersionView,
   type PageView,
   type Principal,
@@ -15,7 +18,7 @@ import {
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
-import { pageVersions, pages, users, type PageRow } from '../db/schema';
+import { pageVersions, pages, spaces, users, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { checkMove, type TreeNode } from './domain/tree';
@@ -199,6 +202,45 @@ export class PagesService {
       .where(eq(pages.id, locked.id))
       .returning();
     return page;
+  }
+
+  /**
+   * 두 버전의 차이 (FR-720~726).
+   *
+   * 비교 자체는 `packages/shared`의 순수 함수가 한다. 여기서는 **권한과 조회**만 본다 —
+   * 읽을 수 있어야 하고(FR-737과 같은 판정), 두 버전이 다 있어야 한다.
+   */
+  async diff(id: string, from: number, to: number, principal: Principal): Promise<PageDiffView> {
+    const [a, b] = await Promise.all([this.version(id, from, principal), this.version(id, to, principal)]);
+    return {
+      from: { versionNo: a.versionNo, title: a.title, createdByName: a.createdByName, createdAt: a.createdAt },
+      to: { versionNo: b.versionNo, title: b.title, createdByName: b.createdByName, createdAt: b.createdAt },
+      titleChanged: a.title !== b.title,
+      diff: diffDocs(a.content, b.content),
+    };
+  }
+
+  /**
+   * 내보낼 HTML (FR-730~737).
+   *
+   * **읽기 권한과 같은 판정이다** (FR-737) — `get`이 그것을 한다. 버전을 주면 그 버전을,
+   * 안 주면 지금 것을 낸다.
+   */
+  async exportHtml(id: string, principal: Principal, versionNo?: number): Promise<{ filename: string; html: string; versionNo: number }> {
+    const page = await this.get(id, principal);
+    const target = versionNo === undefined ? null : await this.version(id, versionNo, principal);
+    const space = await this.db.query.spaces.findFirst({ where: eq(spaces.id, page.spaceId) });
+    const html = renderExportDocument({
+      title: target?.title ?? page.title,
+      doc: target?.content ?? page.content,
+      exportedAt: new Date().toISOString(),
+      spaceName: space?.name,
+      versionNo: target?.versionNo ?? page.currentVersionNo,
+    });
+    // **파일 이름에 제목을 그대로 쓰지 않는다.** 경로 구분자나 제어문자가 들어가면
+    // 내려받는 쪽에서 엉뚱한 곳에 저장된다. 안전한 글자만 남기고 비면 페이지 id를 쓴다
+    const safe = (target?.title ?? page.title).replace(/[^\p{L}\p{N}._-]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+    return { filename: `${safe || page.id}.html`, html, versionNo: target?.versionNo ?? page.currentVersionNo };
   }
 
   async versions(id: string, principal: Principal): Promise<PageVersionView[]> {

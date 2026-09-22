@@ -262,7 +262,7 @@ page_templates(
 | 상태↔JSON 변환 | `apps/api/src/pages/domain/ydoc.ts` | **A (신규)** | Yjs 상태와 정본 JSON 사이의 왕복 |
 | WS 인증 | `apps/api/src/pages/collab/session-auth.ts` | B | 쿠키에서 세션을 읽고 경로의 uuid를 검사 |
 | 협업 게이트웨이 | `apps/api/src/pages/collab/collab.gateway.ts` | B | WS 중계·유휴 저장·상태 보관 |
-| 내보내기 | apps/api/src/pages/export.controller.ts | B | HTML 응답 + 감사 기록 |
+| 내보내기·비교 | `apps/api/src/pages/pages.service.ts` | B | HTML 응답·차이 계산 (컨트롤러는 `pages.module.ts`) |
 | 템플릿 | apps/api/src/templates/ | B | CRUD + 감사 기록 |
 | 메일 발송 | apps/api/src/mail/ | B | 인터페이스 + 모의 + 사내 API 어댑터 |
 | 화면 | `apps/web/src/pages/` | B | 위 F절 |

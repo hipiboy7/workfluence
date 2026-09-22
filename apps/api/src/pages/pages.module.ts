@@ -1,14 +1,15 @@
-import { Body, Controller, Delete, Get, Inject, Module, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Module, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import {
   createPageDto,
   movePageDto,
   updatePageDto,
   type DocNode,
   type PageSummary,
+  type PageDiffView,
   type PageVersionView,
   type PageView,
 } from '@workfluence/shared';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
 import { UuidPipe } from '../common/uuid.pipe';
@@ -106,6 +107,45 @@ export class PagesController {
     @CurrentUser() me: SessionUser,
   ): Promise<PageVersionView & { content: DocNode }> {
     return this.pages.version(id, no, me);
+  }
+
+  /** 두 버전의 차이 (FR-720). 읽을 수 있으면 볼 수 있다 */
+  @Get(':id/versions/:a/diff/:b')
+  diff(
+    @Param('id', UuidPipe) id: string,
+    @Param('a', ParseIntPipe) a: number,
+    @Param('b', ParseIntPipe) b: number,
+    @CurrentUser() me: SessionUser,
+  ): Promise<PageDiffView> {
+    return this.pages.diff(id, a, b, me);
+  }
+
+  /**
+   * HTML 한 파일로 내보낸다 (FR-730~737).
+   *
+   * **감사로그에 남긴다** (FR-736). 문서가 앱 밖으로 나가는 경로라 "누가 언제 무엇을"이
+   * 남아야 한다 — 첨부 다운로드를 남기는 것과 같은 판단이다 (6절).
+   */
+  @Get(':id/export')
+  async exportHtml(
+    @Param('id', UuidPipe) id: string,
+    @Query('versionNo') versionNo: string | undefined,
+    @CurrentUser() me: SessionUser,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const no = versionNo === undefined ? undefined : Number(versionNo);
+    if (no !== undefined && !Number.isInteger(no)) throw new BadRequestException('versionNo는 정수다');
+    const out = await this.pages.exportHtml(id, me, no);
+    await this.audit.record({ action: 'page.export', actorId: me.id, targetType: 'page', targetId: id, detail: { versionNo: out.versionNo }, ip: req.ip });
+    res
+      .status(200)
+      .setHeader('Content-Type', 'text/html; charset=utf-8')
+      // **파일로 받게 한다.** 브라우저가 열어 버리면 내보낸 문서가 우리 오리진에서
+      // 실행되는 셈이고, 그러면 본문이 우리 CSP 안에서 도는 길이 생긴다
+      .setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}`)
+      .setHeader('Cache-Control', 'no-store')
+      .send(out.html);
   }
 
   @Post(':id/versions/:no/restore')

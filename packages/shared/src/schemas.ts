@@ -1,3 +1,4 @@
+import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
@@ -285,6 +286,14 @@ export type PageVersionView = {
   createdByName: string;
   createdAt: string;
 };
+/** 두 버전을 나란히 볼 때 화면이 받는 것 (P6_설계서_Collab FR-720) */
+export type PageDiffView = {
+  from: { versionNo: number; title: string; createdByName: string; createdAt: string };
+  to: { versionNo: number; title: string; createdByName: string; createdAt: string };
+  titleChanged: boolean;
+  diff: DocDiff;
+};
+
 export type AttachmentView = {
   id: string;
   pageId: string;
