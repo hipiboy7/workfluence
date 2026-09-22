@@ -358,6 +358,12 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://localhost:8443 
 | 무엇 | 전 | 후 |
 |---|---|---|
 | 재색인 | `PagesService.reindexAll`(drizzle)과 `scripts/reindex.ts`(`pg`)가 **각자 질의를 적었다** | 질의·범위를 `apps/api/src/pages/reindex.ts`에. 실행 방법만 둘 |
+
+> **`PagesService.reindexAll`에는 아직 운영 호출자가 없다** (자체 점검 지적). 관리 화면에서
+> 부를 자리(FR-333)가 설계에 있지만 화면이 없다. 실제 재색인 경로는 `pnpm search:reindex`다.
+> **호출자 없는 코드의 커버리지는 품질 근거가 아니다** (3절·보류 10) — 이 파일이 100%인
+> 것은 "정의가 옳다"는 뜻이지 "재색인이 동작한다"는 뜻이 아니다. 동작은 스크립트 쪽으로
+> 확인해야 하고, **그쪽에는 테스트가 없다.** 화면이 붙는 Phase에서 다시 측정한다.
 | 첨부 블롭 경로 | `LocalDiskStorage`와 `scripts/trash-purge.ts`가 각자 `<앞2자>/<해시>`를 만들었다 | `apps/api/src/attachments/domain/blob-path.ts` (A등급, 100%) |
 
 ---
