@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { type DocNode, type Principal } from '@workfluence/shared';
-import { and, eq, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -32,9 +32,6 @@ import { readPageId, readSessionId } from './session-auth';
 
 const MSG_UPDATE = 0;
 const MSG_AWARENESS = 1;
-
-/** 실시간 상태가 이만큼 오래 손대지 않았으면 고아로 본다 (FR-710의 뒷정리) */
-const ORPHAN_AFTER_HOURS = 24;
 
 type Member = { socket: WebSocket; principal: Principal; name: string };
 
@@ -288,17 +285,6 @@ export class CollabGateway implements OnModuleDestroy {
     if (room.members.size > 0) return; // 저장하는 사이에 누가 들어왔다
     this.rooms.delete(pageId);
     await this.db.delete(pageRealtime).where(eq(pageRealtime.pageId, pageId));
-  }
-
-  /**
-   * 오래된 고아 상태를 지운다. 프로세스가 죽으면 상태가 남는데, 그 자체는 문제가
-   * 아니지만(다음에 열면 이어진다) **영구히 쌓이는 것**은 막아야 한다.
-   * `pnpm trash:purge`가 부른다.
-   */
-  async purgeOrphanState(hours = ORPHAN_AFTER_HOURS): Promise<number> {
-    const cutoff = new Date(Date.now() - hours * 3_600_000);
-    const r = await this.db.delete(pageRealtime).where(lt(pageRealtime.updatedAt, cutoff));
-    return r.rowCount ?? 0;
   }
 
   /**
