@@ -229,6 +229,9 @@ importers:
       connect-pg-simple:
         specifier: ^10.0.0
         version: 10.0.0
+      cookie-signature:
+        specifier: ^1.2.2
+        version: 1.2.2
       drizzle-orm:
         specifier: ^0.45.0
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
@@ -269,6 +272,9 @@ importers:
       '@types/connect-pg-simple':
         specifier: ^7.0.3
         version: 7.0.3
+      '@types/cookie-signature':
+        specifier: ^1.1.2
+        version: 1.1.2
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6
@@ -1388,6 +1394,9 @@ packages:
 
   '@types/connect@3.4.38':
     resolution: {integrity: sha512-K6uROf1LD88uDQqJCktA4yzL1YYAK6NgfsI0v/mTgyPKWsX1CnJ0XPSDhViejru1GcRkLWb8RlzFYJRqGUbaug==}
+
+  '@types/cookie-signature@1.1.2':
+    resolution: {integrity: sha512-2OhrZV2LVnUAXklUFwuYUTokalh/dUb8rqt70OW6ByMSxYpauPZ+kfNLknX3aJyjY5iu8i3cUyoLZP9Fn37tTg==}
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
@@ -3891,6 +3900,10 @@ snapshots:
       '@types/pg': 8.23.1
 
   '@types/connect@3.4.38':
+    dependencies:
+      '@types/node': 24.13.4
+
+  '@types/cookie-signature@1.1.2':
     dependencies:
       '@types/node': 24.13.4
 

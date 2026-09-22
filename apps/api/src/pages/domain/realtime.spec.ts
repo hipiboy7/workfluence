@@ -82,3 +82,21 @@ describe('shouldSaveVersion — 만드는 쪽 (FR-706)', () => {
     expect(shouldSaveVersion({ next: doc('같음'), previous: doc('같음'), idleMs: 0, idleThresholdMs: 5_000, force: true }).save).toBe(false);
   });
 });
+
+describe('shouldSaveVersion — 마크만 달라도 변경이다', () => {
+  const plain: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '중요' }] }] };
+  const bold: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '중요', marks: [{ type: 'bold' }] }] }] };
+
+  it('글자는 같고 **굵게만 씌워도** 버전을 만든다 — 텍스트 비교만 하면 놓친다', () => {
+    expect(shouldSaveVersion({ next: bold, previous: plain, idleMs: 9_000, idleThresholdMs: 5_000 }).save).toBe(true);
+  });
+
+  it('같은 마크끼리는 만들지 않는다', () => {
+    expect(shouldSaveVersion({ next: bold, previous: bold, idleMs: 9_000, idleThresholdMs: 5_000 }).save).toBe(false);
+  });
+
+  it('마크 속성이 다르면 변경이다 — 링크 주소만 바뀐 경우', () => {
+    const l = (href: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '여기', marks: [{ type: 'link', attrs: { href } }] }] }] });
+    expect(shouldSaveVersion({ next: l('/b'), previous: l('/a'), idleMs: 9_000, idleThresholdMs: 5_000 }).save).toBe(true);
+  });
+});

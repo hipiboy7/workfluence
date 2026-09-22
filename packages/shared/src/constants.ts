@@ -71,6 +71,14 @@ export const AUDIT_ACTIONS = [
   'category.update',
   'category.delete',
   'settings.update',
+  // Phase 6 (P6_설계서_Collab D.2절)
+  'page.export',
+  'page.collab.save',
+  'template.create',
+  'template.update',
+  'template.delete',
+  'mail.send',
+  'mail.fail',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

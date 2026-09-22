@@ -27,6 +27,7 @@
     "@workfluence/shared": "workspace:*",
     "argon2": "^0.45.1",
     "connect-pg-simple": "^10.0.0",
+    "cookie-signature": "^1.2.2",
     "drizzle-orm": "^0.45.0",
     "express": "^5.2.0",
     "express-session": "^1.19.0",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@types/connect-pg-simple": "^7.0.3",
+    "@types/cookie-signature": "^1.1.2",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.19.0",
     "@types/node": "^24.0.0",
