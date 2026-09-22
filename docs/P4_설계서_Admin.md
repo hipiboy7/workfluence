@@ -124,6 +124,62 @@
 
 ---
 
+# D.1 API 계약
+
+`CLAUDE.md` 4절 1단계가 요구하는 절이다. **Phase 3 설계서가 이 절을 빠뜨렸고**, 그때
+자체 점검이 "Phase 4 설계서부터 절 구성을 점검 목록으로 만든다"고 했다 (P3 검토서 #7).
+
+권한 열의 "스페이스 판정"은 그 페이지가 속한 스페이스의 `spaceAccess()` 결과를 뜻한다.
+새 판정을 만들지 않는다.
+
+| 메서드·경로 | 권한 | 돌려주는 것 |
+|---|---|---|
+| `GET /api/notifications?limit=` | 로그인. **자기 것만** | `NotificationView[]` |
+| `GET /api/notifications/unread-count` | 로그인 | `{ count }` |
+| `POST /api/notifications/:id/read` | 자기 알림만 | `{ ok }`. 남의 것이면 404 |
+| `POST /api/notifications/read-all` | 로그인 | `{ count }` |
+| `GET /api/trash/pages?limit=` | 스페이스 판정 `canWrite` | `TrashPageView[]` |
+| `POST /api/trash/pages/:id/restore` | 같음 | `{ ok, movedToRoot }` |
+| `GET /api/trash/spaces?limit=` | `space.manage` | `TrashSpaceView[]` |
+| `POST /api/trash/spaces/:id/restore` | `space.manage` | `{ ok }` |
+| `GET /api/settings/policy` | 로그인. **관리자가 아니면 일부만** | `Policy`(부분) + `uploadCeilingMb` |
+| `PATCH /api/settings/policy` | `settings.manage` | `{ ok }` |
+| `GET /api/labels?limit=` | 로그인 | `LabelView[]` |
+| `GET /api/labels/:name/pages?limit=` | 질의에서 거름 | `SearchHit[]` |
+| `GET /api/pages/:id/labels` | 스페이스 판정 `canRead` | `LabelView[]` |
+| `POST /api/pages/:id/labels` | `canWrite` | `LabelView` |
+| `DELETE /api/pages/:id/labels/:labelId` | `canWrite` | `{ ok }` |
+| `GET /api/audit?limit=&action=&actorId=&from=&to=` | `audit.read` | `AuditEventView[]` |
+| `PATCH /api/categories/:id` | `space.manage` | `CategoryView` |
+| `DELETE /api/categories/:id` | `space.manage` | `{ ok }`. 쓰는 스페이스가 있으면 409 |
+| `POST /api/users/:id/terminate-sessions` | `user.manage` | `{ count }` |
+
+**상태 코드의 뜻을 고정한다.** 못 보는 것은 **404**다 (403이 아니다 — 403은 "그것이 있다"를
+알려 준다). 권한은 있는데 상태가 막는 것은 403. 규칙 위반은 400, 크기 초과는 413,
+충돌은 409.
+
+# D.2 화면 흐름
+
+```
+첫 화면(스페이스 목록)
+├─ 알림 (n)  →  /notifications   읽음 처리 · 모두 읽음 · 대상으로 이동
+├─ 휴지통    →  /trash           지운 페이지 되살리기 / (관리자) 지운 스페이스
+├─ 검색      →  /search
+└─ (관리자) 운영 설정 → /admin/policy   숫자 값 · 허용 확장자
+                사용자 관리 → /admin/users    승인 · 잠금 해제 · 초기화 · 역할 · **세션 강제 종료**
+                감사로그    → /admin/audit    행위 · 기간으로 거르기
+
+페이지 보기 /pages/:id
+├─ 라벨      붙이기 · 떼기 · 라벨 이름 누르면 /labels/:name
+├─ 첨부
+└─ 댓글      @아이디로 부르면 그 사람 알림함에 뜬다
+```
+
+**되살리기가 부모를 잃었을 때는 말해 준다.** 맨 위로 옮겼다는 안내를 띄우지 않으면
+사용자는 되살린 문서를 찾지 못한다 (FR-512).
+
+---
+
 # E. 모듈과 등급
 
 > **경로에 백틱이 없는 줄은 아직 만들지 않은 것이다.** 만드는 커밋에서 백틱을 붙인다 —
@@ -167,6 +223,26 @@
 9. 검증기록 → 자체 점검 → 가이드 갱신
 
 ---
+
+# G.1 이전 Phase가 넘긴 것 — 받거나 다시 미루거나
+
+Phase 2·3이 "Phase 4에서"라고 적어 둔 항목들이다. **설계서가 받지 않으면 Phase가 닫힐 때
+조용히 사라진다.** 각각 이번에 할지 말지를 정한다.
+
+| 출처 | 항목 | 이번 Phase |
+|---|---|---|
+| P3 #1 | 라벨 화면·API | **했다** (FR-533~536) |
+| P3 #4 | 운영 조절값을 DB `settings` + 관리 화면으로 | **했다** (FR-520~528) |
+| P2 #5 | 페이지 이동 **화면**(끌어 옮기기) | **안 한다.** 인수 기준이 요구하지 않고, 트리 UI는 그 자체로 한 Phase 분량이다. `기능백로그`로 넘긴다 |
+| P2 #6 / P2 자체 7 | `page_versions`에 append-only 트리거 | **안 한다.** 넣으면 E2E 정리가 깨져 정리 방식과 함께 바꿔야 한다. **Phase 5**(반입 전 데이터 규칙 점검)로 미룬다 |
+| P2 #4 | `kind`·`status`에 DB CHECK 제약 | **안 한다.** 상태가 늘 때 함께. Phase 5 |
+| P2 #7 / 자체 10 | 개인 스페이스 개수 제한 | **안 한다.** 화면에 경로가 없고 실제 피해가 확인되지 않았다. 요구가 오면 백로그로 |
+| P2 자체 11 | `page.restore` 상수에 호출자가 없다 | **정리했다.** 휴지통이 `page.restore.trash`를 쓰므로 이름이 갈렸다. 둘 다 남긴다 — 하나는 버전 복원, 하나는 휴지통 복원으로 **뜻이 다르다** |
+| P2 자체 13 | 분류 중복 생성이 409가 아니라 201(멱등) | **문구를 맞추지 않았다.** 멱등이 화면에 더 낫다는 판단은 그대로다. FR-308 문구 수정은 Phase 5 |
+| P2 자체 18 | 홈이 `scope=all`을 안 불러 admin 목록이 불완전 | **안 한다.** 관리자 전용 전체 목록 화면 대신 감사로그·스페이스 상태 변경으로 갈음했다. 필요해지면 백로그로 |
+| P3 #5 | `client_max_body_size`와 업로드 상한의 기계 검사 | **안 한다.** FR-528로 **앱 쪽 천장**은 막았지만 nginx와의 대조는 여전히 손이다. Phase 5 반입 점검에 넣는다 |
+| P3 #6 | 재색인 구현이 둘 | **안 한다.** Phase 5 |
+| P3 자체 13·15 | `page.delete` 조건이 공허한 것, viewer 댓글 금지가 설계서에 없는 것 | **권한 세분화를 하지 않기로 했으므로**(쟁점 4) "그때 살아난다"는 근거가 사라졌다. 지금 규칙("스페이스에 쓸 수 있으면")이 최종이고, 그것을 FR-422 옆에 적었다 |
 
 # H. Phase 5 인계 (착수 시점 예상)
 
