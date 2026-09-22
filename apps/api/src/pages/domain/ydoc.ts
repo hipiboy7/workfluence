@@ -75,12 +75,12 @@ function toYChildren(nodes: readonly DocNode[]): (Y.XmlElement | Y.XmlText)[] {
   return out;
 }
 
-function toYNode(node: DocNode): Y.XmlElement | Y.XmlText {
-  if (node.type === 'text') {
-    const text = new Y.XmlText();
-    text.insert(0, node.text ?? '', marksToAttributes(node.marks) ?? undefined);
-    return text;
-  }
+/**
+ * 요소 하나. **글자 노드는 오지 않는다** — `toYChildren`이 묶어서 처리하므로 여기까지
+ * 닿을 길이 없다. 처음에는 여기에도 글자 분기를 뒀는데 호출되는 자리가 없어 지웠다
+ * (`diff.ts`·`fromYNode`와 같은 판단: 닿지 않는 가지를 남기지 않는다).
+ */
+function toYNode(node: DocNode): Y.XmlElement {
   const el = new Y.XmlElement(node.type);
   for (const [k, v] of Object.entries(node.attrs ?? {})) {
     // **빈 값은 넣지 않는다.** `undefined`는 Yjs가 문자열 `"undefined"`로 굳히고,
