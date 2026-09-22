@@ -58,9 +58,19 @@ async function main(): Promise<void> {
   const password = process.env.WF_LOAD_PASSWORD;
   if (!username || !password) throw new Error('WF_LOAD_USER·WF_LOAD_PASSWORD를 주고 돌린다 (합성 계정)');
 
-  // 세션을 **미리 다 연다.** 측정 중에 로그인이 섞이면 재려던 것(읽기 지연)이 흐려진다
-  const cookies = await Promise.all(Array.from({ length: SESSIONS }, () => login(username, password)));
-  console.log(`[load] 세션 ${cookies.length}개 열림`);
+  // 세션을 **미리 다 연다.** 측정 중에 로그인이 섞이면 재려던 것(읽기 지연)이 흐려진다.
+  //
+  // **한꺼번에 열지 않는다.** 로그인은 IP별 제한을 받는다. 성공한 요청은 예산을 돌려받지만
+  // (T-023), 50개를 동시에 던지면 **환불이 돌아오기 전에** 전부 심사를 통과해야 해서
+  // 한도를 넘는다. 조금씩 나눠 열면 앞의 성공이 환불되어 걸리지 않는다.
+  // 실제로는 50명이 서로 다른 주소에서 들어오므로 이 제한은 재려는 대상이 아니다.
+  const cookies: string[] = [];
+  const LOGIN_CHUNK = Number(process.env.WF_LOAD_LOGIN_CHUNK ?? 5);
+  for (let i = 0; i < SESSIONS; i += LOGIN_CHUNK) {
+    const n = Math.min(LOGIN_CHUNK, SESSIONS - i);
+    cookies.push(...(await Promise.all(Array.from({ length: n }, () => login(username, password)))));
+  }
+  console.log(`[load] 세션 ${cookies.length}개 열림 (${LOGIN_CHUNK}개씩)`);
 
   const samples: Sample[] = [];
   for (let round = 0; round < ROUNDS; round++) {

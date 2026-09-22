@@ -126,3 +126,23 @@ export const RATE_LIMITS = {
   recoverPassword: { max: 3, windowSec: 600 },
   login: { max: 20, windowSec: 60 },
 } as const;
+
+/**
+ * DB 연결 풀 (P5_설계서_Release, T-026).
+ *
+ * **왜 상수로 두는가.** 세 값이 서로를 전제한다. `max`보다 많은 요청이 동시에 트랜잭션을
+ * 열면 뒤에 온 요청은 기다리는데, 기다리는 시간에 상한이 없으면 **영구히 멈춘다.** 실제로
+ * 그렇게 멈췄다. 그래서 기다림에 상한을 두고(`connectionTimeoutMillis`), 트랜잭션을 열어 둔
+ * 채 잊어버린 연결은 DB가 끊게 한다(`idleInTransactionTimeoutMillis`).
+ *
+ * 세 값은 "느려진다"와 "조용히 멈춘다" 사이의 선택이다. **느려지는 쪽을 고른다** —
+ * 500이 나면 로그와 화면에 보이지만, 멈추면 아무 데도 안 보인다.
+ */
+export const DB_POOL = {
+  /** 동시에 열어 두는 연결 수. 300명·동시 수십 세션 기준 */
+  max: 10,
+  /** 연결을 못 얻으면 이만큼 기다렸다 **실패한다**. 무한 대기 금지 */
+  connectionTimeoutMillis: 10_000,
+  /** 트랜잭션을 열어 둔 채 놀고 있는 연결을 DB가 끊는다. 새는 곳이 있어도 스스로 낫는다 */
+  idleInTransactionTimeoutMillis: 30_000,
+} as const;

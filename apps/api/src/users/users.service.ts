@@ -58,20 +58,27 @@ export class UsersService {
     private readonly settings: SettingsService,
   ) {}
 
-  findById(id: string): Promise<UserRow | undefined> {
-    return this.db.query.users.findFirst({ where: eq(users.id, id) });
+  /**
+   * 조회 도우미는 **전부 `tx`를 받는다.**
+   *
+   * 트랜잭션 안에서 `this.db`로 조회하면 **같은 풀에서 두 번째 연결을 달라고 한다.** 동시
+   * 요청 수가 풀 크기에 닿는 순간 전원이 서로의 연결을 기다려 앱이 영구히 멈춘다 (T-026).
+   * 인자를 받아 두면 호출부가 트랜잭션 안인지 밖인지에 상관없이 맞는다.
+   */
+  findById(id: string, tx: Db = this.db): Promise<UserRow | undefined> {
+    return tx.query.users.findFirst({ where: eq(users.id, id) });
   }
 
-  findByUsername(username: string): Promise<UserRow | undefined> {
-    return this.db.query.users.findFirst({ where: eq(users.username, username) });
+  findByUsername(username: string, tx: Db = this.db): Promise<UserRow | undefined> {
+    return tx.query.users.findFirst({ where: eq(users.username, username) });
   }
 
-  findByEmail(email: string): Promise<UserRow | undefined> {
-    return this.db.query.users.findFirst({ where: eq(users.email, email.toLowerCase()) });
+  findByEmail(email: string, tx: Db = this.db): Promise<UserRow | undefined> {
+    return tx.query.users.findFirst({ where: eq(users.email, email.toLowerCase()) });
   }
 
-  findByOidcSub(sub: string): Promise<UserRow | undefined> {
-    return this.db.query.users.findFirst({ where: eq(users.oidcSub, sub) });
+  findByOidcSub(sub: string, tx: Db = this.db): Promise<UserRow | undefined> {
+    return tx.query.users.findFirst({ where: eq(users.oidcSub, sub) });
   }
 
   async list(limit: number): Promise<UserView[]> {
@@ -96,8 +103,8 @@ export class UsersService {
    * 미인증 공격자가 "이 사람이 여기 있다"를 확인하는 오라클이 된다. 이 코드베이스는 다른
    * 곳에서 열거를 막고 있는데(로그인 단일 문구·ID 찾기 마스킹) 여기만 새면 의미가 없다.
    */
-  private async assertUnique(username: string, email: string): Promise<void> {
-    if ((await this.findByUsername(username)) || (await this.findByEmail(email))) {
+  private async assertUnique(username: string, email: string, tx: Db = this.db): Promise<void> {
+    if ((await this.findByUsername(username, tx)) || (await this.findByEmail(email, tx))) {
       throw new ConflictException('이미 사용 중인 아이디이거나 등록된 email이다');
     }
   }
@@ -129,7 +136,7 @@ export class UsersService {
 
   async signup(dto: SignupDto, tx: Db = this.db): Promise<UserRow> {
     await this.assertPasswordStrength(dto.password, tx);
-    await this.assertUnique(dto.username, dto.email);
+    await this.assertUnique(dto.username, dto.email, tx);
     const [row] = await tx
       .insert(users)
       .values({
@@ -150,7 +157,7 @@ export class UsersService {
     // **여기도 강도를 본다.** 계약(zod)이 바닥만 보게 바뀐 뒤로 이 경로만 검사가 없었다 —
     // 관리자가 만든 계정은 바로 활성이라, 비어 있으면 가장 센 계정이 가장 약한 비밀번호를 갖는다
     await this.assertPasswordStrength(dto.password, tx);
-    await this.assertUnique(dto.username, dto.email);
+    await this.assertUnique(dto.username, dto.email, tx);
     const [row] = await tx
       .insert(users)
       .values({
@@ -167,15 +174,15 @@ export class UsersService {
     return row;
   }
 
-  private async getManaged(id: string, actor: Principal): Promise<UserRow> {
-    const target = await this.findById(id);
+  private async getManaged(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
+    const target = await this.findById(id, tx);
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
     if (!canManageUser(actor, target.role as Role)) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
     return target;
   }
 
   async approve(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
-    const target = await this.getManaged(id, actor);
+    const target = await this.getManaged(id, actor, tx);
     if (target.status !== 'pending') throw new BadRequestException('승인 대기 상태가 아니다');
     const [row] = await tx
       .update(users)
@@ -186,7 +193,7 @@ export class UsersService {
   }
 
   async unlock(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
-    await this.getManaged(id, actor);
+    await this.getManaged(id, actor, tx);
     const cleared = afterSuccess();
     const [row] = await tx
       .update(users)
@@ -198,7 +205,7 @@ export class UsersService {
 
   /** 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다 */
   async resetPassword(id: string, actor: Principal, tx: Db = this.db): Promise<{ user: UserRow; temporaryPassword: string }> {
-    const target = await this.getManaged(id, actor);
+    const target = await this.getManaged(id, actor, tx);
     // IdP 계정에 비밀번호를 붙이면 IdP가 강제하던 인증(사내 MFA·정책)을 건너뛰는 옆문이 생긴다.
     // FR-217이 "IdP 계정은 비밀번호로 로그인할 수 없다"고 한 것을 초기화가 뚫으면 안 된다.
     if (target.oidcSub !== null) {
@@ -229,7 +236,7 @@ export class UsersService {
   /** 역할 변경 (FR-232, FR-233) */
   async changeRole(id: string, role: Role, actor: Principal, tx: Db = this.db): Promise<UserRow> {
     if (id === actor.id) throw new BadRequestException('자기 자신의 역할은 바꿀 수 없다');
-    const target = await this.getManaged(id, actor);
+    const target = await this.getManaged(id, actor, tx);
     if (!canAssignRole(actor, role)) throw new ForbiddenException(`'${role}' 역할을 부여할 권한이 없다`);
     // 마지막 root를 강등하면 아무도 root 권한을 되돌릴 수 없다 (FR-233). 순수 함수로 두기 어려워 여기서 센다
     if (target.role === 'root' && role !== 'root') {
@@ -241,8 +248,8 @@ export class UsersService {
   }
 
   /** ID 찾기 (FR-208): email + 이름이 **모두** 일치할 때만 */
-  async findByEmailAndName(email: string, displayName: string): Promise<UserRow | undefined> {
-    return this.db.query.users.findFirst({
+  async findByEmailAndName(email: string, displayName: string, tx: Db = this.db): Promise<UserRow | undefined> {
+    return tx.query.users.findFirst({
       where: and(eq(users.email, email.toLowerCase()), eq(users.displayName, displayName)),
     });
   }
@@ -255,8 +262,8 @@ export class UsersService {
    * 없는 폐쇄망에서는 자가 재설정을 안전하게 만들 방법이 없으므로 **기능을 두지 않고**
    * 관리자 초기화(인증·권한 검사가 있는 경로)로 보낸다.
    */
-  async findRecoveryTarget(username: string, email: string): Promise<UserRow | null> {
-    const user = await this.findByUsername(username);
+  async findRecoveryTarget(username: string, email: string, tx: Db = this.db): Promise<UserRow | null> {
+    const user = await this.findByUsername(username, tx);
     if (!user || !user.email || user.email !== email.toLowerCase() || user.status !== 'active') return null;
     return user;
   }
@@ -268,7 +275,7 @@ export class UsersService {
    * 변경과 같은 판단이다 (FR-224). `sess`는 connect-pg-simple가 넣은 세션 객체 전체다.
    */
   async terminateSessions(id: string, actor: Principal, tx: Db = this.db): Promise<number> {
-    const target = await this.findById(id);
+    const target = await this.findById(id, tx);
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
     if (!canManageUser(actor, target.role as Role)) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
     const r = await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
@@ -276,7 +283,7 @@ export class UsersService {
   }
 
   async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db): Promise<void> {
-    const user = await this.findById(id);
+    const user = await this.findById(id, tx);
     if (!user?.passwordHash) throw new NotFoundException('사용자를 찾을 수 없다');
     if (!(await argon2.verify(user.passwordHash, currentPassword))) throw new BadRequestException('현재 비밀번호가 올바르지 않다');
     await this.assertPasswordStrength(newPassword, tx);
@@ -295,7 +302,7 @@ export class UsersService {
    * 관리자 화면에만** 쓴다.
    */
   async verifyCredentials(username: string, password: string, now: Date = new Date(), tx: Db = this.db): Promise<CredentialResult> {
-    const user = await this.findByUsername(username);
+    const user = await this.findByUsername(username, tx);
     if (!user || !user.passwordHash) {
       await argon2.verify(DUMMY_HASH, password).catch(() => false);
       return { ok: false, reason: 'unknown' };

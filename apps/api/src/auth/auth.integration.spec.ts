@@ -403,3 +403,32 @@ describe('역할 (FR-232, FR-233)', () => {
     await expect(usersSvc.changeRole(alice.id, 'admin', { id: alice.id, role: 'root' })).rejects.toThrow(/자기 자신/);
   });
 });
+
+/**
+ * **풀 크기보다 많은 동시 로그인** (T-026).
+ *
+ * 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면, 동시 요청이 풀 크기에 닿는 순간
+ * 열려 있는 트랜잭션끼리 서로의 연결을 기다려 **영원히 풀리지 않는다.** 부하 측정에서
+ * 실제로 앱 전체가 멈췄다. 테스트 풀은 4이므로 8개를 동시에 던지면 그 상태를 재현한다.
+ *
+ * 이 테스트는 **느려지면 실패한다.** 데드락은 오류를 내지 않고 조용히 멈추기 때문에
+ * "던졌더니 다 돌아왔다"를 시간 안에 확인하는 것 말고는 잡을 방법이 없다.
+ */
+describe('동시 로그인이 연결 풀을 잠그지 않는다 (T-026)', () => {
+  it('풀 크기(4)의 두 배를 동시에 던져도 전부 돌아온다', { timeout: 20_000 }, async () => {
+    await approvedAlice();
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => auth.login({ username: 'alice', password: SIGNUP.password })),
+    );
+    expect(results).toHaveLength(8);
+    expect(results.every((u) => u.username === 'alice')).toBe(true);
+  });
+
+  it('실패하는 로그인도 마찬가지다 — 실패 경로는 갱신까지 해서 더 오래 잡는다', { timeout: 20_000 }, async () => {
+    await approvedAlice();
+    const settled = await Promise.allSettled(
+      Array.from({ length: 8 }, () => auth.login({ username: 'alice', password: 'wrong-password' })),
+    );
+    expect(settled.every((r) => r.status === 'rejected')).toBe(true);
+  });
+});

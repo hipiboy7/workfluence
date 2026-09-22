@@ -171,9 +171,11 @@ export class AuthService {
 
   /** JIT 동기화 (FR-215, FR-217). **IdP가 정본**이라 있던 계정도 갱신한다 */
   private async upsertFromClaims(claims: OidcClaims, role: Role, tx: Db): Promise<UserRow> {
-    const existing = await this.users.findByOidcSub(claims.sub);
+    // **조회도 `tx`로 한다.** 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면 동시 요청이
+    // 풀 크기에 닿는 순간 전원이 서로를 기다린다 (T-026)
+    const existing = await this.users.findByOidcSub(claims.sub, tx);
     const displayName = claims.preferredUsername ?? claims.sub;
-    const email = await this.freeEmail(claims.email, existing?.id);
+    const email = await this.freeEmail(claims.email, existing?.id, tx);
 
     if (existing) {
       const [row] = await tx
@@ -187,7 +189,7 @@ export class AuthService {
     const [row] = await tx
       .insert(users)
       .values({
-        username: await this.freeUsername(claims.preferredUsername ?? claims.sub),
+        username: await this.freeUsername(claims.preferredUsername ?? claims.sub, tx),
         displayName,
         email,
         // password_hash를 비워 둔다 — IdP 계정은 비밀번호로 로그인할 수 없다 (FR-217)
@@ -213,10 +215,10 @@ export class AuthService {
    * 않는다**(같은 이름의 다른 사람일 수 있고 합치면 되돌릴 수 없다). 관리자가 감사로그를
    * 보고 정리하도록 남긴다.
    */
-  private async freeEmail(raw: string | undefined, selfId?: string): Promise<string | null> {
+  private async freeEmail(raw: string | undefined, selfId: string | undefined, tx: Db): Promise<string | null> {
     const email = raw?.toLowerCase() ?? null;
     if (!email) return null;
-    const owner = await this.users.findByEmail(email);
+    const owner = await this.users.findByEmail(email, tx);
     if (!owner || owner.id === selfId) return email;
     return null;
   }
@@ -225,11 +227,11 @@ export class AuthService {
    * 쓸 수 있는 username을 찾는다. 이미 쓰이고 있으면 뒤에 숫자를 붙인다.
    * **로컬 계정과 이름이 같아도 합치지 않는다** — 같은 이름의 다른 사람일 수 있고, 합치면 되돌릴 수 없다.
    */
-  private async freeUsername(base: string): Promise<string> {
+  private async freeUsername(base: string, tx: Db): Promise<string> {
     const clean = base.toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'idp-user';
     for (let i = 0; i < 100; i++) {
       const candidate = i === 0 ? clean : `${clean}${i}`;
-      if (!(await this.users.findByUsername(candidate))) return candidate;
+      if (!(await this.users.findByUsername(candidate, tx))) return candidate;
     }
     throw new BadRequestException('사용 가능한 사용자명을 만들지 못했다');
   }
