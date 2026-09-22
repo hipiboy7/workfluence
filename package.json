@@ -29,6 +29,11 @@
     "search:reindex": "pnpm build:shared && tsx scripts/reindex.ts",
     "trash:purge": "pnpm build:shared && tsx scripts/trash-purge.ts",
     "audit:purge": "pnpm build:shared && tsx scripts/audit-purge.ts",
+    "backup:create": "pnpm build:shared && tsx scripts/backup-create.ts",
+    "backup:restore": "pnpm build:shared && tsx scripts/backup-restore.ts",
+    "release:bundle": "pnpm build:shared && tsx scripts/release-bundle.ts",
+    "release:verify": "pnpm build:shared && tsx scripts/release-verify.ts",
+    "load:test": "pnpm build:shared && tsx scripts/load-test.ts",
     "licenses:check": "tsx scripts/check-licenses.ts"
   },
   "devDependencies": {

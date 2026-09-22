@@ -3,5 +3,6 @@ export * from './env';
 export * from './document';
 export * from './permissions';
 export * from './policy';
+export * from './release';
 export * from './schemas';
 export * from './security';

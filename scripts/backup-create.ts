@@ -1,0 +1,64 @@
+import { formatChecksums } from '@workfluence/shared';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+/**
+ * 백업 (P5_설계서_Release B절, FR-610~611·616).
+ *
+ * 대상은 **운영 형상의 compose 스택**이다 — 개발용 임베디드 PG가 아니다. 백업은
+ * `pg_dump -Fc`(압축·병렬 복원 가능한 사용자 지정 형식)와 첨부 디렉토리 tar 둘이다.
+ *
+ * **스키마 버전을 함께 적는다** (FR-611). 옛 백업을 새 스키마에 부으면 조용히 깨지는데,
+ * 그때 "이 백업이 어느 시점 것인가"를 알 방법이 이것뿐이다.
+ */
+const COMPOSE = ['compose', '-f', 'deploy/compose.yml', '--env-file', 'deploy/.env'];
+
+function dc(args: string[], opts: { capture?: boolean } = {}): Buffer {
+  return execFileSync('docker', [...COMPOSE, ...args], {
+    maxBuffer: 1024 * 1024 * 512,
+    stdio: opts.capture ? ['ignore', 'pipe', 'inherit'] : ['ignore', 'inherit', 'inherit'],
+  }) as Buffer;
+}
+
+function psql(sql: string): string {
+  return dc(['exec', '-T', 'postgres', 'psql', '-U', 'workfluence', '-d', 'workfluence', '-tAc', sql], { capture: true })
+    .toString()
+    .trim();
+}
+
+function main(): void {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const out = resolve(process.argv[2] ?? join('.local', 'backups', stamp));
+  mkdirSync(out, { recursive: true });
+  console.log(`[backup] ${out}`);
+
+  // 세는 것을 **먼저** 한다. 덤프 도중 쓰기가 들어오면 수치와 덤프가 어긋나는데,
+  // 먼저 세면 "적어도 이만큼은 있어야 한다"는 하한이 되어 복원 검사가 거짓 통과하지 않는다
+  const migrations = psql(`SELECT count(*) FROM drizzle.__drizzle_migrations`);
+  const counts = Object.fromEntries(
+    ['users', 'spaces', 'pages', 'page_versions', 'attachments', 'comments', 'audit_events', 'notifications'].map((t) => [
+      t,
+      Number(psql(`SELECT count(*) FROM ${t}`)),
+    ]),
+  );
+
+  writeFileSync(join(out, 'dump.pgc'), dc(['exec', '-T', 'postgres', 'pg_dump', '-U', 'workfluence', '-Fc', 'workfluence'], { capture: true }));
+  writeFileSync(join(out, 'attachments.tar'), dc(['exec', '-T', 'api', 'tar', '-cf', '-', '-C', '/data', 'attachments'], { capture: true }));
+
+  const files = ['dump.pgc', 'attachments.tar'];
+  const sums = files.map((f) => ({ file: f, sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex') }));
+  writeFileSync(join(out, 'SHA256SUMS'), formatChecksums(sums));
+  writeFileSync(
+    join(out, 'BACKUP.json'),
+    JSON.stringify({ createdAt: new Date().toISOString(), migrations: Number(migrations), counts }, null, 2) + '\n',
+  );
+
+  // 감사로그에 남긴다 (FR-616). 백업을 언제 떴는지는 사고 뒤에 가장 먼저 찾는 것이다
+  psql(`INSERT INTO audit_events (action, target_type, detail) VALUES ('backup.create','system','${JSON.stringify({ path: out }).replace(/'/g, "''")}')`);
+
+  console.log(`[backup] 완료 — 마이그레이션 ${migrations}개 · ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+}
+
+main();
