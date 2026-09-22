@@ -38,6 +38,7 @@ export const AUDIT_ACTIONS = [
   'user.approve',
   'user.unlock',
   'user.password.reset',
+  'user.sessions.terminate',
   'user.role.change',
   'category.create',
   'space.create',

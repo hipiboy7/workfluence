@@ -8,6 +8,7 @@ export function AdminUsersPage() {
   const [rows, setRows] = useState<UserView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [temporary, setTemporary] = useState<{ username: string; password: string } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api<UserView[]>('/api/users')
@@ -31,6 +32,7 @@ export function AdminUsersPage() {
       <h1>사용자 관리</h1>
       <p className="muted small"><Link to="/">← 홈</Link></p>
       {error && <p className="badge fail" role="alert">{error}</p>}
+      {notice && <p className="badge" role="status">{notice}</p>}
       {temporary && (
         <section className="card">
           <h2>임시 비밀번호</h2>
@@ -75,6 +77,18 @@ export function AdminUsersPage() {
                   }
                 >
                   비밀번호 초기화
+                </button>
+                {/* 관리자 강제 종료 (scope-definition 4.1절 #4). 서버측 세션을 파기한다 */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    void act(async () => {
+                      const r = await api<{ count: number }>(`/api/users/${u.id}/terminate-sessions`, { method: 'POST' });
+                      setNotice(`${u.displayName}님의 세션 ${r.count}개를 끊었다.`);
+                    })
+                  }
+                >
+                  세션 강제 종료
                 </button>
               </td>
             </tr>

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { maskEmail, type AuditAction, type AuditEventView } from '@workfluence/shared';
-import { desc, eq } from 'drizzle-orm';
+import { maskEmail, type AuditAction, type AuditEventView, type AuditQueryDto } from '@workfluence/shared';
+import { and, desc, eq, gte, lt } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { auditEvents, users } from '../db/schema';
 
@@ -56,7 +56,19 @@ export class AuditService {
     });
   }
 
-  async list(limit: number): Promise<AuditEventView[]> {
+  /**
+   * 조회 (FR-531). 조건은 **질의에서** 건다 — 가져와서 거르면 `limit`이 조용히 빈다.
+   * 감사로그는 append-only라 행 수가 계속 늘고, 그 실수의 대가가 가장 큰 곳이다.
+   */
+  async list(q: AuditQueryDto): Promise<AuditEventView[]> {
+    const { limit } = q;
+    const conds = [
+      q.action ? eq(auditEvents.action, q.action) : undefined,
+      q.actorId ? eq(auditEvents.actorId, q.actorId) : undefined,
+      q.from ? gte(auditEvents.createdAt, q.from) : undefined,
+      q.to ? lt(auditEvents.createdAt, q.to) : undefined,
+    ].filter((c) => c !== undefined);
+
     const rows = await this.db
       .select({
         id: auditEvents.id,
@@ -71,6 +83,7 @@ export class AuditService {
       })
       .from(auditEvents)
       .leftJoin(users, eq(users.id, auditEvents.actorId))
+      .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(auditEvents.createdAt))
       .limit(limit);
     return rows.map((r) => ({

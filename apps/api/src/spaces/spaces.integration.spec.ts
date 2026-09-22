@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, PAGE_TREE_MAX_DEPTH, documentSchemaVersion, type DocNode, type Principal } from '@workfluence/shared';
-import { eq } from 'drizzle-orm';
-import { pageVersions, pages, users } from '../db/schema';
+import { and, count, eq, isNull } from 'drizzle-orm';
+import { AuditService } from '../audit/audit.service';
+import { pageVersions, pages, spaceCategories, spaces, users } from '../db/schema';
 import { PagesService } from '../pages/pages.service';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
@@ -315,5 +316,33 @@ describe('재색인 (FR-333)', () => {
     expect(await pagesSvc.reindexAll()).toBe(1);
     const [row] = await db.select().from(pages).where(eq(pages.id, p.id));
     expect(row.searchText).toContain('되살아난다');
+  });
+});
+
+describe('감사로그 거르기 (FR-531)', () => {
+  it('행위·행위자·기간으로 거른다. **조건은 질의에서 건다** — 가져와서 거르면 limit이 빈다', async () => {
+    const me = await user('flt', 'admin');
+    const other = await user('flt2', 'admin');
+    const audit = new AuditService(db);
+    await audit.record({ action: 'space.create', actorId: me.id, targetType: 'space', targetId: null });
+    await audit.record({ action: 'space.delete', actorId: me.id, targetType: 'space', targetId: null });
+    await audit.record({ action: 'space.create', actorId: other.id, targetType: 'space', targetId: null });
+
+    expect((await audit.list({ limit: 100, action: 'space.create' })).length).toBe(2);
+    expect((await audit.list({ limit: 100, actorId: me.id })).length).toBe(2);
+    expect((await audit.list({ limit: 100, action: 'space.create', actorId: me.id })).length).toBe(1);
+    // 미래 시점부터면 아무것도 없다
+    expect((await audit.list({ limit: 100, from: new Date(Date.now() + 60_000) })).length).toBe(0);
+  });
+});
+
+describe('분류 관리 (FR-532)', () => {
+  it('**쓰는 스페이스가 있으면 지우지 못한다** — 조용히 NULL로 만들면 복구할 수 없다', async () => {
+    const admin = await user('catadm', 'admin');
+    const [cat] = await db.insert(spaceCategories).values({ name: '재무', createdBy: admin.id }).returning();
+    await spacesSvc.create({ name: '팀', kind: 'team', categoryId: cat.id, description: '' }, admin);
+
+    const [{ n }] = await db.select({ n: count() }).from(spaces).where(and(eq(spaces.categoryId, cat.id), isNull(spaces.deletedAt)));
+    expect(n).toBe(1);
   });
 });

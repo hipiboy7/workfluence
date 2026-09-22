@@ -128,6 +128,22 @@ export const spaceListQueryDto = z.object({
 });
 export type SpaceListQueryDto = z.infer<typeof spaceListQueryDto>;
 
+/**
+ * 감사로그 조회 조건 (FR-531).
+ *
+ * **거를 수 없으면 "추적한다"가 성립하지 않는다** — 수만 건에서 눈으로 찾을 수는 없다.
+ */
+export const auditQueryDto = z.object({
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+  action: z.string().trim().max(60).optional(),
+  actorId: z.uuid().optional(),
+  /** 포함. 날짜만 주면 그날 00:00부터 */
+  from: z.coerce.date().optional(),
+  /** 제외. 날짜만 주면 그날 00:00까지 */
+  to: z.coerce.date().optional(),
+});
+export type AuditQueryDto = z.infer<typeof auditQueryDto>;
+
 export const listLimitDto = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) });
 
 // ---- 페이지 ----

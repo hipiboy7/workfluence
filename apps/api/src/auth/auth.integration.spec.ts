@@ -232,7 +232,7 @@ describe('감사로그 (인수 기준 3, FR-236, FR-238)', () => {
     const s = await auth.oidcStart();
     await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: s.state }, { state: s.state, nonce: s.nonce });
 
-    const events = await audit.list(50);
+    const events = await audit.list({ limit: 50 });
     const methods = events.filter((e) => e.action === 'auth.login.success').map((e) => e.detail?.method);
     expect(methods).toContain('local');
     expect(methods).toContain('oidc');
@@ -240,14 +240,14 @@ describe('감사로그 (인수 기준 3, FR-236, FR-238)', () => {
 
   it('실패도 남고, 사유는 기록에만 있다', async () => {
     await auth.login({ username: 'nobody', password: 'x' }).catch(() => undefined);
-    const [e] = await audit.list(1);
+    const [e] = await audit.list({ limit: 1 });
     expect(e.action).toBe('auth.login.failure');
     expect(e.detail).toMatchObject({ reason: 'unknown' });
   });
 
   it('email은 마스킹해서 남긴다', async () => {
     await auth.signup(SIGNUP);
-    const e = (await audit.list(10)).find((x) => x.action === 'user.signup');
+    const e = (await audit.list({ limit: 10 })).find((x) => x.action === 'user.signup');
     expect(e?.detail?.email).toBe('al***@example.internal');
     expect(JSON.stringify(e?.detail)).not.toContain(SIGNUP.email);
   });
@@ -258,29 +258,29 @@ describe('감사로그 (인수 기준 3, FR-236, FR-238)', () => {
    * 테스트였다. 자체 점검이 잡았다. 이번에는 **기록을 남긴 뒤 실패시켜** 실제로 되돌아가는지 본다.
    */
   it('기록을 남긴 뒤 트랜잭션이 실패하면 기록도 사라진다 (FR-236)', async () => {
-    const before = (await audit.list(200)).length;
+    const before = (await audit.list({ limit: 200 })).length;
     await db
       .transaction(async (tx) => {
         await audit.record({ action: 'user.approve', targetType: 'user', targetId: 'rollback-me' }, tx);
         throw new Error('일부러 실패');
       })
       .catch(() => undefined);
-    expect((await audit.list(200)).length).toBe(before);
-    expect((await audit.list(200)).some((e) => e.targetId === 'rollback-me')).toBe(false);
+    expect((await audit.list({ limit: 200 })).length).toBe(before);
+    expect((await audit.list({ limit: 200 })).some((e) => e.targetId === 'rollback-me')).toBe(false);
   });
 
   it('반대로 커밋되면 남는다 — 위 테스트가 항진 명제가 아님을 보인다', async () => {
     await db.transaction(async (tx) => {
       await audit.record({ action: 'user.approve', targetType: 'user', targetId: 'keep-me' }, tx);
     });
-    expect((await audit.list(200)).some((e) => e.targetId === 'keep-me')).toBe(true);
+    expect((await audit.list({ limit: 200 })).some((e) => e.targetId === 'keep-me')).toBe(true);
   });
 
   it('로그인 실패의 횟수 갱신과 기록이 함께 남는다 (FR-236)', async () => {
     const alice = await approvedAlice();
     await auth.login({ username: 'alice', password: 'wrong' }).catch(() => undefined);
     expect((await usersSvc.findById(alice.id))?.failedAttempts).toBe(1);
-    expect((await audit.list(5)).some((e) => e.action === 'auth.login.failure')).toBe(true);
+    expect((await audit.list({ limit: 5 })).some((e) => e.action === 'auth.login.failure')).toBe(true);
   });
 });
 
@@ -333,7 +333,7 @@ describe('계정 복구 — 미인증 경로는 비밀번호를 발급하지 않
   it('요청은 감사로그에 남아 관리자가 판단할 수 있다', async () => {
     await approvedAlice();
     await auth.recoverPassword({ username: 'alice', email: SIGNUP.email });
-    const e = (await audit.list(10)).find((x) => x.action === 'auth.password.recover');
+    const e = (await audit.list({ limit: 10 })).find((x) => x.action === 'auth.password.recover');
     expect(e?.detail).toMatchObject({ found: true, requested: true });
   });
 });

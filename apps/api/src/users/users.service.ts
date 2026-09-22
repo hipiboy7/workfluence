@@ -258,6 +258,20 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * 관리자 강제 종료 (`scope-definition` 4.1절 #4, FR-539).
+   *
+   * **서버측 세션을 파기한다.** 쿠키만 지우게 하면 훔친 세션이 계속 산다 — 로그아웃·비밀번호
+   * 변경과 같은 판단이다 (FR-224). `sess`는 connect-pg-simple가 넣은 세션 객체 전체다.
+   */
+  async terminateSessions(id: string, actor: Principal, tx: Db = this.db): Promise<number> {
+    const target = await this.findById(id);
+    if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
+    if (!canManageUser(actor, target.role as Role)) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
+    const r = await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
+    return r.rowCount ?? 0;
+  }
+
   async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db): Promise<void> {
     const user = await this.findById(id);
     if (!user?.passwordHash) throw new NotFoundException('사용자를 찾을 수 없다');
