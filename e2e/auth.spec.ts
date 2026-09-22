@@ -123,8 +123,9 @@ test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한�
   // 감사로그 (GET /api/audit)
   await page.goto('/admin/audit');
   await expect(page.getByRole('heading', { name: '감사로그' })).toBeVisible();
-  await expect(page.getByText('user.approve').first()).toBeVisible();
-  await expect(page.getByText('user.password.reset').first()).toBeVisible();
+  // **표 안에서** 찾는다. 행위 선택 상자에도 같은 글자가 option으로 있어서다 (Phase 4에서 생겼다)
+  await expect(page.locator('tbody').getByText('user.approve').first()).toBeVisible();
+  await expect(page.locator('tbody').getByText('user.password.reset').first()).toBeVisible();
 
   cleanupExtra.push(target.username);
 });

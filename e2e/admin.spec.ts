@@ -118,3 +118,30 @@ test('일반 사용자에게는 운영 설정이 보이지 않는다', async ({ 
   await expect(page.getByRole('link', { name: '운영 설정' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: '휴지통' })).toBeVisible();
 });
+
+test('관리자가 감사로그를 거르고 세션을 끊는다', async ({ page }) => {
+  await login(page, ADMIN.username, ADMIN.password);
+
+  // 1) 감사로그를 **행위로** 거른다 (FR-531)
+  await page.getByRole('link', { name: '감사로그' }).click();
+  await expect(page.getByRole('table')).toBeVisible();
+  await page.getByLabel('행위').selectOption('auth.login.success');
+  await page.getByRole('button', { name: '거르기' }).click();
+  // 거른 뒤에는 그 행위만 남는다
+  const actions = await page.locator('tbody tr td:nth-child(2)').allInnerTexts();
+  expect(actions.length).toBeGreaterThan(0);
+  expect(new Set(actions)).toEqual(new Set(['auth.login.success']));
+
+  // 미래 날짜부터 거르면 0건이다 — 기간 조건이 실제로 먹는다
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  await page.getByLabel('시작').fill(tomorrow);
+  await page.getByRole('button', { name: '거르기' }).click();
+  await expect(page.locator('tbody tr')).toHaveCount(0);
+
+  // 2) 세션 강제 종료 (FR-539)
+  await page.goto('/');
+  await page.getByRole('link', { name: '사용자 관리' }).click();
+  const row = page.getByRole('row').filter({ hasText: MATE.username });
+  await row.getByRole('button', { name: '세션 강제 종료' }).click();
+  await expect(page.getByRole('status')).toContainText('세션');
+});
