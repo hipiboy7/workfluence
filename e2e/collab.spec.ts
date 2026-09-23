@@ -119,7 +119,12 @@ test('두 버전을 골라 비교하고 HTML로 내보낸다', async ({ page }) 
   await boxes.nth(1).check();
   await page.getByRole('button', { name: '비교하기' }).click();
   await expect(page.locator('.diff')).toBeVisible();
-  await expect(page.locator('.diff')).toContainText(/변경|추가|삭제/);
+  // **요약줄을 확인하면 안 된다.** 요약줄은 아무것도 못 찾아도 늘 "변경 0 · 추가 0 · 삭제 0"을
+  // 담으므로 그 단언은 절대 실패하지 않는다 — 실제로 비교가 마크 변경을 통째로 못 보고
+  // 있었는데 이 E2E가 통과하고 있었다 (P6 코드 리뷰 12).
+  // **찾아낸 낱말 자체**를 본다
+  await expect(page.locator('.diff')).not.toContainText('두 버전의 내용이 같다');
+  await expect(page.locator('.diff .w-added, .diff .diff-added')).not.toHaveCount(0);
 
   // 내보내기 — **파일로 내려와야 한다** (FR-730)
   await page.goto(`/pages/${pageId}`);

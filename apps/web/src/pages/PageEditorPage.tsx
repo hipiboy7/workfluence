@@ -57,8 +57,17 @@ export function PageEditorPage() {
       // **지금 바로 남긴다.** 화면이 그렇게 약속했으므로 그대로 해야 한다 —
       // 유휴를 기다리게 하면 눌러도 아무 일이 없는 것처럼 보인다
       setBusy(true);
+      setError(null);
       try {
-        await api(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
+        const r = await api<{ saved: boolean }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
+        // **저장되지 않았으면 넘어가지 않는다.** 연결이 끊긴 채 누르면 서버에 방이 없어
+        // `saved: false`가 오는데, 전에는 그 값을 보지도 않고 보기로 넘어갔다 —
+        // 사용자는 저장됐다고 믿고 화면에는 옛 내용이 뜬다 (P6 코드 리뷰 5a)
+        if (!r.saved) {
+          setError('연결이 끊겨 저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
+          setBusy(false);
+          return;
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setBusy(false);
@@ -140,7 +149,8 @@ export function PageEditorPage() {
           <p className="muted small">편집을 시작한 버전: v{page.currentVersionNo}</p>
         )}
 
-        <button type="button" onClick={() => void save()} disabled={busy || conflict !== null}>
+        {/* 끊긴 상태에서 누르면 **저장되지 않는다.** 누를 수 있게 두면 "눌렀으니 됐다"가 된다 */}
+        <button type="button" onClick={() => void save()} disabled={busy || conflict !== null || (collab && link === 'offline')}>
           {busy ? '저장 중…' : collab ? '저장하고 보기로' : '저장'}
         </button>
       </section>

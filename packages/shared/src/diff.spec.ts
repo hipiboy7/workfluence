@@ -173,3 +173,38 @@ describe('블록 텍스트는 블록 하나의 것이다', () => {
     expect(kinds(r.blocks)).toEqual(['removed']);
   });
 });
+
+describe('마크와 블록 경계 (P6 코드 리뷰 4·10)', () => {
+  const para = (...content: DocNode[]): DocNode => ({ type: 'paragraph', content });
+  const txt = (text: string, marks?: DocNode['marks']): DocNode => ({ type: 'text', text, marks });
+  const d = (...content: DocNode[]): DocNode => ({ type: 'doc', content });
+
+  it('링크 주소만 바뀐 것을 **변경으로 본다**', () => {
+    const a = d(para(txt('여기', [{ type: 'link', attrs: { href: '/a' } }])));
+    const b = d(para(txt('여기', [{ type: 'link', attrs: { href: '/evil' } }])));
+    expect(diffDocs(a, b).changed).toBe(true);
+  });
+
+  it('굵게가 붙은 것을 변경으로 본다', () => {
+    expect(diffDocs(d(para(txt('중요'))), d(para(txt('중요', [{ type: 'bold' }])))).changed).toBe(true);
+  });
+
+  it('마크의 순서만 다른 것은 변경이 아니다', () => {
+    const a = d(para(txt('글', [{ type: 'bold' }, { type: 'italic' }])));
+    const b = d(para(txt('글', [{ type: 'italic' }, { type: 'bold' }])));
+    expect(diffDocs(a, b).changed).toBe(false);
+  });
+
+  it('목록 항목을 합친 것을 변경으로 본다 — 글자만 이으면 같아 보인다', () => {
+    const li = (s: string): DocNode => ({ type: 'listItem', content: [para(txt(s))] });
+    const a = d({ type: 'bulletList', content: [li('사과'), li('배')] });
+    const b = d({ type: 'bulletList', content: [li('사과배')] });
+    expect(diffDocs(a, b).changed).toBe(true);
+  });
+
+  it('값이 `null`인 속성은 없는 것과 같다 — 편집기가 붙이는 기본값이다', () => {
+    const a = d(para(txt('글', [{ type: 'link', attrs: { href: '/a' } }])));
+    const b = d(para(txt('글', [{ type: 'link', attrs: { href: '/a', title: null } }])));
+    expect(diffDocs(a, b).changed).toBe(false);
+  });
+});

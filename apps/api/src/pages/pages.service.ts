@@ -215,6 +215,10 @@ export class PagesService {
         spaceId: page.spaceId,
         actorId,
         previousDoc: (previous?.contentJson as DocNode | undefined) ?? null,
+        // **여기서 actorId는 "마지막으로 키를 누른 사람"이지 멘션을 쓴 사람이 아니다.**
+        // 자기 자신 필터를 그대로 두면 불린 사람이 마침 마지막 타이핑을 했을 때
+        // 그 멘션이 조용히 사라진다 (P6 코드 리뷰 6)
+        actorWroteMentions: false,
       },
       tx,
     );

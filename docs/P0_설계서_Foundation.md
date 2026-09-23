@@ -396,7 +396,8 @@ checkPasswordPolicy(password, policy)                    → string[]  위반 �
 
 - `apps/api/drizzle/`에 SQL 파일과 메타데이터를 커밋한다.
 - `migrate.ts`는 **모듈로도 CLI로도** 동작한다. 기동 시 자동 적용(개발)과 배포 절차의 명시적 단계(운영)가 같은 코드를 쓴다.
-- 파일명은 Drizzle 생성 규칙(`NNNN_<name>.sql`)을 따르고, 손으로 쓰는 SQL은 `--custom`으로 빈 파일을 만들어 채운다. 문장 구분은 `--> statement-breakpoint`.
+- 파일명은 Drizzle 생성 규칙(`NNNN_<name>.sql`)을 따른다. 문장 구분은 `--> statement-breakpoint`.
+  > **정정 2026-09-22 (보류 17).** 여기 적었던 `--custom`으로 빈 파일을 만드는 절차는 더 이상 쓰지 않는다. **마이그레이션은 파일을 직접 만들어 쓰고 `_journal.json`에 손으로 등재한다.** 생성기는 스냅샷 사슬이 0004에서 끊겨 이미 있는 표를 다시 만드는 파일을 낸다 (`P6_검증기록_Collab` 3절).
 
 ### 3.4 시드
 

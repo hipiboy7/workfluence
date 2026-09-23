@@ -34,8 +34,6 @@ export const ALLOWED_NODES: Record<string, readonly string[]> = {
   bulletList: [],
   orderedList: ['start', 'type'],
   listItem: [],
-  taskList: [],
-  taskItem: ['checked'],
   codeBlock: ['language'],
   blockquote: [],
   horizontalRule: [],
@@ -83,7 +81,7 @@ export function validateDocument(input: unknown): DocumentValidation {
       return;
     }
     const type = node.type;
-    if (typeof type !== 'string' || !(type in ALLOWED_NODES)) {
+    if (typeof type !== 'string' || !Object.hasOwn(ALLOWED_NODES, type)) {
       errors.push(`${path}: 허용되지 않는 노드 '${String(type)}'`);
       return;
     }
@@ -125,7 +123,7 @@ export function validateDocument(input: unknown): DocumentValidation {
 }
 
 function checkMark(mark: unknown, path: string, errors: string[]): void {
-  if (!isRecord(mark) || typeof mark.type !== 'string' || !(mark.type in ALLOWED_MARKS)) {
+  if (!isRecord(mark) || typeof mark.type !== 'string' || !Object.hasOwn(ALLOWED_MARKS, mark.type)) {
     errors.push(`${path}: 허용되지 않는 마크 '${isRecord(mark) ? String(mark.type) : typeof mark}'`);
     return;
   }
@@ -195,7 +193,6 @@ const BLOCK_NODES = new Set([
   'paragraph',
   'heading',
   'listItem',
-  'taskItem',
   'codeBlock',
   'blockquote',
   'tableRow',

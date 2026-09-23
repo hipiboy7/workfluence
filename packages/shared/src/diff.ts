@@ -40,14 +40,17 @@ export type DocDiff = {
  * 속성은 **키를 정렬해** 담는다. 편집기나 직렬화 순서가 달라진 것을 변경으로 읽으면
  * "아무것도 안 고쳤는데 전부 바뀌었다"가 된다.
  */
+function attrsKey(attrs: DocNode['attrs']): string {
+  if (!attrs) return '';
+  return Object.keys(attrs)
+    .filter((k) => attrs[k] !== null && attrs[k] !== undefined)
+    .sort()
+    .map((k) => `${k}=${JSON.stringify(attrs[k])}`)
+    .join(',');
+}
+
 function fingerprint(node: DocNode): string {
-  const attrs = node.attrs
-    ? Object.keys(node.attrs)
-        .sort()
-        .map((k) => `${k}=${JSON.stringify(node.attrs![k])}`)
-        .join(',')
-    : '';
-  return `${node.type}|${attrs}|${blockText(node)}`;
+  return `${node.type}|${attrsKey(node.attrs)}|${blockText(node)}`;
 }
 
 /**
@@ -58,9 +61,31 @@ function fingerprint(node: DocNode): string {
  * 남겨 두면 그 뒤로 아무도 맞는지 확인하지 않는다.
  */
 function blockText(node: DocNode): string {
-  if (node.text !== undefined) return node.text;
+  if (node.text !== undefined) return node.text + marksKey(node.marks);
   if (!node.content) return '';
-  return node.content.map(blockText).join('');
+  // **자식 사이에 경계를 넣는다.** 구분자 없이 이으면 `['사과','배']` 목록과 `['사과배']`
+  // 목록이 같은 글자가 되어 **항목을 합친 변경이 비교에서 사라진다.** 표 칸도 같다.
+  // `\u0000`은 문서 JSON에 들어올 수 없는 글자라 사람의 글과 부딪히지 않는다
+  return node.content.map(blockText).join('\u0000');
+}
+
+/**
+ * 마크를 지문에 담는다.
+ *
+ * **담지 않으면 링크 주소만 바뀐 것을 비교가 "같다"고 말한다.** 굵게·기울임이야 사소하지만
+ * `href`가 `/a`에서 `/evil`로 바뀐 것을 이력 비교가 못 보는 것은 이 시스템에서 가장 곤란한
+ * 종류의 오답이다 (P6 코드 리뷰 4). `realtime.ts`의 같은 이름 함수는 처음부터 마크를
+ * 담고 있었다 — 복사해 오면서 한쪽만 빠졌다.
+ */
+function marksKey(marks: DocNode['marks']): string {
+  if (!marks || marks.length === 0) return '';
+  return (
+    '\u0001' +
+    marks
+      .map((m) => `${m.type}(${attrsKey(m.attrs)})`)
+      .sort()
+      .join('+')
+  );
 }
 
 /** 낱말로 쪼갠다. 공백은 버리고 낱말만 남긴다 — 공백 변경은 사람이 묻는 차이가 아니다 */

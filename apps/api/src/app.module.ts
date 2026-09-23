@@ -11,6 +11,7 @@ import { CommentsModule } from './comments/comments.module';
 import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { APP_ENV, ConfigModule, loadEnv } from './config/config.module';
+import { RevocationModule } from './common/revocation.bus';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { LabelsModule } from './labels/labels.module';
@@ -48,6 +49,8 @@ function resolveWebDist(): string {
   imports: [
     ConfigModule,
     DbModule,
+    // RevocationModule은 @Global — 세션을 끊는 쪽과 듣는 쪽이 서로를 모르게 한다 (P7 FR-805)
+    RevocationModule,
     // AuditModule은 @Global — 쓰기를 하는 모든 모듈이 AuditService를 쓴다
     AuditModule,
     UsersModule,
