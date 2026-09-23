@@ -18,6 +18,7 @@ import { DB, type Db } from '../db/db.module';
 import { users, type UserRow } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { UsersService } from '../users/users.service';
+import { safeDisplayName } from './domain/display-name';
 import { mapGroupsToRole } from './domain/claims';
 import { OIDC_PROVIDER, type OidcClaims, type OidcProvider, type PkcePair } from './oidc/oidc.provider';
 
@@ -174,7 +175,11 @@ export class AuthService {
     // **조회도 `tx`로 한다.** 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면 동시 요청이
     // 풀 크기에 닿는 순간 전원이 서로를 기다린다 (T-026)
     const existing = await this.users.findByOidcSub(claims.sub, tx);
-    const displayName = claims.preferredUsername ?? claims.sub;
+    // **IdP가 준 값도 검증한다** (P7 보안 검토 F4). 로컬 가입은 `displayNameSchema`가
+    // 줄바꿈을 막는데(FR-807) JIT 동기화는 zod를 거치지 않아 **주 로그인 경로가 그 방어를
+    // 비켜 갔다.** 이 값은 멘션 메일 제목에 들어간다 — 사내 메일 API가 제목을 헤더로
+    // 옮기는 순간 인젝션이 된다 (보류 18)
+    const displayName = safeDisplayName(claims.preferredUsername ?? claims.sub, claims.sub);
     const email = await this.freeEmail(claims.email, existing?.id, tx);
 
     if (existing) {

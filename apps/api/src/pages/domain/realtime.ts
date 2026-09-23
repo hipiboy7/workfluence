@@ -88,11 +88,20 @@ function canonicalKids(nodes: readonly DocNode[]): DocNode[] {
   return out.filter((n) => !(n.type === 'text' && !n.text));
 }
 
+/**
+ * **`JSON.stringify`로 감싼다.** 글자를 경계로 쓰면 사람이 그 글자를 본문에 넣어 구조를
+ * 흉내 낼 수 있고, 그러면 **바뀐 문서를 "그대로"로 보아 저장을 건너뛴다.**
+ * 스스로의 편집이 사라지는 것이라 남을 해치지는 않지만, 조용히 잘못되는 쪽이다
+ * (`packages/shared/src/diff.ts`의 `blockKey`와 같은 판단).
+ */
 function fingerprint(node: DocNode): string {
-  const kids = canonicalKids(node.content ?? [])
-    .map(fingerprint)
-    .join('');
-  return `<${node.type}|${attrsKey(node.attrs)}|${marksKey(node.marks)}|${node.text ?? ''}${kids}>`;
+  return JSON.stringify([
+    node.type,
+    attrsKey(node.attrs),
+    marksKey(node.marks),
+    node.text ?? '',
+    canonicalKids(node.content ?? []).map(fingerprint),
+  ]);
 }
 
 export function shouldSaveVersion(input: SaveInput): SaveDecision {

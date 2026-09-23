@@ -13,7 +13,7 @@ Phase 7은 **기능을 더하지 않는다.** Phase 6까지 만든 것 중 **반
 | 4 | app 이미지 예산 400MB에 여유가 0인 것을 어떻게 하나 | **예산을 올리지 않고 이미지를 줄인다** | 늘리는 쪽은 한 번 하면 다음에도 한다 |
 | 5 | 끊긴 연결을 자동으로 다시 붙이나 | **붙이지 않는다** | 화면이 이미 "연결이 끊겼다"를 빨갛게 말한다(FR-711). 자동 재연결은 **권한이 사라져 끊은 연결을 다시 붙이려 드는** 코드라, 이 Phase가 닫으려는 결함과 정면으로 부딪친다 |
 | 6 | 세션 파기를 주기 재판정에만 맡기나 | **주기 + 즉시 통지 둘 다 둔다** | 보안 검토가 짚은 것이 정확하다 — "세션을 끊어 침해를 봉쇄한다"는 **사고 대응 수단**인데 최대 5분이 비면 그 수단이 아니게 된다. 다만 즉시 통지만으로는 Crew 제거·계정 만료처럼 **한 군데 길목이 없는 변화**를 못 잡는다. 둘은 서로를 대신하지 못한다 (§C.1) |
-| 7 | 보안 검토가 확신도 8 미만으로 뺀 4건을 하나 | **셋은 한다, 하나는 안 한다** | `Origin` 검사·CR/LF 차단·WS의 절대 타임아웃은 합쳐 열 줄 남짓이고 셋 다 **나중에 조건이 바뀌면 진짜 취약점이 되는 것**이다. 링크 `target`은 화면 렌더 한정이라 두고 본다 (§C.6) |
+| 7 | 보안 검토가 확신도 8 미만으로 뺀 4건을 하나 | **셋은 한다, 하나는 안 한다** | `Origin` 검사·CR/LF 차단·WS의 절대 타임아웃은 합쳐 열 줄 남짓이고 셋 다 **나중에 조건이 바뀌면 진짜 취약점이 되는 것**이다. 링크 `target`은 화면 렌더 한정이라 두고 본다 (§C.4.1) |
 
 ## B. 요구사항
 
@@ -28,7 +28,16 @@ Phase 7은 **기능을 더하지 않는다.** Phase 6까지 만든 것 중 **반
 | FR-806 | WebSocket 업그레이드는 `Origin`이 이 서버가 아니면 거부한다 | 보안 검토 참고 1 |
 | FR-807 | 표시 이름에 CR·LF를 넣을 수 없다 | 보안 검토 참고 3 |
 | FR-808 | WebSocket 경로도 세션 **절대 타임아웃**을 본다 | 보안 검토 참고 2 |
-| NFR-70 | FR-800의 재판정은 방마다가 아니라 **연결마다** 하되, 주기 안에 질의가 연결 수만큼만 돈다 | 300명·수십 세션 규모 |
+| FR-809 | 버전 비교는 **마크와 블록 경계**를 본다. 링크 주소만 바뀐 것을 "같다"고 답하지 않는다 | 코드 리뷰 4·10 |
+| FR-810 | 저장 계기를 `idle`·`manual`·`leave`·`shutdown` 넷으로 나눈다. **빈 문서로 덮는 것은 `manual`뿐**이다 | 코드 리뷰 8 |
+| FR-811 | 화면의 저장 버튼은 **실제로 남았을 때만** 보기로 넘어간다. 남지 않았으면 이유를 말한다 | 코드 리뷰 5a, 자체 점검 3 |
+| FR-812 | 열었다 닫기만 해서는 버전이 늘지 않는다 (왕복 정규화) | 코드 리뷰 7 |
+| FR-813 | 세션을 끊는 동작은 **누른 세션의 범위만큼** 끊는다 — 로그아웃은 그 세션, 비밀번호 변경·강제 종료는 전부 | 보안 검토 F1 |
+| FR-814 | 끊기로 한 연결이 보낸 변경은 **적용하지 않는다** | 보안 검토 F2 |
+| FR-815 | `flush`를 누른 사람을 감사로그에 남긴다 | 보안 검토 F3 |
+| FR-816 | IdP가 준 표시 이름도 제어문자를 걸러 저장한다 | 보안 검토 F4 |
+| FR-817 | 실시간 편집으로만 오래 작업해도 유휴 만료로 쫓겨나지 않는다. **열어만 둔 탭은 이어 주지 않는다** | 자체 점검 13 |
+| NFR-70 | FR-800의 재판정은 방마다가 아니라 **연결마다** 한다. 연결 하나에 질의 셋(세션·사용자·스페이스)이 들고, 그것이 주기(기본 5분)에 한 번이다 | 300명·수십 세션 규모 |
 
 ## C. 설계
 
@@ -84,7 +93,7 @@ UsersService ──revoke(userId)──▶ [RevocationBus] ──▶ CollabGatew
 
 ### C.5 이미지 줄이기 (FR-804)
 
-런타임 이미지의 `node_modules`에 **의존성이 함께 들여온 소스맵 9.8MB와 문서 11.7MB**가 들어 있다. 실행에 쓰이지 않는다. 빌드 스테이지에서 지운다 — 런타임 스테이지에서 지우면 앞 레이어에 그대로 남아 크기가 안 준다.
+런타임 이미지의 `node_modules`에 **의존성이 함께 들여온 소스맵 9.8MB와 문서 1.7MB**가 들어 있다. 실행에 쓰이지 않는다. 빌드 스테이지에서 지운다 — 런타임 스테이지에서 지우면 앞 레이어에 그대로 남아 크기가 안 준다.
 
 `LICENSE`는 **지우지 않는다** (7절 라이선스 목록).
 
@@ -105,9 +114,20 @@ UsersService ──revoke(userId)──▶ [RevocationBus] ──▶ CollabGatew
 | `packages/shared/src/html.ts` | A | 같은 노드의 태그 매핑 제거 |
 | `packages/shared/src/env.ts` | A | 새 키 둘 |
 | `packages/shared/src/schemas.ts` | A | 표시 이름에 CR·LF 금지 (FR-807) |
-| `apps/api/src/common/revocation.bus.ts` (신규) | B | 세션 파기 통지의 가운데 지점 (FR-805) |
+| `packages/shared/src/diff.ts` | A | 마크·블록 경계를 보는 구조 지문 `blockKey` (FR-809) |
+| `packages/shared/src/{document,html}.ts` | A | `Object.hasOwn`, `taskList` 제거 (FR-803) |
+| `packages/shared/src/constants.ts` | A | 감사 종류 `page.collab.flush` (FR-815) |
+| `apps/api/src/pages/domain/realtime.ts` | A | 저장 계기 넷, 왕복 정규화, 제목 비교 (FR-810·812) |
+| `apps/api/src/auth/domain/display-name.ts` (신규) | **A** | IdP 표시 이름 정제 (FR-816) |
+| `apps/api/src/common/revocation.bus.ts` (신규) | B | 세션 파기 통지의 가운데 지점 (FR-805·813) |
 | `apps/api/src/users/users.service.ts` | B | 세션을 끊을 때 버스에 알린다 |
-| `deploy/Dockerfile` | — | 런타임 군살 제거 |
+| `apps/api/src/auth/auth.module.ts` | B | 로그아웃이 그 세션의 연결을 끊는다 (FR-813) |
+| `apps/api/src/auth/auth.service.ts` | B | JIT 동기화가 표시 이름을 정제한다 (FR-816) |
+| `apps/api/src/pages/pages.module.ts` | B | `flush` 호출자를 감사로그에 (FR-815) |
+| `apps/api/src/{notifications,mail,templates}/…` | B | 멘션 귀속·메일 이름·템플릿 동시 생성 |
+| `apps/web/src/pages/PageEditorPage.tsx` | B | 남지 않았으면 넘어가지 않는다 (FR-811) |
+| `deploy/nginx.conf` | — | `Host $http_host` (T-032) |
+| `deploy/Dockerfile` | — | 런타임 군살 제거. **라이선스 원문은 남긴다** |
 
 ## F. 검토 셋의 처리
 

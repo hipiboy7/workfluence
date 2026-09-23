@@ -16,7 +16,7 @@ import { UsersService } from '../../users/users.service';
 import { MentionMailService } from '../../mail/mention-mail.service';
 import type { MentionOutcome } from '../../notifications/notifications.service';
 import { PagesService } from '../pages.service';
-import { shouldSaveVersion, type SaveTrigger } from '../domain/realtime';
+import { shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
 import { docFromYDoc, yDocFromDoc } from '../domain/ydoc';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
 import { readPageId, readSessionId } from './session-auth';
@@ -55,6 +55,14 @@ type Member = {
   spaceId: string;
   /** 직전 ping에 pong이 돌아왔는가 (FR-801) */
   alive: boolean;
+  /**
+   * 권한을 잃어 끊기로 한 연결.
+   *
+   * **`close()`는 즉시 끊지 않는다.** close 프레임을 보내고 상대의 답을 최대 30초 기다리며,
+   * 그동안 `ws`는 들어온 메시지를 그대로 올린다. 답하지 않는 클라이언트는 **끊기로 한 뒤에도
+   * 30초 동안 문서를 계속 고칠 수 있었다** (P7 보안 검토 F2). 이 표시를 보고 되돌아 나온다.
+   */
+  revoked: boolean;
   lastCheckedAt: number;
 };
 
@@ -85,10 +93,19 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
    * 뒤의 것이 앞을 덮어 앞사람은 아무에게도 안 닿는 고아 방에서 편집한다** (자체 점검 5)
    */
   private readonly pending = new Map<string, Promise<Room>>();
+  /** 마지막 저장 판정. `flush`가 "정말 남았는가"를 답하는 데 쓴다 (P7 자체 점검 3) */
+  private readonly lastDecision = new Map<string, SaveDecision>();
   private wss?: WebSocketServer;
   private timer?: NodeJS.Timeout;
   private pingTimer?: NodeJS.Timeout;
   private unsubscribeRevoke?: () => void;
+  /**
+   * **떠 있는 뒷일.** 퇴장 저장·유휴 저장·메일은 아무도 기다리지 않는 `void` 호출이다.
+   * 그대로 두면 프로세스가 내려갈 때 **진행 중인 저장이 잘린다** — 마지막 몇 초의 편집이
+   * 사라지는 바로 그 경우다. 여기 모아 두고 종료 때 기다린다.
+   * (테스트에서도 같은 값을 한다 — 안 기다리면 다음 파일의 DB 정리와 겹친다. T-028과 같은 자리)
+   */
+  private readonly pendingWork = new Set<Promise<unknown>>();
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -102,10 +119,24 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     private readonly revocation: RevocationBus,
   ) {}
 
+  /** 뒷일을 기록해 둔다. 끝나면 스스로 빠진다 */
+  private track(work: Promise<unknown>): void {
+    const p = work.catch(() => undefined);
+    this.pendingWork.add(p);
+    void p.finally(() => this.pendingWork.delete(p));
+  }
+
+  /** 떠 있는 뒷일이 전부 끝날 때까지 기다린다. 뒷일이 또 뒷일을 낳을 수 있어 비워질 때까지 돈다 */
+  private async drain(): Promise<void> {
+    for (let i = 0; i < 20 && this.pendingWork.size > 0; i++) {
+      await Promise.allSettled([...this.pendingWork]);
+    }
+  }
+
   onModuleInit(): void {
     // **세션을 끊는 동작은 즉시 전달받는다** (FR-805). 주기 재판정만으로는 관리자가
     // 강제 종료를 눌러도 최대 `WF_COLLAB_RECHECK_MS`만큼 그 사람이 계속 쓴다
-    this.unsubscribeRevoke = this.revocation.onRevoke((userId) => this.closeFor(userId, '세션 파기'));
+    this.unsubscribeRevoke = this.revocation.onRevoke((userId, sid) => this.closeFor(userId, '세션 파기', sid));
   }
 
   /** `main.ts`가 부른다. HTTP 서버 하나에 붙어 같은 포트를 쓴다 — nginx 설정이 하나로 끝난다 */
@@ -133,6 +164,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     for (const pageId of [...this.rooms.keys()]) {
       await this.saveIfNeeded(pageId, 'shutdown').catch((e: unknown) => this.log.error(`종료 중 저장 실패 ${pageId}: ${String(e)}`));
     }
+    await this.drain();
     this.wss?.close();
   }
 
@@ -190,8 +222,19 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       // 붙어 아무에게도 안 닿고 저장도 되지 않는다 (P6 코드 리뷰 3)
       room.joining += 1;
       const joined = room;
-      this.wss.handleUpgrade(req, socket, head, (ws) => {
+      // **표를 반드시 되돌려 놓는다.** `ws`의 `handleUpgrade`는 클라이언트가 이미 끊었거나
+      // 핸드셰이크 헤더가 불량하면 **콜백을 부르지 않고** 소켓만 파괴한다. 그러면 표가
+      // 영영 걸린 채 남아 그 방을 아무도 지우지 못한다 (P7 자체 점검 1).
+      // 원시 소켓의 `close`로 한 번, 콜백에서 한 번 — 먼저 오는 쪽이 되돌린다
+      let released = false;
+      const release = (): void => {
+        if (released) return;
+        released = true;
         joined.joining -= 1;
+      };
+      socket.once('close', release);
+      this.wss.handleUpgrade(req, socket, head, (ws) => {
+        release();
         this.join(pageId, joined, ws, principal, user.displayName, sid, page.spaceId);
       });
     } catch (e) {
@@ -201,7 +244,19 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 요청이 이 서버에서 온 것인가 (FR-806) */
+  /**
+   * 요청이 이 서버에서 온 것인가 (FR-806).
+   *
+   * **호스트만 본다. 스킴은 보지 않는다.** 한 번 넣었다가 뺐다 — 기대하는 스킴을 알려면
+   * `X-Forwarded-Proto`를 믿어야 하는데, **앞단에 장비가 하나 더 있어 거기서 TLS를 끝내고
+   * nginx에 http로 넘기면** 브라우저 Origin은 https이고 그 헤더는 http라 **모든 실시간
+   * 편집이 막힌다.** T-032와 똑같은 함정의 다른 얼굴이다. 이 앱이 놓인 앞단 구성을
+   * 우리가 알지 못하는 한, **배치에 따라 전면 장애가 되는 검사를 심층 방어로 넣지 않는다.**
+   *
+   * 스킴을 빼도 막으려던 것은 막힌다 — 공격자 페이지의 Origin은 **호스트가 다르다.**
+   * 같은 호스트·같은 포트에 http로 응답하는 무언가가 있어야 하는데, 운영은 nginx가
+   * 그 포트를 혼자 듣고 TLS만 받는다.
+   */
   private sameOrigin(req: IncomingMessage): boolean {
     const origin = req.headers.origin;
     // 브라우저는 WebSocket 핸드셰이크에 `Origin`을 **반드시** 붙인다. 없으면 브라우저가 아니다
@@ -294,7 +349,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   private join(pageId: string, room: Room, socket: WebSocket, principal: Principal, name: string, sid: string, spaceId: string): void {
-    const member: Member = { socket, principal, name, sid, spaceId, alive: true, lastCheckedAt: Date.now() };
+    const member: Member = { socket, principal, name, sid, spaceId, alive: true, revoked: false, lastCheckedAt: Date.now() };
     room.members.add(member);
     room.emptyAt = null;
 
@@ -305,6 +360,8 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     });
 
     socket.on('message', (data: Buffer) => {
+      // **끊기로 한 연결의 말은 듣지 않는다** (P7 보안 검토 F2)
+      if (member.revoked) return;
       if (data.length < 1) return;
       const kind = data[0];
       const payload = data.subarray(1);
@@ -332,7 +389,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         // **마지막 사람이 나가면 남기고 정리한다** (FR-710).
         // **`void`로 두면 안 된다** — 저장이 실패하면 처리되지 않은 거부가 되어
         // Node가 프로세스를 죽인다. 창을 닫는 순간 서버가 내려간다 (P6 코드 리뷰 1)
-        void this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(`퇴장 저장 실패 ${pageId}: ${String(e)}`));
+        this.track(this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(`퇴장 저장 실패 ${pageId}: ${String(e)}`)));
       }
     });
     socket.on('error', () => socket.close());
@@ -365,17 +422,35 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 그 사용자의 열린 편집 연결을 모두 끊는다 (FR-805) */
-  private closeFor(userId: string, why: string): void {
+  /**
+   * 그 사용자의 열린 편집 연결을 끊는다 (FR-805).
+   *
+   * `sid`를 주면 **그 세션의 연결만** 끊는다 — 로그아웃은 누른 브라우저 하나의 일이다.
+   */
+  private closeFor(userId: string, why: string, sid?: string): void {
     let n = 0;
     for (const room of this.rooms.values()) {
-      for (const m of room.members) {
+      for (const m of [...room.members]) {
         if (m.principal.id !== userId) continue;
-        m.socket.close(CLOSE_REVOKED, why);
+        if (sid && m.sid !== sid) continue;
+        this.revoke(room, m, why);
         n += 1;
       }
     }
-    if (n) this.log.log(`${why} — 편집 연결 ${n}개를 끊었다 (user=${userId})`);
+    if (n) this.log.log(`${why} — 편집 연결 ${n}개를 끊었다 (user=${userId}${sid ? ', 이 세션만' : ''})`);
+  }
+
+  /**
+   * 한 연결을 끊는다.
+   *
+   * **순서가 중요하다.** 표시하고 → 방에서 빼고 → 닫는다. 닫기부터 하면 답하지 않는
+   * 클라이언트가 30초 동안 계속 쓰고, 그 사이 `recheck`도 이미 본 것으로 여겨 다시 안 본다.
+   */
+  private revoke(room: Room, member: Member, why: string): void {
+    member.revoked = true;
+    room.members.delete(member);
+    if (room.members.size === 0) room.emptyAt = Date.now();
+    member.socket.close(CLOSE_REVOKED, why);
   }
 
   private async sweep(): Promise<void> {
@@ -396,6 +471,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (!room.lastChangeAt || now - room.lastChangeAt < this.env.WF_COLLAB_IDLE_SAVE_MS) continue;
 
       await this.saveIfNeeded(pageId, 'idle').catch((e: unknown) => this.log.error(`자동 저장 실패 ${pageId}: ${String(e)}`));
+      // sweep 자체는 기다렸지만, 그 안에서 띄운 메일 같은 뒷일은 아직 떠 있을 수 있다
     }
   }
 
@@ -427,9 +503,23 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         mustChangePassword: user?.mustChangePassword === true,
         canWrite,
       });
-      if (!reason) continue;
+      if (!reason) {
+        // **실제로 고치고 있는 사람의 세션은 이어 준다.**
+        // `sessions.expire`는 HTTP 요청으로만 갱신된다. WebSocket으로만 30분 넘게 편집하면
+        // 유휴 만료에 걸려 **작업 중에 쫓겨난다** (P7 자체 점검 13).
+        // **열어만 둔 탭은 이어 주지 않는다** — 그러면 유휴 타임아웃이 뜻을 잃는다.
+        // 직전 주기 안에 이 사람이 실제로 문서를 바꿨을 때만이다
+        const typing = room.lastActor === m.principal.id && now - room.lastChangeAt < this.env.WF_COLLAB_RECHECK_MS;
+        if (typing) {
+          const idleMs = (await this.settings.get()).sessionIdleMinutes * 60_000;
+          await this.db.execute(
+            sql`UPDATE sessions SET expire = now() + make_interval(secs => ${Math.round(idleMs / 1000)}) WHERE sid = ${m.sid}`,
+          );
+        }
+        continue;
+      }
       this.log.log(`편집 연결을 끊는다 — ${reason} (user=${m.principal.id})`);
-      m.socket.close(CLOSE_REVOKED, reason);
+      this.revoke(room, m, reason);
     }
   }
 
@@ -496,14 +586,19 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         this.log.warn(`검증 실패로 저장하지 않았다 (page=${pageId}): ${decision.errors.slice(0, 3).join(' / ')}`);
       }
       await this.rememberState(pageId, room, current.currentVersionNo);
-      // **검증에 실패한 상태는 지우지 않는다.** 지우면 고칠 기회가 사라진다 (자체 점검 6)
-      if (trigger !== 'idle') {
+      // **검증에 실패한 상태는 지우지 않는다.** 지우면 고칠 기회가 사라진다 (자체 점검 6).
+      // **다만 사람이 남아 있으면 방도 지우지 않는다** — 지우면 그 사람들은 맵에 없는 방에서
+      // 계속 편집하고 아무도 저장하지 않는다. 다음에 들어온 사람은 두 번째 방을 만들어
+      // 둘이 갈린다. 사람이 누른 저장(`manual`)에서 실제로 일어난다 (P7 자체 점검 3)
+      if (trigger !== 'idle' && room.members.size === 0 && room.joining === 0) {
         if (decision.errors.length) this.drop(pageId, room);
         else await this.finish(pageId, room);
       }
+      this.lastDecision.set(pageId, decision);
       return;
     }
 
+    this.lastDecision.set(pageId, decision);
     const actor = room.lastActor ?? current.updatedBy;
     const collected: MentionOutcome[] = [];
     let savedVersionNo = current.currentVersionNo + 1;
@@ -521,7 +616,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     // **이름을 넘기지 않는다** — 자동 저장의 actor는 "마지막으로 키를 누른 사람"이라
     // 그 이름을 적으면 틀린 사람이 적힌다 (P6 코드 리뷰 6)
     const mentions = collected[0];
-    if (mentions?.count) void this.mentionMail.notify(mentions, null, title, actor);
+    if (mentions?.count) this.track(this.mentionMail.notify(mentions, null, title, actor));
     room.versionNo = savedVersionNo;
     // **저장하는 동안 들어온 변경은 그대로 둔다.** 무조건 0으로 밀면 그 변경은
     // 다음 타이핑이나 퇴장까지 저장되지 않는다 (자체 점검 12)
@@ -566,13 +661,19 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
    *
    * **저장이 끝난 뒤에 돌아온다.** 그래야 호출부가 읽는 버전 번호가 실제와 맞는다.
    */
-  async flush(pageId: string, title?: string): Promise<boolean> {
+  async flush(pageId: string, title?: string): Promise<{ saved: boolean; reason: string }> {
     const room = this.rooms.get(pageId);
-    if (!room) return false;
+    if (!room) return { saved: false, reason: '편집 중인 사람이 없다' };
     // **제목도 함께 남긴다.** 협업 모드에서도 제목은 평범한 입력칸이고, 그것을 안 보내면
     // 사람이 고친 제목이 조용히 버려진다 (자체 점검 3)
     if (title) room.title = title;
+    this.lastDecision.delete(pageId);
     await this.saveIfNeeded(pageId, 'manual');
-    return true;
+    const d = this.lastDecision.get(pageId);
+    this.lastDecision.delete(pageId);
+    // **"방이 있었다"를 "남겼다"로 답하면 안 된다.** 검증에 실패했는데 화면이 보기로
+    // 넘어가면 사람은 저장됐다고 믿는다 (P7 자체 점검 3)
+    if (!d) return { saved: false, reason: '남길 것이 없다' };
+    return d.save ? { saved: true, reason: '' } : { saved: false, reason: d.reason };
   }
 }

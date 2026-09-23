@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
 import * as Y from 'yjs';
 import { AuditService } from '../../audit/audit.service';
@@ -83,6 +83,7 @@ function fakeSocket(): FakeSocket {
  */
 type Internals = {
   room(pageId: string, versionNo: number): Promise<{ doc: Y.Doc; lastActor: string | null; members: Set<unknown> }>;
+  heartbeat(): void;
   join(pageId: string, room: unknown, socket: unknown, principal: Principal, name: string, sid: string, spaceId: string): void;
   sweep(): Promise<void>;
   heartbeat(): void;
@@ -165,6 +166,18 @@ beforeEach(async () => {
   spaceId = space.id;
   const page = await pagesSvc.create({ spaceId, parentId: null, title: '문서', content: doc('처음') }, { id: userId, role: 'admin' });
   pageId = page.id;
+});
+
+/**
+ * **다음 파일로 넘어가기 전에 저장을 끝낸다.**
+ *
+ * 퇴장 저장은 `void ... .catch(...)`라 테스트가 끝나도 진행 중일 수 있다. 그 트랜잭션이
+ * 살아 있는 채로 다음 파일의 `resetTables`가 `TRUNCATE`를 걸면 **교착이 난다** —
+ * 그 파일은 "앞 테스트의 상태가 샌다"로 깨지고, 원인은 여기에 있다 (T-028과 같은 자리).
+ */
+afterEach(async () => {
+  await gw.onModuleDestroy().catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 30));
 });
 
 async function currentVersion(): Promise<number> {
@@ -277,16 +290,13 @@ describe('살아 있는 연결의 권한 (P7 FR-800·805)', () => {
 });
 
 describe('하트비트 (P7 FR-801)', () => {
-  it('첫 주기에는 ping만 보낸다', () => {
-    void attach();
+  it('첫 주기에는 ping만 보낸다', async () => {
+    // **`await`를 빠뜨리면 이 테스트는 아무것도 확인하지 않는다.** `attach`가 DB에서
+    // 양보하는 사이 `heartbeat()`가 빈 방을 돌아 단언이 한 번도 실행되지 않는다 (P7 자체 점검 4)
+    const { socket } = await attach();
     inner.heartbeat();
-    for (const room of inner.rooms.values()) {
-      for (const m of room.members) {
-        const s = (m as { socket: FakeSocket }).socket;
-        expect(s.pinged).toBe(1);
-        expect(s.terminated).toBe(false);
-      }
-    }
+    expect(socket.pinged).toBe(1);
+    expect(socket.terminated).toBe(false);
   });
 
   it('pong이 없으면 다음 주기에 끊는다', async () => {
@@ -312,18 +322,18 @@ describe('flush — 화면의 저장 버튼 (P6 코드 리뷰 11)', () => {
     const sock = [...room.members][0] as { socket: FakeSocket };
     sock.socket.emit('message', editUpdate(room.doc, '저장할 글'));
     const ok = await gw.flush(pageId, '새 제목');
-    expect(ok).toBe(true);
+    expect(ok.saved).toBe(true);
     expect(await currentVersion()).toBe(before + 1);
   });
 
   it('방이 없으면 `false`다 — 화면은 이 값을 보고 이동을 멈춘다', async () => {
-    expect(await gw.flush(pageId)).toBe(false);
+    expect((await gw.flush(pageId)).saved).toBe(false);
   });
 
   it('**본문이 그대로여도 제목이 바뀌면 남는다** (P6 코드 리뷰 5b)', async () => {
     const before = await currentVersion();
     await attach();
-    expect(await gw.flush(pageId, '제목만 고침')).toBe(true);
+    expect((await gw.flush(pageId, '제목만 고침')).saved).toBe(true);
     expect(await currentVersion()).toBe(before + 1);
     const r = await db.execute<{ title: string }>(sql`SELECT title FROM pages WHERE id = ${pageId}`);
     expect(r.rows[0].title).toBe('제목만 고침');
@@ -356,5 +366,65 @@ describe('빈 문서 보호가 퇴장 경로를 막는다 (P6 코드 리뷰 8)',
     socket.close();
     await new Promise((r) => setTimeout(r, 100));
     expect(await currentVersion()).toBe(before);
+  });
+});
+
+describe('끊기로 한 연결 (P7 보안 검토 F1·F2)', () => {
+  it('**끊은 뒤에 온 변경은 적용하지 않는다** — `close()`는 30초 동안 메시지를 더 올린다', async () => {
+    const { socket, room } = await attach();
+    bus.revoke(userId);
+    expect(socket.closed?.code).toBe(1008);
+    // 답하지 않는 클라이언트가 계속 보내는 상황
+    socket.emit('message', editUpdate(room.doc, '끊긴 뒤에 쓴 글'));
+    expect(room.lastActor).toBeNull();
+    expect(room.members.size).toBe(0);
+  });
+
+  it('로그아웃은 **그 세션의 연결만** 끊는다 — 다른 기기 편집을 끊을 이유가 없다', async () => {
+    const a = await attach(userId, sid);
+    const otherSid = await mkSession(userId);
+    const b = fakeSocket();
+    inner.join(pageId, a.room, b, { id: userId, role: 'admin' }, '다른 기기', otherSid, spaceId);
+
+    bus.revoke(userId, sid);
+    expect(a.socket.closed?.code).toBe(1008);
+    expect(b.closed).toBeNull();
+  });
+
+  it('비밀번호 변경·강제 종료는 `sid` 없이 불러 **전부** 끊는다', async () => {
+    const a = await attach(userId, sid);
+    const b = fakeSocket();
+    inner.join(pageId, a.room, b, { id: userId, role: 'admin' }, '다른 기기', await mkSession(userId), spaceId);
+
+    bus.revoke(userId);
+    expect(a.socket.closed?.code).toBe(1008);
+    expect(b.closed?.code).toBe(1008);
+  });
+});
+
+describe('저장할 수 없는 문서 (P7 자체 점검 3)', () => {
+  it('**검증에 실패하면 `flush`가 `saved: false`와 이유를 돌려준다**', async () => {
+    const { room } = await attach();
+    // 허용 목록 밖 노드를 방의 문서에 직접 넣는다 (깨진 클라이언트가 보내는 상황)
+    room.doc.transact(() => {
+      const frag = room.doc.getXmlFragment('default');
+      frag.insert(frag.length, [new Y.XmlElement('script')]);
+    }, { principal: { id: userId } });
+
+    const r = await gw.flush(pageId);
+    expect(r.saved).toBe(false);
+    expect(r.reason).toContain('문서 검증 실패');
+  });
+
+  it('**사람이 남아 있으면 방을 지우지 않는다** — 지우면 그 뒤 편집이 아무데도 안 간다', async () => {
+    const { room } = await attach();
+    room.doc.transact(() => {
+      const frag = room.doc.getXmlFragment('default');
+      frag.insert(frag.length, [new Y.XmlElement('script')]);
+    }, { principal: { id: userId } });
+
+    await gw.flush(pageId);
+    expect(inner.rooms.get(pageId)).toBe(room);
+    expect(room.members.size).toBe(1);
   });
 });

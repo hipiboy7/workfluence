@@ -188,3 +188,17 @@ describe('계기별 빈 문서 보호 (P6 코드 리뷰 8)', () => {
     expect(why(shouldSaveVersion({ next: doc('새 글'), previous: doc('옛 글'), idleMs: 0, idleThresholdMs: 5_000, trigger: 'leave' }))).toBe('save');
   });
 });
+
+describe('지문을 본문으로 흉내 낼 수 없다 (P7 자체 확인)', () => {
+  const wrap = (...content: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content });
+  const p = (...kids: DocNode[]): DocNode => ({ type: 'paragraph', content: kids });
+  const t = (text: string): DocNode => ({ type: 'text', text });
+
+  it('문단 둘을 경계 글자로 이어 붙인 것은 **변경이다**', () => {
+    const before = wrap(p(t('앞')), p(t('뒤')));
+    for (const sep of ['<', '>', '|', '><', '\u0000']) {
+      const after = wrap(p(t(`앞${sep}뒤`)));
+      expect(why(shouldSaveVersion({ next: after, previous: before, idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'leave' })), sep).toBe('save');
+    }
+  });
+});

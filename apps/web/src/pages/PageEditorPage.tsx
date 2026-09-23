@@ -59,12 +59,13 @@ export function PageEditorPage() {
       setBusy(true);
       setError(null);
       try {
-        const r = await api<{ saved: boolean }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
-        // **저장되지 않았으면 넘어가지 않는다.** 연결이 끊긴 채 누르면 서버에 방이 없어
-        // `saved: false`가 오는데, 전에는 그 값을 보지도 않고 보기로 넘어갔다 —
-        // 사용자는 저장됐다고 믿고 화면에는 옛 내용이 뜬다 (P6 코드 리뷰 5a)
+        const r = await api<{ saved: boolean; reason: string }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
+        // **저장되지 않았으면 넘어가지 않는다.** 연결이 끊긴 채 누르거나 문서가 검증을
+        // 통과하지 못하면 `saved: false`가 오는데, 전에는 그 값을 보지도 않고 보기로
+        // 넘어갔다 — 사용자는 저장됐다고 믿고 화면에는 옛 내용이 뜬다 (P6 코드 리뷰 5a).
+        // **왜 안 됐는지도 말한다** — "저장이 안 됐다"만으로는 무엇을 고쳐야 할지 모른다
         if (!r.saved) {
-          setError('연결이 끊겨 저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
+          setError(r.reason ? `저장되지 않았다: ${r.reason}` : '저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
           setBusy(false);
           return;
         }

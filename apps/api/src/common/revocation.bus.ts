@@ -20,10 +20,10 @@ import { Global, Injectable, Logger, Module } from '@nestjs/common';
 @Injectable()
 export class RevocationBus {
   private readonly log = new Logger('Revocation');
-  private readonly listeners = new Set<(userId: string) => void>();
+  private readonly listeners = new Set<(userId: string, sid?: string) => void>();
 
   /** 구독을 해제하는 함수를 돌려준다 */
-  onRevoke(fn: (userId: string) => void): () => void {
+  onRevoke(fn: (userId: string, sid?: string) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
@@ -31,13 +31,17 @@ export class RevocationBus {
   /**
    * 이 사용자의 세션이 파기됐다.
    *
+   * **`sid`를 주면 그 세션만이다.** 로그아웃은 누른 그 브라우저의 세션 하나만 지우므로
+   * (`req.session.destroy()`), 그 사람의 다른 기기 편집까지 끊으면 안 된다.
+   * 비밀번호 변경·관리자 강제 종료는 전부 지우므로 `sid` 없이 부른다.
+   *
    * **구독자가 던져도 삼킨다.** 이 호출은 비밀번호 변경 트랜잭션 뒤에 오는데,
    * 듣는 쪽의 사정으로 비밀번호 변경이 실패하면 안 된다.
    */
-  revoke(userId: string): void {
+  revoke(userId: string, sid?: string): void {
     for (const fn of this.listeners) {
       try {
-        fn(userId);
+        fn(userId, sid);
       } catch (e) {
         this.log.warn(`세션 파기 통지 처리 실패 (user=${userId}): ${String(e)}`);
       }

@@ -24,8 +24,10 @@ RUN pnpm build \
  # 의존성이 함께 들여온 **소스맵과 README를 지운다** (P7 FR-804). 실행에 쓰이지 않는데
  # 합쳐서 11MB이고, app 이미지 예산 400MB에 여유가 0이던 상태였다.
  # **런타임 스테이지가 아니라 여기서 지운다** — 뒤에서 지우면 앞 레이어에 그대로 남는다.
- # `LICENSE`는 남긴다 (7절 라이선스 목록). 우리 `dist`의 소스맵도 남긴다 — 장애 때 필요하다
- && find /out/api/node_modules -type f \( -name '*.map' -o -name '*.md' -o -name '*.markdown' \) -delete
+ # **라이선스 원문은 남긴다** (7절). `-name '*.md'`만 쓰면 `LICENSE.md`·`NOTICE.md`도 지워져
+ # 주석이 약속한 것과 반대가 된다 — 실제로 `jose`·`ms` 등 운영 의존성이 그 이름을 쓴다
+ # (P7 보안 검토 F5). 우리 `dist`의 소스맵도 남긴다 — 장애 때 필요하다
+ && find /out/api/node_modules -type f \( -name '*.map' -o \( \( -name '*.md' -o -name '*.markdown' \) ! -iname 'license*' ! -iname 'licence*' ! -iname 'copying*' ! -iname 'notice*' \) \) -delete
 
 # ---------- 2) 런타임 ----------
 FROM node:24-bookworm-slim

@@ -74,6 +74,7 @@ export const AUDIT_ACTIONS = [
   // Phase 6 (P6_설계서_Collab D.2절)
   'page.export',
   'page.collab.save',
+  'page.collab.flush',
   'template.create',
   'template.update',
   'template.delete',

@@ -55,7 +55,7 @@ workfluence/
 │   │   ├── src/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
 │   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드
-│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드
+│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
 │   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드
 │   │   │   ├── users/            [P1] 가입·승인·초기화·역할
@@ -63,7 +63,7 @@ workfluence/
 │   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 정책값 (세 겹 출처 · 캐시)
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
 │   │   │   ├── pages/            [P2] 페이지·버전 / [P6] collab/(WebSocket 게이트웨이) ·
-│   │   │   │                     domain/{realtime,ydoc}.ts / [P7] collab/liveness.ts
+│   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글

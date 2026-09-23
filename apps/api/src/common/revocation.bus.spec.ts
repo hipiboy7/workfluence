@@ -31,6 +31,16 @@ describe('RevocationBus (P7 FR-805)', () => {
     });
     bus.onRevoke(later);
     expect(() => bus.revoke('u1')).not.toThrow();
-    expect(later).toHaveBeenCalledWith('u1');
+    expect(later).toHaveBeenCalledWith('u1', undefined);
+  });
+});
+
+describe('세션 하나만 끊기 (P7 보안 검토 F1)', () => {
+  it('`sid`를 주면 그대로 전달한다 — 로그아웃은 그 브라우저 하나의 일이다', () => {
+    const bus = new RevocationBus();
+    const seen: [string, string | undefined][] = [];
+    bus.onRevoke((id, sid) => seen.push([id, sid]));
+    bus.revoke('u1', 'sid-abc');
+    expect(seen).toEqual([['u1', 'sid-abc']]);
   });
 });
