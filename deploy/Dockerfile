@@ -2,7 +2,7 @@
 # 빌드: Linux 서버에서  docker build -f deploy/Dockerfile -t workfluence-app:<git-sha> .
 # 실행: deploy/compose.yml
 #
-# 프로토타입 단계: 이 파일은 Windows 개발 PC에서는 빌드할 수 없다(Docker 없음). Linux 서버에서 실측 후 조정한다.
+# 개발과 빌드는 같은 Linux 서버에서 한다 (CLAUDE.md 0.3절, 2026-09-21 통합).
 
 # ---------- 1) 빌드 ----------
 FROM node:24-bookworm-slim AS build
@@ -20,7 +20,14 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build \
  && pnpm --filter @workfluence/api deploy --legacy --prod /out/api \
- && mkdir -p /out/web && cp -r apps/web/dist /out/web/dist
+ && mkdir -p /out/web && cp -r apps/web/dist /out/web/dist \
+ # 의존성이 함께 들여온 **소스맵과 README를 지운다** (P7 FR-804). 실행에 쓰이지 않는데
+ # 합쳐서 11MB이고, app 이미지 예산 400MB에 여유가 0이던 상태였다.
+ # **런타임 스테이지가 아니라 여기서 지운다** — 뒤에서 지우면 앞 레이어에 그대로 남는다.
+ # **라이선스 원문은 남긴다** (7절). `-name '*.md'`만 쓰면 `LICENSE.md`·`NOTICE.md`도 지워져
+ # 주석이 약속한 것과 반대가 된다 — 실제로 `jose`·`ms` 등 운영 의존성이 그 이름을 쓴다
+ # (P7 보안 검토 F5). 우리 `dist`의 소스맵도 남긴다 — 장애 때 필요하다
+ && find /out/api/node_modules -type f \( -name '*.map' -o \( \( -name '*.md' -o -name '*.markdown' \) ! -iname 'license*' ! -iname 'licence*' ! -iname 'copying*' ! -iname 'notice*' \) \) -delete
 
 # ---------- 2) 런타임 ----------
 FROM node:24-bookworm-slim

@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 5까지 구현 완료** (2026-09-22). `[P4]`·`[P5]`·`[P6]` 표기가 붙은 항목만 **계획**이며 각 Phase 착수 시 `P{N}_설계서_*.md`로 상세화한다
+- 상태: **Phase 7까지 구현 완료** (2026-09-23). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -22,14 +22,15 @@
 [브라우저]
     │ HTTPS
     ▼
-[nginx]  TLS 종단 · X-Forwarded-* 전달 · WebSocket 프록시(Phase 6 대비) · 업로드 상한
+[nginx]  TLS 종단 · X-Forwarded-* 전달 · WebSocket 프록시(실시간 편집) · 업로드 상한
     │ HTTP (컨테이너 네트워크)
     ▼
 [api]    NestJS. REST API + 빌드된 SPA 정적 서빙 (한 프로세스)
     │                                   │
-    │ SQL                               │ OIDC (Phase 1)
+    │ SQL                               │ OIDC · 메일 발송 (HTTP)
     ▼                                   ▼
 [postgres]  문서·사용자·감사로그       [사내 IdP]  외부. Discovery·JWKS
+                                       [사내 메일 API]  외부. 멘션 알림 (보류 18)
     │
     ▼
 [볼륨]  postgres_data · attachments(Phase 3)
@@ -54,26 +55,28 @@ workfluence/
 │   │   ├── src/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
 │   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드
-│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드
+│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
 │   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드
 │   │   │   ├── users/            [P1] 가입·승인·초기화·역할
 │   │   │   ├── audit/            [P1] append-only 기록·조회
-│   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 조절값
+│   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 정책값 (세 겹 출처 · 캐시)
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
-│   │   │   ├── pages/            [P2] 페이지·버전
+│   │   │   ├── pages/            [P2] 페이지·버전 / [P6] collab/(WebSocket 게이트웨이) ·
+│   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
 │   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계)
 │   │   │   ├── trash/            [P4] 휴지통·되살리기
 │   │   │   ├── labels/           [P4] 라벨
-│   │   │   └── settings/         [P4] 운영 정책값 (세 겹 출처 · 캐시)
+│   │   │   ├── templates/        [P6] 페이지 템플릿
+│   │   │   └── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http)
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
 │       └── src/{components,pages,api.ts,auth.tsx}
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
-│   └── src/{env,constants,document,permissions,policy,security,schemas}.ts
+│   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html}.ts
 ├── e2e/                          Playwright
 ├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · check-licenses
 │                                 reindex · trash-purge · audit-purge · backup-create · backup-restore
@@ -82,7 +85,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P4]`는 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P7]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -106,6 +109,9 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `permissions.ts` | `can()`·`spaceAccess()`·역할 간 우열·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
 | `security.ts` | ID·email 마스킹, 임시 비밀번호·식별자 생성 (난수 소스 주입) | 난수를 주입받아 순수 함수로 두면 테스트가 결정적이다 |
 | `schemas.ts` | API 요청 DTO(zod) + 응답 뷰 타입 | 서버 검증과 클라이언트 타입이 한 정의에서 나온다 |
+| `release.ts` | 반입 묶음의 필수 구성 목록 | 문서가 아니라 코드가 단일 출처다 (`CLAUDE.md` 8.3절) |
+| `diff.ts` | 두 문서 JSON의 블록·단어 비교 (LCS) | 화면이 그리고 서버가 같은 결과를 내야 한다 |
+| `html.ts` | 문서 JSON → HTML 렌더링·이스케이프·인쇄 CSS | 허용 노드 목록이 `document.ts`와 한 곳에서 나와야 한다 |
 
 전부 **A등급**(테스트 먼저, ≥90%)이다. 입출력이 결정적이고 외부 의존이 없다.
 
@@ -132,6 +138,8 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `comments` | `id`, `page_id`, `parent_id`, `body_json`, `created_by`, `deleted_at` | P3 | |
 | `labels` / `page_labels` | `id`,`name` / (`page_id`,`label_id`) | P3 | |
 | `notifications` | `id`, `user_id`, `type`, `payload`, `read_at` | P4 | 앱 내 알림함 |
+| `page_realtime` | `page_id` PK, `state` bytea, `version_no`, `updated_by`, `updated_at` | P6 | Yjs 상태. **파생 데이터**라 지워도 정본에서 다시 시작한다 (보류 4). 페이지가 지워지면 CASCADE |
+| `page_templates` | `id`, `name` uq, `content_json`, `created_by`, `updated_at` | P6 | 페이지 시작 틀. 관리자만 만든다 |
 
 ### 3.2 규약
 
@@ -144,7 +152,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 
 ### 3.3 마이그레이션
 
-Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌리는 스크립트를 두지 않는다. 되돌림은 백업 복원으로 처리한다 — 폐쇄망에서 롤백 스크립트를 신뢰하기 어렵고, 잘못된 롤백이 데이터를 잃게 만든다.
+**손으로 쓴 SQL 파일을 커밋**한다 (보류 17 판정 2026-09-22 — 생성기는 스냅샷 사슬이 0004에서 끊겨 이미 있는 표를 다시 만드는 파일을 낸다). forward-only이며 되돌리는 스크립트를 두지 않는다. 되돌림은 백업 복원으로 처리한다 — 폐쇄망에서 롤백 스크립트를 신뢰하기 어렵고, 잘못된 롤백이 데이터를 잃게 만든다.
 
 | 환경 | 적용 방법 |
 |---|---|
@@ -182,7 +190,8 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 | 인증 제공자 | 로컬 + OIDC | `AuthProvider` 주입 토큰 | SAML·다른 IdP·인증서 |
 | 파일 스토리지 | 로컬 디스크(볼륨) | `StorageProvider` | MinIO·S3 호환·NAS |
 | 검색 | PostgreSQL ILIKE + pg_trgm | `SearchProvider` | pg_bigm·외부 엔진 |
-| 실시간 상태 | 없음 (JSON 정본) | 문서 저장 인터페이스 | Yjs 상태 테이블 추가 (Phase 6) |
+| 실시간 상태 | Yjs (`page_realtime`). **JSON이 정본이고 이것은 파생** | 게이트웨이가 상태를 읽고 쓰는 지점 | 다른 CRDT, 또는 실시간 편집을 끄는 것(`WF_COLLAB_ENABLED=false`) |
+| 알림 발송 | 앱 안 알림함 + 사내 메일 API | `MAIL_SENDER` 토큰 (`mock`/`http`) | 사내 메신저, 다른 메일 게이트웨이 |
 
 테스트에서는 이 인터페이스의 대역(fake)을 쓴다. 단 **PostgreSQL은 대역을 쓰지 않는다** — SQL·제약·트랜잭션이 곧 로직이라 대역으로 검증하면 실패를 놓친다.
 
@@ -199,7 +208,7 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 |---|---|
 | `check:env` | Node·pnpm·`.env`·DB·마이그레이션·데이터 경로·디스크 여유 → `READY` |
 | `dev:db` | 임베디드 PostgreSQL 기동 |
-| `db:generate` / `db:migrate` / `db:seed` | 마이그레이션 생성 / 적용 / 시드 |
+| `db:migrate` / `db:seed` | 마이그레이션 적용 / 시드. **생성은 쓰지 않는다** (보류 17) |
 | `dev` / `build` / `start` | 개발 서버 / 빌드 / 실행 |
 | `search:reindex` | 검색 인덱스 재생성 (본문 JSON → `pages.search_text`) |
 | `trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 (첨부 파일 실체까지) |
@@ -252,7 +261,8 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 | 3 | `search`·`attachments`, 댓글·라벨, trigram 인덱스, 스토리지 제공자 |
 | 4 | 관리 화면, 권한 세분화, 휴지통, 알림, `settings` 관리 UI |
 | 5 | 배포·운영 문서, 백업·복원, 부하·보안 점검 |
-| 6 | 실시간 편집(저장 모델은 보류 4에서 판정), 외부 알림, PDF |
+| 6 | 실시간 편집(JSON 정본 + Yjs 파생, 보류 4), 버전 비교, HTML 내보내기, 템플릿, 멘션 메일. PDF·가져오기는 하지 않는다 |
+| 7 | 반입 전 강화 — 살아 있는 연결의 권한 재판정·하트비트, 이미지 군살 제거 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
@@ -304,7 +314,7 @@ Drizzle이 생성한 **SQL 파일을 커밋**한다. forward-only이며 되돌�
 ### 11.4 확장을 싸게 유지하는 규칙
 
 - **판정은 한 곳에서.** 권한·정책 판정을 화면에서 다시 구현하지 않는다. 서버가 응답에 판정 결과를 실어 보내고 화면은 그대로 쓴다.
-- **교체 가능한 축은 인터페이스 뒤에.** 6절의 네 축은 구현을 갈아도 상위 로직이 안 바뀐다. 새 기능이 그 축에 걸리면 축을 늘리지 말고 구현을 더한다.
+- **교체 가능한 축은 인터페이스 뒤에.** 6절의 다섯 축은 구현을 갈아도 상위 로직이 안 바뀐다. 새 기능이 그 축에 걸리면 축을 늘리지 말고 구현을 더한다.
 - **파생 데이터는 재생성 가능하게.** 검색 색인처럼 원본에서 다시 만들 수 있는 것은 정본으로 취급하지 않는다.
 - **새 문서 종류를 만들기 전에 기존 문서에 절을 더할 수 없는지 본다** (`CLAUDE.md` 10절).
 - **순환 참조를 만들지 않는다.** 두 모듈이 함께 쓰는 변환 함수는 제3의 파일로 뺀다. CommonJS에서 순환이 생기면 타입 검사는 통과하고 기동만 실패한다 (2.1절).

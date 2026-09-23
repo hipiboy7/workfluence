@@ -72,6 +72,8 @@ services:
       # **끄는 스위치가 여기 없으면 장애 시 끌 수가 없다** (장애대응 7.19)
       WF_COLLAB_ENABLED: ${WF_COLLAB_ENABLED:-true}
       WF_COLLAB_IDLE_SAVE_MS: ${WF_COLLAB_IDLE_SAVE_MS:-5000}
+      WF_COLLAB_PING_MS: ${WF_COLLAB_PING_MS:-30000}
+      WF_COLLAB_RECHECK_MS: ${WF_COLLAB_RECHECK_MS:-300000}
       WF_MAIL_ENABLED: ${WF_MAIL_ENABLED:-false}
       WF_MAIL_MOCK: ${WF_MAIL_MOCK:-true}
       WF_MAIL_API_URL: ${WF_MAIL_API_URL:-}

@@ -40,18 +40,25 @@ export type DocDiff = {
  * 속성은 **키를 정렬해** 담는다. 편집기나 직렬화 순서가 달라진 것을 변경으로 읽으면
  * "아무것도 안 고쳤는데 전부 바뀌었다"가 된다.
  */
+function attrsKey(attrs: DocNode['attrs']): string {
+  if (!attrs) return '';
+  return Object.keys(attrs)
+    .filter((k) => attrs[k] !== null && attrs[k] !== undefined)
+    .sort()
+    .map((k) => `${k}=${JSON.stringify(attrs[k])}`)
+    .join(',');
+}
+
 function fingerprint(node: DocNode): string {
-  const attrs = node.attrs
-    ? Object.keys(node.attrs)
-        .sort()
-        .map((k) => `${k}=${JSON.stringify(node.attrs![k])}`)
-        .join(',')
-    : '';
-  return `${node.type}|${attrs}|${blockText(node)}`;
+  return blockKey(node);
 }
 
 /**
- * 블록 안의 글자를 순서대로 모은다. 표·목록처럼 자식이 깊어도 끝까지 내려간다 (FR-724).
+ * 블록 안의 **사람이 읽을 글자**를 순서대로 모은다. 표·목록처럼 자식이 깊어도 끝까지 내려간다 (FR-724).
+ *
+ * **이 값은 화면에 그대로 그려진다** (`BlockDiff.before`/`after`, 낱말 비교의 입력).
+ * 그러니 여기에 구분자나 마크 표기를 섞으면 **비교 화면에 쓰레기 문자가 찍힌다.**
+ * 짝짓기에 쓰는 값은 아래 `blockKey`로 따로 둔다.
  *
  * **블록에만 부른다 — 문서(`doc`)에는 부르지 않는다.** 처음에는 `doc`일 때 줄바꿈으로
  * 잇는 분기를 뒀는데 호출되는 자리가 없었다. 죽은 가지는 "나중에 쓰일지 모른다"로
@@ -61,6 +68,41 @@ function blockText(node: DocNode): string {
   if (node.text !== undefined) return node.text;
   if (!node.content) return '';
   return node.content.map(blockText).join('');
+}
+
+/**
+ * 짝짓기·같음 판정에 쓰는 **구조 지문**. 사람에게 보여 주지 않는다.
+ *
+ * 왜 `blockText`로는 안 되는가. 두 가지를 놓친다.
+ *
+ * 1. **마크.** `href`가 `/a`에서 `/evil`로 바뀐 것을 이력 비교가 "같다"고 답하면 안 된다
+ *    (P6 코드 리뷰 4). `realtime.ts`의 같은 이름 함수는 처음부터 마크를 담고 있었는데
+ *    복사해 오면서 한쪽만 빠졌다.
+ * 2. **블록 안쪽의 경계.** 구분자 없이 이으면 `['사과','배']` 목록과 `['사과배']` 목록이
+ *    같은 글자가 되어 **항목을 합친 변경이 사라진다** (P6 코드 리뷰 10).
+ *
+ * **구분자로 글자를 쓰지 않는다.** 한 글자를 경계로 삼으면 사람이 그 글자를 본문에 넣는
+ * 순간 충돌한다 — `['사과','배']`와 `['사과\u0000배']`가 같아진다(직접 넣어 보고 확인했다).
+ * 괄호로 감싸도 마찬가지로 본문에 괄호를 넣어 흉내 낼 수 있다. **`JSON.stringify`가
+ * 중첩을 모호하지 않게 만든다** — 안쪽 문자열의 따옴표·역슬래시를 스스로 이스케이프한다.
+ */
+function blockKey(node: DocNode): string {
+  return JSON.stringify([
+    node.type,
+    attrsKey(node.attrs),
+    marksKey(node.marks),
+    node.text ?? '',
+    (node.content ?? []).map(blockKey),
+  ]);
+}
+
+/** 마크를 지문에 담는다. 순서는 뜻이 없으므로 정렬한다 */
+function marksKey(marks: DocNode['marks']): string {
+  if (!marks || marks.length === 0) return '';
+  return marks
+    .map((m) => `${m.type}[${attrsKey(m.attrs)}]`)
+    .sort()
+    .join('+');
 }
 
 /** 낱말로 쪼갠다. 공백은 버리고 낱말만 남긴다 — 공백 변경은 사람이 묻는 차이가 아니다 */

@@ -134,14 +134,24 @@ export class PagesController {
     @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(flushCollabDto)) dto: ReturnType<typeof flushCollabDto.parse>,
     @CurrentUser() me: SessionUser,
-  ): Promise<{ saved: boolean; currentVersionNo: number }> {
+  ): Promise<{ saved: boolean; reason: string; currentVersionNo: number }> {
     // **쓰기 권한을 본다.** WebSocket을 거치지 않고 부를 수 있는 경로이고,
     // 읽기만 되는 사람이 강제 저장을 일으키면 유휴 묶음(FR-707)이 무력해진다 (자체 점검 16)
     const page = await this.pages.get(id, me);
     await this.spaces.assertWrite(page.spaceId, me);
-    const saved = await this.collab.flush(id, dto.title);
+    const result = await this.collab.flush(id, dto.title);
+    // **누가 눌렀는지 남긴다** (P7 보안 검토 F3). 저장되는 버전의 작성자는 **실제로 글자를
+    // 바꾼 사람**(FR-802)이라, 이것이 없으면 "B가 A의 문서를 B가 정한 제목으로 남겼는데
+    // 이력과 감사로그에는 A만 보이는" 상태가 된다 — 사후 조사가 엉뚱한 사람을 가리킨다
+    await this.audit.record({
+      action: 'page.collab.flush',
+      actorId: me.id,
+      targetType: 'page',
+      targetId: id,
+      detail: { saved: result.saved, reason: result.reason, titleGiven: dto.title ?? null },
+    });
     const after = await this.pages.get(id, me);
-    return { saved, currentVersionNo: after.currentVersionNo };
+    return { saved: result.saved, reason: result.reason, currentVersionNo: after.currentVersionNo };
   }
 
   /** 두 버전의 차이 (FR-720). 읽을 수 있으면 볼 수 있다 */

@@ -122,3 +122,28 @@ describe('extractText', () => {
     expect(extractText(emptyDocument())).toBe('');
   });
 });
+
+describe('프로토타입에 있는 이름 (P6 코드 리뷰 2)', () => {
+  // `'constructor' in ALLOWED_NODES`가 true라 허용 노드로 통과한 뒤,
+  // `ALLOWED_NODES['constructor']`가 배열이 아니라 함수여서 **검증이 오류 목록 대신
+  // TypeError를 던졌다.** REST로는 400이 아니라 500이 되고, 실시간 편집에서는
+  // 그 예외가 저장 경로를 타고 올라가 프로세스를 죽였다
+  it('`constructor`를 노드 종류로 보내면 거부한다 — 던지지 않는다', () => {
+    const r = validateDocument({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'constructor' }] });
+    expect(r.ok).toBe(false);
+  });
+
+  it('`constructor`를 마크로 보내면 거부한다 — 던지지 않는다', () => {
+    const r = validateDocument({
+      type: 'doc',
+      attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION },
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: '글', marks: [{ type: 'constructor', attrs: { x: 1 } }] }] }],
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it('`taskList`는 더 이상 허용 노드가 아니다 (P7 FR-803)', () => {
+    const r = validateDocument({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'taskList' }] });
+    expect(r.ok).toBe(false);
+  });
+});

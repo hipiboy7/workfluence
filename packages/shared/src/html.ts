@@ -17,8 +17,6 @@ const TAGS: Record<string, string> = {
   bulletList: 'ul',
   orderedList: 'ol',
   listItem: 'li',
-  taskList: 'ul',
-  taskItem: 'li',
   codeBlock: 'pre',
   table: 'table',
   tableRow: 'tr',
@@ -67,7 +65,7 @@ function attrsOf(node: DocNode): string {
 function wrapMarks(text: string, marks: DocMark[] | undefined): string {
   let out = text;
   for (const mark of marks ?? []) {
-    if (!(mark.type in ALLOWED_MARKS)) continue;
+    if (!Object.hasOwn(ALLOWED_MARKS, mark.type)) continue;
     if (mark.type === 'link') {
       // **검증과 같은 기준으로 본다** — `document.ts`가 `trim()` 뒤에 검사하므로
       // 여기서 안 하면 "저장은 되는데 내보내면 링크가 빠지는" 문서가 생긴다 (자체 점검 34)
@@ -86,7 +84,7 @@ function wrapMarks(text: string, marks: DocMark[] | undefined): string {
 
 function renderNode(node: DocNode): string {
   // **허용 목록 밖은 통째로 뺀다** (FR-732). 자식도 그리지 않는다
-  if (!(node.type in ALLOWED_NODES)) return '';
+  if (!Object.hasOwn(ALLOWED_NODES, node.type)) return '';
 
   if (node.type === 'text') return wrapMarks(escapeHtml(node.text ?? ''), node.marks);
   if (node.type === 'hardBreak') return '<br />';

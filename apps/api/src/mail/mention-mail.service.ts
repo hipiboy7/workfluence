@@ -24,14 +24,19 @@ export class MentionMailService {
   ) {}
 
   /** 커밋 뒤에 부른다. `await`하지 않아도 되도록 스스로 예외를 삼킨다 */
-  async notify(outcome: MentionOutcome, actorName: string, pageTitle: string): Promise<void> {
+  async notify(outcome: MentionOutcome, actorName: string | null, pageTitle: string, actorId?: string): Promise<void> {
     if (!this.env.WF_MAIL_ENABLED || outcome.recipients.length === 0) return;
     try {
       // **문서 본문을 담지 않는다** (FR-755). 누가 어디서 불렀는지와 링크만.
       // 메일은 앱 밖으로 나가고, 받는 사람이 그 페이지를 볼 권한을 잃어도 메일은 남는다
       const where = outcome.commentId ? '댓글' : '문서';
+      // **누가 불렀는지 확실하지 않으면 이름을 적지 않는다.** 실시간 편집의 자동 저장은
+      // "마지막으로 키를 누른 사람"만 알기 때문에, 이름을 적으면 **틀린 사람의 이름이**
+      // 메일로 나간다 (P6 코드 리뷰 6)
+      const headline = actorName ? `${actorName} 님이 ${where}에서 회원님을 불렀습니다.` : `${where}에서 회원님이 불렸습니다.`;
+      const subject = actorName ? `[위키] ${actorName} 님이 회원님을 불렀습니다` : '[위키] 문서에서 회원님이 불렸습니다';
       const text = [
-        `${actorName} 님이 ${where}에서 회원님을 불렀습니다.`,
+        headline,
         '',
         `문서: ${pageTitle}`,
         // 주소가 없으면 **링크 줄을 아예 빼고 보낸다.** `(주소 미설정)/pages/…`가
@@ -45,7 +50,7 @@ export class MentionMailService {
       // 불렸는지"가 드러난다 — 폐쇄망이라도 그것은 알려 줄 일이 아니다 (자체 점검 21)
       const results = await Promise.all(
         outcome.recipients.map((r) =>
-          this.sender.send({ to: [r.email], subject: `[위키] ${actorName} 님이 회원님을 불렀습니다`, text }),
+          this.sender.send({ to: [r.email], subject, text }),
         ),
       );
       const ok = results.every(Boolean);
@@ -54,6 +59,8 @@ export class MentionMailService {
       // 주소는 담지 않는다 — 감사로그는 오래 남고 개인정보다 (7절)
       await this.audit.record({
         action: ok ? 'mail.send' : 'mail.fail',
+        // **누가 일으킨 메일인지 남긴다** (FR-756). 없으면 "누가"에 답하지 못한다
+        actorId,
         targetType: 'page',
         targetId: outcome.pageId,
         detail: { recipients: outcome.recipients.length, sent: results.filter(Boolean).length, kind: 'mention' },

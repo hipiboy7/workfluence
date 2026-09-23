@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { can, stampSchemaVersion, type DocNode, type PageTemplateView, type Principal } from '@workfluence/shared';
 import { desc, eq } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
@@ -56,6 +56,9 @@ export class TemplatesService {
     this.assertAdmin(principal);
     const existing = await tx.query.pageTemplates.findFirst({ where: eq(pageTemplates.name, dto.name) });
     if (existing) return { template: toView(existing), created: false };
+    // **`onConflictDoNothing`으로 넣는다.** 위의 조회와 이 삽입 사이에 같은 이름이
+    // 들어오면 UNIQUE 위반으로 500이 된다 — "멱등하다"고 적어 둔 바로 그 자리에서
+    // 동시에 부르면 한쪽이 오류를 받는다 (P6 코드 리뷰 20)
     const [row] = await tx
       .insert(pageTemplates)
       .values({
@@ -65,7 +68,14 @@ export class TemplatesService {
         createdBy: principal.id,
         updatedBy: principal.id,
       })
+      .onConflictDoNothing({ target: pageTemplates.name })
       .returning();
+    if (!row) {
+      // 그 사이에 남이 같은 이름으로 만들었다. 덮어쓰지 않고 그것을 돌려준다
+      const raced = await tx.query.pageTemplates.findFirst({ where: eq(pageTemplates.name, dto.name) });
+      if (!raced) throw new ConflictException('템플릿을 만들지 못했다');
+      return { template: toView(raced), created: false };
+    }
     return { template: toView(row), created: true };
   }
 

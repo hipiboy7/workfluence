@@ -173,3 +173,66 @@ describe('블록 텍스트는 블록 하나의 것이다', () => {
     expect(kinds(r.blocks)).toEqual(['removed']);
   });
 });
+
+describe('마크와 블록 경계 (P6 코드 리뷰 4·10)', () => {
+  const para = (...content: DocNode[]): DocNode => ({ type: 'paragraph', content });
+  const txt = (text: string, marks?: DocNode['marks']): DocNode => ({ type: 'text', text, marks });
+  const d = (...content: DocNode[]): DocNode => ({ type: 'doc', content });
+
+  it('링크 주소만 바뀐 것을 **변경으로 본다**', () => {
+    const a = d(para(txt('여기', [{ type: 'link', attrs: { href: '/a' } }])));
+    const b = d(para(txt('여기', [{ type: 'link', attrs: { href: '/evil' } }])));
+    expect(diffDocs(a, b).changed).toBe(true);
+  });
+
+  it('굵게가 붙은 것을 변경으로 본다', () => {
+    expect(diffDocs(d(para(txt('중요'))), d(para(txt('중요', [{ type: 'bold' }])))).changed).toBe(true);
+  });
+
+  it('마크의 순서만 다른 것은 변경이 아니다', () => {
+    const a = d(para(txt('글', [{ type: 'bold' }, { type: 'italic' }])));
+    const b = d(para(txt('글', [{ type: 'italic' }, { type: 'bold' }])));
+    expect(diffDocs(a, b).changed).toBe(false);
+  });
+
+  it('목록 항목을 합친 것을 변경으로 본다 — 글자만 이으면 같아 보인다', () => {
+    const li = (s: string): DocNode => ({ type: 'listItem', content: [para(txt(s))] });
+    const a = d({ type: 'bulletList', content: [li('사과'), li('배')] });
+    const b = d({ type: 'bulletList', content: [li('사과배')] });
+    expect(diffDocs(a, b).changed).toBe(true);
+  });
+
+  it('값이 `null`인 속성은 없는 것과 같다 — 편집기가 붙이는 기본값이다', () => {
+    const a = d(para(txt('글', [{ type: 'link', attrs: { href: '/a' } }])));
+    const b = d(para(txt('글', [{ type: 'link', attrs: { href: '/a', title: null } }])));
+    expect(diffDocs(a, b).changed).toBe(false);
+  });
+});
+
+describe('지문을 본문으로 흉내 낼 수 없다 (P7 자체 확인)', () => {
+  const li = (s: string): DocNode => ({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: s }] }] });
+  const d = (...content: DocNode[]): DocNode => ({ type: 'doc', content });
+
+  it('구분자로 쓰던 글자를 본문에 넣어도 항목 합치기가 보인다', () => {
+    const a = d({ type: 'bulletList', content: [li('사과'), li('배')] });
+    for (const sep of ['\u0000', '\u0001', ')(', '|', '><']) {
+      const b = d({ type: 'bulletList', content: [li(`사과${sep}배`)] });
+      expect(diffDocs(a, b).changed, `구분자 ${JSON.stringify(sep)}`).toBe(true);
+    }
+  });
+
+  it('마크 표기를 흉내 낸 글자는 마크가 아니다', () => {
+    const a = d({ type: 'paragraph', content: [{ type: 'text', text: '글' }] });
+    const b = d({ type: 'paragraph', content: [{ type: 'text', text: '글bold[]' }] });
+    expect(diffDocs(a, b).changed).toBe(true);
+  });
+
+  it('**보여 주는 글자에는 구분자가 섞이지 않는다** — 화면에 그대로 그려진다', () => {
+    const a = d({ type: 'bulletList', content: [li('사과'), li('배')] });
+    const b = d({ type: 'bulletList', content: [li('사과'), li('포도')] });
+    const out = diffDocs(a, b);
+    const text = JSON.stringify(out.blocks);
+    expect(text).not.toMatch(/\\u0000|\\u0001/);
+    expect(text).not.toContain('bold[');
+  });
+});

@@ -10,6 +10,7 @@ import {
 } from '@workfluence/shared';
 import type { Request } from 'express';
 import 'express-session';
+import { RevocationBus } from '../common/revocation.bus';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { RateLimit, RateLimitGuard, RateLimitStore } from '../common/rate-limit.guard';
 import { ZodPipe } from '../common/zod.pipe';
@@ -37,6 +38,7 @@ export class AuthController {
     // **가드가 아니라 저장소를 주입받는다.** 가드는 Nest가 provider와 별개로 만들어서
     // 여기서 가드를 받으면 요청을 센 인스턴스와 다른 것이 온다 — 환불이 조용히 사라진다 (T-027)
     private readonly rateLimit: RateLimitStore,
+    private readonly revocation: RevocationBus,
   ) {}
 
   @Post('login')
@@ -54,9 +56,14 @@ export class AuthController {
   @AllowPendingPasswordChange()
   async logout(@Req() req: Request): Promise<{ ok: true }> {
     const userId = req.session.userId;
+    const sid = req.sessionID;
     await this.auth.logout(userId, req.ip);
     // 서버측 세션을 **파기**한다 (FR-224). 쿠키만 지우면 훔친 세션이 계속 산다
     await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+    // **열려 있는 편집 연결도 끊는다** (P7 보안 검토 F1). 세션 행을 지우는 것만으로는
+    // 부족하다 — 그 연결은 행을 다시 읽지 않는다. **이 세션의 것만** 끊는다: 로그아웃은
+    // 누른 브라우저 하나의 일이고, 같은 사람의 다른 기기 편집을 끊을 이유가 없다
+    if (userId) this.revocation.revoke(userId, sid);
     return { ok: true };
   }
 

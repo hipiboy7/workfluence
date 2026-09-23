@@ -170,11 +170,21 @@ describe('renderDocHtml — 속성 (FR-732·733)', () => {
     expect(renderDocHtml(doc(p({ type: 'text' })))).toBe('<p></p>');
   });
 
-  it('허용됐지만 태그가 없는 노드는 **자식만 그린다**', () => {
-    // `taskItem`은 li로 매핑돼 있으므로, 매핑이 없는 경우를 직접 만든다
-    const out = renderDocHtml(doc({ type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [p(t('할 일'))] }] }));
-    expect(out).toContain('할 일');
-    expect(out).toContain('checked="true"');
+  it('허용 목록 밖 노드는 자식까지 통째로 버린다', () => {
+    // `taskList`는 Phase 7에서 허용 목록에서 뺐다 — 편집기가 만들 수 없는 노드였다 (P7 FR-803)
+    const out = renderDocHtml(doc(p(t('앞')), { type: 'taskList', content: [p(t('할 일'))] }, p(t('뒤'))));
+    expect(out).toContain('앞');
+    expect(out).toContain('뒤');
+    expect(out).not.toContain('할 일');
+  });
+
+  it('`constructor`처럼 Object에 있는 이름을 노드·마크로 보내도 터지지 않는다', () => {
+    // `in` 연산자는 프로토타입까지 본다. `TAGS['constructor']`가 함수로 잡혀
+    // HTML에 함수 본문이 찍히던 자리다 (P6 코드 리뷰 2)
+    const out = renderDocHtml(doc({ type: 'constructor', content: [p(t('숨은 글'))] }));
+    expect(out).toBe('');
+    const marked = renderDocHtml(doc(p({ type: 'text', text: '글', marks: [{ type: 'constructor' }] })));
+    expect(marked).toBe('<p>글</p>');
   });
 });
 

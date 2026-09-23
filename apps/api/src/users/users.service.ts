@@ -14,6 +14,7 @@ import * as argon2 from 'argon2';
 import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import { afterFailure, afterSuccess, isLocked } from '../auth/domain/lockout';
+import { RevocationBus } from '../common/revocation.bus';
 import { DB, type Db } from '../db/db.module';
 import { SettingsService } from '../settings/settings.service';
 import { users, type UserRow } from '../db/schema';
@@ -56,6 +57,7 @@ export class UsersService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly settings: SettingsService,
+    private readonly revocation: RevocationBus,
   ) {}
 
   /**
@@ -118,6 +120,9 @@ export class UsersService {
    */
   async destroyAllSessions(userId: string, tx: Db = this.db): Promise<void> {
     await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${userId}`);
+    // **세션 행을 지우는 것만으로는 부족하다.** 이미 열려 있는 편집용 WebSocket은
+    // 그 행을 다시 읽지 않아 계속 살아 있다 (P6 보안 검토 발견 1). 버스로 알린다
+    this.revocation.revoke(userId);
   }
 
   /** 가입 요청 → 승인 대기 (FR-200) */
@@ -282,6 +287,7 @@ export class UsersService {
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
     if (!canManageUser(actor, target.role as Role)) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
     const r = await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
+    this.revocation.revoke(id);
     return r.rowCount ?? 0;
   }
 

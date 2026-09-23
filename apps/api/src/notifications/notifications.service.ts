@@ -69,6 +69,15 @@ export class NotificationsService {
       actorId: string;
       /** 직전 내용. 주면 **새로 생긴 멘션만** 부른다 (코드 리뷰 6) */
       previousDoc?: DocNode | null;
+      /**
+       * `actorId`가 **실제로 그 멘션을 쓴 사람인가**. 기본은 그렇다(REST 저장·댓글).
+       *
+       * 실시간 편집의 자동 저장은 아니다 — 거기서 `actorId`는 "마지막으로 키를 누른
+       * 사람"이다. A가 `@bob`을 쓰고 잠시 뒤 bob이 다른 문단을 고치면 저장의 actor가
+       * bob이 되고, 그러면 **bob에 대한 멘션이 자기 자신 멘션으로 지워져 영영 사라진다**
+       * (직전 내용과 비교하므로 다음 저장에서는 "새 멘션"이 아니다). P6 코드 리뷰 6.
+       */
+      actorWroteMentions?: boolean;
     },
     tx: Db = this.db,
   ): Promise<MentionOutcome> {
@@ -83,8 +92,9 @@ export class NotificationsService {
     if (names.length === 0) return none;
 
     const mentioned = await tx.query.users.findMany({ where: inArray(users.username, names) });
-    // 자기 자신은 부르지 않는다 (FR-503)
-    const candidates = mentioned.filter((u) => u.id !== args.actorId && u.status === 'active');
+    const suppressSelf = args.actorWroteMentions !== false;
+    // 자기 자신은 부르지 않는다 — **다만 부른 사람을 확실히 알 때만** (FR-503)
+    const candidates = mentioned.filter((u) => (suppressSelf ? u.id !== args.actorId : true) && u.status === 'active');
     if (candidates.length === 0) return none;
 
     const space = await tx.query.spaces.findFirst({ where: and(eq(spaces.id, args.spaceId), isNull(spaces.deletedAt)) });

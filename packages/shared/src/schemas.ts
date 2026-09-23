@@ -38,7 +38,18 @@ export const emailSchema = z
   .toLowerCase()
   .max(254)
   .pipe(z.email('올바른 email 형식이 아니다'));
-export const displayNameSchema = z.string().trim().min(1).max(100);
+/**
+ * **줄바꿈을 막는다.** 이 값은 멘션 메일의 제목에 들어간다 (P6 FR-753). 지금 발송은
+ * JSON이라 무해하지만, 사내 메일 API가 제목을 SMTP 헤더로 옮기는 순간 헤더 인젝션이
+ * 된다 (보류 18). **그 날 코드를 고칠 사람이 이 연결을 기억할 것이라고 기대하지 않는다**
+ * (P6 보안 검토 참고 3).
+ */
+export const displayNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .refine((v) => !/[\r\n]/.test(v), { message: '표시 이름에 줄바꿈을 넣을 수 없다' });
 
 // ---- 인증·계정 ----
 

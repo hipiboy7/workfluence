@@ -11,6 +11,7 @@ import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from
 import { AuthService } from './auth.service';
 import { DEV_IDENTITY, encodeMockCode } from './oidc/mock.provider';
 import type { OidcProvider } from './oidc/oidc.provider';
+import { RevocationBus } from '../common/revocation.bus';
 
 /**
  * B등급 통합 테스트 (P1_설계서_Auth 10절). **실제 PostgreSQL**을 쓴다.
@@ -49,7 +50,7 @@ function makeAuth(provider: OidcProvider | null = new StubProvider()): AuthServi
 
 beforeAll(async () => {
   ({ db } = await openTestDb());
-  usersSvc = new UsersService(db, new SettingsService(db, loadEnv()));
+  usersSvc = new UsersService(db, new SettingsService(db, loadEnv()), new RevocationBus());
   spacesSvc = new SpacesService(db);
   audit = new AuditService(db);
   auth = makeAuth();

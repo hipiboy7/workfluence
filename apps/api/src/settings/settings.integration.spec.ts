@@ -5,6 +5,7 @@ import { settings, users } from '../db/schema';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { UsersService } from '../users/users.service';
 import { SettingsService } from './settings.service';
+import { RevocationBus } from '../common/revocation.bus';
 
 /** B등급 (P4_설계서_Admin E절). 실제 PostgreSQL. */
 
@@ -152,7 +153,7 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
   it('**값을 만들었으면 소비 지점이 그 값을 받는다.** 비밀번호 최소 길이를 올리면 짧은 것이 막힌다', async () => {
     const me = await admin();
     const settings = svcWith();
-    const users = new UsersService(db, settings);
+    const users = new UsersService(db, settings, new RevocationBus());
 
     // 기본 8자에서는 통과하는 비밀번호
     const pw = 'Abcd12ef';
@@ -169,7 +170,7 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
   it('**낮추는 방향도 먹는다** (자체 점검 2) — 계약은 바닥만 본다', async () => {
     const me = await admin();
     const settings = svcWith();
-    const users = new UsersService(db, settings);
+    const users = new UsersService(db, settings, new RevocationBus());
     const twelve = 'Abcd12efGh34'; // 12자·2종
 
     // 20자로 올리면 12자가 막힌다
@@ -196,7 +197,7 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
   it('**관리자가 만든 계정도 강도를 지킨다** (보안 검토 1) — 이 경로만 검사가 없었다', async () => {
     const me = await admin();
     const settings = svcWith();
-    const users = new UsersService(db, settings);
+    const users = new UsersService(db, settings, new RevocationBus());
     await expect(
       users.create({ username: 'svc', displayName: 'svc', email: 'svc@example.internal', password: 'abcdefgh', role: 'member' }, me, db),
     ).rejects.toThrow(/2종/);
@@ -205,7 +206,7 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
   it('**잠금 임계도 살아 있는 값을 쓴다 — 실제로 실패시켜 본다** (자체 점검 7)', async () => {
     const me = await admin();
     const settings = svcWith();
-    const users = new UsersService(db, settings);
+    const users = new UsersService(db, settings, new RevocationBus());
     await users.signup({ username: 'lockme', displayName: 'lockme', email: 'l@example.internal', password: 'Abcd12ef' }, db);
 
     // 기본 임계는 5다. 3으로 낮추면 세 번째 실패에서 잠겨야 한다
