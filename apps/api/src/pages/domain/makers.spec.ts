@@ -94,6 +94,27 @@ describe('advance — 있던 자리와 사라진 자리', () => {
     expect(l.makers.get('2:0|kim')).toBe(X);
   });
 
+  describe('**한 번에 생긴 것만 옮김일 수 있다** — 붙여 넣기·되돌리기·재구성은 멘션을 통째로 만든다 (네 번째 검토 2)', () => {
+    const made = (c: number, from: number, to: number) => new Map([[c, { from, to }]]);
+
+    it('**한 글자씩 쳐서 만든 멘션은 옮김이 아니다** — 정본의 `@kim`을 지우고 저장한 뒤 같은 사람이 다시 쳐서 부른다', () => {
+      let l = ledgerWith([2, 0, 10, U]);
+      l = advance(l, [site(1, 0, 'kim')], null); // 정본의 멘션 — 만든 사람을 모른다
+      l = advance(l, [], U); // U가 지웠다 → kim: 모름
+      // U가 `@kim`을 한 글자씩 친다 — 마지막 글자 `m`만 이 변경에서 들어왔다
+      l = advance(l, [site(2, 0, 'kim')], U, made(2, 3, 4));
+      expect(l.makers.get('2:0|kim')).toBe(U);
+    });
+
+    it('**통째로 붙여 넣은 멘션은 옮김일 수 있다** — 같은 상황에서 붙여 넣으면 모름', () => {
+      let l = ledgerWith([2, 0, 10, U]);
+      l = advance(l, [site(1, 0, 'kim')], null);
+      l = advance(l, [], U);
+      l = advance(l, [site(2, 0, 'kim')], U, made(2, 0, 4));
+      expect(l.makers.get('2:0|kim')).toBeNull();
+    });
+  });
+
   describe('**옮김** — 사라진 이름이 다시 생기면 (P8 세 번째 코드 리뷰 1)', () => {
     it('**남의 멘션을 잘라 붙이면 모름** — 두 변경에 걸쳐도 (잘라내기 → 붙여 넣기)', () => {
       let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
@@ -213,23 +234,51 @@ describe('recordDelivered / deliveredBy — 어느 연결이 들여왔나', () =
 
 describe('claimOwn — 연결 자신의 클라이언트', () => {
   const r = (...xs: [number, number, number][]) => new Map(xs.map(([c, from, to]) => [c, { from, to }]));
+  const sent = (...xs: [number, number, number][]) => ({ structs: r(...xs), deletes: new Map<number, [number, number][]>() });
 
-  it('**한 클라이언트만, 시계 0부터** 새로 들어왔으면 그 연결이 만든 클라이언트다', () => {
+  it('**보낸 것 중 시계 0부터인 클라이언트가 하나뿐이고 그것이 새로 들어왔으면** 그 연결이 만든 것이다 — 누가 만들었는지도 적는다', () => {
     const own = new Set<number>();
-    claimOwn(own, r([7, 0, 3]));
+    const owners = new Map<number, string>();
+    claimOwn(own, owners, U, sent([7, 0, 3]), r([7, 0, 3]));
     expect(own.has(7)).toBe(true);
+    expect(owners.get(7)).toBe(U);
   });
 
   it('0부터가 아니면 아니다 — 남의 클라이언트를 이어 보낸 것이다', () => {
     const own = new Set<number>();
-    claimOwn(own, r([7, 3, 5]));
+    claimOwn(own, new Map(), U, sent([7, 3, 5]), r([7, 3, 5]));
     expect(own.size).toBe(0);
   });
 
-  it('**여러 클라이언트가 한꺼번에** 들어왔으면 아무것도 아니다 — 옛 문서를 통째로 다시 보낸 것이다 (P8 세 번째 코드 리뷰 3)', () => {
+  it('**보내지 않은 클라이언트는 0부터 들어와도 아니다** — 남이 미리 보내 둔 조각이 묻어 들어온 것이다', () => {
     const own = new Set<number>();
-    claimOwn(own, r([7, 0, 3], [8, 0, 2]));
+    claimOwn(own, new Map(), U, sent([7, 0, 3]), r([7, 0, 3], [8, 0, 2]));
+    expect([...own]).toEqual([7]);
+  });
+
+  it('**보낸 것 중 0부터인 것이 여럿이면** 아무것도 아니다 — 옛 문서를 통째로 다시 보낸 것이다 (P8 세 번째 코드 리뷰 3)', () => {
+    const own = new Set<number>();
+    claimOwn(own, new Map(), U, sent([7, 0, 3], [8, 0, 2]), r([7, 0, 3], [8, 0, 2]));
     expect(own.size).toBe(0);
+  });
+
+  it('**믿을 수 없는 변경이어도 자기 클라이언트는 알아본다** — 첫 변경에 위조가 묻었다고 그 연결이 끝까지 모름이 되면 안 된다 (네 번째 검토 1)', () => {
+    // U가 보낸 것은 7:0..2인데 남이 미리 보내 둔 7:2..4가 함께 들어왔다 — 클라이언트는 여전히 U가 만든 것이다
+    const own = new Set<number>();
+    claimOwn(own, new Map(), U, sent([7, 0, 2]), r([7, 0, 4]));
+    expect(own.has(7)).toBe(true);
+  });
+
+  it('**남이 만든 클라이언트는 차지하지 못한다**', () => {
+    const own = new Set<number>();
+    claimOwn(own, new Map([[7, X]]), U, sent([7, 0, 3]), r([7, 0, 3]));
+    expect(own.size).toBe(0);
+  });
+
+  it('**같은 사람이 다시 붙으면 이어받는다** — 같은 Y.Doc으로 재접속하면 시계가 0이 아니다 (네 번째 검토 5)', () => {
+    const own = new Set<number>();
+    claimOwn(own, new Map([[7, U]]), U, sent([7, 9, 12]), r([7, 9, 12]));
+    expect(own.has(7)).toBe(true);
   });
 });
 
@@ -314,12 +363,15 @@ describe('직렬화 — `page_realtime.authors`', () => {
     expect(back.delivered).toEqual(l.delivered);
     expect(back.gone).toEqual(l.gone);
     expect(back.seq).toBe(l.seq);
+    l.owners.set(7, U);
+    expect(ledgerFromJson(ledgerToJson(l)).owners).toEqual(new Map([[7, U]]));
   });
 
-  it('JSON 모양은 `{makers, delivered, gone, seq}`이다', () => {
+  it('JSON 모양은 `{makers, delivered, gone, seq, owners}`이다', () => {
     let l = advance(ledgerWith([7, 3, 7, U]), [site(7, 3, 'kim')], U);
     l = advance(l, [], U);
-    expect(ledgerToJson(l)).toEqual({ makers: [], delivered: [[7, 3, 7, U]], gone: [['kim', [[U, 2]]]], seq: 2 });
+    l.owners.set(7, U);
+    expect(ledgerToJson(l)).toEqual({ makers: [], delivered: [[7, 3, 7, U]], gone: [['kim', [[U, 2]]]], seq: 2, owners: [[7, U]] });
   });
 
   it('**모양이 맞지 않는 항목은 버린다** — 버린 자리·구간은 "모름"이 된다', () => {
@@ -340,18 +392,20 @@ describe('직렬화 — `page_realtime.authors`', () => {
       delivered: [[7, 0, 3, U], [7, 3, 1, U], [7, -1, 3, U], [7, 0, 3, 'x'], 'x'],
       gone: [['kim', [[U, 3], [null, 4]]], ['Kim', [[U, 1]]], ['lee', [['x', 1]]], ['park', [[U, -1]]], 'x'],
       seq: 2,
+      owners: [[7, U], [8, null], [-1, U], [9, 'x'], 'x'],
     });
     expect(got.makers).toEqual(new Map<string, string | null>([['7:0|kim', U], ['8:0|lee', null]]));
     expect(got.delivered).toEqual(new Map([[7, [[0, 3, U]]]]));
     expect(got.gone).toEqual(new Map([['kim', new Map<string | null, number>([[U, 3], [null, 4]])]]));
     // 순번은 적힌 기록보다 작아지지 않는다 — 작아지면 그 뒤의 기록이 저장 한 번에 잊힌다
     expect(got.seq).toBe(4);
+    expect(got.owners).toEqual(new Map([[7, U]]));
   });
 
   it('객체가 아니거나 다른 모양이면 빈 장부다', () => {
     for (const raw of [null, [U], 'x', undefined, {}, { makers: 'x' }, { clients: {}, struck: {} }]) {
       const l = ledgerFromJson(raw);
-      expect([l.makers.size, l.delivered.size, l.gone.size, l.seq]).toEqual([0, 0, 0, 0]);
+      expect([l.makers.size, l.delivered.size, l.gone.size, l.seq, l.owners.size]).toEqual([0, 0, 0, 0, 0]);
     }
   });
 });

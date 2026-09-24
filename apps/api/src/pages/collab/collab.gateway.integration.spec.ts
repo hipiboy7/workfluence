@@ -766,6 +766,65 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
     expect(await saveAndCarol()).toEqual([{ actor_id: userId }]);
   });
 
+  describe('**정상 사용에서 이름이 비지 않는다** (네 번째 검토 1·2·5·6)', () => {
+    it('**남이 지운 이름을 내가 한 글자씩 쳐서 부르면 나다** — 옮김은 통째로 생길 때만이다', async () => {
+      const x = await enter(otherId);
+      const u = await enter(userId);
+      act(x, (f) => newPara(f, '@collab-c 완료'));
+      act(x, (f) => f.delete(f.length - 1, 1)); // X가 지웠다 — collab-c를 기억한다
+      act(u, (f) => newPara(f, '다른 글'));
+      expect((await gw.flush(pageId)).saved).toBe(true); // collab-c 없이 저장됐다
+      act(u, (f) => newPara(f, ''));
+      typeAt(u, last, 0, '@collab-c 다시 확인');
+      expect(await saveAndCarol()).toEqual([{ actor_id: userId }]);
+    });
+
+    it('**같은 Y.Doc으로 다시 붙은 뒤에 친 멘션도 그 사람이다** — 같은 사람이 만든 클라이언트를 이어받는다', async () => {
+      const u = await enter(userId);
+      act(u, (f) => newPara(f, '처음 친 글'));
+      // 화면이 연결만 다시 연다 (표시 이름이 바뀌면 그렇다) — 문서는 그대로다
+      const again = fakeSocket();
+      inner.join(pageId, room, again, { id: userId, role: 'admin' }, userId, await mkSession(userId), spaceId);
+      again.emit('message', MSG(Y.encodeStateAsUpdate(u.doc)));
+      u.socket = again;
+      act(u, (f) => newPara(f, ''));
+      typeAt(u, last, 0, '@collab-c 확인');
+      expect(await saveAndCarol()).toEqual([{ actor_id: userId }]);
+    });
+
+    it('**첫 변경에 남의 보류 조각이 묻어도** 그 뒤 내 멘션은 나다 — 자기 클라이언트는 믿을 수 없는 변경에서도 알아본다', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      // X가 U의 첫 문단 모양을 흉내 내고(같은 ID가 된다) 그 안에 **제 글자만** 보내 둔다 → 부모가 없어 보류된다
+      const mimic = new Y.Doc();
+      Y.applyUpdate(mimic, Y.encodeStateAsUpdate(room.doc));
+      mimic.clientID = u.doc.clientID;
+      newPara(frag(mimic), '');
+      const z = new Y.Doc();
+      Y.applyUpdate(z, Y.encodeStateAsUpdate(mimic));
+      const svZ = Y.encodeStateVector(z);
+      last(frag(z)).insert(0, 'X의 글');
+      x.socket.emit('message', MSG(Y.encodeStateAsUpdate(z, svZ)));
+      // U의 첫 변경이 그 부모를 만든다 — 보류분이 함께 들어와 믿을 수 없는 변경이 된다
+      act(u, (f) => newPara(f, ''));
+      typeAt(u, last, 0, '@collab-c 확인');
+      expect(await saveAndCarol()).toEqual([{ actor_id: userId }]);
+    });
+
+    it('**첫 조각이 이미 지워진 문단으로 들어가도** 그 뒤 내 멘션은 나다', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      act(x, (f) => f.delete(0, 1)); // X가 "처음" 문단을 지웠다
+      // U는 그것을 받기 전에 그 문단에 한 글자를 쳤다 — 서버에서는 지워진 채로 들어온다
+      const sv = Y.encodeStateVector(u.doc);
+      u.doc.transact(() => textAt(frag(u.doc), 0).insert(0, '가'));
+      u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, sv)));
+      act(u, (f) => newPara(f, ''));
+      typeAt(u, last, 0, '@collab-c 확인');
+      expect(await saveAndCarol()).toEqual([{ actor_id: userId }]);
+    });
+  });
+
   describe('**동시 편집은 위조가 아니다** — Yjs가 스스로 지우는 것 (세 번째 코드 리뷰 4)', () => {
     const forgeryWarnings = (spy: { mock: { calls: unknown[][] } }): string[] =>
       spy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('보낸 것보다'));
