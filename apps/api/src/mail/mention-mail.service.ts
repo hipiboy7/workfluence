@@ -33,7 +33,7 @@ export class MentionMailService {
       // **누가 불렀는지 확실하지 않으면 이름을 적지 않는다.** 실시간 편집의 자동 저장은
       // "마지막으로 키를 누른 사람"만 알기 때문에, 그 이름을 적으면 **틀린 사람의 이름이**
       // 메일로 나간다 (P6 코드 리뷰 6). 그래서 거기서는 `actorName`이 `null`이고, 대신
-      // **받는 사람별로** 그 멘션을 친 사람(`calledBy`)이 실려 온다 (P8 FR-905)
+      // **받는 사람별로** 그 멘션을 만든 사람(`calledBy`)이 실려 온다 (P8 FR-905)
       const compose = (name: string | null): { subject: string; text: string } => ({
         subject: name ? `[위키] ${name} 님이 회원님을 불렀습니다` : '[위키] 문서에서 회원님이 불렸습니다',
         text: [

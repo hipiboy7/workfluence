@@ -14,20 +14,11 @@ import { SettingsService } from '../../settings/settings.service';
 import { SpacesService } from '../../spaces/spaces.service';
 import { UsersService } from '../../users/users.service';
 import { MentionMailService } from '../../mail/mention-mail.service';
-import type { MentionOutcome } from '../../notifications/notifications.service';
+import { scanMentions, type MentionOutcome } from '../../notifications/notifications.service';
 import { PagesService } from '../pages.service';
 import { shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
-import { attributedText, docFromYDoc, yDocFromDoc } from '../domain/ydoc';
-import {
-  attributionFromJson,
-  attributionToJson,
-  claimAuthors,
-  freezeUnknown,
-  isStruck,
-  recordStruck,
-  type Attribution,
-  type ClockRange,
-} from '../domain/authorship';
+import { docFromYDoc, mentionSites, yDocFromDoc } from '../domain/ydoc';
+import { advanceMakers, isFaithful, makersFor, makersFromJson, makersToJson, type ClockRange, type MakerMap, type SentChange } from '../domain/makers';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
 import { readPageId, readSessionId } from './session-auth';
 
@@ -75,10 +66,10 @@ type Member = {
   revoked: boolean;
   lastCheckedAt: number;
   /**
-   * 지금 적용 중인 변경에 든 클라이언트별 시계 구간. `Y.applyUpdate` 동안만 채워진다.
-   * 트랜잭션 관찰자가 이것과 "실제로 새로 들어간 구간"을 맞춰 대응표를 고친다 (P8 C.2절)
+   * 지금 적용 중인 변경에 든 조각·삭제 구간. `Y.applyUpdate` 동안만 채워진다.
+   * 트랜잭션 관찰자가 이것과 "실제로 일어난 것"을 맞춰, 그 변경을 믿을지 정한다 (P8 C.2절)
    */
-  sending: Map<number, ClockRange> | null;
+  sending: SentChange | null;
 };
 
 type Room = {
@@ -92,10 +83,10 @@ type Room = {
   /** 마지막으로 **실제로 문서를 바꾼** 사람. 자동 저장의 `createdBy`가 된다 (FR-712·802) */
   lastActor: string | null;
   /**
-   * 클라이언트 ID → 사용자, 그리고 **남이 지운 흔적**. 멘션을 **만든 사람**을 가린다
-   * (P8_설계서_Mention C.2절, FR-900·903). 실시간 상태와 함께 `page_realtime.authors`에 남는다
+   * 멘션 자리(`@` 글자 ID + 이름) → **그 멘션을 생기게 한 사람** (P8_설계서_Mention C.2절, FR-900·903).
+   * 멤버의 변경마다 고친다. 실시간 상태와 함께 `page_realtime.authors`에 남는다
    */
-  attribution: Attribution;
+  makers: MakerMap;
   /** 진행 중인 저장. 새 요청은 이 뒤에 줄을 선다 — `flush`가 거짓말하지 않으려면 필요하다 */
   saving: Promise<void> | null;
   /** 사람이 고친 제목. 없으면 DB의 것을 쓴다 */
@@ -322,15 +313,15 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   private async createRoom(pageId: string, versionNo: number): Promise<Room> {
     const saved = await this.db.query.pageRealtime.findFirst({ where: eq(pageRealtime.pageId, pageId) });
     let doc: Y.Doc;
-    let attribution: Attribution = { authors: new Map(), struck: new Map() };
+    let makers: MakerMap = new Map();
     if (saved && saved.versionNo === versionNo) {
       // 상태가 정본과 같은 버전에서 시작했을 때만 잇는다. 그 사이 REST로 저장됐으면
       // **정본이 앞서 있으므로** 옛 상태를 이어받으면 그 저장을 되돌리게 된다
       doc = new Y.Doc();
       Y.applyUpdate(doc, Uint8Array.from(saved.state));
-      // **대응표도 함께 잇는다** (FR-903). 재기동 전에 쳤지만 아직 저장되지 않은 멘션의
+      // **만든 사람 표도 함께 잇는다** (FR-903). 재기동 전에 쳤지만 아직 저장되지 않은 멘션의
       // "누가"가 여기서 살아남는다
-      attribution = attributionFromJson(saved.authors);
+      makers = makersFromJson(saved.authors);
     } else {
       const version = await this.db.query.pageVersions.findFirst({
         where: and(eq(pageVersions.pageId, pageId), eq(pageVersions.versionNo, versionNo)),
@@ -339,10 +330,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (saved) this.log.warn(`실시간 상태가 낡아 정본에서 다시 시작한다 (page=${pageId})`);
     }
 
-    // **이미 문서에 있는데 표에 없는 ID는 "모름"으로 굳힌다** (C.2절). 정본에서 만든 방의 글자는
-    // 이 서버의 ID로 들어가 있다. 비워 두면 쓰기 권한이 있는 누군가가 그 ID로 조각을 보내
-    // 먼저 차지할 수 있다
-    freezeUnknown(attribution.authors, [...doc.store.clients.keys(), doc.clientID]);
+    // **표를 지금 문서에 맞춘다.** 표에 있는 자리는 그대로, 없는 자리는 모름이다 — 정본에서 만든 방의
+    // 멘션은 전부 직전 버전에 이미 있어 새 알림이 되지 않는다(이름 차이 비교, C.3절)
+    makers = advanceMakers(makers, mentionSites(doc, scanMentions), null);
 
     const room: Room = {
       doc,
@@ -351,7 +341,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       versionNo,
       lastChangeAt: 0,
       lastActor: null,
-      attribution,
+      makers,
       saving: null,
       title: null,
       emptyAt: Date.now(),
@@ -375,38 +365,44 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     });
 
     /**
-     * **누가 어느 클라이언트 ID를 쓰는지, 누가 누구의 글자를 지웠는지 적는다** (P8 C.2절).
+     * **멘션을 생기게 한 사람을 적는다** (P8_설계서_Mention C.2절, FR-900·904·907).
      *
-     * `update`가 아니라 **트랜잭션이 끝나는 순간**에 본다. 두 가지 때문이다.
-     * - 새로 들어간 구간은 트랜잭션의 `beforeState` → `afterState`에 이미 있다. 변경을 다시 풀 필요가 없다
-     * - **지운 글자는 이 순간이 지나면 내용과 함께 흔적만 남는다**(GC). 누가 지웠는지 적을 기회는 지금뿐이다
+     * 멤버의 변경이 끝나는 순간 문서의 멘션 자리를 다시 훑고, **새로 생긴 자리에 그 연결의 사용자**를 적는다.
+     * 글자의 클라이언트 ID나 Yjs가 적어 둔 이웃은 보지 않는다 — 그 값은 전부 클라이언트가 정한다. 믿는 것은
+     * **인증된 연결** 하나다. 그래서 이름이 붙을 수 있는 사람은 자기 연결로 그 멘션을 만든 사람뿐이다.
      *
-     * 판정은 `claimAuthors`·`recordStruck`(A등급)이 한다. 연결이 아닌 쪽의 트랜잭션(서버가 직접
-     * 고치는 것)은 지운 사람을 모르는 것으로 친다 — 모르는 것을 "괜찮다"로 치면 그 틈으로 사칭이 들어온다.
+     * 다만 그 변경이 **보낸 것보다 문서를 더 바꿨으면** 믿지 않는다(`isFaithful`). Yjs가 보류해 둔 남의 조각·
+     * 삭제가 이 변경에 묻어 들어온 것이다 — 그때 생긴 멘션은 모름이다. 연결이 아닌 쪽의 트랜잭션(서버가 직접
+     * 고치는 것)도 모름이다.
+     *
+     * **트랜잭션이 끝나는 순간**에 본다. 새로 들어간 구간은 `beforeState` → `afterState`에 있고, 지운 글자는
+     * 이 순간이 지나면 내용이 사라져(GC) 서식 조각과 글자를 가릴 수 없다.
      */
     doc.on('afterTransaction', (tr: Y.Transaction) => {
+      // 아무것도 안 바뀐 트랜잭션(접속 직후 이미 아는 전체 상태, 저장 때의 정리)은 훑지 않는다
+      if (tr.changed.size === 0 && tr.deleteSet.clients.size === 0) return;
       const member = tr.origin && typeof tr.origin === 'object' && 'sending' in tr.origin ? (tr.origin as Member) : null;
-      const { authors, struck } = room.attribution;
+      let maker: string | null = null;
       if (member?.sending) {
         const integrated = new Map<number, ClockRange>();
         for (const [client, after] of tr.afterState) {
           const before = tr.beforeState.get(client) ?? 0;
           if (after > before) integrated.set(client, { from: before, to: after });
         }
-        const frozen = claimAuthors(authors, member.principal.id, member.sending, integrated);
-        // **흔적을 남긴다.** 남이 쓰던 ID를 주장했거나, 보낸 것보다 더 들어왔다 — 사칭 시도일 수 있다 (FR-904).
-        // 이 로그가 없으면 "알림에 이름이 없다" 말고는 아무것도 남지 않는다 (운영가이드 7.22절)
-        if (frozen.length) {
-          this.log.warn(
-            `클라이언트 ID가 맞지 않는다(남의 ID를 주장했거나 보낸 것보다 더 들어왔다) — 그 ID의 글자를 "모름"으로 돌린다 (page=${pageId}, user=${member.principal.id}, ids=${frozen.join(',')})`,
-          );
+        // 서식 조각의 정리는 글자를 바꾸지 않는다 — Yjs가 스스로 지우기도 하므로 세지 않는다
+        const deleted: [number, number, number][] = [];
+        Y.iterateDeletedStructs(tr, tr.deleteSet, (struct) => {
+          if (struct instanceof Y.Item && !(struct.content instanceof Y.ContentFormat)) deleted.push([struct.id.client, struct.id.clock, struct.length]);
+        });
+        if (isFaithful(member.sending, integrated, deleted)) maker = member.principal.id;
+        else {
+          // **흔적을 남긴다.** 보내지 않은 조각이나 삭제가 이 변경에서 일어났다 — 누가 미리 보내 둔 위조일 수 있다
+          // (FR-904). 이 로그가 없으면 "알림에 이름이 없다" 말고는 아무것도 남지 않는다 (운영가이드 7.22절).
+          // `user=`는 이 변경을 보낸 연결이다 — 위조를 보낸 사람이 아니라 **피해자**일 수 있다
+          this.log.warn(`변경이 보낸 것보다 문서를 더 바꿨다 — 이 변경으로 생긴 멘션은 "모름"으로 둔다 (page=${pageId}, user=${member.principal.id})`);
         }
       }
-      const deleted: [number, number, number][] = [];
-      Y.iterateDeletedStructs(tr, tr.deleteSet, (struct) => {
-        if (struct instanceof Y.Item) deleted.push([struct.id.client, struct.id.clock, struct.length]);
-      });
-      if (deleted.length) recordStruck(struck, authors, member?.principal.id ?? null, deleted);
+      room.makers = advanceMakers(room.makers, mentionSites(doc, scanMentions), maker);
     });
 
     this.rooms.set(pageId, room);
@@ -434,10 +430,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         try {
           // **오리진으로 멤버를 실어 보낸다.** 위의 `update` 관찰자가 이것을 보고
           // "실제로 바뀐 경우에만" 작성자를 고친다.
-          // 보낸 것에 든 클라이언트별 시계 구간을 먼저 읽어 둔다 — 관찰자가 대응표를 고칠 때 쓴다 (P8 C.2절).
+          // 보낸 것에 든 조각·삭제 구간을 먼저 읽어 둔다 — 관찰자가 그 변경을 믿을지 정할 때 쓴다 (P8 C.2절).
           // 변경을 한 번 더 훑는 값이고 DB는 건드리지 않는다 (NFR-80)
-          const meta = Y.parseUpdateMeta(payload);
-          member.sending = new Map([...meta.from].map(([client, from]) => [client, { from, to: meta.to.get(client) ?? from }]));
+          member.sending = this.sentChange(payload);
           Y.applyUpdate(room.doc, payload, member);
         } catch (e) {
           // 깨진 변경은 **버린다.** 방을 죽이지 않는다 — 한 사람의 잘못된 프레임이
@@ -466,6 +461,25 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       }
     });
     socket.on('error', () => socket.close());
+  }
+
+  /**
+   * 한 연결이 보낸 변경에 든 조각·삭제 구간 (P8 C.2절). `Y.decodeUpdate` 한 번으로 둘 다 읽는다.
+   * 깨진 변경이면 던진다 — 부르는 쪽이 그 변경을 버린다.
+   */
+  private sentChange(payload: Uint8Array): SentChange {
+    const decoded = Y.decodeUpdate(payload);
+    const structs = new Map<number, ClockRange>();
+    for (const s of decoded.structs) {
+      if (!(s instanceof Y.Item) && !(s instanceof Y.GC)) continue;
+      const cur = structs.get(s.id.client);
+      const from = s.id.clock;
+      const to = s.id.clock + s.length;
+      structs.set(s.id.client, cur ? { from: Math.min(cur.from, from), to: Math.max(cur.to, to) } : { from, to });
+    }
+    const deletes = new Map<number, [number, number][]>();
+    for (const [client, items] of decoded.ds.clients) deletes.set(client, items.map((d) => [d.clock, d.len] as [number, number]));
+    return { structs, deletes };
   }
 
   private frame(kind: number, payload: Uint8Array): Buffer {
@@ -624,14 +638,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
 
     const changedAt = room.lastChangeAt;
     const next = docFromYDoc(room.doc);
-    // **멘션을 친 사람을 `next`와 같은 순간에 읽는다** (P8 C.3절). 아래 `await` 사이에 문서가
-    // 더 바뀌면, 나중에 읽은 작성자는 저장되는 본문과 짝이 맞지 않는다
-    const { authors, struck } = room.attribution;
-    const typedBy = attributedText(
-      room.doc,
-      (client) => authors.get(client) ?? null,
-      (client, clock, len) => isStruck(struck, client, clock, len),
-    );
+    // **멘션을 만든 사람을 `next`와 같은 순간에 읽는다** (P8 C.2절). 아래 `await` 사이에 문서가
+    // 더 바뀌면, 나중에 읽은 표는 저장되는 본문과 짝이 맞지 않는다
+    const mentionedBy = makersFor(room.makers, mentionSites(room.doc, scanMentions));
     const current = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId) });
     if (!current) {
       this.drop(pageId, room);
@@ -684,7 +693,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const collected: MentionOutcome[] = [];
     let savedVersionNo = current.currentVersionNo + 1;
     await this.db.transaction(async (tx) => {
-      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, typedBy, (m) => collected.push(m));
+      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, mentionedBy, (m) => collected.push(m));
       // **락 안에서 만들어진 번호를 쓴다.** 밖에서 계산한 `+1`은 REST 저장과 겹치면
       // 실제와 다른 번호가 감사로그에 남는다 (P6 코드 리뷰 16)
       savedVersionNo = saved.currentVersionNo;
@@ -695,7 +704,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     });
     // 메일은 **커밋 뒤에** 보낸다 (FR-754). 기다리지 않는다.
     // **기본 이름을 넘기지 않는다** — 자동 저장의 actor는 "마지막으로 키를 누른 사람"이라
-    // 그 이름을 적으면 틀린 사람이 적힌다 (P6 코드 리뷰 6). 친 사람을 아는 받는 사람에게는
+    // 그 이름을 적으면 틀린 사람이 적힌다 (P6 코드 리뷰 6). 만든 사람을 아는 받는 사람에게는
     // `recipients[].calledBy`가 그 이름을 싣고 간다 (P8 FR-905)
     const mentions = collected[0];
     // **메일 감사의 "누가"도 마지막으로 키를 누른 사람이 아니다** (P8 코드 리뷰 3). 부른 사람이 한 사람이면
@@ -718,9 +727,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   /** 실시간 상태를 남긴다. 프로세스가 죽어도 다음에 이어지도록 */
   private async rememberState(pageId: string, room: Room, versionNo: number): Promise<void> {
     const state = Buffer.from(Y.encodeStateAsUpdate(room.doc));
-    // **대응표를 상태와 같은 쓰기에서 남긴다** (FR-903). 따로 쓰면 둘 중 하나만 남는 순간이 생기고,
-    // 그때 죽으면 상태에는 있는 글자의 주인을 표가 모른다
-    const authors = attributionToJson(room.attribution);
+    // **만든 사람 표를 상태와 같은 쓰기에서 남긴다** (FR-903). 따로 쓰면 둘 중 하나만 남는 순간이 생기고,
+    // 그때 죽으면 상태에는 있는 멘션을 누가 만들었는지 표가 모른다
+    const authors = makersToJson(room.makers);
     await this.db
       .insert(pageRealtime)
       .values({ pageId, state, versionNo, updatedBy: room.lastActor, authors })

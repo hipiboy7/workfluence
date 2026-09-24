@@ -3,9 +3,10 @@ import { can, spaceAccess, type DocNode, type NotificationView, type Principal, 
 import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { comments, notifications, pages, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
-import { callerFor, extractMentions, mentionAuthors, type TypedText } from './domain/mention';
+import { callerFor, extractMentions } from './domain/mention';
 
-export type { TypedText } from './domain/mention';
+/** 멘션 규칙은 이 모듈의 것이다. 실시간 편집이 문서의 멘션 자리를 찾을 때 이것을 쓴다 (P8 C.2절) */
+export { scanMentions } from './domain/mention';
 
 /** 알림을 보내는 경계 (FR-509). 지금은 앱 안 저장뿐이고, 메일·메신저는 이 뒤에 붙인다 */
 export const NOTIFY = Symbol('NOTIFY');
@@ -80,18 +81,18 @@ export class NotificationsService {
       /** 직전 내용. 주면 **새로 생긴 멘션만** 부른다 (코드 리뷰 6) */
       previousDoc?: DocNode | null;
       /**
-       * **글자마다 누가, 어떻게 넣었나** (P8_설계서_Mention C.3·C.4절, 모양은 `TypedText`).
-       * 없으면 `actorId`가 전부 쳤다 (REST 저장·댓글 — 요청한 사람이 쓴 사람이다).
+       * 이름마다, **나온 곳마다 그 멘션을 만든 사람** (P8_설계서_Mention C.2·C.4절). 모르면 `null`.
+       * 없으면 `actorId`가 전부 썼다 (REST 저장·댓글 — 요청한 사람이 쓴 사람이다).
        *
        * 실시간 편집의 자동 저장은 이것을 준다. 거기서 `actorId`는 "마지막으로 키를 누른
        * 사람"이라 멘션을 쓴 사람이 아니다. A가 `@bob`을 쓰고 bob이 다른 문단을 고치면
        * 저장의 actor가 bob이 된다 — 그것으로 부르면 **"bob 님이 불렀다"가 bob에게** 가고,
        * 자기 자신 필터를 걸면 **그 알림이 영영 사라진다** (P6 코드 리뷰 6, 보류 21).
        *
-       * 멘션마다 누가 **만들었는지**는 **여기서** 가린다(`mentionAuthors`·`callerFor`). 멘션 규칙은 이
-       * 모듈의 것이라 부르는 쪽이 알 필요가 없다. 가려지지 않으면 **모름**이다 — actor를 비운다 (FR-901).
+       * 받는 사람에게 누구를 말할지는 **여기서** 고른다(`callerFor`). 표에 그 이름이 없으면 **모름**이다 —
+       * actor를 비운다 (FR-901).
        */
-      typedBy?: TypedText;
+      mentionedBy?: ReadonlyMap<string, readonly (string | null)[]>;
     },
     tx: Db = this.db,
   ): Promise<MentionOutcome> {
@@ -106,7 +107,7 @@ export class NotificationsService {
     if (names.length === 0) return none;
 
     const mentioned = await tx.query.users.findMany({ where: inArray(users.username, names) });
-    const occurrences = args.typedBy ? mentionAuthors(args.typedBy) : null;
+    const occurrences = args.mentionedBy ?? null;
     /**
      * 받는 사람마다 누가 불렀나. REST·댓글은 요청한 사람이다.
      * 자기 자신은 부르지 않는다 — **다만 스스로 부른 것이 확실할 때만** (FR-503·902).

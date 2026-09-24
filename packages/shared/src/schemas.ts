@@ -368,7 +368,7 @@ export type NotificationView = {
   pageId: string | null;
   commentId: string | null;
   /**
-   * 부른 사람. **`null`이면 모른다** — 실시간 편집에서 그 `@아이디`를 누가 쳤는지 확실하지
+   * 부른 사람. **`null`이면 모른다** — 실시간 편집에서 그 멘션을 누가 생기게 했는지 확실하지
    * 않을 때다. 틀린 이름을 적는 대신 비운다 (P8_설계서_Mention FR-901)
    */
   actorName: string | null;

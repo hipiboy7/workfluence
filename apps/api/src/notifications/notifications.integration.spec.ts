@@ -292,6 +292,16 @@ describe('권한이 회수되면 제목이 가려진다 (보안 검토 3)', () =
 describe('멘션을 만든 사람 — `mentionedBy` (P8)', () => {
   /** 이름마다, 나온 곳마다 그 멘션을 만든 사람 (게이트웨이가 만드는 모양) */
   const by = (entries: Record<string, (string | null)[]>): ReadonlyMap<string, readonly (string | null)[]> => new Map(Object.entries(entries));
+  async function setup() {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const typist = await user('typist');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+    await db.update(users).set({ email: 'mate@example.internal' }).where(eq(users.id, mate.id));
+    const pid = await page(sp.id, owner.id);
+    return { owner, mate, typist, sp, pid };
+  }
 
   it('**부른 사람은 저장한 사람이 아니라 그 멘션을 만든 사람이다** (FR-900)', async () => {
     const { mate, typist, sp, pid } = await setup();

@@ -451,6 +451,7 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
   const textAt = (f: Y.XmlFragment, i: number): Y.XmlText => (f.get(i) as Y.XmlElement).get(0) as Y.XmlText;
   const newPara = (f: Y.XmlFragment, text: string, kind = 'paragraph'): void => {
     const p = new Y.XmlElement(kind);
+    if (kind === 'heading') p.setAttribute('level', 2 as never);
     p.insert(0, [new Y.XmlText(text)]);
     f.insert(f.length, [p]);
   };

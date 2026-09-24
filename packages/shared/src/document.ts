@@ -192,8 +192,8 @@ export function extractText(doc: DocNode): string {
 /**
  * 끝에 줄바꿈을 두는 블록. **`extractText`가 줄을 나누는 곳이다.**
  *
- * 내보내는 이유: 실시간 상태에서 글자마다 작성자를 붙인 본문을 만드는 쪽(`attributedText`)이
- * **같은 곳에서 줄을 나눠야** 두 쪽이 같은 멘션을 찾는다 (P8_설계서_Mention C.3절).
+ * 내보내는 이유: 실시간 상태에서 멘션 자리를 찾는 쪽(`mentionSites`)이
+ * **같은 곳에서 줄을 나눠야** 두 쪽이 같은 멘션을 찾는다 (P8_설계서_Mention C.2절).
  */
 export const BLOCK_NODES: ReadonlySet<string> = new Set([
   'paragraph',
