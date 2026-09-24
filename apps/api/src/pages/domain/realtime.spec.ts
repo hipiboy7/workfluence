@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { shouldSaveVersion, type SaveDecision } from './realtime';
+import { blockedReason, saveBlockedReason, shouldSaveVersion, type SaveDecision } from './realtime';
 import type { DocNode } from '@workfluence/shared';
+import { DOCUMENT_SCHEMA_VERSION } from '@workfluence/shared';
 
 /**
  * A등급 — **테스트 먼저** (3절, P6_설계서_Collab C.2절 ⑤).
@@ -11,7 +12,7 @@ import type { DocNode } from '@workfluence/shared';
 
 const doc = (text: string): DocNode => ({
   type: 'doc',
-  attrs: { schemaVersion: 1 },
+  attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION },
   content: text ? [{ type: 'paragraph', content: [{ type: 'text', text }] }] : [{ type: 'paragraph' }],
 });
 
@@ -29,23 +30,43 @@ describe('shouldSaveVersion — 안 만드는 쪽 (FR-707·708)', () => {
   });
 
   it('속성 순서만 달라도 같다고 본다', () => {
-    const a: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'heading', attrs: { level: 2, textAlign: 'left' }, content: [{ type: 'text', text: 'x' }] }] };
-    const b: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'heading', attrs: { textAlign: 'left', level: 2 }, content: [{ type: 'text', text: 'x' }] }] };
+    // 속성이 둘인 허용 노드로 본다 (P9에서 `textAlign`이 허용 목록에서 빠졌다)
+    const cell = (attrs: Record<string, unknown>): DocNode => ({
+      type: 'doc',
+      attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION },
+      content: [{ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', attrs, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }] }] }] }],
+    });
+    const a = cell({ colspan: 2, rowspan: 1 });
+    const b = cell({ rowspan: 1, colspan: 2 });
     expect(why(shouldSaveVersion({ next: b, previous: a, idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' }))).toBe('내용이 그대로');
   });
 
   it('**스키마 검증을 통과하지 못하면 만들지 않는다** (FR-708)', () => {
-    const bad = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'iframe' }] } as DocNode;
+    const bad = { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'iframe' }] } as DocNode;
     const d = shouldSaveVersion({ next: bad, previous: doc('이전'), idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' });
     expect(d.save).toBe(false);
     expect(why(d)).toContain('문서 검증 실패');
   });
 
-  it('검증 실패 사유를 함께 준다 — 로그만 남기므로 사유가 없으면 고칠 수 없다', () => {
+  it('검증 실패 사유를 함께 준다 — 로그와 화면 알림(P9 FR-1011)에 쓰므로 사유가 없으면 고칠 수 없다', () => {
     const bad = { type: 'paragraph' } as DocNode;
     const d = shouldSaveVersion({ next: bad, previous: doc('이전'), idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' });
     expect(d.save).toBe(false);
     if (!d.save) expect(d.errors.length).toBeGreaterThan(0);
+  });
+
+  it('**방을 열 때의 알림도 같은 검증 단계다** — 두 벌로 두면 한쪽만 고쳐져 들어오는 사람과 판정이 다른 까닭을 본다 (P9 세 번째 코드 리뷰 5)', () => {
+    const bad = { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'iframe' }, { type: 'video' }] } as DocNode;
+    const d = shouldSaveVersion({ next: bad, previous: doc('이전'), idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' });
+    expect(d.save).toBe(false);
+    if (!d.save) expect(saveBlockedReason(bad)).toBe(blockedReason(d.errors));
+    expect(saveBlockedReason(doc('멀쩡한 문서'))).toBeNull();
+  });
+
+  it('까닭 한 줄은 첫 오류와 나머지 건수다 — 오류가 없으면 `null` (D.9)', () => {
+    expect(blockedReason([])).toBeNull();
+    expect(blockedReason(['하나'])).toBe('하나');
+    expect(blockedReason(['하나', '둘', '셋'])).toBe('하나 외 2건');
   });
 
   it('**빈 문서로 덮어쓰지 않는다** — 연결이 끊기며 빈 상태가 올라오면 내용이 사라진다', () => {
@@ -84,8 +105,8 @@ describe('shouldSaveVersion — 만드는 쪽 (FR-706)', () => {
 });
 
 describe('shouldSaveVersion — 마크만 달라도 변경이다', () => {
-  const plain: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '중요' }] }] };
-  const bold: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '중요', marks: [{ type: 'bold' }] }] }] };
+  const plain: DocNode = { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '중요' }] }] };
+  const bold: DocNode = { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '중요', marks: [{ type: 'bold' }] }] }] };
 
   it('글자는 같고 **굵게만 씌워도** 버전을 만든다 — 텍스트 비교만 하면 놓친다', () => {
     expect(shouldSaveVersion({ next: bold, previous: plain, idleMs: 9_000, idleThresholdMs: 5_000, trigger: 'idle' }).save).toBe(true);
@@ -96,13 +117,13 @@ describe('shouldSaveVersion — 마크만 달라도 변경이다', () => {
   });
 
   it('마크 속성이 다르면 변경이다 — 링크 주소만 바뀐 경우', () => {
-    const l = (href: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '여기', marks: [{ type: 'link', attrs: { href } }] }] }] });
+    const l = (href: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '여기', marks: [{ type: 'link', attrs: { href } }] }] }] });
     expect(shouldSaveVersion({ next: l('/b'), previous: l('/a'), idleMs: 9_000, idleThresholdMs: 5_000, trigger: 'idle' }).save).toBe(true);
   });
 });
 
 describe('왕복 정규화 — 열었다 닫기만 해도 버전이 늘지 않는다 (P6 코드 리뷰 7)', () => {
-  const wrap = (content: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content });
+  const wrap = (content: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content });
   const same = (a: DocNode, b: DocNode): string =>
     why(shouldSaveVersion({ next: b, previous: a, idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'leave' }));
 
@@ -190,7 +211,7 @@ describe('계기별 빈 문서 보호 (P6 코드 리뷰 8)', () => {
 });
 
 describe('지문을 본문으로 흉내 낼 수 없다 (P7 자체 확인)', () => {
-  const wrap = (...content: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content });
+  const wrap = (...content: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content });
   const p = (...kids: DocNode[]): DocNode => ({ type: 'paragraph', content: kids });
   const t = (text: string): DocNode => ({ type: 'text', text });
 

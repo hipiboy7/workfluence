@@ -39,7 +39,7 @@ function attributesToMarks(attrs: Record<string, unknown> | undefined): DocMark[
 /**
  * 자식들을 Yjs 노드로 바꾼다. **연속된 글자 노드는 `Y.XmlText` 하나로 묶는다.**
  *
- * 처음에는 글자 노드마다 `Y.XmlText`를 따로 만들었다. 그러면 편집기(y-prosemirror)가
+ * 처음에는 글자 노드마다 `Y.XmlText`를 따로 만들었다. 그러면 편집기(y-tiptap — y-prosemirror의 TipTap 판)가
  * 보는 구조와 달라져, **각 클라이언트의 첫 편집이 문단을 통째로 다시 쓴다** — 둘이
  * 겹치면 Yjs가 둘 다 살려 `"Hello worldworld"`처럼 글자가 복제된다. 다른 문단만
  * 고쳐도 일어난다 (자체 점검 2, 실측으로 재현됐다).
@@ -90,7 +90,8 @@ function toYNode(node: DocNode): Y.XmlElement {
     el.setAttribute(k, v as never);
   }
   const kids = toYChildren(node.content ?? []);
-  if (kids.length) el.push(kids);
+  // `insert(0, …)`로 넣는다 — `push`는 아직 문서에 붙지 않은 요소의 길이를 읽어 방을 만들 때마다 Yjs 경고가 찍혔다 (P9 세 번째 자체 점검 5)
+  if (kids.length) el.insert(0, kids);
   return el;
 }
 
@@ -118,7 +119,8 @@ function fromYNode(node: unknown): DocNode[] {
   // **편집기가 만들지 않는 노드는 버린다** (P8 세 번째 검토 2). 우리 편집기는 `Y.XmlElement`·`Y.XmlText`만
   // 만들지만 **조작한 클라이언트는 `Y.XmlHook`·`Y.Text`·`Y.Map`을 넣을 수 있다.** 예전에는 "만드는 코드가 없으니
   // 올 수 없다"고 보고 좁히기만 했는데, 그런 노드 하나로 여기서 던져 **그 페이지의 자동 저장이 영영 실패했다.**
-  // 그 노드는 정본 JSON에 뜻이 없다
+  // 그 노드는 정본 JSON에 뜻이 없다. Phase 9부터는 관문이 그런 변경을 문 앞에서 받지 않지만(P9_설계서_Gate D.2) 여기서도
+  // 버린다 — Phase 9 전에 남은 실시간 상태에는 들어 있을 수 있다
   if (!(node instanceof Y.XmlElement)) return [];
   const el = node;
   // 편집기 쪽에서 온 `null` 기본값을 여기서 떨어뜨린다 (자체 점검 1·18)
@@ -126,6 +128,9 @@ function fromYNode(node: unknown): DocNode[] {
   const content: DocNode[] = [];
   for (const child of el.toArray()) content.push(...fromYNode(child));
 
+  // **단계가 없는 제목은 1단계로 읽는다** (P9 FR-1010). 편집기(ProseMirror)는 없는 속성을 기본값으로 채워 1단계를 보인다.
+  // 관문은 속성을 하나씩 보므로 "있어야 한다"를 문 앞에서 볼 수 없다 — 누가 `level`만 지우면 저장이 멈췄다
+  if (el.nodeName === 'heading' && attrs.level === undefined) attrs.level = 1;
   const out: DocNode = { type: el.nodeName };
   if (Object.keys(attrs).length) out.attrs = attrs;
   if (content.length) out.content = content;

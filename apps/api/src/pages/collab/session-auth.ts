@@ -63,3 +63,19 @@ export function readPageId(url: string | undefined): string | null {
   const path = url.split(/[?#]/)[0];
   return WS_PATH.exec(path)?.[1] ?? null;
 }
+
+/**
+ * 연결한 사람의 주소 — 감사로그의 `ip` (P9_설계서_Gate D.6).
+ *
+ * **HTTP 쪽 `req.ip`와 같은 규칙이다.** `WF_TRUST_PROXY`면 Express는 한 단계(nginx)를 믿으므로(`trust proxy = 1`),
+ * 그 nginx가 덧붙인 `X-Forwarded-For`의 **마지막** 항목이 연결한 사람이다. 앞쪽 항목은 클라이언트가 적어 보낼 수 있다.
+ * 업그레이드 요청은 Express를 거치지 않아 `req.ip`가 없다 — 그래서 같은 규칙을 여기서 쓴다.
+ */
+export function readClientIp(forwardedFor: string | string[] | undefined, remoteAddress: string | undefined, trustProxy: boolean): string | null {
+  if (trustProxy && forwardedFor) {
+    const joined = Array.isArray(forwardedFor) ? forwardedFor.join(',') : forwardedFor;
+    const last = joined.split(',').map((s) => s.trim()).filter(Boolean).pop();
+    if (last) return last;
+  }
+  return remoteAddress ?? null;
+}

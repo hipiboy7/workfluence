@@ -15,7 +15,7 @@ let spacesSvc: SpacesService;
 let pagesSvc: PagesService;
 
 const doc = (text: string): DocNode =>
-  ({ type: 'doc', schemaVersion: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }) as DocNode;
+  ({ type: 'doc', schemaVersion: DOCUMENT_SCHEMA_VERSION, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }) as DocNode;
 
 async function user(username: string, role: 'root' | 'admin' | 'member' = 'member'): Promise<Principal> {
   const [u] = await db

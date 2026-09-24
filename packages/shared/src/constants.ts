@@ -22,8 +22,14 @@ export const SPACE_MEMBER_ROLES = ['owner', 'editor', 'viewer'] as const;
 export type SpaceMemberRole = (typeof SPACE_MEMBER_ROLES)[number];
 export const ASSIGNABLE_MEMBER_ROLES = ['editor', 'viewer'] as const;
 
-/** 문서(ProseMirror JSON) 스키마 버전. 노드·마크 허용 목록이 바뀌면 올린다. */
-export const DOCUMENT_SCHEMA_VERSION = 1;
+/**
+ * 문서(ProseMirror JSON) 스키마 버전. 노드·마크 허용 목록이 바뀌면 올린다.
+ *
+ * - 1: Phase 2~8.
+ * - 2: Phase 9 (P9_설계서_Gate D.7) — 링크 `title`·표 칸 `align`을 더하고, 편집기가 만들 수 없던 `textAlign`을 뺐다.
+ *   자식 규칙·노드별 마크 규칙이 생겼다. 1로 찍힌 문서는 그 규칙 이전에 저장된 것이다.
+ */
+export const DOCUMENT_SCHEMA_VERSION = 2;
 
 /** 감사 이벤트 종류 (CLAUDE.md 6절 감사로그 대상) */
 export const AUDIT_ACTIONS = [
@@ -80,7 +86,34 @@ export const AUDIT_ACTIONS = [
   'template.delete',
   'mail.send',
   'mail.fail',
+  // Phase 9 (P9_설계서_Gate D.6) — 실시간 편집의 관문이 받지 않은 변경. 누가·어느 페이지·어느 규칙
+  'page.collab.reject',
 ] as const;
+
+/**
+ * 실시간 편집에서 **관문이 변경을 받지 않아** 연결을 닫을 때의 닫기 코드 (P9_설계서_Gate D.6, FR-1005).
+ * 4000~4999는 응용이 쓰는 자리다. 화면은 이 코드를 보고 "서버가 이 편집을 받지 않았다"를 말한다 — 그냥
+ * 끊긴 것과 달리 **다시 붙어도 같은 편집은 다시 거절된다**는 뜻이라 따로 말한다.
+ */
+export const COLLAB_CLOSE_REFUSED = 4400;
+
+/**
+ * 거절·검증 실패의 **까닭**에 적는 이름·키의 최대 길이 (P9 코드 리뷰 4 · 두 번째 코드 리뷰 8). 까닭은 경고 로그와 감사로그(지울 수 없다)로 가고, 이름·키는
+ * 조작한 클라이언트가 정한다 — 넘으면 자른다(`cutName`)
+ */
+export const MAX_NAME_IN_REASON = 40;
+
+/**
+ * 실시간 편집 프레임의 **앞 한 바이트** — 무엇이 실렸나 (P6_설계서_Collab C.2절 · P9_설계서_Gate D.9, FR-1011).
+ * 서버(`collab.gateway.ts`)와 화면(`collabLink.ts`)이 이것 하나를 쓴다 — 따로 적으면 한쪽만 바뀐다.
+ *
+ * - `update` 문서 변경(Yjs), `awareness` 사람 표시(y-protocols) — 양쪽이 보낸다
+ * - `status` **서버만 보낸다.** 이 방의 자동 저장이 멈췄는지(`CollabStatus`). 화면이 보낸 것은 서버가 버린다
+ */
+export const COLLAB_MSG = { update: 0, awareness: 1, status: 2 } as const;
+
+/** `COLLAB_MSG.status`에 실리는 것(UTF-8 JSON). `saveBlocked`는 자동 저장이 멈춘 까닭이고, 풀리면 `null`이다 */
+export type CollabStatus = { saveBlocked: string | null };
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /** 페이지 트리 최대 깊이. 무한 중첩은 이동·경로 계산 비용을 키운다. */

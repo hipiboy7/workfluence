@@ -132,9 +132,10 @@ test('관리자가 감사로그를 거르고 세션을 끊는다', async ({ page
   expect(actions.length).toBeGreaterThan(0);
   expect(new Set(actions)).toEqual(new Set(['auth.login.success']));
 
-  // 미래 날짜부터 거르면 0건이다 — 기간 조건이 실제로 먹는다
-  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  await page.getByLabel('시작').fill(tomorrow);
+  // 미래 날짜부터 거르면 0건이다 — 기간 조건이 실제로 먹는다. **이틀 뒤로 잡는다** — 날짜는 UTC로 만들고 화면은 KST로 읽어,
+  // "내일"(UTC)이 KST 00~09시에는 오늘이 되어 방금 한 로그인이 걸렸다 (T-041)
+  const future = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+  await page.getByLabel('시작').fill(future);
   await page.getByRole('button', { name: '거르기' }).click();
   await expect(page.locator('tbody tr')).toHaveCount(0);
 

@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { type DocNode, type Principal } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, type CollabStatus, type DocNode, type Principal } from '@workfluence/shared';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -16,7 +16,7 @@ import { UsersService } from '../../users/users.service';
 import { MentionMailService } from '../../mail/mention-mail.service';
 import { scanMentions, type MentionOutcome } from '../../notifications/notifications.service';
 import { PagesService } from '../pages.service';
-import { shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
+import { blockedReason, saveBlockedReason, shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
 import { docFromYDoc, mentionSites, yDocFromDoc } from '../domain/ydoc';
 import {
   advance,
@@ -35,7 +35,9 @@ import {
   type Site,
 } from '../domain/makers';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
-import { readPageId, readSessionId } from './session-auth';
+import { inspectUpdate, type GateRule } from '../domain/gate';
+import { MAX_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence } from '../domain/presence';
+import { readClientIp, readPageId, readSessionId } from './session-auth';
 
 /**
  * 실시간 편집 중계 (P6_설계서_Collab C.2절, FR-700~712 / P7_설계서_Hardening C.1~C.3).
@@ -43,11 +45,13 @@ import { readPageId, readSessionId } from './session-auth';
  * **`y-websocket`의 서버를 쓰지 않는다.** 연결 시점에 권한을 판정해야 하는데(FR-703)
  * 남의 서버 구현에 인증을 끼워 넣는 것보다 프로토콜을 우리가 다루는 편이 경계가 분명하다.
  *
- * 우리가 다루는 메시지는 둘뿐이고 앞 한 바이트가 종류다.
- *   0 = 문서 변경 — Yjs에 적용하고 같은 방에 퍼뜨린다. 유휴가 지나면 버전을 남긴다
- *   1 = 사람 표시 — **저장하지 않고 퍼뜨리기만** 한다. 커서 위치는 남길 값어치가 없다
+ * 메시지는 셋이고 앞 한 바이트가 종류다 (`COLLAB_MSG`).
+ *   0 = 문서 변경 — 관문을 지나면 Yjs에 적용하고 같은 방에 퍼뜨린다. 유휴가 지나면 버전을 남긴다
+ *   1 = 사람 표시 — 걸러서 **퍼뜨리기만** 한다(저장하지 않는다). 커서 위치는 남길 값어치가 없다
+ *   2 = 저장 상태 — **서버만 보낸다.** 자동 저장이 멈췄는지 알린다 (P9 FR-1011). 화면이 보낸 것은 버린다
  *
- * 변경 자체는 Yjs가 병합하므로 이 클래스는 **변경의 내용을 해석하지 않는다**(Phase 8부터 누가 무엇을 보냈는지는 본다 — 아래).
+ * 변경의 병합은 Yjs가 한다. 이 클래스가 변경의 내용을 보는 것은 **누가 무엇을 보냈나**(Phase 8)와 **받아도 되는
+ * 모양인가**(Phase 9, 관문)뿐이다 — 아래.
  *
  * **Phase 7에서 더한 것.** 업그레이드 때 한 번 판정하고 마는 구조를 고쳤다 — 주기 재판정,
  * 하트비트, 세션 파기 즉시 반영, "접속만으로 작성자가 바뀌지 않게" 하는 것.
@@ -58,13 +62,21 @@ import { readPageId, readSessionId } from './session-auth';
  *
  * **`room.doc`에 관찰자를 더하면 그 안에서 던지지 않게 한다.** Yjs는 관찰자의 예외를 변경을 **적용한 뒤**
  * `Y.applyUpdate` 밖으로 올린다 — 길목의 예외가 편집 전체를 막았다 (T-035).
+ *
+ * **Phase 9에서 더한 것 — 관문.** 멤버가 보낸 변경을 **적용하기 전에** 서버 문서에 대어 보고(`inspectUpdate`), 편집기가
+ * 만들 수 있는 모양이 아니면 받지 않고 그 연결을 끊는다(완결·구조·주인 규칙). 사람 표시도 읽고 걸러 다시 쓴다
+ * (`screenPresence` — 남의 몫을 빼고, 이름은 서버가 정하고, 색·커서는 화면이 만드는 모양만 남긴다). 관문을 지난 변경은
+ * **받은 그대로** 퍼뜨린다 (P9_설계서_Gate D.1, 보류 22·23·24). 자동 저장이 검증에 걸리면 방의 화면에 알린다 (D.9).
  */
-
-const MSG_UPDATE = 0;
-const MSG_AWARENESS = 1;
 
 /** 권한을 잃어 끊을 때 쓰는 닫기 코드. 1008 = policy violation */
 const CLOSE_REVOKED = 1008;
+
+/**
+ * 저장이 던졌을 때(정본 읽기·저장 트랜잭션·상태 남기기) 방에 알리는 까닭 (P9 D.9, 세 번째 코드 리뷰 3). 실시간 상태는 살아 있고 다음 유휴에 다시 한다 —
+ * 알리지 않으면 화면은 저장되는 줄 안다
+ */
+export const SAVE_FAILED_REASON = '서버가 버전을 남기지 못했다 — 잠시 뒤 다시 한다';
 
 /** 아무도 없는 방을 이만큼 두고도 아무 일이 없으면 치운다 (고아 방 회수) */
 const EMPTY_ROOM_TTL_MS = 60_000;
@@ -98,6 +110,13 @@ type Member = {
    * 이 연결이 들여온 글자 중 이 클라이언트들의 것만 이 사람이 쓴 글자로 친다
    */
   own: Set<number>;
+  /** 연결한 사람의 주소 — 거절을 감사로그에 남길 때 쓴다 (P9 D.6). HTTP의 `req.ip`와 같은 규칙으로 구한다 */
+  ip: string | null;
+  /**
+   * 이 연결이 사람 표시로 묶은 클라이언트 ID. `MAX_PRESENCE_BINDS`개까지다 (P9 D.5). 나가도 풀지 않는다 — 사람마다의 상한은
+   * `unwrittenBindsLeft`가 본다 (세 번째 코드 리뷰 2)
+   */
+  presenceBound: number[];
 };
 
 type Room = {
@@ -129,6 +148,11 @@ type Room = {
   title: string | null;
   /** 아무도 없어진 시각. 고아 방 회수용 */
   emptyAt: number | null;
+  /**
+   * 자동 저장이 멈춘 까닭 — 마지막 판정이 검증에 실패했다. 방의 모두에게 알렸고, 새로 들어오는 사람에게도 알린다.
+   * 검증을 지난 판정이 나면 `null`로 돌아간다 (P9 FR-1011)
+   */
+  saveBlocked: string | null;
 };
 
 @Injectable()
@@ -280,9 +304,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         joined.joining -= 1;
       };
       socket.once('close', release);
+      const ip = readClientIp(req.headers['x-forwarded-for'], req.socket.remoteAddress, this.env.WF_TRUST_PROXY);
       this.wss.handleUpgrade(req, socket, head, (ws) => {
         release();
-        this.join(pageId, joined, ws, principal, user.displayName, sid, page.spaceId);
+        this.join(pageId, joined, ws, principal, user.displayName, sid, page.spaceId, ip);
       });
     } catch (e) {
       if (room) room.joining = Math.max(0, room.joining - 1);
@@ -384,12 +409,15 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       saving: null,
       title: null,
       emptyAt: Date.now(),
+      // **방을 열 때도 저장할 수 있는 상태인지 본다** (P9 D.9, 두 번째 코드 리뷰 4·자체 점검 1). 알림은 방의 메모리에만 있어, 다시
+      // 만든 방(재기동 뒤·모두 나간 뒤 남은 실시간 상태, Phase 9 전의 정본)은 첫 판정까지 몰랐다 — 들어오는 사람이 곧바로 안다
+      saveBlocked: saveBlockedReason(docFromYDoc(doc)),
     };
 
     /**
      * **작성자는 Yjs에게 묻는다** (FR-802).
      *
-     * 전에는 `MSG_UPDATE`를 받았다는 사실만으로 `lastActor`를 바꿨다. 그런데 화면은
+     * 전에는 문서 변경(`COLLAB_MSG.update`)을 받았다는 사실만으로 `lastActor`를 바꿨다. 그런데 화면은
      * 접속 직후 자기 문서 전체를 한 번 보낸다(빈 문서다). 그래서 **아무것도 고치지 않고
      * 열기만 해도 그 사람이 다음 버전의 작성자가 됐다.**
      *
@@ -481,13 +509,28 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     room.ledger = advance(room.ledger, room.sites, maker, integrated);
   }
 
-  private join(pageId: string, room: Room, socket: WebSocket, principal: Principal, name: string, sid: string, spaceId: string): void {
-    const member: Member = { socket, principal, name, sid, spaceId, alive: true, revoked: false, lastCheckedAt: Date.now(), sending: null, own: new Set() };
+  private join(pageId: string, room: Room, socket: WebSocket, principal: Principal, name: string, sid: string, spaceId: string, ip: string | null = null): void {
+    const member: Member = {
+      socket,
+      principal,
+      name,
+      sid,
+      spaceId,
+      alive: true,
+      revoked: false,
+      lastCheckedAt: Date.now(),
+      sending: null,
+      own: new Set(),
+      ip,
+      presenceBound: [],
+    };
     room.members.add(member);
     room.emptyAt = null;
 
     // 새로 들어온 사람에게 **지금 상태 전부**를 보낸다. 그다음부터는 변경만 오간다
-    socket.send(this.frame(MSG_UPDATE, Y.encodeStateAsUpdate(room.doc)));
+    socket.send(this.frame(COLLAB_MSG.update, Y.encodeStateAsUpdate(room.doc)));
+    // 자동 저장이 멈춰 있으면 **들어오자마자** 안다 — 모르면 저장되는 줄 알고 쓴다 (FR-1011)
+    if (room.saveBlocked !== null) socket.send(this.statusFrame(room));
     socket.on('pong', () => {
       member.alive = true;
     });
@@ -498,19 +541,25 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (data.length < 1) return;
       const kind = data[0];
       const payload = data.subarray(1);
-      if (kind === MSG_UPDATE) {
-        // 보낸 것에 든 조각·삭제 구간을 먼저 읽어 둔다 — 관찰자가 그 변경을 믿을지 정할 때 쓴다 (P8 C.2절).
-        // 변경을 한 번 더 훑는 값이고 DB는 건드리지 않는다 (NFR-80)
-        let sending: SentChange;
+      if (kind === COLLAB_MSG.update) {
+        let decoded: ReturnType<typeof Y.decodeUpdate>;
         try {
-          sending = this.sentChange(payload);
-        } catch (e) {
-          // **읽을 수 없는 변경은 버린다.** 방을 죽이지 않는다 — 한 사람의 잘못된 프레임이
-          // 나머지의 편집을 끊으면 안 된다. 읽기에서 실패했으니 적용되지 않았다
-          this.log.warn(`변경을 읽지 못해 버린다 (page=${pageId}): ${String(e)}`);
+          decoded = Y.decodeUpdate(payload);
+        } catch {
+          // **읽을 수 없는 변경도 거절이다** (P9 D.1). 정상 화면은 그런 것을 보내지 않는다. 방의 다른 사람은 아무 일도 겪지 않는다
+          this.refuse(pageId, room, member, 'structure', '읽을 수 없는 변경');
           return;
         }
-        member.sending = sending;
+        // **적용하기 전에 본다** (P9 D.1). 적용한 뒤 고치는 길은 남이 차지한 시계 구간을 되돌리지 못한다(보류 24).
+        // 받은 바이트도 넘긴다 — 같은 클라이언트의 덩어리가 되풀이됐는지는 읽은 것만으로 가릴 수 없다 (D.2)
+        const verdict = inspectUpdate(decoded, room.doc, member.principal.id, room.ledger.owners, payload);
+        if (!verdict.ok) {
+          this.refuse(pageId, room, member, verdict.rule, verdict.reason);
+          return;
+        }
+        if (verdict.bind !== null) room.ledger.owners.set(verdict.bind, member.principal.id);
+        // 보낸 것에 든 조각·삭제 구간 — 관찰자가 그 변경을 믿을지 정할 때 쓴다 (P8 C.2절). DB는 건드리지 않는다 (NFR-80)
+        member.sending = this.sentChange(decoded);
         try {
           // **오리진으로 멤버를 실어 보낸다.** 위의 `update` 관찰자가 이것을 보고
           // "실제로 바뀐 경우에만" 작성자를 고친다
@@ -525,8 +574,11 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
           // 이 연결이 보낸 ID 목록이 묻어 간다
           member.sending = null;
         }
-      } else if (kind !== MSG_AWARENESS) {
-        return; // 모르는 종류는 버린다
+      } else if (kind === COLLAB_MSG.awareness) {
+        this.relayPresence(pageId, room, member, payload);
+        return;
+      } else {
+        return; // 모르는 종류는 버린다 — 저장 상태(`COLLAB_MSG.status`)도 서버만 보내는 것이라 여기로 온다
       }
       this.broadcast(room, data, member);
     });
@@ -545,11 +597,51 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * 한 연결이 보낸 변경에 든 조각·삭제 구간 (P8 C.2절). `Y.decodeUpdate` 한 번으로 둘 다 읽는다.
-   * 깨진 변경이면 던진다 — 부르는 쪽이 그 변경을 버린다.
+   * 사람 표시를 걸러 퍼뜨린다 (P9_설계서_Gate D.5, FR-1004). **남의 몫은 빼고, 이름은 서버가 아는 표시 이름으로 바꾸고, 색·커서는
+   * 화면이 만드는 모양만 남긴다.** 주인 없는 클라이언트 ID는 보낸 사람에게 묶는다 — 화면은 열자마자 자기 ID를 알리므로, 여기서
+   * 묶으면 그 ID가 남에게 퍼지기 전에 주인이 정해진다(D.4). 한 연결이 묶는 수는 `MAX_PRESENCE_BINDS`까지, 한 사람이 방에 쓰지 않고 쥔 수는
+   * `MAX_UNWRITTEN_PRESENCE_BINDS`까지다. **나가도 풀지 않는다** (세 번째 코드 리뷰 2). 읽지 못하면 거절이다.
    */
-  private sentChange(payload: Uint8Array): SentChange {
-    const decoded = Y.decodeUpdate(payload);
+  private relayPresence(pageId: string, room: Room, member: Member, payload: Uint8Array): void {
+    let entries: ReturnType<typeof readPresence>;
+    try {
+      entries = readPresence(payload);
+    } catch {
+      this.refuse(pageId, room, member, 'presence', '읽을 수 없는 사람 표시');
+      return;
+    }
+    const owners = room.ledger.owners;
+    const user = member.principal.id;
+    // 사람마다의 상한은 **묶을 후보가 있을 때만** 센다 — 주인 표를 훑으므로 커서가 움직일 때마다 세지 않는다
+    const unowned = entries.length === 1 && !owners.has(entries[0].client);
+    const canBind = unowned
+      ? Math.min(MAX_PRESENCE_BINDS - member.presenceBound.length, unwrittenBindsLeft(owners, user, (c) => Y.getState(room.doc.store, c) > 0))
+      : 0;
+    const { keep, bind } = screenPresence(entries, user, owners, member.name, canBind);
+    for (const client of bind) owners.set(client, user);
+    member.presenceBound.push(...bind);
+    if (keep.length) this.broadcast(room, this.frame(COLLAB_MSG.awareness, writePresence(keep)), member);
+  }
+
+  /**
+   * **관문이 받지 않았다** (P9_설계서_Gate D.6, FR-1005·1006). 적용도 중계도 하지 않고, 기록하고, 그 연결을 닫는다.
+   *
+   * 기록에는 규칙과 까닭(이름·키 수준)만 남긴다 — 글자·속성 값은 남기지 않는다(7절). 닫기는 `revoke`와 같은 순서다:
+   * 표시 → 방에서 뺌 → 닫기. 닫은 뒤에 온 말은 듣지 않는다.
+   */
+  private refuse(pageId: string, room: Room, member: Member, rule: GateRule | 'presence', reason: string): void {
+    if (member.revoked) return;
+    this.log.warn(`관문이 변경을 받지 않았다 — ${reason} (page=${pageId}, user=${member.principal.id}, rule=${rule})`);
+    this.track(
+      this.audit
+        .record({ action: 'page.collab.reject', actorId: member.principal.id, targetType: 'page', targetId: pageId, detail: { rule, reason }, ip: member.ip ?? undefined })
+        .catch((e: unknown) => this.log.error(`거절을 감사로그에 남기지 못했다 (page=${pageId}): ${String(e)}`)),
+    );
+    this.revoke(room, member, '받지 않은 변경', COLLAB_CLOSE_REFUSED);
+  }
+
+  /** 한 연결이 보낸 변경에 든 조각·삭제 구간 (P8 C.2절). 관문이 읽은 것을 그대로 받는다 */
+  private sentChange(decoded: ReturnType<typeof Y.decodeUpdate>): SentChange {
     const structs = new Map<number, ClockRange>();
     for (const s of decoded.structs) {
       if (!(s instanceof Y.Item) && !(s instanceof Y.GC)) continue;
@@ -565,6 +657,25 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
 
   private frame(kind: number, payload: Uint8Array): Buffer {
     return Buffer.concat([Buffer.of(kind), Buffer.from(payload)]);
+  }
+
+  /** 방의 저장 상태 알림 (FR-1011) */
+  private statusFrame(room: Room): Buffer {
+    const status: CollabStatus = { saveBlocked: room.saveBlocked };
+    return this.frame(COLLAB_MSG.status, Buffer.from(JSON.stringify(status), 'utf8'));
+  }
+
+  /**
+   * **자동 저장이 멈췄는지 방의 모두에게 알린다** (P9_설계서_Gate D.9, FR-1011). 까닭이 바뀔 때만 보낸다.
+   *
+   * 멈춘 것을 로그로만 남기면 편집하는 사람은 저장되는 줄 알고 계속 쓴다 — 동료의 화면에는 보이니 더 그렇다. 나가면서
+   * 사라지는 줄도 모른다. 까닭은 검증이 낸 문장이다: 자리와 노드·속성의 이름뿐이고 값은 없다 (7절).
+   */
+  private announceSave(room: Room, reason: string | null): void {
+    if (room.saveBlocked === reason) return;
+    room.saveBlocked = reason;
+    const data = this.statusFrame(room);
+    for (const m of room.members) if (m.socket.readyState === m.socket.OPEN) m.socket.send(data);
   }
 
   private broadcast(room: Room, data: Buffer, from: Member): void {
@@ -614,11 +725,11 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
    * **순서가 중요하다.** 표시하고 → 방에서 빼고 → 닫는다. 닫기부터 하면 답하지 않는
    * 클라이언트가 30초 동안 계속 쓰고, 그 사이 `recheck`도 이미 본 것으로 여겨 다시 안 본다.
    */
-  private revoke(room: Room, member: Member, why: string): void {
+  private revoke(room: Room, member: Member, why: string, code = CLOSE_REVOKED): void {
     member.revoked = true;
     room.members.delete(member);
     if (room.members.size === 0) room.emptyAt = Date.now();
-    member.socket.close(CLOSE_REVOKED, why);
+    member.socket.close(code, why);
   }
 
   private async sweep(): Promise<void> {
@@ -702,7 +813,14 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const room = this.rooms.get(pageId);
     if (!room) return Promise.resolve();
     const prior = room.saving ?? Promise.resolve();
-    const next = prior.then(() => this.runSave(pageId, room, trigger));
+    // **던지면 방에 알리고 다시 던진다** (P9 세 번째 코드 리뷰 3·자체 점검 1). 저장 트랜잭션만이 아니라 그 앞의 정본 읽기도 DB를
+    // 탄다 — DB가 흔들리면 거기서 먼저 던진다. 전에는 아무 알림이 없어 옛 까닭이 남거나 화면이 아무것도 몰랐다
+    const next = prior
+      .then(() => this.runSave(pageId, room, trigger))
+      .catch((e: unknown) => {
+        if (this.rooms.get(pageId) === room) this.announceSave(room, SAVE_FAILED_REASON);
+        throw e;
+      });
     // 사슬은 삼킨 것으로 잇는다 — 한 번 실패했다고 다음 저장까지 막히면 안 된다
     room.saving = next.then(
       () => undefined,
@@ -751,11 +869,14 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       idleThresholdMs: this.env.WF_COLLAB_IDLE_SAVE_MS,
       trigger,
     });
+    // 검증이 가장 먼저라 오류가 없는 판정은 전부 "검증을 지났다"다 — 내용이 그대로여도, 아직 편집 중이어도.
+    // **저장하는 판정은 커밋한 뒤에 푼다** — 먼저 풀면 저장이 실패해도 화면은 다시 저장되는 줄 안다 (P9 두 번째 코드 리뷰 5)
+    if (!decision.save) this.announceSave(room, blockedReason(decision.errors));
 
     if (!decision.save) {
       if (decision.errors.length) {
-        // **버전을 만들지 않고 로그만 남긴다** (FR-708). 실시간 상태는 살아 있으므로
-        // 사람이 화면에서 고칠 수 있다 — 여기서 저장하면 깨진 것이 정본이 된다
+        // **버전을 만들지 않는다** (FR-708). 까닭은 위에서 방의 화면에 알렸고(FR-1011) 여기서는 로그에 남긴다. 실시간 상태는
+        // 살아 있으므로 사람이 화면에서 고칠 수 있다 — 여기서 저장하면 깨진 것이 정본이 된다
         this.log.warn(`검증 실패로 저장하지 않았다 (page=${pageId}): ${decision.errors.slice(0, 3).join(' / ')}`);
       }
       await this.rememberState(pageId, room, current.currentVersionNo);
@@ -789,6 +910,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         tx,
       );
     });
+    this.announceSave(room, null);
     // 메일은 **커밋 뒤에** 보낸다 (FR-754). 기다리지 않는다.
     // **기본 이름을 넘기지 않는다** — 자동 저장의 actor는 "마지막으로 키를 누른 사람"이라
     // 그 이름을 적으면 틀린 사람이 적힌다 (P6 코드 리뷰 6). 만든 사람을 아는 받는 사람에게는

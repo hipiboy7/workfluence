@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 8까지 구현 완료** (2026-09-24). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 9까지 구현 완료** (2026-09-24). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -63,7 +63,8 @@ workfluence/
 │   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 정책값 (세 겹 출처 · 캐시)
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
 │   │   │   ├── pages/            [P2] 페이지·버전 / [P6] collab/(WebSocket 게이트웨이) ·
-│   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts / [P8] domain/makers.ts
+│   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts / [P8] domain/makers.ts /
+│   │   │   │                     [P9] domain/{gate,presence}.ts (실시간 편집의 관문)
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
@@ -85,7 +86,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P8]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P9]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -105,7 +106,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 |---|---|---|
 | `env.ts` | `WF_*` 환경 스키마(strict), 파싱, `.env.example` 키 추출 | 서버가 쓰고, 테스트가 `.env.example`과 대조한다 |
 | `constants.ts` | 역할·상태·Crew 역할·감사 이벤트·문서 스키마 버전·정책 기본값·CSRF 헤더 | 화면 문구와 서버 판정이 같은 목록을 봐야 한다 |
-| `document.ts` | 문서 JSON 허용 노드·마크, 검증, 텍스트 추출 | **서버 검증과 편집기 확장이 어긋나면 편집기가 만든 문서를 서버가 거부한다** |
+| `document.ts` | 문서 JSON 허용 목록(노드·속성·마크·자식·노드별 마크), 검증, 속성·마크 판정 함수, 텍스트 추출 | **서버 검증 · 실시간 편집의 관문 · 편집기가 같은 목록을 본다.** 편집기 쪽은 대조 테스트(`apps/web/src/components/extensions.spec.ts`)가 강제한다 — 어긋나면 편집기가 만든 문서를 서버가 받지 않는다 (P9 D.7) |
 | `permissions.ts` | `can()`·`spaceAccess()`·역할 간 우열·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
 | `security.ts` | ID·email 마스킹, 임시 비밀번호·식별자 생성 (난수 소스 주입) | 난수를 주입받아 순수 함수로 두면 테스트가 결정적이다 |
 | `schemas.ts` | API 요청 DTO(zod) + 응답 뷰 타입 | 서버 검증과 클라이언트 타입이 한 정의에서 나온다 |
@@ -138,7 +139,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `comments` | `id`, `page_id`, `parent_id`, `body_json`, `created_by`, `deleted_at` | P3 | |
 | `labels` / `page_labels` | `id`,`name` / (`page_id`,`label_id`) | P3 | |
 | `notifications` | `id`, `user_id`, `kind`, `page_id`, `comment_id`, `actor_id`, `read_at`, `created_at` | P4 | 앱 내 알림함. **`actor_id`는 P8부터 null 가능** — 같이 쓴 문서에서 부른 사람을 확실히 모를 때다 (`P8_설계서_Mention` D절) |
-| `page_realtime` | `page_id` PK, `state` bytea, `version_no`, `authors` jsonb, `updated_by`, `updated_at` | P6 · P8(`authors`) | Yjs 상태. **파생 데이터**라 지워도 정본에서 다시 시작한다 (보류 4). 페이지가 지워지면 CASCADE. `authors`는 멘션을 만든 사람의 장부다 — 멘션 자리마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름 (`P8_설계서_Mention` C.2절) |
+| `page_realtime` | `page_id` PK, `state` bytea, `version_no`, `authors` jsonb, `updated_by`, `updated_at` | P6 · P8(`authors`) | Yjs 상태. **파생 데이터**라 지워도 정본에서 다시 시작한다 (보류 4). 페이지가 지워지면 CASCADE. `authors`는 멘션을 만든 사람의 장부다 — 멘션 자리마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름 (`P8_설계서_Mention` C.2절). 그 안의 `owners`(클라이언트 ID → 주인)는 P9부터 **누가 그 ID로 쓸 수 있나**도 정한다 (`P9_설계서_Gate` D.4) |
 | `page_templates` | `id`, `name` uq, `content_json`, `created_by`, `updated_at` | P6 | 페이지 시작 틀. 관리자만 만든다 |
 
 ### 3.2 규약
@@ -179,8 +180,9 @@ shared  ←  api(config → db → common → 기능 모듈)
 ## 5. 문서(본문) 계약
 
 - 저장 형식은 **ProseMirror JSON**. 서버는 HTML을 받지 않는다.
-- `shared/document.ts`의 허용 목록(노드·마크·속성) 밖이면 400. 링크는 `http(s)`·내부 경로·앵커만 허용한다.
-- **편집기 확장 목록과 서버 허용 목록은 같아야 한다.** 어긋나면 사용자가 만든 문서를 서버가 거부한다. 편집기 확장을 추가할 때 허용 목록도 같은 커밋에서 넓히고, 문서 스키마 버전을 올린다.
+- `shared/document.ts`의 허용 목록(노드·속성·마크·자식·노드별 마크)과 값 규칙(링크 주소·제목 단계·표 칸 정렬·열 너비), 깊이·노드 수 한도 밖이면 400. 링크는 `http(s)`·내부 경로·앵커만 허용한다.
+- **편집기 스키마와 서버 허용 목록은 같다** — `apps/web/src/components/extensions.spec.ts`가 노드·속성·마크·자식·노드별 마크를 양쪽으로 대조한다(P9 D.7). 편집기 확장을 추가할 때 허용 목록도 같은 커밋에서 넓히고, 문서 스키마 버전을 올린다. 편집기도 서버와 **같은 식**으로만 링크를 만든다(이메일은 글자로 남는다).
+- **실시간 편집의 변경도 적용하기 전에 같은 목록으로 본다** (`apps/api/src/pages/domain/gate.ts`). 어긋나면 받지 않고 그 연결을 끊는다 — REST의 400에 해당한다. 서버에서 보류될 조각과 남의 클라이언트 ID로 쓴 조각도 받지 않는다 (P9 D.3·D.4). 노드 수 한도는 문 앞에서 세지 않는다 — 넘기면 자동 저장이 멈추고 서버가 방의 화면에 그 까닭을 알린다 (P9 D.9).
 - 검색용 평문은 서버가 JSON에서 추출한다. 클라이언트가 보낸 텍스트를 믿지 않는다.
 
 ## 6. 교체 가능성 (DIP 경계)
@@ -264,6 +266,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 6 | 실시간 편집(JSON 정본 + Yjs 파생, 보류 4), 버전 비교, HTML 내보내기, 템플릿, 멘션 메일. PDF·가져오기는 하지 않는다 |
 | 7 | 반입 전 강화 — 살아 있는 연결의 권한 재판정·하트비트, 이미지 군살 제거 |
 | 8 | 멘션 귀속 — `pages/domain/makers.ts`(멘션을 만든 사람의 장부: 새로 생긴 멘션 자리 · 어느 연결이 어느 글자를 들여왔나 · 옮김을 가리는 사라진 이름), `page_realtime.authors`, `notifications.actor_id` null 허용 (`0008`) |
+| 9 | 실시간 편집의 관문 — `pages/domain/gate.ts`(되풀이 검사·완결·구조·주인 규칙), `pages/domain/presence.ts`(사람 표시 거르기), 허용 목록의 자식·노드별 마크·값 규칙, 편집기 확장 목록 하나(`apps/web/src/components/extensions.ts`)와 대조 테스트, 감사 종류 `page.collab.reject`, 서버만 보내는 저장 상태 알림 `COLLAB_MSG.status`(P9 D.9), 화면의 연결 상태 기계 `apps/web/src/components/collabLink.ts`. 화면의 동기화 라이브러리는 `@tiptap/y-tiptap`이다(P9 B.1). 마이그레이션 없음 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
@@ -293,7 +296,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 새 개체 (예: 문서 템플릿) | 전부 | L | 감사 이벤트 종류와 권한 행위를 ①에 먼저 등재 |
 | 정책값 조절 (세션 시간·업로드 상한) | 설정만 | S | `CLAUDE.md` 5절 세 갈래 중 어디인지 먼저 판정 |
 | 권한 규칙 변경 | ① + 그 테스트 | M | `permissions.ts` 한 곳만 고친다. 화면·서버가 따라온다 |
-| 편집기 기능 추가 (표·각주 등) | ① + ④ | M | **허용 목록과 편집기 확장을 같은 커밋에서 넓히고 문서 스키마 버전을 올린다** |
+| 편집기 기능 추가 (표·각주 등) | ① + ④ | M | **허용 목록과 편집기 확장을 같은 커밋에서 넓히고 문서 스키마 버전을 올린다.** 빠뜨리면 대조 테스트가 먼저 깨진다 — 넘어가면 그 기능을 쓰는 순간 실시간 편집이 끊긴다(관문) |
 | 인증 방식 추가 (SAML 등) | 6절 축 | M | 주입 토큰 뒤에 구현을 더한다. 상위 로직은 안 바뀐다 |
 | 첨부 저장 위치 변경 (NAS·S3) | 6절 축 | M | 같음 |
 | 검색 엔진 교체 | 6절 축 | M | 같음. 색인은 파생 데이터라 재생성 가능하다 |
@@ -308,7 +311,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 환경변수 추가·개명 | `.env.example` · 그 Phase 설계서의 설정 항목 표 · `deploy/compose.yml` | 기동 실패 또는 운영에서만 값이 빈다 |
 | 감사 이벤트 종류 추가 | `constants.ts`의 목록 · 기록하는 지점 | 기록이 안 남거나 과거 로그와 이름이 어긋난다 |
 | 권한 행위 추가 | `permissions.ts`의 허용 표 · 엔드포인트 가드 | 기본 거부라 아무도 못 쓴다 |
-| 편집기 확장 추가 | 문서 허용 목록 · 문서 스키마 버전 | 사용자가 만든 문서를 서버가 400으로 거부한다 |
+| 편집기 확장 추가 | 문서 허용 목록(노드·속성·마크·자식·노드별 마크) · 문서 스키마 버전 | 대조 테스트가 깨진다. 넘어가면 REST는 400, 실시간 편집은 그 기능을 쓰는 사람의 연결이 끊긴다 |
 | 테이블 컬럼 추가 | 마이그레이션 SQL · 시드의 빈 값 채우기 | 기존 행이 비어 있는 채로 남는다 |
 | API 응답 모양 변경 | `schemas.ts`의 뷰 타입 · 화면 | 타입 검사는 통과하고 화면만 깨진다 |
 

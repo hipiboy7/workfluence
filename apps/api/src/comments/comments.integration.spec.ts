@@ -1,4 +1,4 @@
-import { emptyDocument, type DocNode, type Principal } from '@workfluence/shared';
+import { emptyDocument, type DocNode, type Principal, DOCUMENT_SCHEMA_VERSION } from '@workfluence/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { comments, pages, users } from '../db/schema';
@@ -57,7 +57,7 @@ describe('작성·수정 (FR-420)', () => {
     const pid = await page(sp.id, me.id);
     const c = await svc.create(pid, { body: body('내용') }, me);
     const row = await db.query.comments.findFirst({ where: eq(comments.id, c.id) });
-    expect((row!.bodyJson as DocNode).attrs?.schemaVersion).toBe(1);
+    expect((row!.bodyJson as DocNode).attrs?.schemaVersion).toBe(DOCUMENT_SCHEMA_VERSION);
   });
 
   it('본문이 빈 문서여도 받는다 — 내용 검증은 문서 스키마가 한다', async () => {

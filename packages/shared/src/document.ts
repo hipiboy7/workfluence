@@ -1,10 +1,13 @@
-import { DOCUMENT_SCHEMA_VERSION } from './constants';
+import { DOCUMENT_SCHEMA_VERSION, MAX_NAME_IN_REASON } from './constants';
 
 /**
  * 페이지 본문(ProseMirror/TipTap JSON) 검증·텍스트 추출 (CLAUDE.md 6절·7절).
  *
  * 서버는 HTML을 받지 않고 이 JSON만 받는다. 허용 목록 밖의 노드·마크·속성은 거부한다.
- * 편집기(apps/web)의 확장 목록과 이 허용 목록은 같아야 한다 — 어긋나면 편집기가 만든 문서가 400으로 거부된다.
+ * **편집기(apps/web)의 스키마와 이 허용 목록은 같다** — `apps/web/src/components/extensions.spec.ts`가 양쪽으로 대조한다
+ * (P9_설계서_Gate D.7). 어긋나면 편집기가 만든 문서가 거부되고(실시간 편집에서는 연결이 끊긴다), 허용 목록에만 있는 것은
+ * 조작한 클라이언트만 넣는 "보이지 않는 속성"이 된다(보류 22).
+ * 같은 규칙을 실시간 편집의 관문(`apps/api/src/pages/domain/gate.ts`)도 쓴다 — 그래서 속성·마크 판정을 함수로 내보낸다.
  * 검증은 순수 함수라 A등급(테스트 먼저).
  */
 
@@ -28,8 +31,9 @@ export type DocMark = {
  */
 export const ALLOWED_NODES: Record<string, readonly string[]> = {
   doc: ['schemaVersion'],
-  paragraph: ['textAlign'],
-  heading: ['level', 'textAlign'],
+  // **`textAlign`을 뺐다** (P9 D.7). 편집기에 정렬 확장이 없어 만들 수 없는 속성이었다 — 조작한 클라이언트만 넣는다
+  paragraph: [],
+  heading: ['level'],
   text: [],
   bulletList: [],
   orderedList: ['start', 'type'],
@@ -40,8 +44,9 @@ export const ALLOWED_NODES: Record<string, readonly string[]> = {
   hardBreak: [],
   table: [],
   tableRow: [],
-  tableCell: ['colspan', 'rowspan', 'colwidth'],
-  tableHeader: ['colspan', 'rowspan', 'colwidth'],
+  // `align`은 편집기가 붙여 넣은 HTML의 정렬에서 만든다 (P9 D.7 — 전에는 정렬된 표를 붙여 넣으면 저장이 멈췄다)
+  tableCell: ['colspan', 'rowspan', 'colwidth', 'align'],
+  tableHeader: ['colspan', 'rowspan', 'colwidth', 'align'],
 };
 
 /** 허용 마크와 속성 키 */
@@ -51,7 +56,44 @@ export const ALLOWED_MARKS: Record<string, readonly string[]> = {
   strike: [],
   underline: [],
   code: [],
-  link: ['href', 'target', 'rel', 'class'],
+  // `title`은 붙여 넣은 링크의 `title`에서 온다 (P9 D.7)
+  link: ['href', 'target', 'rel', 'class', 'title'],
+};
+
+const BLOCKS = ['blockquote', 'bulletList', 'codeBlock', 'heading', 'horizontalRule', 'orderedList', 'paragraph', 'table'] as const;
+
+/**
+ * **그 자리에 올 수 있는 자식** — 편집기 스키마의 내용 식에서 나올 수 있는 노드 종류다(P9_설계서_Gate D.2). `text`는 글자.
+ * 순서와 개수(예: `listItem`은 문단으로 시작한다)는 보지 않는다 — 내용 식 전체를 옮기려면 서버에 ProseMirror가 든다(D.8).
+ *
+ * 조작한 클라이언트는 이것을 무시할 수 있고, 받은 편집기는 그런 문서를 그린 뒤 그 근처의 편집에서 깨진다(P9 B.1).
+ */
+export const ALLOWED_CHILDREN: Record<string, readonly string[]> = {
+  doc: BLOCKS,
+  paragraph: ['hardBreak', 'text'],
+  heading: ['hardBreak', 'text'],
+  text: [],
+  bulletList: ['listItem'],
+  orderedList: ['listItem'],
+  listItem: BLOCKS,
+  codeBlock: ['text'],
+  blockquote: BLOCKS,
+  horizontalRule: [],
+  hardBreak: [],
+  table: ['tableRow'],
+  tableRow: ['tableCell', 'tableHeader'],
+  tableCell: BLOCKS,
+  tableHeader: BLOCKS,
+};
+
+/**
+ * **글자를 담는 노드가 받는 마크** (P9 D.2). `codeBlock`은 아무 마크도 받지 않는다 — 코드 블록 안의 굵은 글자를 받은
+ * 편집기는 **그 블록을 통째로 지웠다**(P9 B.1 실측).
+ */
+export const MARKS_IN: Record<string, readonly string[]> = {
+  paragraph: ['bold', 'code', 'italic', 'link', 'strike', 'underline'],
+  heading: ['bold', 'code', 'italic', 'link', 'strike', 'underline'],
+  codeBlock: [],
 };
 
 /** 링크는 http(s)·내부 경로·앵커만 (CLAUDE.md 7절). javascript:·data: 등은 거부. */
@@ -72,8 +114,9 @@ export function validateDocument(input: unknown): DocumentValidation {
       errors.push(`${path}: 중첩 깊이 ${MAX_DOCUMENT_DEPTH} 초과`);
       return;
     }
+    // 넘은 뒤의 노드는 세기만 한다 — 같은 문장을 노드마다 더하면 "외 N건"이 같은 말의 되풀이가 된다(자동 저장 멈춤 알림, P9 D.9)
     if (++nodeCount > MAX_DOCUMENT_NODES) {
-      errors.push(`노드 수 ${MAX_DOCUMENT_NODES} 초과`);
+      if (nodeCount === MAX_DOCUMENT_NODES + 1) errors.push(`노드 수 ${MAX_DOCUMENT_NODES} 초과`);
       return;
     }
     if (!isRecord(node)) {
@@ -82,15 +125,11 @@ export function validateDocument(input: unknown): DocumentValidation {
     }
     const type = node.type;
     if (typeof type !== 'string' || !Object.hasOwn(ALLOWED_NODES, type)) {
-      errors.push(`${path}: 허용되지 않는 노드 '${String(type)}'`);
+      errors.push(`${path}: 허용되지 않는 노드 '${cutName(String(type))}'`);
       return;
     }
-    checkAttrs(node.attrs, ALLOWED_NODES[type], `${path}(${type})`, errors);
+    for (const problem of nodeAttrProblems(type, node.attrs)) errors.push(`${path}(${type}): ${problem}`);
 
-    if (type === 'heading') {
-      const level = (node.attrs as Record<string, unknown> | undefined)?.level;
-      if (typeof level !== 'number' || level < 1 || level > 6) errors.push(`${path}: heading.level은 1~6`);
-    }
     if (type === 'text') {
       if (typeof node.text !== 'string' || node.text.length === 0) errors.push(`${path}: text 노드는 비어 있지 않은 문자열`);
       if (node.content !== undefined) errors.push(`${path}: text 노드는 content를 가질 수 없다`);
@@ -110,7 +149,11 @@ export function validateDocument(input: unknown): DocumentValidation {
       if (!Array.isArray(node.content)) {
         errors.push(`${path}: content는 배열`);
       } else {
-        node.content.forEach((child, i) => visit(child, `${path}.content[${i}]`, depth + 1));
+        node.content.forEach((child, i) => {
+          const childPath = `${path}.content[${i}]`;
+          placementProblems(type, child, childPath, errors);
+          visit(child, childPath, depth + 1);
+        });
       }
     }
   };
@@ -122,25 +165,94 @@ export function validateDocument(input: unknown): DocumentValidation {
   return errors.length ? { ok: false, errors } : { ok: true };
 }
 
-function checkMark(mark: unknown, path: string, errors: string[]): void {
-  if (!isRecord(mark) || typeof mark.type !== 'string' || !Object.hasOwn(ALLOWED_MARKS, mark.type)) {
-    errors.push(`${path}: 허용되지 않는 마크 '${isRecord(mark) ? String(mark.type) : typeof mark}'`);
+/**
+ * 자식 하나가 그 자리에 올 수 있는가 (P9 D.2). **모르는 노드는 여기서 짚지 않는다** — 방문할 때 "허용되지 않는 노드"
+ * 하나로 짚는다. 같은 잘못을 두 번 말하면 오류 20건의 한도를 헛되이 쓴다.
+ */
+function placementProblems(parent: string, child: unknown, path: string, errors: string[]): void {
+  if (!isRecord(child) || typeof child.type !== 'string' || !Object.hasOwn(ALLOWED_NODES, child.type)) return;
+  if (!ALLOWED_CHILDREN[parent].includes(child.type)) {
+    errors.push(`${path}: '${parent}' 안에 올 수 없는 '${child.type}'`);
     return;
   }
-  checkAttrs(mark.attrs, ALLOWED_MARKS[mark.type], path, errors);
-  if (mark.type === 'link') {
-    const href = (mark.attrs as Record<string, unknown> | undefined)?.href;
-    if (typeof href !== 'string' || !ALLOWED_LINK_HREF.test(href.trim())) {
-      errors.push(`${path}: 허용되지 않는 링크 주소 '${String(href)}'`);
+  if (child.type !== 'text' || !Array.isArray(child.marks)) return;
+  const allowed = MARKS_IN[parent];
+  for (const m of child.marks) {
+    if (isRecord(m) && typeof m.type === 'string' && Object.hasOwn(ALLOWED_MARKS, m.type) && !allowed.includes(m.type)) {
+      errors.push(`${path}: '${parent}' 안의 글자는 마크 '${m.type}'를 받지 않는다`);
     }
   }
 }
 
-function checkAttrs(attrs: unknown, allowed: readonly string[], path: string, errors: string[]): void {
-  if (attrs === undefined || attrs === null) return;
-  if (!isRecord(attrs)) {
-    errors.push(`${path}: attrs는 객체`);
+function checkMark(mark: unknown, path: string, errors: string[]): void {
+  if (!isRecord(mark) || typeof mark.type !== 'string') {
+    errors.push(`${path}: 허용되지 않는 마크 '${isRecord(mark) ? cutName(String(mark.type)) : typeof mark}'`);
     return;
+  }
+  for (const problem of markProblems(mark.type, mark.attrs)) errors.push(`${path}: ${problem}`);
+}
+
+/**
+ * **노드 하나의 속성 문제** — 정본 검증과 실시간 편집의 관문이 같이 쓴다 (P9 FR-1001).
+ *
+ * 까닭에 **값을 적지 않는다** — 이 글이 경고 로그·감사로그·저장 실패 로그로 간다(7절: 문서 내용을 기록에 남기지 않는다).
+ * `partial`이면 "있어야 하는 속성"을 보지 않는다 — 관문은 속성을 하나씩(맵 항목마다) 보므로 없는 것을 판정할 수 없다.
+ * 그 자리는 변환이 편집기와 같은 기본값으로 채운다(P9 FR-1010). 있는 값은 그래도 본다.
+ */
+export function nodeAttrProblems(type: string, attrs: unknown, opts: { partial?: boolean } = {}): string[] {
+  if (!Object.hasOwn(ALLOWED_NODES, type)) return [`허용되지 않는 노드 '${cutName(type)}'`];
+  const out = attrProblems(attrs, ALLOWED_NODES[type]);
+  if (type === 'heading') {
+    const level = isRecord(attrs) ? attrs.level : undefined;
+    const present = level !== undefined && level !== null;
+    if ((present || !opts.partial) && (typeof level !== 'number' || level < 1 || level > 6)) out.push('heading.level은 1~6');
+  }
+  if ((type === 'tableCell' || type === 'tableHeader') && isRecord(attrs)) {
+    // **화면이 style에 그대로 넣는 값**이다 — `align`은 `text-align: …`에, `colwidth`는 표 `colgroup`의 `width: …px`에
+    // (TipTap 3.31.3). "원시값이면 된다"로는 `left; position:fixed; inset:0`이 지나가 보는 사람 모두의 화면을 덮는다
+    // (P9 보안 검토 1). 편집기는 붙여 넣은 HTML에서도 `align`을 이 셋으로, `colwidth`를 `parseInt`한 숫자로 만든다
+    const { align, colwidth } = attrs;
+    if (align !== undefined && align !== null && !TABLE_ALIGN.has(align as string)) out.push("속성 'align' 값은 left·center·right");
+    if (colwidth !== undefined && colwidth !== null && !(Array.isArray(colwidth) && colwidth.every((w) => w === null || typeof w === 'number'))) {
+      out.push("속성 'colwidth' 값은 숫자 배열");
+    }
+  }
+  return out;
+}
+
+/** 표 칸 정렬 — TipTap `normalizeTableCellAlign`이 받는 값과 같다 */
+const TABLE_ALIGN: ReadonlySet<string> = new Set(['left', 'center', 'right']);
+
+/**
+ * 이름·키는 조작한 클라이언트가 정한다 — 까닭(경고 로그·감사로그로 간다)이 불어나지 않게 `MAX_NAME_IN_REASON`자로 자른다
+ * (P9 코드 리뷰 4). 실시간 편집의 관문(`gate.ts`)도 이것을 쓴다 — 한 곳에서 자른다
+ */
+export function cutName(s: string): string {
+  return s.length > MAX_NAME_IN_REASON ? `${s.slice(0, MAX_NAME_IN_REASON)}…` : s;
+}
+
+/** **마크 하나의 문제** — 정본 검증과 관문이 같이 쓴다 (P9 FR-1001). 링크 주소도 적지 않는다 */
+export function markProblems(type: string, attrs: unknown): string[] {
+  if (!Object.hasOwn(ALLOWED_MARKS, type)) return [`허용되지 않는 마크 '${cutName(type)}'`];
+  const out = attrProblems(attrs, ALLOWED_MARKS[type]);
+  if (type === 'link') {
+    const href = isRecord(attrs) ? attrs.href : undefined;
+    if (typeof href !== 'string' || !ALLOWED_LINK_HREF.test(href.trim())) out.push('허용되지 않는 링크 주소');
+    // **`rel`의 `opener` 낱말은 받지 않는다** (P9 두 번째 코드 리뷰 2 · 두 번째 보안 검토). 편집기는 `rel`을 그대로 그리고,
+    // `target="_blank"`와 함께면 새 창으로 열린 쪽이 원래 창(이 위키)을 다른 곳으로 옮길 수 있다. 붙여 넣은 HTML이 흔히 가져오는
+    // 값(`nofollow`·`noopener` 등)은 받는다 — 값 전체를 좁히면 정상적인 붙여 넣기가 막힌다
+    const rel = isRecord(attrs) ? attrs.rel : undefined;
+    if (typeof rel === 'string' && rel.toLowerCase().split(/\s+/).includes('opener')) out.push("속성 'rel' 값에 'opener'를 둘 수 없다");
+  }
+  return out;
+}
+
+function attrProblems(attrs: unknown, allowed: readonly string[]): string[] {
+  const errors: string[] = [];
+  if (attrs === undefined || attrs === null) return errors;
+  if (!isRecord(attrs)) {
+    errors.push('attrs는 객체');
+    return errors;
   }
   for (const [key, value] of Object.entries(attrs)) {
     // **값이 `null`·`undefined`인 속성은 없는 속성과 같다.**
@@ -153,9 +265,13 @@ function checkAttrs(attrs: unknown, allowed: readonly string[], path: string, er
     // 값이 없는 속성은 뜻도 없으므로 **허용 목록을 넓히는 대신 빈 값을 건너뛴다** —
     // 목록을 넓히면 편집기가 새 속성을 더할 때마다 같은 일이 반복된다.
     if (value === null || value === undefined) continue;
-    if (!allowed.includes(key)) errors.push(`${path}: 허용되지 않는 속성 '${key}'`);
-    if (!isPrimitiveOrPrimitiveArray(value)) errors.push(`${path}: 속성 '${key}' 값은 원시값 또는 원시값 배열`);
+    if (!allowed.includes(key)) {
+      errors.push(`허용되지 않는 속성 '${cutName(key)}'`);
+      continue;
+    }
+    if (!isPrimitiveOrPrimitiveArray(value)) errors.push(`속성 '${cutName(key)}' 값은 원시값 또는 원시값 배열`);
   }
+  return errors;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

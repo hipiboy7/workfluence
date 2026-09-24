@@ -23,16 +23,22 @@ export function PageEditorPage() {
   const [collab, setCollab] = useState<boolean | null>(null);
   const [peers, setPeers] = useState<string[]>([]);
   const [link, setLink] = useState<CollabState>('connecting');
+  // 서버가 알린 **자동 저장이 멈춘 까닭** (P9 FR-1011). 풀리면 `null`
+  const [saveBlocked, setSaveBlocked] = useState<string | null>(null);
   const [page, setPage] = useState<PageView | null>(null);
   const [doc, setDoc] = useState<DocNode | null>(null);
   const [title, setTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // **저장 실패는 편집기 옆에 말한다** — 불러오기 실패(`error`)처럼 화면 전체를 갈아 치우면 편집기가 사라져 "쓰던 내용을 복사해
+  // 두라"를 따를 수 없었다 (P9 두 번째 자체 점검 2)
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = () => {
     setConflict(null);
     setError(null);
+    setSaveError(null);
     api<PageView>(`/api/pages/${id}`)
       .then((p) => {
         setPage(p);
@@ -49,6 +55,7 @@ export function PageEditorPage() {
   }, []);
   const onPeers = useCallback((names: string[]) => setPeers(names), []);
   const onState = useCallback((s: CollabState) => setLink(s), []);
+  const onSaveBlocked = useCallback((r: string | null) => setSaveBlocked(r), []);
 
   const save = async () => {
     // **실시간 편집에서는 서버가 이미 저장하고 있다.** 여기서 또 PATCH를 보내면
@@ -57,7 +64,7 @@ export function PageEditorPage() {
       // **지금 바로 남긴다.** 화면이 그렇게 약속했으므로 그대로 해야 한다 —
       // 유휴를 기다리게 하면 눌러도 아무 일이 없는 것처럼 보인다
       setBusy(true);
-      setError(null);
+      setSaveError(null);
       try {
         const r = await api<{ saved: boolean; reason: string }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
         // **저장되지 않았으면 넘어가지 않는다.** 연결이 끊긴 채 누르거나 문서가 검증을
@@ -65,12 +72,12 @@ export function PageEditorPage() {
         // 넘어갔다 — 사용자는 저장됐다고 믿고 화면에는 옛 내용이 뜬다 (P6 코드 리뷰 5a).
         // **왜 안 됐는지도 말한다** — "저장이 안 됐다"만으로는 무엇을 고쳐야 할지 모른다
         if (!r.saved) {
-          setError(r.reason ? `저장되지 않았다: ${r.reason}` : '저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
+          setSaveError(r.reason ? `저장되지 않았다: ${r.reason}` : '저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
           setBusy(false);
           return;
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setSaveError(e instanceof Error ? e.message : String(e));
         setBusy(false);
         return;
       }
@@ -80,7 +87,7 @@ export function PageEditorPage() {
     }
     if (!page || !doc) return;
     setBusy(true);
-    setError(null);
+    setSaveError(null);
     try {
       await api<PageView>(`/api/pages/${id}`, { method: 'PATCH', json: { title, content: doc, baseVersionNo: page.currentVersionNo } });
       nav(`/pages/${id}`);
@@ -89,7 +96,7 @@ export function PageEditorPage() {
         const b = e.body as { currentVersionNo: number; baseVersionNo: number; message: string };
         setConflict(b);
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        setSaveError(e instanceof Error ? e.message : String(e));
       }
     } finally {
       setBusy(false);
@@ -123,7 +130,7 @@ export function PageEditorPage() {
         <label htmlFor="ed-body">본문</label>
         <div id="ed-body">
           {collab && me ? (
-            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} />
+            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} onSaveBlocked={onSaveBlocked} />
           ) : (
             <Editor value={page.content} onChange={setDoc} />
           )}
@@ -141,6 +148,19 @@ export function PageEditorPage() {
                   연결이 끊겼다. 지금 쓰는 내용은 저장되지 않는다 — 다른 곳에 복사한 뒤 새로고침한다
                 </strong>
               )}
+              {/* **거절로 끊긴 것은 따로 말한다** (P9 FR-1005). 다시 붙어도 같은 편집은 다시 거절된다 —
+                  무엇이 걸렸는지는 관리자가 감사로그에서 본다 */}
+              {link === 'refused' && (
+                <strong className="badge fail">
+                  서버가 이 편집을 받지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다 — 계속되면 관리자에게 알린다
+                </strong>
+              )}
+              {/* **자동 저장이 멈춘 것도 말한다** (P9 FR-1011). 편집은 동료에게 계속 보여 저장되는 줄 알기 쉽다 */}
+              {saveBlocked !== null && link !== 'refused' && (
+                <strong className="badge fail">
+                  자동 저장이 멈췄다: {saveBlocked}. 풀리기 전에는 버전이 남지 않는다 — 모르겠으면 쓰던 내용을 복사해 두고 관리자에게 알린다
+                </strong>
+              )}
             </p>
             <p className="muted small">
               쓰는 대로 자동으로 저장된다. 저장 버튼은 <strong>지금 바로</strong> 남기고 보기로 갈 때 쓴다.
@@ -151,7 +171,12 @@ export function PageEditorPage() {
         )}
 
         {/* 끊긴 상태에서 누르면 **저장되지 않는다.** 누를 수 있게 두면 "눌렀으니 됐다"가 된다 */}
-        <button type="button" onClick={() => void save()} disabled={busy || conflict !== null || (collab && link === 'offline')}>
+        {saveError && (
+          <p className="badge fail" role="alert">
+            {saveError}
+          </p>
+        )}
+        <button type="button" onClick={() => void save()} disabled={busy || conflict !== null || (collab && (link === 'offline' || link === 'refused'))}>
           {busy ? '저장 중…' : collab ? '저장하고 보기로' : '저장'}
         </button>
       </section>

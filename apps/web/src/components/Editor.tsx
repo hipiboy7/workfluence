@@ -1,8 +1,7 @@
 import { EditorContent, useEditor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import { useEffect } from 'react';
 import { emptyDocument, type DocNode } from '@workfluence/shared';
+import { editorExtensions } from './extensions';
 
 /**
  * 본문 편집기 (FR-342).
@@ -13,7 +12,8 @@ import { emptyDocument, type DocNode } from '@workfluence/shared';
  */
 export function Editor({ value, onChange, editable = true }: { value: DocNode; onChange?: (doc: DocNode) => void; editable?: boolean }) {
   const editor = useEditor({
-    extensions: [StarterKit, Table.configure({ resizable: false }), TableRow, TableHeader, TableCell],
+    // 실시간 편집기와 **같은 목록**이다 — 서버 허용 목록과의 대조는 `extensions.spec.ts` (P9 D.7)
+    extensions: editorExtensions(),
     content: value,
     editable,
     onUpdate: ({ editor: e }) => onChange?.(e.getJSON() as DocNode),
