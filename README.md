@@ -2,7 +2,7 @@
 
 금융 폐쇄망 내부용 위키·문서 협업 시스템 (Confluence 대체).
 
-**현재 단계**: Phase 7까지 완료 (반입 전 강화, 2026-09-23). Phase 6에서 실시간 동시 편집·버전 비교·HTML 내보내기·템플릿·멘션 메일이 들어왔고, PDF 내보내기와 Confluence 가져오기는 하지 않기로 닫았다.
+**현재 단계**: Phase 8까지 완료 (멘션 귀속, 2026-09-24). Phase 6에서 실시간 동시 편집·버전 비교·HTML 내보내기·템플릿·멘션 메일이 들어왔고, PDF 내보내기와 Confluence 가져오기는 하지 않기로 닫았다.
 
 ## 처음 온 사람이 읽는 순서
 
@@ -25,7 +25,7 @@
 | 리눅스 서버에서 이미지를 만든다 | [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md) |
 | 새 기능을 넣고 싶다 | [`docs/기능백로그.md`](docs/기능백로그.md) |
 | 이 오류 본 적 있나 | [`docs/internal/검토서_트러블슈팅.md`](docs/internal/검토서_트러블슈팅.md) |
-| 무엇을 어떻게 검증했나 | Phase별 검증기록 — [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) · [`docs/P1_검증기록_Auth.md`](docs/P1_검증기록_Auth.md) · [`docs/P2_검증기록_Page.md`](docs/P2_검증기록_Page.md) · [`docs/P3_검증기록_Content.md`](docs/P3_검증기록_Content.md) · [`docs/P4_검증기록_Admin.md`](docs/P4_검증기록_Admin.md) · [`docs/P5_검증기록_Release.md`](docs/P5_검증기록_Release.md) · [`docs/P6_검증기록_Collab.md`](docs/P6_검증기록_Collab.md) · [`docs/P7_검증기록_Hardening.md`](docs/P7_검증기록_Hardening.md) |
+| 무엇을 어떻게 검증했나 | Phase별 검증기록 — [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) · [`docs/P1_검증기록_Auth.md`](docs/P1_검증기록_Auth.md) · [`docs/P2_검증기록_Page.md`](docs/P2_검증기록_Page.md) · [`docs/P3_검증기록_Content.md`](docs/P3_검증기록_Content.md) · [`docs/P4_검증기록_Admin.md`](docs/P4_검증기록_Admin.md) · [`docs/P5_검증기록_Release.md`](docs/P5_검증기록_Release.md) · [`docs/P6_검증기록_Collab.md`](docs/P6_검증기록_Collab.md) · [`docs/P7_검증기록_Hardening.md`](docs/P7_검증기록_Hardening.md) · [`docs/P8_검증기록_Mention.md`](docs/P8_검증기록_Mention.md) |
 | 왜 이런 작업 방식인가 | [`docs/internal/검토서_방법론개정.md`](docs/internal/검토서_방법론개정.md) |
 
 ## 구조

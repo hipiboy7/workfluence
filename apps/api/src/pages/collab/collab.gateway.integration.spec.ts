@@ -12,7 +12,7 @@ import { SpacesService } from '../../spaces/spaces.service';
 import { UsersService } from '../../users/users.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../../test/db';
 import { PagesService } from '../pages.service';
-import { yDocFromDoc } from '../domain/ydoc';
+import { docFromYDoc, yDocFromDoc } from '../domain/ydoc';
 import { CollabGateway } from './collab.gateway';
 
 /**
@@ -536,6 +536,78 @@ describe('멘션을 친 사람 (P8 FR-900~904)', () => {
     expect(await mentionRows(userId)).toEqual([{ actor_id: null }]);
   });
 
+  it('**남이 글자를 지워 만든 멘션은 원래 쓴 사람의 이름으로 나가지 않는다** (P8 코드 리뷰 1)', async () => {
+    const carolId = await mkUser('collab-c');
+    const a = await attach(userId);
+    const aDoc = new Y.Doc();
+    // A는 `@collab-cx`라고 썼다 — 없는 사람이라 아무도 불리지 않는다
+    type(a.socket, aDoc, a.room, (f) => paragraph(f, '@collab-cx 확인'));
+    const bSock = fakeSocket();
+    inner.join(pageId, a.room, bSock, { id: otherId, role: 'admin' }, 'B', await mkSession(otherId), spaceId);
+    // B가 `x` 하나를 지워 `@collab-c`를 만든다. 남은 글자는 전부 A의 것이다
+    type(bSock, new Y.Doc(), a.room, (f) => lastText(f).delete(9, 1));
+
+    await gw.flush(pageId);
+    expect(await mentionRows(carolId)).toEqual([{ actor_id: null }]);
+  });
+
+  it('**보류된 위조 조각이 주인의 변경에 묻어 들어와도 주인 이름으로 나가지 않는다** (P8 자체 점검 1)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    const carolId = await mkUser('collab-c');
+    const a = await attach(userId);
+    // 화면처럼 둔다 — A의 문서는 **자기 변경만** 보내고, 받은 것을 되돌려 보내지 않는다
+    const aDoc = new Y.Doc();
+    Y.applyUpdate(aDoc, Y.encodeStateAsUpdate(a.room.doc));
+    const sendOwn = (edit: () => void): void => {
+      const sv = Y.encodeStateVector(aDoc);
+      edit();
+      a.socket.emit('message', MSG(Y.encodeStateAsUpdate(aDoc, sv)));
+    };
+    sendOwn(() => paragraph(aDoc.getXmlFragment('default'), '안녕'));
+
+    // B가 A의 ID로 **앞선 시계의** 조각을 만든다: 앞 5글자는 숨기고, 뒤의 멘션만 보낸다 → 서버가 보류한다
+    const bSock = fakeSocket();
+    inner.join(pageId, a.room, bSock, { id: otherId, role: 'admin' }, 'B', await mkSession(otherId), spaceId);
+    const forged = new Y.Doc();
+    Y.applyUpdate(forged, Y.encodeStateAsUpdate(aDoc));
+    forged.clientID = aDoc.clientID;
+    lastText(forged.getXmlFragment('default')).insert(2, 'xxxxx');
+    const hidden = Y.encodeStateVector(forged);
+    lastText(forged.getXmlFragment('default')).insert(7, ' @collab-c 확인');
+    bSock.emit('message', MSG(Y.encodeStateAsUpdate(forged, hidden)));
+    expect(docFromYDoc(a.room.doc).content?.at(-1)?.content?.[0]?.text).toBe('안녕'); // 아직 안 들어갔다
+
+    // A가 평범하게 다섯 글자를 친다 — 숨긴 구간과 시계가 같아 위조가 여기 묻어 들어온다
+    sendOwn(() => lastText(aDoc.getXmlFragment('default')).insert(2, '하세요요요'));
+    expect(JSON.stringify(docFromYDoc(a.room.doc))).toContain('@collab-c');
+
+    await gw.flush(pageId);
+    expect(await mentionRows(carolId)).toEqual([{ actor_id: null }]);
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringContaining(`user=${userId}, ids=${aDoc.clientID}`));
+    warn.mockRestore();
+  });
+
+  it('**옛 문서를 통째로 다시 보내도 남의 글자를 차지하지 못한다** (P8 자체 점검 2)', async () => {
+    const carolId = await mkUser('collab-c');
+    // 옛 방에서 A가 멘션을 썼고, B는 그 문서를 쥐고 있다 (방은 그 뒤 사라졌다)
+    const old = new Y.Doc();
+    Y.applyUpdate(old, Y.encodeStateAsUpdate(yDocFromDoc(doc('처음'))));
+    const aOld = new Y.Doc();
+    Y.applyUpdate(aOld, Y.encodeStateAsUpdate(old));
+    paragraph(aOld.getXmlFragment('default'), '@collab-c 확인');
+    const bOld = new Y.Doc();
+    Y.applyUpdate(bOld, Y.encodeStateAsUpdate(aOld));
+    paragraph(bOld.getXmlFragment('default'), 'B의 문단');
+
+    // 새 방에 B가 그 문서를 통째로 보낸다 — A의 조각과 B의 조각이 한꺼번에 새로 들어온다
+    const b = await attach(otherId, await mkSession(otherId));
+    b.socket.emit('message', MSG(Y.encodeStateAsUpdate(bOld)));
+    expect(JSON.stringify(docFromYDoc(b.room.doc))).toContain('@collab-c');
+
+    await gw.flush(pageId);
+    expect(await mentionRows(carolId)).toEqual([{ actor_id: null }]);
+  });
+
   it('**대응표는 실시간 상태와 함께 남고, 재기동한 게이트웨이가 잇는다** (FR-903)', async () => {
     const a = await attach(userId);
     const aDoc = new Y.Doc();
@@ -545,8 +617,8 @@ describe('멘션을 친 사람 (P8 FR-900~904)', () => {
       f.insert(f.length, [new Y.XmlElement('script')]);
     });
     expect((await gw.flush(pageId)).saved).toBe(false);
-    const saved = await db.execute<{ authors: Record<string, string | null> }>(sql`SELECT authors FROM page_realtime WHERE page_id = ${pageId}`);
-    expect(saved.rows[0].authors[String(aDoc.clientID)]).toBe(userId);
+    const saved = await db.execute<{ authors: { clients: Record<string, string | null> } }>(sql`SELECT authors FROM page_realtime WHERE page_id = ${pageId}`);
+    expect(saved.rows[0].authors.clients[String(aDoc.clientID)]).toBe(userId);
 
     // 서버가 다시 떴다 — 메모리의 방은 없다
     const gw2 = build();

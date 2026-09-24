@@ -33,7 +33,7 @@ const outcome = (recipients: MentionOutcome['recipients'], commentId: string | n
   commentId,
   recipients,
 });
-const to = (email: string, calledBy: string | null) => ({ email, displayName: email, calledBy });
+const to = (email: string, calledBy: string | null) => ({ email, displayName: email, calledBy, calledById: null });
 
 beforeAll(async () => {
   ({ db } = await openTestDb());

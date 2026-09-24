@@ -1,5 +1,6 @@
 import { BLOCK_NODES, DOCUMENT_SCHEMA_VERSION, type DocMark, type DocNode } from '@workfluence/shared';
 import * as Y from 'yjs';
+import type { TypedText } from '../../notifications/notifications.service';
 
 /**
  * 실시간 상태(Y.Doc)와 정본 JSON 사이의 변환 (A등급, P6_설계서_Collab C.1절).
@@ -143,44 +144,103 @@ export function docFromYDoc(ydoc: Y.Doc): DocNode {
 }
 
 /**
- * 글자마다 **넣은 사람**을 붙인 본문 (P8_설계서_Mention C.3절, FR-900).
+ * 글자마다 **누가, 어떻게** 넣었는지를 붙인 본문 (P8_설계서_Mention C.3절, FR-900).
  *
  * `text`는 `extractText(docFromYDoc(ydoc))`와 **마지막 정리(빈 줄 줄이기·앞뒤 공백)만 빼고 같다.**
  * 멘션 판정은 그 정리의 앞뒤로 같으므로(`@` 앞의 공백은 공백으로 남는다) 정리는 하지 않는다 —
- * 하면 글자 위치와 `authors`의 짝이 어긋난다. 걷는 규칙을 `extractText`와 맞추는 것이 이 함수의
+ * 하면 글자 위치와 나머지 배열의 짝이 어긋난다. 걷는 규칙을 `extractText`와 맞추는 것이 이 함수의
  * 일이고, 테스트가 둘의 일치를 강제한다. 한쪽이 찾은 멘션을 다른 쪽이 못 찾으면 그 멘션은
  * **조용히 "모름"이 된다.**
  *
- * `authors[i]`는 `text[i]`(UTF-16 단위)를 넣은 클라이언트를 `authorOf`로 바꾼 것이다.
- * 줄바꿈처럼 **아무도 치지 않은 글자는 `null`**이다.
+ * **판정하지 않는다.** Yjs에서 보이는 사실만 옮긴다 — 누가 넣었나(`item.id.client`), 칠 때 왼쪽이
+ * 무엇이었나(`item.origin`), 칠 때 오른쪽이 무엇이었나(`item.rightOrigin`), 사이에 지운 흔적이 있나.
+ * 그것으로 멘션을 누가 "만들었는지" 가리는 규칙은 알림 쪽(`mentionAuthors`)이 들고 있다.
+ * 각 배열의 뜻은 `TypedText`에 있다.
  *
  * `Y.XmlText`의 조각 사슬(`_start` → `right`)을 직접 걷는다. `toDelta()`는 글자를 서식별로
  * 묶어 줄 뿐 **누가 넣었는지는 버린다.** 서식 조각(`ContentFormat`)과 끼워 넣기(embed)는 글자가
  * 아니므로 건너뛴다 — `docFromYDoc`도 문자열이 아닌 것은 버린다.
+ *
+ * `struckBy(client, clock, len)` — 그 구간에 **남이 지운** 글자가 있는가. 지운 흔적은 내용이 사라져
+ * 흔적만으로는 누가 지웠는지 모른다. 게이트웨이가 지우는 순간 적어 둔 것을 묻는다.
  */
-export function attributedText(ydoc: Y.Doc, authorOf: (client: number) => string | null): { text: string; authors: (string | null)[] } {
+export function attributedText(
+  ydoc: Y.Doc,
+  authorOf: (client: number) => string | null,
+  struckBy: (client: number, clock: number, len: number) => boolean,
+): TypedText {
   const parts: string[] = [];
   const authors: (string | null)[] = [];
-  const push = (s: string, who: string | null): void => {
-    parts.push(s);
-    for (let i = 0; i < s.length; i++) authors.push(who);
+  const structural: boolean[] = [];
+  const afterLeft: boolean[] = [];
+  const rightIds: (Y.ID | null)[] = [];
+  const gaps: (string | null | undefined)[] = [];
+  /** 보이는 글자의 ID → 글자. `before`를 풀 때 쓴다 (오른쪽 이웃은 뒤에 나오므로 다 걷은 뒤에 푼다) */
+  const visible = new Map<string, string>();
+  /** 다음 글자 앞 틈에 쌓이는 지운 흔적의 책임자 */
+  let pending: string | null | undefined;
+  const account = (v: string | null): void => {
+    pending = pending === undefined ? v : pending === v ? pending : null;
+  };
+  const push = (ch: string, who: string | null, isStructural: boolean, after: boolean, right: Y.ID | null): void => {
+    gaps.push(pending);
+    pending = undefined;
+    parts.push(ch);
+    authors.push(who);
+    structural.push(isStructural);
+    afterLeft.push(after);
+    rightIds.push(right);
+  };
+
+  const walkText = (node: Y.XmlText): void => {
+    // 이 글자 덩어리가 블록의 처음(또는 구조 글자 바로 뒤)에서 시작하는가
+    const fresh = structural.length === 0 || structural[structural.length - 1];
+    let leftId: Y.ID | null = null;
+    /** `leftId` 뒤로 쌓인 지운 흔적의 ID 구간. `origin`이 이 안을 가리켜도 "바로 뒤에 쳤다"로 본다 */
+    let tombs: [number, number, number][] = [];
+    for (let item = node._start; item; item = item.right) {
+      if (item.deleted) {
+        account(struckBy(item.id.client, item.id.clock, item.length) ? null : authorOf(item.id.client));
+        tombs.push([item.id.client, item.id.clock, item.length]);
+        continue;
+      }
+      if (!(item.content instanceof Y.ContentString)) continue;
+      const str = item.content.str;
+      const who = authorOf(item.id.client);
+      for (let k = 0; k < str.length; k++) {
+        let after = true;
+        if (k === 0) {
+          const origin = item.origin;
+          if (origin === null) after = leftId === null && fresh;
+          else
+            after =
+              (leftId !== null && Y.compareIDs(origin, leftId)) ||
+              tombs.some(([c, from, len]) => origin.client === c && from <= origin.clock && origin.clock < from + len);
+        }
+        // 한 조각 안의 글자는 차례로 친 것이다 — Yjs는 이어 친 글자만 한 조각으로 합친다
+        push(str[k], who, false, after, item.rightOrigin);
+        visible.set(`${item.id.client}:${item.id.clock + k}`, str[k]);
+        leftId = Y.createID(item.id.client, item.id.clock + k);
+        tombs = [];
+      }
+    }
   };
   const walk = (node: Y.XmlElement | Y.XmlText): void => {
     if (node instanceof Y.XmlText) {
-      for (let item = node._start; item; item = item.right) {
-        if (item.deleted || !(item.content instanceof Y.ContentString)) continue;
-        push(item.content.str, authorOf(item.id.client));
-      }
+      walkText(node);
       return;
     }
     // `extractText`와 같은 순서·같은 규칙이다: 줄바꿈 노드 → 자식 → 블록 끝 줄바꿈
     if (node.nodeName === 'hardBreak') {
-      push('\n', null);
+      push('\n', null, true, false, null);
       return;
     }
     for (const child of node.toArray()) walk(child as Y.XmlElement | Y.XmlText);
-    if (BLOCK_NODES.has(node.nodeName)) push('\n', null);
+    if (BLOCK_NODES.has(node.nodeName)) push('\n', null, true, false, null);
   };
   for (const child of ydoc.getXmlFragment(COLLAB_FIELD).toArray()) walk(child as Y.XmlElement | Y.XmlText);
-  return { text: parts.join(''), authors };
+  gaps.push(pending);
+
+  const before = rightIds.map((id) => (id === null ? null : visible.get(`${id.client}:${id.clock}`)));
+  return { text: parts.join(''), authors, structural, afterLeft, before, gaps };
 }

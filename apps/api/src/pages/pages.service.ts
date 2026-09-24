@@ -17,7 +17,7 @@ import {
 } from '@workfluence/shared';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
-import type { MentionOutcome } from '../notifications/notifications.service';
+import type { MentionOutcome, TypedText } from '../notifications/notifications.service';
 import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
 import { pageVersions, pages, spaces, users, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -91,7 +91,7 @@ export class PagesService {
     };
   }
 
-  async create(dto: CreatePageDto, principal: Principal, tx: Db = this.db): Promise<PageView> {
+  async create(dto: CreatePageDto, principal: Principal, tx: Db = this.db, onMentions?: (m: MentionOutcome) => void): Promise<PageView> {
     await this.spaces.assertWrite(dto.spaceId, principal, tx);
     if (dto.parentId) await this.assertParent(tx, dto.parentId, dto.spaceId, null);
 
@@ -127,10 +127,13 @@ export class PagesService {
       .values({ pageId: page.id, versionNo: 1, title: dto.title, contentJson: content, contentText: text, createdBy: principal.id });
     // 본문의 멘션도 알림을 만든다 (FR-500 — 설계서는 "댓글·페이지 본문 둘 다"다).
     // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다
-    await this.notifications.notifyMentions(
+    // **부른 사람들을 호출부에 넘긴다** — 메일은 커밋 뒤에 보낸다 (FR-754). 이것이 없어 새 페이지 본문의
+    // 멘션은 알림함에만 가고 메일은 가지 않았다 (P8 자체 점검 6, Phase 6부터)
+    const mentions = await this.notifications.notifyMentions(
       { doc: content, pageId: page.id, commentId: null, spaceId: page.spaceId, actorId: principal.id },
       tx,
     );
+    onMentions?.(mentions);
     return { ...toPageSummary(page), content, createdBy: principal.id, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
@@ -198,7 +201,7 @@ export class PagesService {
     content: DocNode,
     actorId: string,
     tx: Db,
-    typedBy: { text: string; authors: readonly (string | null)[] },
+    typedBy: TypedText,
     onMentions?: (m: MentionOutcome) => void,
   ): Promise<PageRow> {
     const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');

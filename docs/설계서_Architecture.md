@@ -263,6 +263,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 5 | 배포·운영 문서, 백업·복원, 부하·보안 점검 |
 | 6 | 실시간 편집(JSON 정본 + Yjs 파생, 보류 4), 버전 비교, HTML 내보내기, 템플릿, 멘션 메일. PDF·가져오기는 하지 않는다 |
 | 7 | 반입 전 강화 — 살아 있는 연결의 권한 재판정·하트비트, 이미지 군살 제거 |
+| 8 | 멘션 귀속 — `pages/domain/authorship.ts`(클라이언트 ID 대응표·남이 지운 흔적), `page_realtime.authors`, `notifications.actor_id` null 허용 (`0008`) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

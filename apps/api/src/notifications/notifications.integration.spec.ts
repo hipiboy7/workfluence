@@ -6,7 +6,7 @@ import { PagesService } from '../pages/pages.service';
 import { comments, notifications, pages, spaceMembers, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { InAppChannel, NotificationsService } from './notifications.service';
+import { InAppChannel, NotificationsService, type TypedText } from './notifications.service';
 
 /** B등급 (P4_설계서_Admin E절). 실제 PostgreSQL. */
 
@@ -171,6 +171,19 @@ describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
     expect(list[0]).toMatchObject({ pageId: created.id, commentId: null, actorName: 'owner' });
   });
 
+  it('**새 페이지도 부른 사람들을 호출부에 넘긴다** — 메일은 그것으로 커밋 뒤에 보낸다 (P8 자체 점검 6)', async () => {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+    await db.update(users).set({ email: 'mate@example.internal' }).where(eq(users.id, mate.id));
+    const got: { count: number; recipients: unknown[] }[] = [];
+    await pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('@mate 확인') }, owner, db, (m) => got.push(m));
+    expect(got).toHaveLength(1);
+    expect(got[0].count).toBe(1);
+    expect(got[0].recipients).toHaveLength(1);
+  });
+
   it('**같은 사람을 저장할 때마다 다시 부르지 않는다** (코드 리뷰 6)', async () => {
     const owner = await user('owner');
     const mate = await user('mate');
@@ -277,8 +290,15 @@ describe('권한이 회수되면 제목이 가려진다 (보안 검토 3)', () =
  * `collab.gateway.integration.spec.ts`가 본다.
  */
 describe('멘션을 친 사람 — `typedBy` (P8)', () => {
-  /** 본문 전체를 한 사람이 친 것으로 */
-  const typed = (text: string, who: string | null) => ({ text, authors: [...text].map(() => who) });
+  /** 본문 전체를 한 사람이 차례로 친 것으로 (지운 흔적·끼워 넣기 없음) */
+  const typed = (text: string, who: string | null | (string | null)[]): TypedText => ({
+    text,
+    authors: Array.isArray(who) ? who : [...text].map(() => who),
+    structural: [...text].map(() => false),
+    afterLeft: [...text].map(() => true),
+    before: [...text].map(() => null),
+    gaps: [...text, ''].map(() => undefined),
+  });
 
   async function setup() {
     const owner = await user('owner');
@@ -300,7 +320,7 @@ describe('멘션을 친 사람 — `typedBy` (P8)', () => {
     const list = await svc.list(mate, 20);
     expect(list[0].actorName).toBe('typist');
     // 메일도 받는 사람별로 그 이름을 싣고 간다 (FR-905)
-    expect(r.recipients).toEqual([{ email: 'mate@example.internal', displayName: 'mate', calledBy: 'typist' }]);
+    expect(r.recipients).toEqual([{ email: 'mate@example.internal', displayName: 'mate', calledBy: 'typist', calledById: typist.id }]);
   });
 
   it('**친 사람을 모르면 비운다** — 알림은 가고, 목록에서 사라지지 않는다 (FR-901)', async () => {
@@ -335,6 +355,17 @@ describe('멘션을 친 사람 — `typedBy` (P8)', () => {
     const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, typedBy: typed('@mate 확인', owner.id) });
     expect(r.count).toBe(1);
     expect((await svc.list(mate, 20))[0].actorName).toBe('owner');
+  });
+
+  it('**스스로 부른 곳이 앞에 있어도 남이 부른 곳이 있으면 알림이 간다** (P8 코드 리뷰 2)', async () => {
+    const { mate, typist, sp, pid } = await setup();
+    // mate가 앞에서 `@mate`를 스스로 적고, typist가 뒤에서 `@mate`를 불렀다
+    const text = '@mate @mate';
+    const who = [...text].map((_, i) => (i < 5 ? mate.id : i === 5 ? null : typist.id));
+    const r = await svc.notifyMentions({ doc: body(text), pageId: pid, spaceId: sp.id, actorId: mate.id, typedBy: typed(text, who) });
+    expect(r.count).toBe(1);
+    expect((await svc.list(mate, 20))[0].actorName).toBe('typist');
+    expect(r.recipients[0]).toMatchObject({ calledBy: 'typist', calledById: typist.id });
   });
 
   it('REST 경로(`typedBy` 없음)는 그대로 요청한 사람이 부른 사람이고, 메일 이름은 호출부가 준다', async () => {
