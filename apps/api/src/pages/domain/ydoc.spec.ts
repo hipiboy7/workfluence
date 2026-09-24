@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { extractText, validateDocument, type DocNode } from '@workfluence/shared';
+import { mentionAuthors } from '../../notifications/domain/mention';
 import { attributedText, COLLAB_FIELD, docFromYDoc, yDocFromDoc } from './ydoc';
 
 /**
@@ -200,13 +201,14 @@ describe('편집기가 붙이는 것들', () => {
 /**
  * `attributedText` — 글자마다 넣은 사람을 붙인 본문 (P8_설계서_Mention C.3절, FR-900).
  *
- * 축은 둘이다. ① **`extractText`와 같은 글자열**이어야 한다 — 한쪽이 찾은 멘션을 다른 쪽이
+ * 축은 셋이다. ① **`extractText`와 같은 글자열**이어야 한다 — 한쪽이 찾은 멘션을 다른 쪽이
  * 못 찾으면 그 멘션은 조용히 "모름"이 된다. ② 글자의 작성자는 **그 글자를 넣은 클라이언트**다.
+ * ③ **남이 지우거나 끼워 넣어 멘션이 "생긴" 경우**를 가려낼 사실(지운 흔적·입력 당시 이웃)을 싣는다.
  */
 describe('attributedText — 글자마다 넣은 사람', () => {
   /** `extractText`의 마지막 정리. 멘션 판정은 이 정리 전후로 같다 (C.3절) */
   const normalize = (s: string): string => s.replace(/\n{3,}/g, '\n\n').trim();
-  const who = (ydoc: Y.Doc, names: Record<number, string>) => attributedText(ydoc, (c) => names[c] ?? null);
+  const who = (ydoc: Y.Doc, names: Record<number, string>) => attributedText(ydoc, (c) => names[c] ?? null, () => false);
 
   /** 다른 클라이언트가 붙어 `edit`를 하고, 그 변경을 원래 문서에 적용한다 */
   function editAs(target: Y.Doc, edit: (frag: Y.XmlFragment) => void): number {
@@ -234,15 +236,19 @@ describe('attributedText — 글자마다 넣은 사람', () => {
       const ydoc = yDocFromDoc(d);
       const got = who(ydoc, {});
       expect(normalize(got.text)).toBe(extractText(docFromYDoc(ydoc)));
-      expect(got.authors).toHaveLength(got.text.length);
+      for (const arr of [got.authors, got.structural, got.afterLeft, got.before]) expect(arr).toHaveLength(got.text.length);
+      expect(got.gaps).toHaveLength(got.text.length + 1);
     }
   });
 
-  it('처음 문서의 글자는 방(서버)의 클라이언트가 넣은 것이다', () => {
+  it('처음 문서의 글자는 방(서버)의 클라이언트가 넣은 것이고, 블록 끝 줄바꿈은 **구조 글자**다', () => {
     const ydoc = yDocFromDoc(doc(p(t('@kim'))));
     const got = who(ydoc, { [ydoc.clientID]: 'server' });
     expect(got.text).toBe('@kim\n');
     expect(got.authors).toEqual(['server', 'server', 'server', 'server', null]);
+    expect(got.structural).toEqual([false, false, false, false, true]);
+    expect(got.afterLeft.slice(0, 4)).toEqual([true, true, true, true]);
+    expect(got.gaps).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
   });
 
   it('**다른 클라이언트가 넣은 글자는 그 클라이언트의 것이다**', () => {
@@ -251,20 +257,28 @@ describe('attributedText — 글자마다 넣은 사람', () => {
     const got = who(ydoc, { [ydoc.clientID]: 'A', [b]: 'B' });
     expect(got.text).toBe('가나 @lee\n');
     expect(got.authors.slice(0, 7)).toEqual(['A', 'A', 'B', 'B', 'B', 'B', 'B']);
+    // B의 첫 글자는 "나" 바로 뒤에 쳤다
+    expect(got.afterLeft[2]).toBe(true);
   });
 
-  it('**남이 서식을 걸어도 글자의 주인은 그대로다** — 굵게는 글자를 새로 만들지 않는다', () => {
-    const ydoc = yDocFromDoc(doc(p(t('@kim 확인'))));
-    editAs(ydoc, (f) => firstText(f).format(0, 4, { bold: {} }));
+  it('**남이 서식을 걸어도 글자의 주인과 이웃은 그대로다** — 굵게는 글자를 새로 만들지 않는다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('x @kim 확인'))));
+    editAs(ydoc, (f) => firstText(f).format(2, 4, { bold: {} }));
     const got = who(ydoc, { [ydoc.clientID]: 'A' });
-    expect(got.authors.slice(0, 4)).toEqual(['A', 'A', 'A', 'A']);
+    expect(got.authors.slice(2, 6)).toEqual(['A', 'A', 'A', 'A']);
+    expect(got.afterLeft.slice(0, 9)).toEqual(Array(9).fill(true));
   });
 
-  it('지운 글자는 들어오지 않는다', () => {
+  it('지운 글자는 글자열에 없고, 그 자리에 **지운 흔적**이 남는다 — 누가 지웠는지에 따라', () => {
     const ydoc = yDocFromDoc(doc(p(t('@kim 지울말'))));
+    const struckAll = attributedText(ydoc, (c) => (c === ydoc.clientID ? 'A' : null), () => true);
     editAs(ydoc, (f) => firstText(f).delete(4, 4));
-    const got = who(ydoc, { [ydoc.clientID]: 'A' });
-    expect(got.text).toBe('@kim\n');
+    const self = attributedText(ydoc, (c) => (c === ydoc.clientID ? 'A' : null), () => false);
+    const foreign = attributedText(ydoc, (c) => (c === ydoc.clientID ? 'A' : null), () => true);
+    expect(self.text).toBe('@kim\n');
+    expect(struckAll.gaps[4]).toBeUndefined(); // 지우기 전
+    expect(self.gaps[4]).toBe('A'); // 주인이 지운 것으로 친 흔적
+    expect(foreign.gaps[4]).toBeNull(); // 남이 지운 흔적
   });
 
   it('모르는 클라이언트의 글자는 `null`이다', () => {
@@ -278,5 +292,138 @@ describe('attributedText — 글자마다 넣은 사람', () => {
     const got = who(ydoc, {});
     expect(got.text).toBe('ab\n');
     expect(normalize(got.text)).toBe(extractText(docFromYDoc(ydoc)));
+  });
+
+  it('`before`는 입력될 때 바로 오른쪽 글자다 — 끝에 붙였으면 `null`', () => {
+    const ydoc = yDocFromDoc(doc(p(t('@kimlee'))));
+    editAs(ydoc, (f) => firstText(f).insert(4, ' '));
+    const got = who(ydoc, {});
+    expect(got.text).toBe('@kim lee\n');
+    expect(got.before[4]).toBe('l');
+    expect(got.before[7]).toBeNull();
+  });
+});
+
+/**
+ * **남이 지우거나 끼워 넣어 멘션을 "만들면" 원래 쓴 사람의 이름으로 나가면 안 된다**
+ * (P8 코드 리뷰 1 · 보안 검토 1). 실제 Yjs 조작으로 재현하고, `mentionAuthors`까지 이어 본다.
+ *
+ * U가 쓴 글에 X가 손을 대 새 멘션이 생기는 여섯 가지와, 그렇지 않은 정상 경우를 나란히 둔다.
+ */
+describe('멘션을 "만든" 사람 — 실제 Yjs로 (P8 C.3절)', () => {
+  /** 한 사람의 문서. 서버(방)와 주고받는다 */
+  type Peer = { doc: Y.Doc; who: string };
+  const room = (): Y.Doc => {
+    const d = new Y.Doc();
+    d.getXmlFragment(COLLAB_FIELD).insert(0, [new Y.XmlElement('paragraph')]);
+    return d;
+  };
+  /** 방의 첫 문단 글자. 없으면 만든다 */
+  const text = (d: Y.Doc): Y.XmlText => {
+    const para = d.getXmlFragment(COLLAB_FIELD).get(0) as Y.XmlElement;
+    if (para.length === 0) para.insert(0, [new Y.XmlText()]);
+    return para.get(0) as Y.XmlText;
+  };
+  const join = (server: Y.Doc, who: string): Peer => {
+    const d = new Y.Doc();
+    Y.applyUpdate(d, Y.encodeStateAsUpdate(server));
+    return { doc: d, who };
+  };
+  /** 방과 맞춘 뒤 고치고, 방이 모르는 것만 보낸다. **누가 지웠는지**는 돌려준 목록으로 안다 */
+  function act(server: Y.Doc, peer: Peer, edit: (t: Y.XmlText) => void, struck: Set<string>, owners: Map<number, string>): void {
+    Y.applyUpdate(peer.doc, Y.encodeStateAsUpdate(server));
+    const before = Y.encodeStateVector(server);
+    const onTx = (tr: Y.Transaction): void => {
+      Y.iterateDeletedStructs(tr, tr.deleteSet, (item) => {
+        if (owners.get(item.id.client) !== peer.who) for (let k = 0; k < item.length; k++) struck.add(`${item.id.client}:${item.id.clock + k}`);
+      });
+    };
+    server.on('afterTransaction', onTx);
+    owners.set(peer.doc.clientID, peer.who);
+    edit(text(peer.doc));
+    Y.applyUpdate(server, Y.encodeStateAsUpdate(peer.doc, before));
+    server.off('afterTransaction', onTx);
+  }
+  function verdict(server: Y.Doc, struck: Set<string>, owners: Map<number, string>): Map<string, (string | null)[]> {
+    const typed = attributedText(
+      server,
+      (c) => owners.get(c) ?? null,
+      (c, clock, len) => {
+        for (let k = 0; k < len; k++) if (struck.has(`${c}:${clock + k}`)) return true;
+        return false;
+      },
+    );
+    return mentionAuthors(typed);
+  }
+  function scenario(steps: { by: 'U' | 'X'; edit: (t: Y.XmlText) => void }[]): Map<string, (string | null)[]> {
+    const server = room();
+    const struck = new Set<string>();
+    const owners = new Map<number, string>();
+    const peers = { U: join(server, 'U'), X: join(server, 'X') };
+    for (const s of steps) act(server, peers[s.by], s.edit, struck, owners);
+    return verdict(server, struck, owners);
+  }
+  const typeAt = (at: number, s: string) => (t: Y.XmlText) => [...s].forEach((c, i) => t.insert(at + i, c));
+
+  // ── 정상: U의 이름으로 나가야 한다 ──
+  it('정상 — U가 친 멘션', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, 'hi @kim 확인') }]).get('kim')).toEqual(['U']);
+  });
+
+  it('정상 — **남의 글 뒤에 이어서** 쳤다 (앞 공백은 X의 것)', () => {
+    expect(scenario([{ by: 'X', edit: typeAt(0, '참석: ') }, { by: 'U', edit: typeAt(4, '@kim') }]).get('kim')).toEqual(['U']);
+  });
+
+  it('정상 — **U가 오타를 지우고 이어 쳤다** (`@kimm` → 지움 → ` 확인`)', () => {
+    expect(
+      scenario([
+        { by: 'U', edit: typeAt(0, '@kimm') },
+        { by: 'U', edit: (t) => t.delete(4, 1) },
+        { by: 'U', edit: typeAt(4, ' 확인') },
+      ]).get('kim'),
+    ).toEqual(['U']);
+  });
+
+  it('정상 — **남이 서식을 걸었다**', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, 'hi @kim 확인') }, { by: 'X', edit: (t) => t.format(3, 4, { bold: {} }) }]).get('kim')).toEqual(['U']);
+  });
+
+  it('정상 — **남이 바로 뒤에 조사를 붙였다** (`@kim` + X의 `님`) — 이름은 그대로다', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, '@kim 확인') }, { by: 'X', edit: typeAt(4, '님') }]).get('kim')).toEqual(['U']);
+  });
+
+  it('정상 — 남이 끝에 이어 쳤다 (`@kim` + X의 ` 네`)', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, '@kim') }, { by: 'X', edit: typeAt(4, ' 네') }]).get('kim')).toEqual(['U']);
+  });
+
+  // ── 공격: U의 이름으로 나가면 안 된다 ──
+  it('공격 — **남이 뒷글자를 지워** 새 이름을 만든다 (`@kim.lee` → X가 `.lee` 삭제)', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, '@kim.lee 확인') }, { by: 'X', edit: (t) => t.delete(4, 4) }]).get('kim')).toEqual([null]);
+  });
+
+  it('공격 — **남이 앞글자를 지워** 멘션으로 만든다 (`x@kim` → X가 `x` 삭제)', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, 'hi x@kim') }, { by: 'X', edit: (t) => t.delete(3, 1) }]).get('kim')).toEqual([null]);
+  });
+
+  it('공격 — **남의 글자를 지워도 마찬가지다** (X가 친 `x` 뒤에 U가 `@kim`, X가 `x`를 지움)', () => {
+    expect(
+      scenario([
+        { by: 'X', edit: typeAt(0, 'hi x') },
+        { by: 'U', edit: typeAt(4, '@kim') },
+        { by: 'X', edit: (t) => t.delete(3, 1) },
+      ]).get('kim'),
+    ).toEqual([null]);
+  });
+
+  it('공격 — **남이 가운데 글자를 지운다** (`@kiXm` → `@kim`)', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, '@kiXm 확인') }, { by: 'X', edit: (t) => t.delete(3, 1) }]).get('kim')).toEqual([null]);
+  });
+
+  it('공격 — **남이 경계에 공백을 끼워** 멘션으로 만든다 (`x@kim` → `x @kim`)', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, 'x@kim') }, { by: 'X', edit: typeAt(1, ' ') }]).get('kim')).toEqual([null]);
+  });
+
+  it('공격 — **남이 이름을 갈라** 새 이름을 만든다 (`@kimlee` → `@kim lee`)', () => {
+    expect(scenario([{ by: 'U', edit: typeAt(0, '@kimlee') }, { by: 'X', edit: typeAt(4, ' ') }]).get('kim')).toEqual([null]);
   });
 });
