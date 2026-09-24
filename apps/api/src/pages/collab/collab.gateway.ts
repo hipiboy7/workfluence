@@ -17,7 +17,9 @@ import { MentionMailService } from '../../mail/mention-mail.service';
 import type { MentionOutcome } from '../../notifications/notifications.service';
 import { PagesService } from '../pages.service';
 import { shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
-import { docFromYDoc, yDocFromDoc } from '../domain/ydoc';
+import { attributedText, docFromYDoc, yDocFromDoc } from '../domain/ydoc';
+import { authorsFromJson, authorsToJson, claimAuthors, freezeUnknown, type AuthorMap } from '../domain/authorship';
+import { mentionAuthors } from '../../notifications/domain/mention';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
 import { readPageId, readSessionId } from './session-auth';
 
@@ -64,6 +66,11 @@ type Member = {
    */
   revoked: boolean;
   lastCheckedAt: number;
+  /**
+   * 지금 적용 중인 변경에 들어 있던 클라이언트 ID. `Y.applyUpdate` 동안만 채워진다.
+   * `update` 관찰자가 이것과 "실제로 새로 들어간 것"을 맞춰 대응표를 고친다 (P8 C.2절)
+   */
+  sending: number[] | null;
 };
 
 type Room = {
@@ -76,6 +83,11 @@ type Room = {
   lastChangeAt: number;
   /** 마지막으로 **실제로 문서를 바꾼** 사람. 자동 저장의 `createdBy`가 된다 (FR-712·802) */
   lastActor: string | null;
+  /**
+   * 클라이언트 ID → 사용자. 멘션을 **친 사람**을 가린다 (P8_설계서_Mention C.2절, FR-900·903).
+   * 실시간 상태와 함께 `page_realtime.authors`에 남는다
+   */
+  authors: AuthorMap;
   /** 진행 중인 저장. 새 요청은 이 뒤에 줄을 선다 — `flush`가 거짓말하지 않으려면 필요하다 */
   saving: Promise<void> | null;
   /** 사람이 고친 제목. 없으면 DB의 것을 쓴다 */
@@ -302,11 +314,15 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   private async createRoom(pageId: string, versionNo: number): Promise<Room> {
     const saved = await this.db.query.pageRealtime.findFirst({ where: eq(pageRealtime.pageId, pageId) });
     let doc: Y.Doc;
+    let authors: AuthorMap = new Map();
     if (saved && saved.versionNo === versionNo) {
       // 상태가 정본과 같은 버전에서 시작했을 때만 잇는다. 그 사이 REST로 저장됐으면
       // **정본이 앞서 있으므로** 옛 상태를 이어받으면 그 저장을 되돌리게 된다
       doc = new Y.Doc();
       Y.applyUpdate(doc, Uint8Array.from(saved.state));
+      // **대응표도 함께 잇는다** (FR-903). 재기동 전에 쳤지만 아직 저장되지 않은 멘션의
+      // "누가"가 여기서 살아남는다
+      authors = authorsFromJson(saved.authors);
     } else {
       const version = await this.db.query.pageVersions.findFirst({
         where: and(eq(pageVersions.pageId, pageId), eq(pageVersions.versionNo, versionNo)),
@@ -315,6 +331,11 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (saved) this.log.warn(`실시간 상태가 낡아 정본에서 다시 시작한다 (page=${pageId})`);
     }
 
+    // **이미 문서에 있는데 표에 없는 ID는 "모름"으로 굳힌다** (C.2절). 정본에서 만든 방의 글자는
+    // 이 서버의 ID로 들어가 있다. 비워 두면 쓰기 권한이 있는 누군가가 그 ID로 조각을 보내
+    // 먼저 차지할 수 있다
+    freezeUnknown(authors, [...Y.decodeStateVector(Y.encodeStateVector(doc)).keys(), doc.clientID]);
+
     const room: Room = {
       doc,
       members: new Set(),
@@ -322,6 +343,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       versionNo,
       lastChangeAt: 0,
       lastActor: null,
+      authors,
       saving: null,
       title: null,
       emptyAt: Date.now(),
@@ -338,10 +360,14 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
      * 되돌려받으면 오지 않는다. 상태 벡터를 비교하는 방법도 있지만 그쪽은 **순수 삭제를
      * 놓친다** — 지우기만 한 편집이 저장되지 않는다 (`P7_검증기록_Hardening` 2절).
      */
-    doc.on('update', (_update: Uint8Array, origin: unknown) => {
+    doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (!origin || typeof origin !== 'object' || !('principal' in origin)) return;
+      const member = origin as Member;
       room.lastChangeAt = Date.now();
-      room.lastActor = (origin as Member).principal.id;
+      room.lastActor = member.principal.id;
+      // **누가 어느 클라이언트 ID를 쓰는지 적는다** (P8 C.2절). 이 연결이 보낸 것 중 실제로
+      // 새로 들어간 것만이다 — 판정은 `claimAuthors`(A등급)가 한다
+      if (member.sending) claimAuthors(room.authors, member.principal.id, member.sending, Y.parseUpdateMeta(update).from.keys());
     });
 
     this.rooms.set(pageId, room);
@@ -349,7 +375,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   private join(pageId: string, room: Room, socket: WebSocket, principal: Principal, name: string, sid: string, spaceId: string): void {
-    const member: Member = { socket, principal, name, sid, spaceId, alive: true, revoked: false, lastCheckedAt: Date.now() };
+    const member: Member = { socket, principal, name, sid, spaceId, alive: true, revoked: false, lastCheckedAt: Date.now(), sending: null };
     room.members.add(member);
     room.emptyAt = null;
 
@@ -368,13 +394,20 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (kind === MSG_UPDATE) {
         try {
           // **오리진으로 멤버를 실어 보낸다.** 위의 `update` 관찰자가 이것을 보고
-          // "실제로 바뀐 경우에만" 작성자를 고친다
+          // "실제로 바뀐 경우에만" 작성자를 고친다.
+          // 보낸 것에 든 클라이언트 ID를 먼저 읽어 둔다 — 관찰자가 대응표를 고칠 때 쓴다 (P8 C.2절).
+          // 변경을 한 번 더 훑는 값이고 DB는 건드리지 않는다 (NFR-80)
+          member.sending = [...Y.parseUpdateMeta(payload).from.keys()];
           Y.applyUpdate(room.doc, payload, member);
         } catch (e) {
           // 깨진 변경은 **버린다.** 방을 죽이지 않는다 — 한 사람의 잘못된 프레임이
           // 나머지의 편집을 끊으면 안 된다
           this.log.warn(`변경을 적용하지 못했다 (page=${pageId}): ${String(e)}`);
           return;
+        } finally {
+          // **반드시 비운다.** 남아 있으면 이 연결과 무관한 다음 변경(서버가 직접 고치는 것)에
+          // 이 연결이 보낸 ID 목록이 묻어 간다
+          member.sending = null;
         }
       } else if (kind !== MSG_AWARENESS) {
         return; // 모르는 종류는 버린다
@@ -551,6 +584,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
 
     const changedAt = room.lastChangeAt;
     const next = docFromYDoc(room.doc);
+    // **멘션을 친 사람을 `next`와 같은 순간에 읽는다** (P8 C.3절). 아래 `await` 사이에 문서가
+    // 더 바뀌면, 나중에 읽은 작성자는 저장되는 본문과 짝이 맞지 않는다
+    const shown = attributedText(room.doc, (client) => room.authors.get(client) ?? null);
+    const mentionedBy = mentionAuthors(shown.text, shown.authors);
     const current = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId) });
     if (!current) {
       this.drop(pageId, room);
@@ -603,7 +640,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const collected: MentionOutcome[] = [];
     let savedVersionNo = current.currentVersionNo + 1;
     await this.db.transaction(async (tx) => {
-      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, (m) => collected.push(m));
+      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, mentionedBy, (m) => collected.push(m));
       // **락 안에서 만들어진 번호를 쓴다.** 밖에서 계산한 `+1`은 REST 저장과 겹치면
       // 실제와 다른 번호가 감사로그에 남는다 (P6 코드 리뷰 16)
       savedVersionNo = saved.currentVersionNo;
@@ -613,8 +650,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       );
     });
     // 메일은 **커밋 뒤에** 보낸다 (FR-754). 기다리지 않는다.
-    // **이름을 넘기지 않는다** — 자동 저장의 actor는 "마지막으로 키를 누른 사람"이라
-    // 그 이름을 적으면 틀린 사람이 적힌다 (P6 코드 리뷰 6)
+    // **기본 이름을 넘기지 않는다** — 자동 저장의 actor는 "마지막으로 키를 누른 사람"이라
+    // 그 이름을 적으면 틀린 사람이 적힌다 (P6 코드 리뷰 6). 친 사람을 아는 받는 사람에게는
+    // `recipients[].calledBy`가 그 이름을 싣고 간다 (P8 FR-905)
     const mentions = collected[0];
     if (mentions?.count) this.track(this.mentionMail.notify(mentions, null, title, actor));
     room.versionNo = savedVersionNo;
@@ -630,12 +668,15 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   /** 실시간 상태를 남긴다. 프로세스가 죽어도 다음에 이어지도록 */
   private async rememberState(pageId: string, room: Room, versionNo: number): Promise<void> {
     const state = Buffer.from(Y.encodeStateAsUpdate(room.doc));
+    // **대응표를 상태와 같은 쓰기에서 남긴다** (FR-903). 따로 쓰면 둘 중 하나만 남는 순간이 생기고,
+    // 그때 죽으면 상태에는 있는 글자의 주인을 표가 모른다
+    const authors = authorsToJson(room.authors);
     await this.db
       .insert(pageRealtime)
-      .values({ pageId, state, versionNo, updatedBy: room.lastActor })
+      .values({ pageId, state, versionNo, updatedBy: room.lastActor, authors })
       .onConflictDoUpdate({
         target: pageRealtime.pageId,
-        set: { state, versionNo, updatedBy: room.lastActor, updatedAt: sql`now()` },
+        set: { state, versionNo, updatedBy: room.lastActor, authors, updatedAt: sql`now()` },
       });
   }
 

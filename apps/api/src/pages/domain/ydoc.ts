@@ -1,4 +1,4 @@
-import { DOCUMENT_SCHEMA_VERSION, type DocMark, type DocNode } from '@workfluence/shared';
+import { BLOCK_NODES, DOCUMENT_SCHEMA_VERSION, type DocMark, type DocNode } from '@workfluence/shared';
 import * as Y from 'yjs';
 
 /**
@@ -140,4 +140,47 @@ export function docFromYDoc(ydoc: Y.Doc): DocNode {
   const content: DocNode[] = [];
   for (const child of fragment.toArray()) content.push(...fromYNode(child as Y.XmlElement | Y.XmlText));
   return { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content };
+}
+
+/**
+ * 글자마다 **넣은 사람**을 붙인 본문 (P8_설계서_Mention C.3절, FR-900).
+ *
+ * `text`는 `extractText(docFromYDoc(ydoc))`와 **마지막 정리(빈 줄 줄이기·앞뒤 공백)만 빼고 같다.**
+ * 멘션 판정은 그 정리의 앞뒤로 같으므로(`@` 앞의 공백은 공백으로 남는다) 정리는 하지 않는다 —
+ * 하면 글자 위치와 `authors`의 짝이 어긋난다. 걷는 규칙을 `extractText`와 맞추는 것이 이 함수의
+ * 일이고, 테스트가 둘의 일치를 강제한다. 한쪽이 찾은 멘션을 다른 쪽이 못 찾으면 그 멘션은
+ * **조용히 "모름"이 된다.**
+ *
+ * `authors[i]`는 `text[i]`(UTF-16 단위)를 넣은 클라이언트를 `authorOf`로 바꾼 것이다.
+ * 줄바꿈처럼 **아무도 치지 않은 글자는 `null`**이다.
+ *
+ * `Y.XmlText`의 조각 사슬(`_start` → `right`)을 직접 걷는다. `toDelta()`는 글자를 서식별로
+ * 묶어 줄 뿐 **누가 넣었는지는 버린다.** 서식 조각(`ContentFormat`)과 끼워 넣기(embed)는 글자가
+ * 아니므로 건너뛴다 — `docFromYDoc`도 문자열이 아닌 것은 버린다.
+ */
+export function attributedText(ydoc: Y.Doc, authorOf: (client: number) => string | null): { text: string; authors: (string | null)[] } {
+  const parts: string[] = [];
+  const authors: (string | null)[] = [];
+  const push = (s: string, who: string | null): void => {
+    parts.push(s);
+    for (let i = 0; i < s.length; i++) authors.push(who);
+  };
+  const walk = (node: Y.XmlElement | Y.XmlText): void => {
+    if (node instanceof Y.XmlText) {
+      for (let item = node._start; item; item = item.right) {
+        if (item.deleted || !(item.content instanceof Y.ContentString)) continue;
+        push(item.content.str, authorOf(item.id.client));
+      }
+      return;
+    }
+    // `extractText`와 같은 순서·같은 규칙이다: 줄바꿈 노드 → 자식 → 블록 끝 줄바꿈
+    if (node.nodeName === 'hardBreak') {
+      push('\n', null);
+      return;
+    }
+    for (const child of node.toArray()) walk(child as Y.XmlElement | Y.XmlText);
+    if (BLOCK_NODES.has(node.nodeName)) push('\n', null);
+  };
+  for (const child of ydoc.getXmlFragment(COLLAB_FIELD).toArray()) walk(child as Y.XmlElement | Y.XmlText);
+  return { text: parts.join(''), authors };
 }

@@ -100,6 +100,8 @@ let otherId = '';
 let spaceId = '';
 let pageId = '';
 let sid = '';
+let mail: { notify: ReturnType<typeof vi.fn> };
+let build: () => CollabGateway;
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA';
 const doc = (t: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
@@ -147,18 +149,22 @@ beforeEach(async () => {
   const pagesSvc = new PagesService(db, spaces, notifications);
   const users = new UsersService(db, new SettingsService(db, env), new RevocationBus());
   bus = new RevocationBus();
-  const mail = { notify: vi.fn(async () => undefined) };
-  gw = new CollabGateway(
-    db,
-    env,
-    spaces,
-    users,
-    pagesSvc,
-    new AuditService(db),
-    mail as unknown as ConstructorParameters<typeof CollabGateway>[6],
-    new SettingsService(db, env),
-    bus,
-  );
+  mail = { notify: vi.fn(async () => undefined) };
+  // **같은 배선으로 하나 더 만들 수 있게 둔다.** 재기동을 흉내 내려면 메모리를 잃은 두 번째
+  // 게이트웨이가 필요하다 (P8 FR-903)
+  build = () =>
+    new CollabGateway(
+      db,
+      env,
+      spaces,
+      users,
+      pagesSvc,
+      new AuditService(db),
+      mail as unknown as ConstructorParameters<typeof CollabGateway>[6],
+      new SettingsService(db, env),
+      bus,
+    );
+  gw = build();
   gw.onModuleInit();
   inner = gw as unknown as Internals;
 
@@ -426,5 +432,134 @@ describe('저장할 수 없는 문서 (P7 자체 점검 3)', () => {
     await gw.flush(pageId);
     expect(inner.rooms.get(pageId)).toBe(room);
     expect(room.members.size).toBe(1);
+  });
+});
+
+/**
+ * 멘션을 친 사람 (P8_설계서_Mention, 보류 21).
+ *
+ * 여기서는 **클라이언트를 사람마다 하나씩** 둔다. `editUpdate`는 부를 때마다 새 Y.Doc을 만들어
+ * 클라이언트 ID가 매번 달라진다 — 실제 화면은 페이지를 여는 동안 ID 하나를 쓴다.
+ */
+describe('멘션을 친 사람 (P8 FR-900~904)', () => {
+  const MSG = (u: Uint8Array): Buffer => Buffer.concat([Buffer.of(0), Buffer.from(u)]);
+
+  /** 방의 문서를 따라잡은 뒤 고치고, **방이 모르는 부분만** 보낸다 */
+  function type(socket: FakeSocket, client: Y.Doc, room: { doc: Y.Doc }, edit: (frag: Y.XmlFragment) => void): void {
+    Y.applyUpdate(client, Y.encodeStateAsUpdate(room.doc));
+    edit(client.getXmlFragment('default'));
+    socket.emit('message', MSG(Y.encodeStateAsUpdate(client, Y.encodeStateVector(room.doc))));
+  }
+  const paragraph = (frag: Y.XmlFragment, text: string): void => {
+    const p = new Y.XmlElement('paragraph');
+    p.insert(0, [new Y.XmlText(text)]);
+    frag.insert(frag.length, [p]);
+  };
+  const lastText = (frag: Y.XmlFragment): Y.XmlText => (frag.get(frag.length - 1) as Y.XmlElement).get(0) as Y.XmlText;
+
+  async function mentionRows(uid: string): Promise<{ actor_id: string | null }[]> {
+    const r = await db.execute<{ actor_id: string | null }>(sql`SELECT actor_id FROM notifications WHERE user_id = ${uid}`);
+    return r.rows;
+  }
+
+  it('**인수 기준 — A가 `@B`를 치고 B가 마지막으로 고쳐도 "A 님이 불렀다"다**', async () => {
+    await db.execute(sql`UPDATE users SET email = 'b@example.internal' WHERE id = ${otherId}`);
+    const a = await attach(userId);
+    const aDoc = new Y.Doc();
+    type(a.socket, aDoc, a.room, (f) => paragraph(f, '@collab-b 확인 부탁'));
+
+    // B가 들어와 **자기 문서 전체**를 보낸다(화면이 접속 직후 하는 일). 거기에는 A가 쓴 조각이
+    // 다 들어 있다 — 그것으로 A의 글자가 B의 것이 되면 안 된다
+    const bSock = fakeSocket();
+    inner.join(pageId, a.room, bSock, { id: otherId, role: 'admin' }, 'B', await mkSession(otherId), spaceId);
+    const bDoc = new Y.Doc();
+    Y.applyUpdate(bDoc, Y.encodeStateAsUpdate(a.room.doc));
+    bSock.emit('message', MSG(Y.encodeStateAsUpdate(bDoc)));
+    // 그리고 다른 문단을 고친다. 이제 마지막으로 키를 누른 사람은 B다
+    type(bSock, bDoc, a.room, (f) => paragraph(f, 'B가 고친 문단'));
+    expect(a.room.lastActor).toBe(otherId);
+
+    expect((await gw.flush(pageId)).saved).toBe(true);
+    expect(await mentionRows(otherId)).toEqual([{ actor_id: userId }]);
+    // 메일에도 A의 이름이 간다 (FR-905). 기본 이름은 여전히 넘기지 않는다
+    await vi.waitFor(() => expect(mail.notify).toHaveBeenCalled());
+    const [outcome, fallbackName] = mail.notify.mock.calls[0] as [{ recipients: { calledBy: string | null }[] }, string | null];
+    expect(fallbackName).toBeNull();
+    expect(outcome.recipients).toEqual([expect.objectContaining({ calledBy: 'collab-a' })]);
+  });
+
+  it('**둘이 나눠 친 멘션은 누가 불렀는지 모른다** — A가 `@collab-`, B가 `b`', async () => {
+    const a = await attach(userId);
+    const aDoc = new Y.Doc();
+    type(a.socket, aDoc, a.room, (f) => paragraph(f, '@collab-'));
+    const bSock = fakeSocket();
+    inner.join(pageId, a.room, bSock, { id: otherId, role: 'admin' }, 'B', await mkSession(otherId), spaceId);
+    const bDoc = new Y.Doc();
+    type(bSock, bDoc, a.room, (f) => lastText(f).insert(8, 'b 확인'));
+
+    await gw.flush(pageId);
+    expect(await mentionRows(otherId)).toEqual([{ actor_id: null }]);
+  });
+
+  it('**남의 클라이언트 ID로 보내도 그 사람 이름으로 부르지 못한다** — 겹치면 모름이 된다 (FR-904)', async () => {
+    const a = await attach(userId);
+    const aDoc = new Y.Doc();
+    // A가 먼저 자기 ID로 한 글자를 써서 그 ID를 차지한다
+    type(a.socket, aDoc, a.room, (f) => paragraph(f, '안녕'));
+
+    // B가 **A의 클라이언트 ID로** `@collab-b`를 만들어 자기 연결로 보낸다
+    const bSock = fakeSocket();
+    inner.join(pageId, a.room, bSock, { id: otherId, role: 'admin' }, 'B', await mkSession(otherId), spaceId);
+    const forged = new Y.Doc();
+    Y.applyUpdate(forged, Y.encodeStateAsUpdate(a.room.doc));
+    forged.clientID = aDoc.clientID;
+    type(bSock, forged, a.room, (f) => paragraph(f, '@collab-a 이것 좀'));
+
+    await gw.flush(pageId);
+    // "A가 A를 불렀다"(스스로 부름 → 알림 없음)도, "B가 불렀다"도 아니다. **모른다**
+    expect(await mentionRows(userId)).toEqual([{ actor_id: null }]);
+  });
+
+  it('**방(서버)의 클라이언트 ID는 누구도 차지하지 못한다**', async () => {
+    const b = await attach(otherId, await mkSession(otherId));
+    const forged = new Y.Doc();
+    Y.applyUpdate(forged, Y.encodeStateAsUpdate(b.room.doc));
+    forged.clientID = b.room.doc.clientID;
+    type(b.socket, forged, b.room, (f) => paragraph(f, '@collab-a 확인'));
+
+    await gw.flush(pageId);
+    expect(await mentionRows(userId)).toEqual([{ actor_id: null }]);
+  });
+
+  it('**대응표는 실시간 상태와 함께 남고, 재기동한 게이트웨이가 잇는다** (FR-903)', async () => {
+    const a = await attach(userId);
+    const aDoc = new Y.Doc();
+    // 멘션과 함께 **저장할 수 없는 노드**를 넣는다 — 버전은 안 생기고 상태만 남는 경로다
+    type(a.socket, aDoc, a.room, (f) => {
+      paragraph(f, '@collab-b 확인');
+      f.insert(f.length, [new Y.XmlElement('script')]);
+    });
+    expect((await gw.flush(pageId)).saved).toBe(false);
+    const saved = await db.execute<{ authors: Record<string, string | null> }>(sql`SELECT authors FROM page_realtime WHERE page_id = ${pageId}`);
+    expect(saved.rows[0].authors[String(aDoc.clientID)]).toBe(userId);
+
+    // 서버가 다시 떴다 — 메모리의 방은 없다
+    const gw2 = build();
+    try {
+      const inner2 = gw2 as unknown as Internals;
+      const room2 = await inner2.room(pageId, await currentVersion());
+      expect(room2).not.toBe(a.room);
+      const bSock = fakeSocket();
+      inner2.join(pageId, room2, bSock, { id: otherId, role: 'admin' }, 'B', await mkSession(otherId), spaceId);
+      // B가 깨진 노드를 지운다. **지우기만 했다** — 새 글자는 없다
+      const bDoc = new Y.Doc();
+      type(bSock, bDoc, room2, (f) => f.delete(f.length - 1, 1));
+
+      expect((await gw2.flush(pageId)).saved).toBe(true);
+      // 대응표가 없었으면 A의 글자는 "모름"이었다
+      expect(await mentionRows(otherId)).toEqual([{ actor_id: userId }]);
+    } finally {
+      await gw2.onModuleDestroy().catch(() => undefined);
+    }
   });
 });

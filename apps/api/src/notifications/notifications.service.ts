@@ -13,7 +13,8 @@ export type NotificationDraft = {
   kind: 'mention';
   pageId: string;
   commentId: string | null;
-  actorId: string;
+  /** 부른 사람. `null`이면 모른다 (P8 FR-901) */
+  actorId: string | null;
 };
 
 export interface NotificationChannel {
@@ -30,8 +31,14 @@ export type MentionOutcome = {
   count: number;
   pageId: string;
   commentId: string | null;
-  /** email이 있는 사람만. 없는 계정은 앱 안 알림함으로만 받는다 */
-  recipients: { email: string; displayName: string }[];
+  /**
+   * email이 있는 사람만. 없는 계정은 앱 안 알림함으로만 받는다.
+   *
+   * `calledBy`는 **받는 사람별로** 부른 사람의 표시 이름이다 (P8 FR-905). 실시간 편집은
+   * 사람마다 부른 사람이 다를 수 있어서 여기 싣는다. `null`이면 이 서비스는 모른다는 뜻이고,
+   * 메일은 호출부가 넘긴 이름(요청한 사람)을 쓴다 — REST 저장·댓글이 그렇다.
+   */
+  recipients: { email: string; displayName: string; calledBy: string | null }[];
 };
 
 /** 앱 안 알림함. 받는 사람이 화면에서 본다 */
@@ -70,14 +77,16 @@ export class NotificationsService {
       /** 직전 내용. 주면 **새로 생긴 멘션만** 부른다 (코드 리뷰 6) */
       previousDoc?: DocNode | null;
       /**
-       * `actorId`가 **실제로 그 멘션을 쓴 사람인가**. 기본은 그렇다(REST 저장·댓글).
+       * 이름마다 **그 멘션을 친 사람** (P8_설계서_Mention C.4절). 없으면 `actorId`가 전부 쳤다
+       * (REST 저장·댓글 — 요청한 사람이 쓴 사람이다).
        *
-       * 실시간 편집의 자동 저장은 아니다 — 거기서 `actorId`는 "마지막으로 키를 누른
-       * 사람"이다. A가 `@bob`을 쓰고 잠시 뒤 bob이 다른 문단을 고치면 저장의 actor가
-       * bob이 되고, 그러면 **bob에 대한 멘션이 자기 자신 멘션으로 지워져 영영 사라진다**
-       * (직전 내용과 비교하므로 다음 저장에서는 "새 멘션"이 아니다). P6 코드 리뷰 6.
+       * 실시간 편집의 자동 저장은 이것을 준다. 거기서 `actorId`는 "마지막으로 키를 누른
+       * 사람"이라 멘션을 쓴 사람이 아니다. A가 `@bob`을 쓰고 bob이 다른 문단을 고치면
+       * 저장의 actor가 bob이 된다 — 그것으로 부르면 **"bob 님이 불렀다"가 bob에게** 가고,
+       * 자기 자신 필터를 걸면 **그 알림이 영영 사라진다** (P6 코드 리뷰 6, 보류 21).
+       * 표에 없거나 `null`인 이름은 **모름**이다 — 알림의 actor를 비운다 (FR-901).
        */
-      actorWroteMentions?: boolean;
+      mentionedBy?: ReadonlyMap<string, string | null>;
     },
     tx: Db = this.db,
   ): Promise<MentionOutcome> {
@@ -92,9 +101,11 @@ export class NotificationsService {
     if (names.length === 0) return none;
 
     const mentioned = await tx.query.users.findMany({ where: inArray(users.username, names) });
-    const suppressSelf = args.actorWroteMentions !== false;
-    // 자기 자신은 부르지 않는다 — **다만 부른 사람을 확실히 알 때만** (FR-503)
-    const candidates = mentioned.filter((u) => (suppressSelf ? u.id !== args.actorId : true) && u.status === 'active');
+    const callerOf = (username: string): string | null => (args.mentionedBy ? (args.mentionedBy.get(username) ?? null) : args.actorId);
+    // 자기 자신은 부르지 않는다 — **다만 부른 사람을 확실히 알 때만** (FR-503·902).
+    // 모르면(`null`) 부른다. 불린 사람이 마침 스스로를 불렀을 수도 있지만, 그 한 건을 막으려고
+    // 남이 부른 알림을 버리는 쪽이 더 나쁘다
+    const candidates = mentioned.filter((u) => u.status === 'active' && callerOf(u.username) !== u.id);
     if (candidates.length === 0) return none;
 
     const space = await tx.query.spaces.findFirst({ where: and(eq(spaces.id, args.spaceId), isNull(spaces.deletedAt)) });
@@ -104,15 +115,21 @@ export class NotificationsService {
     const n = members.length; // 같은 것을 두 번 세지 않는다
     const like = { ...space, kind: space.kind as SpaceRow['kind'] & ('personal' | 'team'), status: space.status as 'active' | 'suspended' };
 
+    // 부른 사람의 이름은 **메일에만** 쓴다. 실시간 편집일 때만 찾는다 — REST·댓글은 호출부가 안다
+    const callerIds = args.mentionedBy ? [...new Set(candidates.map((u) => callerOf(u.username)).filter((x): x is string => x !== null))] : [];
+    const callers = callerIds.length ? await tx.query.users.findMany({ where: inArray(users.id, callerIds) }) : [];
+    const nameOf = (id: string | null): string | null => (id ? (callers.find((c) => c.id === id)?.displayName ?? null) : null);
+
     const drafts: NotificationDraft[] = [];
-    const recipients: { email: string; displayName: string }[] = [];
+    const recipients: MentionOutcome['recipients'] = [];
     for (const u of candidates) {
       const principal: Principal = { id: u.id, role: u.role as Role };
       const membership = (members.find((m) => m.userId === u.id)?.role as SpaceMemberRole | undefined) ?? null;
       // 판정은 `shared`의 한 함수가 한다 — 여기서 다시 구현하면 검색·목록과 어긋난다
       if (!spaceAccess(principal, { kind: like.kind, status: like.status, createdBy: space.createdBy }, membership, n).canRead) continue;
-      drafts.push({ userId: u.id, kind: 'mention', pageId: args.pageId, commentId: args.commentId ?? null, actorId: args.actorId });
-      if (u.email) recipients.push({ email: u.email, displayName: u.displayName });
+      const caller = callerOf(u.username);
+      drafts.push({ userId: u.id, kind: 'mention', pageId: args.pageId, commentId: args.commentId ?? null, actorId: caller });
+      if (u.email) recipients.push({ email: u.email, displayName: u.displayName, calledBy: nameOf(caller) });
     }
 
     await this.channel.send(drafts, tx);
@@ -149,7 +166,9 @@ export class NotificationsService {
         myMembership: spaceMembers.role,
       })
       .from(notifications)
-      .innerJoin(users, eq(users.id, notifications.actorId))
+      // **`leftJoin`이다.** 부른 사람을 모르는 알림(`actor_id` NULL)이 있다 (P8 FR-901) —
+      // `innerJoin`이면 그 알림이 **목록에서 조용히 사라진다**
+      .leftJoin(users, eq(users.id, notifications.actorId))
       .leftJoin(pages, eq(pages.id, notifications.pageId))
       .leftJoin(spaces, eq(spaces.id, pages.spaceId))
       .leftJoin(spaceMembers, and(eq(spaceMembers.spaceId, spaces.id), eq(spaceMembers.userId, principal.id)))

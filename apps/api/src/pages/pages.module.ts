@@ -81,7 +81,8 @@ export class PagesController {
     // **커밋된 뒤에 보낸다** (FR-754). 기다리지 않는다 — 메일이 느려도 저장 응답은 나가야 한다.
     // 실패해도 던지지 않는 것은 `MentionMailService`가 보장한다 (FR-753)
     const mentions = collected[0];
-    if (mentions?.count) void this.mentionMail.notify(mentions, me.displayName, page.title);
+    // 일으킨 사람을 넘긴다 — 빠뜨리면 `mail.send` 감사의 actor가 빈다 (P8 FR-906)
+    if (mentions?.count) void this.mentionMail.notify(mentions, me.displayName, page.title, me.id);
     return page;
   }
 

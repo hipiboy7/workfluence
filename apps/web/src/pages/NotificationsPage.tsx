@@ -44,7 +44,9 @@ export function NotificationsPage() {
           {rows.map((n) => (
             <li key={n.id} className="card">
               <p className="small">
-                <strong>{n.actorName}</strong>님이 불렀다
+                {/* 부른 사람을 모르면 이름을 지어내지 않는다 (P8 FR-901) — 실시간 편집에서
+                    그 `@아이디`를 누가 쳤는지 확실하지 않을 때다 */}
+                {n.actorName ? <><strong>{n.actorName}</strong>님이 불렀다</> : <>{n.commentId ? '댓글' : '문서'}에서 불렸다</>}
                 {/* 대상이 지워지면 제목이 없다 (FR-506). 알림은 남되 갈 곳이 없음을 말한다 */}
                 {n.pageTitle && n.pageId ? (
                   <> · <Link to={`/pages/${n.pageId}`}>{n.pageTitle}</Link></>

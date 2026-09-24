@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CommentsService } from '../comments/comments.service';
 import { PagesService } from '../pages/pages.service';
-import { comments, pages, spaceMembers, spaces, users } from '../db/schema';
+import { comments, notifications, pages, spaceMembers, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { InAppChannel, NotificationsService } from './notifications.service';
@@ -267,5 +267,77 @@ describe('권한이 회수되면 제목이 가려진다 (보안 검토 3)', () =
     const pid = await page(sp.id, me.id);
     await commentsSvc.create(pid, { body: body('@me 메모') }, other);
     expect((await svc.list(me, 20))[0].pageTitle).toBe('T');
+  });
+});
+
+/**
+ * 실시간 편집 저장의 멘션 귀속 (P8_설계서_Mention C.4절, FR-900~902·905).
+ *
+ * 여기서는 `mentionedBy`를 **직접** 넘긴다. 그 표를 게이트웨이가 어떻게 만드는지는
+ * `collab.gateway.integration.spec.ts`가 본다.
+ */
+describe('멘션을 친 사람 — `mentionedBy` (P8)', () => {
+  async function setup() {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const typist = await user('typist');
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
+    await db.update(users).set({ email: 'mate@example.internal' }).where(eq(users.id, mate.id));
+    const pid = await page(sp.id, owner.id);
+    return { owner, mate, typist, sp, pid };
+  }
+
+  it('**부른 사람은 저장한 사람이 아니라 그 이름을 친 사람이다** (FR-900)', async () => {
+    const { mate, typist, sp, pid } = await setup();
+    // 저장한 사람(마지막으로 키를 누른 사람)은 mate 자신이다 — 예전에는 이것이 "부른 사람"이 됐다
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, mentionedBy: new Map([['mate', typist.id]]) });
+
+    expect(r.count).toBe(1);
+    const list = await svc.list(mate, 20);
+    expect(list[0].actorName).toBe('typist');
+    // 메일도 받는 사람별로 그 이름을 싣고 간다 (FR-905)
+    expect(r.recipients).toEqual([{ email: 'mate@example.internal', displayName: 'mate', calledBy: 'typist' }]);
+  });
+
+  it('**친 사람을 모르면 비운다** — 알림은 가고, 목록에서 사라지지 않는다 (FR-901)', async () => {
+    const { mate, typist, sp, pid } = await setup();
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: new Map([['mate', null]]) });
+
+    expect(r.count).toBe(1);
+    const [row] = await db.select().from(notifications).where(eq(notifications.userId, mate.id));
+    expect(row.actorId).toBeNull();
+    // `innerJoin`이었으면 여기서 0건이다
+    const list = await svc.list(mate, 20);
+    expect(list).toHaveLength(1);
+    expect(list[0].actorName).toBeNull();
+    expect(r.recipients[0].calledBy).toBeNull();
+  });
+
+  it('표에 없는 이름도 모름이다 — 저장한 사람으로 대신하지 않는다', async () => {
+    const { mate, typist, sp, pid } = await setup();
+    await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: new Map() });
+    const [row] = await db.select().from(notifications).where(eq(notifications.userId, mate.id));
+    expect(row.actorId).toBeNull();
+  });
+
+  it('**스스로를 부른 것이 확실하면** 알림을 만들지 않는다 (FR-902)', async () => {
+    const { mate, typist, sp, pid } = await setup();
+    const r = await svc.notifyMentions({ doc: body('@mate 메모'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: new Map([['mate', mate.id]]) });
+    expect(r.count).toBe(0);
+  });
+
+  it('**저장한 사람이 불린 사람이어도 친 사람이 남이면 알림이 간다** — Phase 7 전에는 여기서 사라졌다', async () => {
+    const { owner, mate, sp, pid } = await setup();
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, mentionedBy: new Map([['mate', owner.id]]) });
+    expect(r.count).toBe(1);
+    expect((await svc.list(mate, 20))[0].actorName).toBe('owner');
+  });
+
+  it('REST 경로(`mentionedBy` 없음)는 그대로 요청한 사람이 부른 사람이고, 메일 이름은 호출부가 준다', async () => {
+    const { owner, mate, sp, pid } = await setup();
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: owner.id });
+    expect((await svc.list(mate, 20))[0].actorName).toBe('owner');
+    expect(r.recipients[0].calledBy).toBeNull();
   });
 });
