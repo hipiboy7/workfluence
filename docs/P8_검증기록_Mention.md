@@ -3,8 +3,8 @@
 - 작성일: 2026-09-24 / 작성 LLM: Claude Opus 5.5
 - 설계: [`docs/P8_설계서_Mention.md`](P8_설계서_Mention.md) · 검토: [`docs/internal/P8_검토서_Review.md`](internal/P8_검토서_Review.md)
 - 시행착오는 여기 쓰지 않는다 — [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) T-033(push)·T-034(작성자 추론)·T-035(관찰자 예외)
-- 이 기록의 수치는 **넷째 판**의 것이다. E2E·이미지·컨테이너는 `a1d1c5e`에서, 건수·커버리지는 그 뒤 A등급 테스트 1건을 더한 최종 커밋에서
-  쟀다 — 그 사이 코드는 바뀌지 않았다. 앞의 세 판이 왜 버려졌는지는 T-034와 검토서에 있다.
+- 이 기록의 수치는 **넷째 판**의 병합 후보 `1a55000`에서 한 번에 잰 것이다(건수·커버리지·E2E·이미지·컨테이너). 그 뒤 커밋은
+  이 기록의 수치뿐이다. 앞의 세 판이 왜 버려졌는지는 T-034와 검토서에 있다.
 
 ## 1. 실행 환경
 
@@ -75,8 +75,8 @@ $ pnpm test:e2e
 | 항목 | 값 | 비고 |
 |---|---|---|
 | shared 테스트 | **171건** (Phase 7 종료 시 171건) | 변화 없음 |
-| api 테스트 | **533건** (Phase 7 종료 시 425건) | +108 |
-| E2E | **20건 전부 통과** (1.0분) | +1 (인수 흐름) |
+| api 테스트 | **537건** (Phase 7 종료 시 425건) | +112 |
+| E2E | **20건 전부 통과** (1.1분) | +1 (인수 흐름) |
 | skip | **0건** | |
 | `verify:docs` | 통과 | |
 
@@ -85,7 +85,7 @@ $ pnpm test:e2e
 | 대상 | 라인 | 브랜치 | 함수 | 문장 |
 |---|---|---|---|---|
 | `packages/shared` (A) | **99.31%** | 97.10% | 98.76% | 99.03% |
-| `apps/api` 전체 (B, 관문 70%) | **91.84%** | 84.42% | 90.50% | 88.56% |
+| `apps/api` 전체 (B, 관문 70%) | **91.98%** | 84.86% | 90.50% | 88.68% |
 
 이번에 만지거나 만든 파일:
 
@@ -98,7 +98,7 @@ $ pnpm test:e2e
 | `apps/api/src/notifications/notifications.service.ts` | B | 100% | 95.58% |
 | `apps/api/src/mail/mention-mail.service.ts` | B | **100%** (Phase 7까지 테스트 없음) | 94.44% |
 | `apps/api/src/pages/pages.service.ts` | B | 92.85% | 63.33% |
-| `apps/api/src/pages/collab/collab.gateway.ts` | B | 78.17% | 71.22% |
+| `apps/api/src/pages/collab/collab.gateway.ts` | B | 78.89% | 73.83% |
 
 > **멘션 메일은 Phase 6부터 테스트가 없었다.** 이번에 받는 사람별 이름을 넣으면서 이름을 고르는 규칙이 둘이 됐고,
 > 틀리면 남의 이름이 메일로 나간다. 통합 테스트 8건을 더했다.
@@ -126,7 +126,7 @@ $ pnpm test:e2e
 ### 4.1 브라우저 — 인수 흐름 (`e2e/collab.spec.ts` 3번째)
 
 두 브라우저 문맥에서 A(관리자)가 `@동료아이디 확인부탁…`을 치고, **유휴 저장이 끼기 전에** B(동료)가 끝에 ` B가덧붙임`을 친다.
-9초 뒤 B의 알림함 첫 항목의 굵은 이름이 `E2E 관리자`다. 병합 후보(`a1d1c5e`)에서 다시 돌려 통과했다 — **실제 편집기(y-prosemirror)가
+9초 뒤 B의 알림함 첫 항목의 굵은 이름이 `E2E 관리자`다. 병합 후보(`1a55000`)에서 다시 돌려 통과했다 — **실제 편집기(y-prosemirror)가
 한 글자씩 만드는 변경 모양이 넷째 판의 세 조건(믿을 수 있는 변경·자기 클라이언트의 글자·옮김 아님)을 모두 지난다**는 뜻이다.
 
 첫 실행 때 그 실행의 감사로그를 DB에서 따로 읽어, 이 시험이 정말 "B가 마지막 작성자"인 상태를 만드는지 확인했다:
@@ -139,12 +139,12 @@ page.collab.save  actor bdca1be6   trigger idle   (B)
 저장은 한 번이고 그 작성자는 B다 — **옛 코드였으면 B 자신의 이름이 떴을 상황**이다. E2E 전체를 돌리는 동안 호스트 api 로그에
 `변경이 보낸 것보다 문서를 더 바꿨다` 경고와 `멘션 장부를 고치지 못했다`·`변경을 적용하는 중 예외가 났다` 오류는 **셋 다 0건**이었다.
 
-### 4.2 컨테이너 — 인수 시나리오 (`workfluence-app:a1d1c5e-p8`)
+### 4.2 컨테이너 — 인수 시나리오 (`workfluence-app:1a55000-p8`)
 
 api 컨테이너 안에서 WebSocket 클라이언트 둘로 같은 흐름을 돌렸다(Origin·세션 쿠키로 정상 업그레이드).
 
 ```
-A가 부름: @p8b-1790236018884
+A가 부름: @p8b-1790239077689
 B가 마지막으로 고침
 자동 저장 1 회 · 저장 작성자 = B
 B의 알림함: [{"actorName":"P8 부른사람","pageTitle":"P8 확인"}]
@@ -158,7 +158,7 @@ A가 멘션과 **저장할 수 없는 노드**를 함께 넣어 버전은 생기
 
 ```
 A가 부름 + 깨진 노드. 저장 버튼 → {"saved":false,"reason":"문서 검증 실패 (1건)","currentVersionNo":1}
-page_realtime 남음: true · @p8rb-1790236028955 을 만든 사람 → A
+page_realtime 남음: true · @p8rb-1790239087843 을 만든 사람 → A
 정본 버전 1 (1이면 버전이 안 생겼다)
 --- docker restart 뒤 (2초)
 재기동 뒤 B가 받은 블록: paragraph,paragraph,script
@@ -239,13 +239,13 @@ B의 알림함: [{"actorName":"P8 재기동 부른사람"}]
 ```
 $ docker compose -f deploy/compose.yml --env-file deploy/.env build api     # 29초
 $ docker images workfluence-app --format '{{.Repository}}:{{.Tag}}  {{.Size}}'
-workfluence-app:a1d1c5e-p8  379MB
+workfluence-app:1a55000-p8  379MB
 ```
 
 | 항목 | 값 |
 |---|---|
 | app 이미지 | **379MB** (Phase 7과 같다. 예산 400MB 대비 여유 21MB) — 의존성을 더하지 않았다 |
-| 기동 시간 | 13초 (`up -d postgres api` → 컨테이너 안 `/api/health` 200) |
+| 기동 시간 | 12초 (`up -d postgres api` → 컨테이너 안 `/api/health` 200) |
 
 ## 6. 마이그레이션 `0008_mention_attribution`
 
