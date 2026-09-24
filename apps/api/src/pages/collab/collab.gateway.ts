@@ -114,6 +114,11 @@ type Room = {
   ledger: Ledger;
   /** 마지막으로 훑은 멘션 자리. 저장 때 다시 훑지 않고 이것을 쓴다 */
   sites: Site[];
+  /**
+   * 장부를 고치다 예외가 났다. 그 뒤로 이 방의 멘션은 전부 모름이다 — 장부가 문서와 어긋났을 수 있고,
+   * 어긋난 장부로 이름을 붙이는 것보다 비우는 쪽이 낫다 (P8 세 번째 검토 2)
+   */
+  attributionBroken: boolean;
   /** 진행 중인 저장. 새 요청은 이 뒤에 줄을 선다 — `flush`가 거짓말하지 않으려면 필요하다 */
   saving: Promise<void> | null;
   /** 사람이 고친 제목. 없으면 DB의 것을 쓴다 */
@@ -371,6 +376,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       lastActor: null,
       ledger,
       sites,
+      attributionBroken: false,
       saving: null,
       title: null,
       emptyAt: Date.now(),
@@ -415,41 +421,56 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     doc.on('afterTransaction', (tr: Y.Transaction) => {
       // 아무것도 안 바뀐 트랜잭션(접속 직후 이미 아는 전체 상태, 저장 때의 정리)은 훑지 않는다
       if (tr.changed.size === 0 && tr.deleteSet.clients.size === 0) return;
-      const member = tr.origin && typeof tr.origin === 'object' && 'sending' in tr.origin ? (tr.origin as Member) : null;
-      let maker: string | null = null;
-      if (member?.sending) {
-        const integrated = new Map<number, ClockRange>();
-        for (const [client, after] of tr.afterState) {
-          const before = tr.beforeState.get(client) ?? 0;
-          if (after > before) integrated.set(client, { from: before, to: after });
-        }
-        // 서식 조각과 속성 값(맵 항목)은 글자를 바꾸지 않는다 — Yjs가 스스로 지우기도 하므로 세지 않는다
-        const deleted: DeletedItem[] = [];
-        Y.iterateDeletedStructs(tr, tr.deleteSet, (struct) => {
-          if (!(struct instanceof Y.Item) || struct.content instanceof Y.ContentFormat || struct.parentSub !== null) return;
-          const holder = (struct.parent as Y.AbstractType<unknown> | null)?._item ?? null;
-          deleted.push({ client: struct.id.client, clock: struct.id.clock, len: struct.length, parent: holder ? `${holder.id.client}:${holder.id.clock}` : null });
-        });
-        if (isFaithful(member.sending, integrated, deleted)) {
-          maker = member.principal.id;
-          claimOwn(member.own, integrated);
-          // **한 클라이언트짜리 변경의, 그 연결이 만든 클라이언트의 글자만** 그 사람이 들여온 것으로 적는다
-          if (integrated.size === 1) {
-            for (const [client, range] of integrated) if (member.own.has(client)) recordDelivered(room.ledger.delivered, client, range, maker);
-          }
-        } else {
-          // **흔적을 남긴다.** 보내지 않은 조각이나 삭제가 이 변경에서 일어났다 — 누가 미리 보내 둔 위조일 수 있다
-          // (FR-904). 이 로그가 없으면 "알림에 이름이 없다" 말고는 아무것도 남지 않는다 (운영가이드 7.22절).
-          // `user=`는 이 변경을 보낸 연결이다 — 위조를 보낸 사람이 아니라 **피해자**일 수 있다
-          this.log.warn(`변경이 보낸 것보다 문서를 더 바꿨다 — 이 변경으로 생긴 멘션은 "모름"으로 둔다 (page=${pageId}, user=${member.principal.id})`);
-        }
+      if (room.attributionBroken) return;
+      // **여기서 던지면 방이 멈춘다.** Yjs는 이 관찰자의 예외를 **변경을 이미 적용한 뒤** `Y.applyUpdate` 밖으로
+      // 올리고, 받은 쪽은 "적용하지 못했다"로 알고 퍼뜨리지 않는다 — 그 뒤 모두의 변경이 중계되지 않았다
+      // (P8 세 번째 검토 2). 장부는 부가 기능이다: 실패하면 그 방의 멘션을 모름으로 두고 편집은 계속 흐르게 한다
+      try {
+        this.attribute(room, tr, pageId);
+      } catch (e) {
+        room.attributionBroken = true;
+        this.log.error(`멘션 장부를 고치지 못했다 — 이 방의 멘션은 이제 "모름"이다 (page=${pageId}): ${String(e)}`);
       }
-      room.sites = mentionSites(doc, scanMentions);
-      room.ledger = advance(room.ledger, room.sites, maker);
     });
 
     this.rooms.set(pageId, room);
     return room;
+  }
+
+  /** 트랜잭션 하나를 장부에 반영한다 (위 관찰자가 부른다) */
+  private attribute(room: Room, tr: Y.Transaction, pageId: string): void {
+    const doc = room.doc;
+    const member = tr.origin && typeof tr.origin === 'object' && 'sending' in tr.origin ? (tr.origin as Member) : null;
+    let maker: string | null = null;
+    if (member?.sending) {
+      const integrated = new Map<number, ClockRange>();
+      for (const [client, after] of tr.afterState) {
+        const before = tr.beforeState.get(client) ?? 0;
+        if (after > before) integrated.set(client, { from: before, to: after });
+      }
+      // 서식 조각과 속성 값(맵 항목)은 글자를 바꾸지 않는다 — Yjs가 스스로 지우기도 하므로 세지 않는다
+      const deleted: DeletedItem[] = [];
+      Y.iterateDeletedStructs(tr, tr.deleteSet, (struct) => {
+        if (!(struct instanceof Y.Item) || struct.content instanceof Y.ContentFormat || struct.parentSub !== null) return;
+        const holder = (struct.parent as Y.AbstractType<unknown> | null)?._item ?? null;
+        deleted.push({ client: struct.id.client, clock: struct.id.clock, len: struct.length, parent: holder ? `${holder.id.client}:${holder.id.clock}` : null });
+      });
+      if (isFaithful(member.sending, integrated, deleted)) {
+        maker = member.principal.id;
+        claimOwn(member.own, integrated);
+        // **한 클라이언트짜리 변경의, 그 연결이 만든 클라이언트의 글자만** 그 사람이 들여온 것으로 적는다
+        if (integrated.size === 1) {
+          for (const [client, range] of integrated) if (member.own.has(client)) recordDelivered(room.ledger.delivered, client, range, maker);
+        }
+      } else {
+        // **흔적을 남긴다.** 보내지 않은 조각이나 삭제가 이 변경에서 일어났다 — 누가 미리 보내 둔 위조일 수 있다
+        // (FR-904). 이 로그가 없으면 "알림에 이름이 없다" 말고는 아무것도 남지 않는다 (운영가이드 7.22절).
+        // `user=`는 이 변경을 보낸 연결이다 — 위조를 보낸 사람이 아니라 **피해자**일 수 있다
+        this.log.warn(`변경이 보낸 것보다 문서를 더 바꿨다 — 이 변경으로 생긴 멘션은 "모름"으로 둔다 (page=${pageId}, user=${member.principal.id})`);
+      }
+    }
+    room.sites = mentionSites(doc, scanMentions);
+    room.ledger = advance(room.ledger, room.sites, maker);
   }
 
   private join(pageId: string, room: Room, socket: WebSocket, principal: Principal, name: string, sid: string, spaceId: string): void {
@@ -683,7 +704,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const next = docFromYDoc(room.doc);
     // **멘션을 만든 사람을 `next`와 같은 순간에 읽는다** (P8 C.3절). 아래 `await` 사이에 문서가
     // 더 바뀌면, 나중에 읽은 표는 저장되는 본문과 짝이 맞지 않는다. 자리는 마지막 변경 때 훑어 둔 것이다
-    const mentionedBy = makersFor(room.ledger.makers, room.sites);
+    const mentionedBy = room.attributionBroken ? new Map<string, (string | null)[]>() : makersFor(room.ledger.makers, room.sites);
     const savedNames = new Set(room.sites.map((s) => s.name));
     const current = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId) });
     if (!current) {

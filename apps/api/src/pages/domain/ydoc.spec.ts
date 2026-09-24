@@ -142,7 +142,7 @@ describe('**편집기가 만들지 않는 노드**가 들어와도 던지지 않
    * **그 페이지의 자동 저장이 영영 실패했고**(P6부터), 멘션 자리를 훑는 관찰자가 던져 **방의 중계가 멈췄다**(P8).
    * 그런 노드는 정본 JSON에 뜻이 없다 — 버린다.
    */
-  const withForeign = (make: () => Y.AbstractType<unknown>): Y.Doc => {
+  const withForeign = (make: () => unknown): Y.Doc => {
     const ydoc = yDocFromDoc(doc(p(t('앞 @kim'))));
     const frag = ydoc.getXmlFragment(COLLAB_FIELD);
     frag.insert(1, [make() as never]);

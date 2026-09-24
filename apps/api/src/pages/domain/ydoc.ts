@@ -113,15 +113,18 @@ function fromYText(text: Y.XmlText): DocNode[] {
   return out;
 }
 
-function fromYNode(node: Y.XmlElement | Y.XmlText | Y.XmlHook): DocNode[] {
+function fromYNode(node: unknown): DocNode[] {
   if (node instanceof Y.XmlText) return fromYText(node);
-  // `Y.XmlHook`은 **우리가 만들지 않는다.** 만드는 코드가 없으므로 여기 올 수 없다 —
-  // 타입에는 있으니 좁히기는 하되, 닿지 않는 분기를 남겨 두지 않는다 (`diff.ts`와 같은 판단)
-  const el = node as Y.XmlElement;
+  // **편집기가 만들지 않는 노드는 버린다** (P8 세 번째 검토 2). 우리 편집기는 `Y.XmlElement`·`Y.XmlText`만
+  // 만들지만 **조작한 클라이언트는 `Y.XmlHook`·`Y.Text`·`Y.Map`을 넣을 수 있다.** 예전에는 "만드는 코드가 없으니
+  // 올 수 없다"고 보고 좁히기만 했는데, 그런 노드 하나로 여기서 던져 **그 페이지의 자동 저장이 영영 실패했다.**
+  // 그 노드는 정본 JSON에 뜻이 없다
+  if (!(node instanceof Y.XmlElement)) return [];
+  const el = node;
   // 편집기 쪽에서 온 `null` 기본값을 여기서 떨어뜨린다 (자체 점검 1·18)
   const attrs = Object.fromEntries(Object.entries(el.getAttributes() as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined));
   const content: DocNode[] = [];
-  for (const child of el.toArray()) content.push(...fromYNode(child as Y.XmlElement | Y.XmlText));
+  for (const child of el.toArray()) content.push(...fromYNode(child));
 
   const out: DocNode = { type: el.nodeName };
   if (Object.keys(attrs).length) out.attrs = attrs;
@@ -138,7 +141,7 @@ function fromYNode(node: Y.XmlElement | Y.XmlText | Y.XmlHook): DocNode[] {
 export function docFromYDoc(ydoc: Y.Doc): DocNode {
   const fragment = ydoc.getXmlFragment(COLLAB_FIELD);
   const content: DocNode[] = [];
-  for (const child of fragment.toArray()) content.push(...fromYNode(child as Y.XmlElement | Y.XmlText));
+  for (const child of fragment.toArray()) content.push(...fromYNode(child));
   return { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content };
 }
 
@@ -169,7 +172,7 @@ export function mentionSites(
     clients.push(-1);
     clocks.push(-1);
   };
-  const walk = (node: Y.XmlElement | Y.XmlText): void => {
+  const walk = (node: unknown): void => {
     if (node instanceof Y.XmlText) {
       for (let item = node._start; item; item = item.right) {
         if (item.deleted || !(item.content instanceof Y.ContentString)) continue;
@@ -182,15 +185,18 @@ export function mentionSites(
       }
       return;
     }
+    // **편집기가 만들지 않는 노드는 글자가 아니다** — `docFromYDoc`도 버린다. 여기서 던지면 트랜잭션 관찰자가
+    // 던져 **방의 중계가 멈춘다** (P8 세 번째 검토 2)
+    if (!(node instanceof Y.XmlElement)) return;
     // `extractText`와 같은 순서·같은 규칙이다: 줄바꿈 노드 → 자식 → 블록 끝 줄바꿈
     if (node.nodeName === 'hardBreak') {
       pushBreak();
       return;
     }
-    for (const child of node.toArray()) walk(child as Y.XmlElement | Y.XmlText);
+    for (const child of node.toArray()) walk(child);
     if (BLOCK_NODES.has(node.nodeName)) pushBreak();
   };
-  for (const child of ydoc.getXmlFragment(COLLAB_FIELD).toArray()) walk(child as Y.XmlElement | Y.XmlText);
+  for (const child of ydoc.getXmlFragment(COLLAB_FIELD).toArray()) walk(child);
 
   const out: { key: string; name: string; span: [number, number][] }[] = [];
   for (const hit of scan(parts.join(''))) {
