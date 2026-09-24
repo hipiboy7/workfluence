@@ -80,7 +80,16 @@ export const AUDIT_ACTIONS = [
   'template.delete',
   'mail.send',
   'mail.fail',
+  // Phase 9 (P9_설계서_Gate D.6) — 실시간 편집의 관문이 받지 않은 변경. 누가·어느 페이지·어느 규칙
+  'page.collab.reject',
 ] as const;
+
+/**
+ * 실시간 편집에서 **관문이 변경을 받지 않아** 연결을 닫을 때의 닫기 코드 (P9_설계서_Gate D.6, FR-1005).
+ * 4000~4999는 응용이 쓰는 자리다. 화면은 이 코드를 보고 "서버가 이 편집을 받지 않았다"를 말한다 — 그냥
+ * 끊긴 것과 달리 **다시 붙어도 같은 편집은 다시 거절된다**는 뜻이라 따로 말한다.
+ */
+export const COLLAB_CLOSE_REFUSED = 4400;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /** 페이지 트리 최대 깊이. 무한 중첩은 이동·경로 계산 비용을 키운다. */

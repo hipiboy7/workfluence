@@ -149,7 +149,7 @@ describe('구조 — 편집기가 만드는 모양은 지난다 (FR-1009)', () =
 
 describe('구조 — 편집기가 만들지 않는 Yjs 타입·내용·자리는 받지 않는다 (보류 23, FR-1000)', () => {
   it.each<[string, (f: Y.XmlFragment, d: Y.Doc) => void, string]>([
-    ['문서 맨 위의 Y.XmlHook', (f) => f.insert(f.length, [new Y.XmlHook('evil')]), "편집기가 만들지 않는 타입 'XmlHook'"],
+    ['문서 맨 위의 Y.XmlHook', (f) => f.insert(f.length, [new Y.XmlHook('evil') as never]), "편집기가 만들지 않는 타입 'XmlHook'"],
     [
       '문서 맨 위의 Y.XmlText',
       (f) => {

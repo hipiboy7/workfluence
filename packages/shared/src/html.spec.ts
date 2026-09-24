@@ -131,10 +131,16 @@ describe('renderExportDocument — 한 파일로 (FR-730·735)', () => {
 });
 
 describe('renderDocHtml — 속성 (FR-732·733)', () => {
-  it('허용된 속성만 나온다. `textAlign`은 나오고 모르는 키는 빠진다', () => {
-    const out = renderDocHtml(doc({ type: 'paragraph', attrs: { textAlign: 'center', onclick: 'x()' }, content: [t('가운데')] }));
-    expect(out).toContain('textAlign="center"');
+  it('허용된 속성만 나온다. 표 칸의 `align`은 나오고 모르는 키는 빠진다', () => {
+    const cell = { type: 'tableCell', attrs: { align: 'center', onclick: 'x()' }, content: [p(t('가운데'))] };
+    const out = renderDocHtml(doc({ type: 'table', content: [{ type: 'tableRow', content: [cell] }] }));
+    expect(out).toContain('align="center"');
     expect(out).not.toContain('onclick');
+  });
+
+  it('**`textAlign`은 이제 허용 속성이 아니라 나오지 않는다** — 편집기가 만들 수 없는 속성이었다 (P9 D.7)', () => {
+    const out = renderDocHtml(doc({ type: 'paragraph', attrs: { textAlign: 'center' }, content: [t('가')] }));
+    expect(out).toBe('<p>가</p>');
   });
 
   it('**`schemaVersion`과 `colwidth`는 내보내지 않는다** — 편집기 내부 상태이지 문서가 아니다', () => {
@@ -146,8 +152,10 @@ describe('renderDocHtml — 속성 (FR-732·733)', () => {
   });
 
   it('속성이 `null`이면 적지 않는다 — `x="null"`이 나가면 안 된다', () => {
-    const out = renderDocHtml(doc({ type: 'paragraph', attrs: { textAlign: null }, content: [t('가')] }));
-    expect(out).toBe('<p>가</p>');
+    const cell = { type: 'tableCell', attrs: { align: null }, content: [p(t('가'))] };
+    const out = renderDocHtml(doc({ type: 'table', content: [{ type: 'tableRow', content: [cell] }] }));
+    expect(out).not.toContain('align');
+    expect(out).not.toContain('null');
   });
 
   it('속성값의 따옴표를 이스케이프한다', () => {

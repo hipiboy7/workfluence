@@ -1,6 +1,6 @@
 import { sign } from 'cookie-signature';
 import { describe, expect, it } from 'vitest';
-import { SESSION_COOKIE, readPageId, readSessionId } from './session-auth';
+import { SESSION_COOKIE, readClientIp, readPageId, readSessionId } from './session-auth';
 
 const SECRET = 'test-secret-that-is-long-enough-000000';
 const signed = (sid: string, secret = SECRET) => `${SESSION_COOKIE}=s%3A${encodeURIComponent(sign(sid, secret)).replace(/^s%3A/, '')}`;
@@ -81,5 +81,31 @@ describe('쿠키 파싱 경계', () => {
 
   it('이름만 있고 값이 없으면 `null`', () => {
     expect(readSessionId(`${SESSION_COOKIE}=`, SECRET)).toBeNull();
+  });
+});
+
+/**
+ * 연결한 사람의 주소 — 감사로그의 `ip` (P9_설계서_Gate D.6). HTTP 쪽 `req.ip`와 **같은 규칙**이어야 한다:
+ * `WF_TRUST_PROXY`면 Express는 한 단계(nginx)를 믿는다 — 그 nginx가 덧붙인 **마지막** 항목이 연결한 사람이다.
+ * 앞쪽 항목은 클라이언트가 적어 보낼 수 있다.
+ */
+describe('readClientIp (P9 D.6)', () => {
+  it('프록시를 믿지 않으면 소켓의 주소다 — 헤더는 보지 않는다', () => {
+    expect(readClientIp('10.0.0.9, 10.0.0.8', '::ffff:127.0.0.1', false)).toBe('::ffff:127.0.0.1');
+  });
+
+  it('프록시를 믿으면 X-Forwarded-For의 마지막 항목이다 — 앞쪽은 클라이언트가 꾸밀 수 있다', () => {
+    expect(readClientIp('1.2.3.4, 10.0.0.8', '10.0.0.2', true)).toBe('10.0.0.8');
+    expect(readClientIp(' 10.0.0.8 ', '10.0.0.2', true)).toBe('10.0.0.8');
+  });
+
+  it('프록시를 믿어도 헤더가 없으면 소켓의 주소다', () => {
+    expect(readClientIp(undefined, '10.0.0.2', true)).toBe('10.0.0.2');
+    expect(readClientIp('', '10.0.0.2', true)).toBe('10.0.0.2');
+    expect(readClientIp(['10.0.0.7', '10.0.0.8'], '10.0.0.2', true)).toBe('10.0.0.8');
+  });
+
+  it('주소를 알 수 없으면 `null`', () => {
+    expect(readClientIp(undefined, undefined, false)).toBeNull();
   });
 });

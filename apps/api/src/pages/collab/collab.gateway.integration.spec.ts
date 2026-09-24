@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED } from '@workfluence/shared';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { AuditService } from '../../audit/audit.service';
@@ -87,7 +88,7 @@ function fakeSocket(): FakeSocket {
 type Internals = {
   room(pageId: string, versionNo: number): Promise<{ doc: Y.Doc; lastActor: string | null; members: Set<unknown> }>;
   heartbeat(): void;
-  join(pageId: string, room: unknown, socket: unknown, principal: Principal, name: string, sid: string, spaceId: string): void;
+  join(pageId: string, room: unknown, socket: unknown, principal: Principal, name: string, sid: string, spaceId: string, ip?: string | null): void;
   sweep(): Promise<void>;
   heartbeat(): void;
   rooms: Map<string, { lastActor: string | null; members: Set<unknown> }>;
@@ -527,9 +528,9 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
   });
 
   /** 들어온다. 화면은 접속 직후 **자기 문서 전체**를 보낸다 — 거기에는 남이 쓴 조각이 다 들어 있다 */
-  async function enter(uid: string, into: RoomLike = room, g: Internals = inner): Promise<Peer> {
+  async function enter(uid: string, into: RoomLike = room, g: Internals = inner, ip: string | null = null): Promise<Peer> {
     const socket = fakeSocket();
-    g.join(pageId, into, socket, { id: uid, role: 'admin' }, uid, await mkSession(uid), spaceId);
+    g.join(pageId, into, socket, { id: uid, role: 'admin' }, uid, await mkSession(uid), spaceId, ip);
     const doc = new Y.Doc();
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(into.doc), 'remote');
     socket.emit('message', MSG(Y.encodeStateAsUpdate(doc)));
@@ -565,6 +566,16 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
   async function saveAndCarol(): Promise<{ actor_id: string | null }[]> {
     expect((await gw.flush(pageId)).saved).toBe(true);
     return mentionRows(carolId);
+  }
+  const AWARE = (u: Uint8Array): Buffer => Buffer.concat([Buffer.of(1), Buffer.from(u)]);
+  /** 클라이언트 ID의 주인 (P9 D.4) */
+  const ownerOf = (client: number): string | undefined => (room as unknown as { ledger: Ledger }).ledger.owners.get(client);
+  /** 관문이 남긴 감사로그 (P9 D.6) */
+  async function rejections(): Promise<{ actor_id: string; target_id: string; rule: string; reason: string; ip: string | null }[]> {
+    const r = await db.execute<{ actor_id: string; target_id: string; rule: string; reason: string; ip: string | null }>(
+      sql`SELECT actor_id, target_id, detail->>'rule' AS rule, detail->>'reason' AS reason, ip FROM audit_events WHERE action = 'page.collab.reject' ORDER BY created_at`,
+    );
+    return r.rows;
   }
 
   it('**인수 기준 — A가 `@B`를 치고 B가 마지막으로 고쳐도 "A 님이 불렀다"다**', async () => {
@@ -722,50 +733,71 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
     });
   });
 
-  describe('조작한 클라이언트 — 남의 이름을 붙이지 못한다 (FR-904)', () => {
-    it('**남의 클라이언트 ID로 보내면 모름** — 그 연결이 처음부터 만든 클라이언트가 아니다', async () => {
+  describe('조작한 클라이언트 — 관문이 받지 않는다 (P9 FR-1000~1006, 보류 22·23·24)', () => {
+    const refusedCode = (p: Peer): number | undefined => p.socket.closed?.code;
+
+    it('**남의 클라이언트 ID로 쓰면 받지 않고 끊는다** — 문서도 동료도 그대로, 감사로그에 누가·어느 규칙 (주인 규칙)', async () => {
       const u = await enter(userId);
       act(u, (f) => newPara(f, '안녕'));
-      const x = await enter(otherId);
+      const x = await enter(otherId, room, inner, '10.0.0.8');
       const forged = new Y.Doc();
       Y.applyUpdate(forged, Y.encodeStateAsUpdate(u.doc));
       forged.clientID = u.doc.clientID;
       const sv = Y.encodeStateVector(forged);
       newPara(frag(forged), '@collab-c 이것 좀');
+      const before = u.socket.sent.length;
       x.socket.emit('message', MSG(Y.encodeStateAsUpdate(forged, sv)));
-      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
+      expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(u.socket.sent.length).toBe(before); // 퍼뜨리지 않았다
+      expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('@collab-c');
+      expect(await saveAndCarol()).toEqual([]);
+      await vi.waitFor(async () =>
+        expect(await rejections()).toEqual([{ actor_id: otherId, target_id: pageId, rule: 'owner', reason: '남의 클라이언트 ID로 쓴 조각', ip: '10.0.0.8' }]),
+      );
     });
 
-    it('**내 클라이언트 ID를 남이 먼저 차지해도 이름은 틀리지 않는다** — 그 ID로 쓴 X의 멘션은 X, 새 ID로 바꾼 U의 멘션은 U (P8 다섯 번째 검토 1, 보류 24)', async () => {
+    it('**끊은 뒤에 온 말은 듣지 않는다** — 답하지 않는 클라이언트가 닫기 핸드셰이크 동안 계속 쓰지 못한다 (P7 F2와 같은 자리)', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      act(x, (f) => f.insert(f.length, [new Y.XmlHook('hook') as never]));
+      expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
+      const before = u.socket.sent.length;
+      act(x, (f) => newPara(f, '끊긴 뒤의 글'));
+      expect(u.socket.sent.length).toBe(before);
+      expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('끊긴 뒤의 글');
+    });
+
+    it('**커서 정보로 알려진 ID를 먼저 차지하려 해도 받지 않는다** — 알리는 순간 주인이 정해지고, 주인의 입력은 그대로 닿는다 (P8 다섯 번째 검토 1, 보류 24)', async () => {
       const daveId = await mkUser('collab-d');
       const x = await enter(otherId);
       const u = await enter(userId);
-      // 화면은 열자마자 커서 정보(awareness)로 **자기 클라이언트 ID**를 알리고(`CollabEditor.tsx`), 게이트웨이는 그것을 모두에게 중계한다
+      // 화면은 열자마자 커서 정보(awareness)로 **자기 클라이언트 ID**를 알린다(`CollabEditor.tsx`) — 커서를 보이려면 알려야 한다
       const told = new Awareness(u.doc);
       const heard = new Awareness(new Y.Doc());
       try {
         told.setLocalStateField('user', { name: 'U' });
-        u.socket.emit('message', Buffer.concat([Buffer.of(1), Buffer.from(encodeAwarenessUpdate(told, [u.doc.clientID]))]));
+        u.socket.emit('message', AWARE(encodeAwarenessUpdate(told, [u.doc.clientID])));
         for (const f of x.socket.sent) if (f[0] === 1) applyAwarenessUpdate(heard, new Uint8Array(f.subarray(1)), 'remote');
         const stolen = u.doc.clientID;
         expect([...heard.getStates().keys()]).toContain(stolen);
+        // 그러나 **알리는 순간 U에게 묶였다** — 그 알림이 X에게 가기 전이다
+        expect(ownerOf(stolen)).toBe(userId);
 
-        // U가 아무것도 치기 전에 X가 그 ID로 시계 0부터 먼저 쓴다 — 먼저 보낸 연결이 임자가 된다
         const forged = new Y.Doc();
         Y.applyUpdate(forged, Y.encodeStateAsUpdate(room.doc));
         forged.clientID = stolen;
         const sv = Y.encodeStateVector(forged);
         newPara(frag(forged), '@collab-c 확인');
         x.socket.emit('message', MSG(Y.encodeStateAsUpdate(forged, sv)));
-        expect((room as unknown as { ledger: Ledger }).ledger.owners.get(stolen)).toBe(otherId);
+        expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
 
-        // U의 화면이 그 변경을 받으면 **Yjs가 스스로 새 ID로 바꾼다** — 그 뒤 U가 친 멘션은 U의 것이다
+        // U는 자기 ID 그대로 쓴다 — 전에는 앞 글자가 서버에서 버려졌다
         act(u, (f) => newPara(f, ''));
-        expect(u.doc.clientID).not.toBe(stolen);
+        expect(u.doc.clientID).toBe(stolen);
         typeAt(u, last, 0, '@collab-d 확인');
-
+        expect(JSON.stringify(docFromYDoc(room.doc))).toContain('@collab-d 확인');
         expect((await gw.flush(pageId)).saved).toBe(true);
-        expect(await mentionRows(carolId)).toEqual([{ actor_id: otherId }]); // U의 ID로 썼어도 U의 이름이 아니다
+        expect(await mentionRows(carolId)).toEqual([]);
         expect(await mentionRows(daveId)).toEqual([{ actor_id: userId }]);
       } finally {
         told.destroy();
@@ -773,19 +805,19 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       }
     });
 
-    it('**이미 더 쳐 둔 화면은 ID를 바꾸지 않는다** — 서버와 화면이 갈리고, 그 ID로 이어 친 멘션은 모름이다. 먼저 보낸 X의 이름도 아니다 (보류 24)', async () => {
-      const daveId = await mkUser('collab-d');
+    it('**알리기 전에 남이 먼저 쓴 ID로는 주인도 쓰지 못한다 — 대신 조용히 버려지지 않고 끊겨 드러난다** (D.4)', async () => {
+      // 화면은 열자마자 ID를 알리므로 실제 화면에서는 생기지 않는 순서다. 생기면 입력이 조용히 사라지는 대신(Phase 8까지) 끊긴다
       const x = await enter(otherId);
       const u = await enter(userId);
-      const stolen = u.doc.clientID; // 위 시험처럼 커서 정보로 알려진다
+      const stolen = u.doc.clientID;
       const forged = new Y.Doc();
       Y.applyUpdate(forged, Y.encodeStateAsUpdate(room.doc));
       forged.clientID = stolen;
       const sv = Y.encodeStateVector(forged);
       newPara(frag(forged), 'X');
       x.socket.emit('message', MSG(Y.encodeStateAsUpdate(forged, sv)));
+      expect(ownerOf(stolen)).toBe(otherId); // X가 새 클라이언트를 만든 것과 서버는 가릴 수 없다
 
-      // U는 그 방송을 받기 전에 더 길게 쳐 두었다 — 화면처럼 자기 트랜잭션만 보낸다
       let local: Uint8Array | null = null;
       const onUpdate = (up: Uint8Array, origin: unknown): void => {
         if (origin !== 'remote') local = up;
@@ -794,23 +826,14 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       u.doc.transact(() => newPara(frag(u.doc), 'U가 먼저 쳐 둔 글'));
       u.doc.off('update', onUpdate);
       if (local) u.socket.emit('message', MSG(local));
-      // 서버는 겹치는 시계를 이미 받은 것으로 보고 U의 앞 글자를 버린다 — 나머지는 X의 문단에 붙는다 (보류 24 — 고치면 이 단언이 뒤집힌다)
-      expect(JSON.stringify(docFromYDoc(room.doc))).toContain('X가 먼저 쳐 둔 글');
-      // 방송을 받아도 그 ID의 시계가 이미 앞서 있어 **Yjs가 ID를 바꾸지 않는다**
-      Y.applyUpdate(u.doc, Y.encodeStateAsUpdate(room.doc), 'remote');
-      expect(u.doc.clientID).toBe(stolen);
-
-      act(u, (f) => newPara(f, ''));
-      typeAt(u, last, 0, '@collab-d 확인');
-      expect((await gw.flush(pageId)).saved).toBe(true);
-      expect(await mentionRows(daveId)).toEqual([{ actor_id: null }]);
+      expect(refusedCode(u)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('먼저 쳐 둔 글');
     });
 
-    it('**보류된 위조 조각이 주인의 변경에 묻어 들어와도 주인 이름으로 나가지 않는다** — 모름 + 경고 (P8 자체 점검 1)', async () => {
+    it('**보류될 위조 조각은 받지 않는다** — 앞선 시계를 숨겨 보내면 끊고, 주인의 입력은 묻어 들어오는 것 없이 그대로 닿는다 (완결 규칙, P8 자체 점검 1)', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn');
       try {
         const u = await enter(userId);
-        // 화면처럼 둔다 — U의 문서는 **자기 변경만** 보내고, 이 뒤로는 방에서 받지 않는다
         const sendOwn = (fn: (f: Y.XmlFragment) => void): void => {
           const sv = Y.encodeStateVector(u.doc);
           u.doc.transact(() => fn(frag(u.doc)));
@@ -818,7 +841,6 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
         };
         act(u, (f) => newPara(f, '안녕'));
 
-        // X가 U의 ID로 **앞선 시계의** 조각을 만든다: 앞 5글자는 숨기고 뒤의 멘션만 보낸다 → 서버가 보류한다
         const x = await enter(otherId);
         const forged = new Y.Doc();
         Y.applyUpdate(forged, Y.encodeStateAsUpdate(u.doc));
@@ -827,23 +849,24 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
         const hidden = Y.encodeStateVector(forged);
         last(frag(forged)).insert(7, ' @collab-c 확인');
         x.socket.emit('message', MSG(Y.encodeStateAsUpdate(forged, hidden)));
-        expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('@collab-c');
+        expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
 
-        // U가 평범하게 다섯 글자를 친다 — 숨긴 구간과 시계가 같아 위조가 여기 묻어 들어온다
         sendOwn((f) => last(f).insert(2, '하세요요요'));
-        expect(JSON.stringify(docFromYDoc(room.doc))).toContain('@collab-c');
-
-        expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
-        expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringContaining(`user=${userId}`));
+        const text = JSON.stringify(docFromYDoc(room.doc));
+        expect(text).toContain('안녕하세요요요');
+        expect(text).not.toContain('@collab-c');
+        expect(await saveAndCarol()).toEqual([]);
+        // 관문을 지난 변경은 늘 믿을 수 있다 — Phase 8의 경고가 나오지 않는다 (D.8)
+        expect(warn.mock.calls.map((c) => String(c[0]))).not.toContainEqual(expect.stringContaining('보낸 것보다 문서를 더 바꿨다'));
+        expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringContaining('rule=complete'));
       } finally {
         warn.mockRestore();
       }
     });
 
-    it('**보류된 위조 삭제가 주인의 변경을 지워도 주인 이름으로 나가지 않는다** — 모름 (P8 두 번째 검토 1)', async () => {
+    it('**아직 없는 글자를 지우는 삭제는 받지 않는다** — 주인이 칠 글자를 미리 지워 두는 길 (완결 규칙, P8 두 번째 검토 1)', async () => {
       const u = await enter(userId);
       act(u, (f) => newPara(f, ''));
-      // U가 곧 칠 것(`@collab-cx 확인`)을 같은 ID로 미리 만들어 보고, 그중 `x`를 지우는 삭제 집합만 뽑는다
       const rehearsal = new Y.Doc();
       Y.applyUpdate(rehearsal, Y.encodeStateAsUpdate(u.doc));
       rehearsal.clientID = u.doc.clientID;
@@ -851,18 +874,57 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       let deletion: Uint8Array | null = null;
       rehearsal.on('update', (upd: Uint8Array) => (deletion = upd));
       last(frag(rehearsal)).delete(9, 1);
-      expect(Y.parseUpdateMeta(deletion!).from.size).toBe(0); // 구조는 없고 삭제만 있다
+      expect(Y.parseUpdateMeta(deletion!).from.size).toBe(0);
 
-      // X가 그 삭제만 먼저 보낸다 — 지울 글자가 아직 없어 서버가 보류한다
       const x = await enter(otherId);
       x.socket.emit('message', MSG(deletion!));
-      // U가 평범하게 친다 → 들어오는 순간 보류된 삭제가 `x`를 지워 `@collab-c`가 생긴다
+      expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
       const own = Y.encodeStateVector(u.doc);
       u.doc.transact(() => last(frag(u.doc)).insert(0, '@collab-cx 확인'));
       u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, own)));
-      expect(JSON.stringify(docFromYDoc(room.doc))).toContain('@collab-c 확인');
+      expect(JSON.stringify(docFromYDoc(room.doc))).toContain('@collab-cx 확인');
+      expect(await saveAndCarol()).toEqual([]);
+    });
 
-      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
+    it('**읽을 수 없는 변경과 사람 표시도 받지 않는다** — 정상 화면은 그런 것을 보내지 않는다', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      x.socket.emit('message', Buffer.from([0, 0xff, 0xff, 0xff]));
+      expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
+      const y2 = await enter(otherId);
+      y2.socket.emit('message', Buffer.from([1, 1, 5, 1, 1, 0x7b]));
+      expect(refusedCode(y2)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(refusedCode(u)).toBeUndefined();
+      await vi.waitFor(async () => expect((await rejections()).map((r) => r.rule).sort()).toEqual(['presence', 'structure']));
+    });
+
+    it('**사람 표시에서 남의 몫은 퍼뜨리지 않고, 이름은 서버가 정한다** — 남의 커서·이름을 꾸미지 못한다 (D.5, FR-1004)', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      const watcher = await enter(otherId);
+      const mine = new Awareness(u.doc);
+      // X가 U의 클라이언트 ID로 꾸민 사람 표시 — Awareness는 만들 때의 문서 ID를 쓴다
+      const fakeDoc = new Y.Doc();
+      fakeDoc.clientID = u.doc.clientID;
+      const fake = new Awareness(fakeDoc);
+      const seen = new Awareness(new Y.Doc());
+      try {
+        // U가 자기 몫을 알리면서 이름을 '관리자'라고 적는다 — 서버는 U의 표시 이름으로 바꿔 퍼뜨린다
+        mine.setLocalStateField('user', { name: '관리자', color: 'red' });
+        u.socket.emit('message', AWARE(encodeAwarenessUpdate(mine, [u.doc.clientID])));
+        // X가 U의 몫을 꾸며 보낸다(같은 클라이언트 ID) — 퍼뜨리지 않는다
+        fake.setLocalStateField('user', { name: '가짜 U' });
+        const sentBefore = watcher.socket.sent.length;
+        x.socket.emit('message', AWARE(encodeAwarenessUpdate(fake, [u.doc.clientID])));
+        expect(watcher.socket.sent.length).toBe(sentBefore);
+        for (const f of watcher.socket.sent) if (f[0] === 1) applyAwarenessUpdate(seen, new Uint8Array(f.subarray(1)), 'remote');
+        expect(seen.getStates().get(u.doc.clientID)).toEqual({ user: { name: userId, color: 'red' } });
+        expect(refusedCode(x)).toBeUndefined(); // 메아리일 수 있어 끊지는 않는다
+      } finally {
+        mine.destroy();
+        fake.destroy();
+        seen.destroy();
+      }
     });
 
     it('**옛 문서를 통째로 다시 보내면 모름** — 남의 글자를 보낸 사람 것으로 치지 않는다 (P8 자체 점검 2 · 세 번째 코드 리뷰 3)', async () => {
@@ -896,16 +958,19 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
     expect(x.socket.sent.length).toBeGreaterThan(before);
   });
 
-  it('**편집기가 만들지 않는 노드를 넣어도 방이 멈추지 않는다** — 중계도, 저장도 (P8 세 번째 검토 2)', async () => {
+  it('**편집기가 만들지 않는 노드는 받지 않는다** — 보낸 연결만 끊기고 방은 그대로 흐른다: 중계도 저장도 (P9 D.2, 보류 23 · P8 세 번째 검토 2)', async () => {
     const u = await enter(userId);
     const x = await enter(otherId);
-    // X가 조작한 클라이언트로 문서에 `Y.XmlHook` 하나를 넣는다
+    const peer = await enter(otherId);
+    // X가 조작한 클라이언트로 문서에 `Y.XmlHook` 하나를 넣으려 한다 — 전에는 동료의 편집기가 그리다 던졌다
+    const before = peer.socket.sent.length;
     act(x, (f) => f.insert(f.length, [new Y.XmlHook('hook') as never]));
-    // 그 뒤 U가 평범하게 친다 — X에게 전달돼야 한다
-    const before = x.socket.sent.length;
+    expect(x.socket.closed?.code).toBe(COLLAB_CLOSE_REFUSED);
+    expect(peer.socket.sent.length).toBe(before);
+    expect(room.doc.getXmlFragment('default').toArray().some((n) => n instanceof Y.XmlHook)).toBe(false);
+    // U가 평범하게 친다 — 동료에게 전달되고 저장된다
     act(u, (f) => newPara(f, '@collab-c 확인'));
-    expect(x.socket.sent.length).toBeGreaterThan(before);
-    // 저장도 된다 — 그 노드는 정본에 뜻이 없어 빠진다
+    expect(peer.socket.sent.length).toBeGreaterThan(before);
     expect(await saveAndCarol()).toEqual([{ actor_id: userId }]);
   });
 
@@ -1012,10 +1077,17 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
 
   it('**만든 사람 표는 실시간 상태와 함께 남고, 재기동한 게이트웨이가 잇는다** (FR-903)', async () => {
     const u = await enter(userId);
-    // 멘션과 함께 **저장할 수 없는 노드**를 넣는다 — 버전은 안 생기고 상태만 남는 경로다
+    // 멘션과 함께 **저장할 수 없는 문서**를 만든다 — 버전은 안 생기고 상태만 남는 경로다. 관문이 받는 모양이어야 해서
+    // (P9부터 `script` 같은 요소는 문 앞에서 끊긴다) 정상 편집기도 만들 수 있는 **깊이 한도(64) 넘는 인용**으로 만든다
     act(u, (f) => {
       newPara(f, '@collab-c 확인');
-      f.insert(f.length, [new Y.XmlElement('script')]);
+      let inner: Y.XmlElement = new Y.XmlElement('paragraph');
+      for (let i = 0; i < 70; i++) {
+        const q = new Y.XmlElement('blockquote');
+        q.insert(0, [inner]);
+        inner = q;
+      }
+      f.insert(f.length, [inner]);
     });
     expect((await gw.flush(pageId)).saved).toBe(false);
     const saved = await db.execute<{ authors: { makers: [number, number, string, string | null][] } }>(
@@ -1030,7 +1102,7 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       const room2 = await inner2.room(pageId, await currentVersion());
       expect(room2).not.toBe(room);
       const x = await enter(otherId, room2, inner2);
-      // X가 깨진 노드를 지운다. **지우기만 했다** — 새 멘션은 없다
+      // X가 그 깊은 인용을 지운다. **지우기만 했다** — 새 멘션은 없다
       act(x, (f) => f.delete(f.length - 1, 1), room2);
 
       expect((await gw2.flush(pageId)).saved).toBe(true);

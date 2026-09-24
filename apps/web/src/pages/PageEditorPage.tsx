@@ -141,6 +141,13 @@ export function PageEditorPage() {
                   연결이 끊겼다. 지금 쓰는 내용은 저장되지 않는다 — 다른 곳에 복사한 뒤 새로고침한다
                 </strong>
               )}
+              {/* **거절로 끊긴 것은 따로 말한다** (P9 FR-1005). 다시 붙어도 같은 편집은 다시 거절된다 —
+                  무엇이 걸렸는지는 관리자가 감사로그에서 본다 */}
+              {link === 'refused' && (
+                <strong className="badge fail">
+                  서버가 이 편집을 받지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다 — 계속되면 관리자에게 알린다
+                </strong>
+              )}
             </p>
             <p className="muted small">
               쓰는 대로 자동으로 저장된다. 저장 버튼은 <strong>지금 바로</strong> 남기고 보기로 갈 때 쓴다.
@@ -151,7 +158,7 @@ export function PageEditorPage() {
         )}
 
         {/* 끊긴 상태에서 누르면 **저장되지 않는다.** 누를 수 있게 두면 "눌렀으니 됐다"가 된다 */}
-        <button type="button" onClick={() => void save()} disabled={busy || conflict !== null || (collab && link === 'offline')}>
+        <button type="button" onClick={() => void save()} disabled={busy || conflict !== null || (collab && (link === 'offline' || link === 'refused'))}>
           {busy ? '저장 중…' : collab ? '저장하고 보기로' : '저장'}
         </button>
       </section>

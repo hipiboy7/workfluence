@@ -126,6 +126,9 @@ function fromYNode(node: unknown): DocNode[] {
   const content: DocNode[] = [];
   for (const child of el.toArray()) content.push(...fromYNode(child));
 
+  // **단계가 없는 제목은 1단계로 읽는다** (P9 FR-1010). 편집기(ProseMirror)는 없는 속성을 기본값으로 채워 1단계를 보인다.
+  // 관문은 속성을 하나씩 보므로 "있어야 한다"를 문 앞에서 볼 수 없다 — 누가 `level`만 지우면 저장이 멈췄다
+  if (el.nodeName === 'heading' && attrs.level === undefined) attrs.level = 1;
   const out: DocNode = { type: el.nodeName };
   if (Object.keys(attrs).length) out.attrs = attrs;
   if (content.length) out.content = content;

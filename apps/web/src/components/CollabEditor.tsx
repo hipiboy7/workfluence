@@ -1,11 +1,11 @@
 import { EditorContent, useEditor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import Collaboration from '@tiptap/extension-collaboration';
 import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { COLLAB_CLOSE_REFUSED } from '@workfluence/shared';
+import { editorExtensions } from './extensions';
 
 /**
  * 실시간 동시 편집기 (P6_설계서_Collab F절, FR-700·705).
@@ -29,7 +29,8 @@ function colorFor(name: string): string {
   return `hsl(${h} 70% 45%)`;
 }
 
-export type CollabState = 'connecting' | 'live' | 'offline';
+/** `refused` — 서버의 관문이 이 화면의 편집을 받지 않고 끊었다 (P9_설계서_Gate D.6). 다시 붙어도 같은 편집은 다시 거절된다 */
+export type CollabState = 'connecting' | 'live' | 'offline' | 'refused';
 
 export function CollabEditor({
   pageId,
@@ -93,8 +94,9 @@ export function CollabEditor({
     };
     // **끊기면 그렇다고 말한다.** 조용히 끊기면 사람은 계속 쓰고 있는데 아무에게도
     // 안 가고, 새로고침하면 그 내용이 사라진다 — 가장 나쁜 실패다
-    ws.onclose = () => setState('offline');
-    ws.onerror = () => setState('offline');
+    // **거절로 끊긴 것은 따로 말한다** (P9 FR-1005). 그냥 끊긴 것과 달리 같은 편집을 다시 보내도 다시 거절된다
+    ws.onclose = (ev: CloseEvent) => setState((prev) => (prev === 'refused' || ev.code === COLLAB_CLOSE_REFUSED ? 'refused' : 'offline'));
+    ws.onerror = () => setState((prev) => (prev === 'refused' ? prev : 'offline'));
 
     ydoc.on('update', onDocUpdate);
     awareness.on('update', onAwareness);
@@ -128,13 +130,8 @@ export function CollabEditor({
   const editor = useEditor(
     {
       extensions: [
-        // **`history`를 끈다.** Yjs가 자기 실행 취소를 들고 있어 둘을 같이 두면
-        // 내 취소가 남의 편집까지 되돌린다
-        StarterKit.configure({ undoRedo: false }),
-        Table.configure({ resizable: false }),
-        TableRow,
-        TableHeader,
-        TableCell,
+        // 보기·편집용과 **같은 목록**에 실행 취소만 끈다 — Yjs가 자기 실행 취소를 들고 있다 (P9 D.7)
+        ...editorExtensions({ collab: true }),
         Collaboration.configure({ document: ydoc }),
         CollaborationCaret.configure({ provider: { awareness } as never }),
       ],

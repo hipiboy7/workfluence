@@ -29,8 +29,14 @@ describe('shouldSaveVersion — 안 만드는 쪽 (FR-707·708)', () => {
   });
 
   it('속성 순서만 달라도 같다고 본다', () => {
-    const a: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'heading', attrs: { level: 2, textAlign: 'left' }, content: [{ type: 'text', text: 'x' }] }] };
-    const b: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'heading', attrs: { textAlign: 'left', level: 2 }, content: [{ type: 'text', text: 'x' }] }] };
+    // 속성이 둘인 허용 노드로 본다 (P9에서 `textAlign`이 허용 목록에서 빠졌다)
+    const cell = (attrs: Record<string, unknown>): DocNode => ({
+      type: 'doc',
+      attrs: { schemaVersion: 1 },
+      content: [{ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', attrs, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }] }] }] }],
+    });
+    const a = cell({ colspan: 2, rowspan: 1 });
+    const b = cell({ rowspan: 1, colspan: 2 });
     expect(why(shouldSaveVersion({ next: b, previous: a, idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' }))).toBe('내용이 그대로');
   });
 
