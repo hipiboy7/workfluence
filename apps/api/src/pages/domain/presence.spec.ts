@@ -15,7 +15,7 @@ const X = '00000000-0000-4000-8000-00000000000b';
 
 function screenAwareness(name: string): Awareness {
   const a = new Awareness(new Y.Doc());
-  a.setLocalStateField('user', { name, color: 'hsl(1 70% 45%)' });
+  a.setLocalStateField('user', { name, color: '#b8433a' });
   return a;
 }
 
@@ -24,7 +24,7 @@ describe('읽기 · 다시 쓰기 — y-protocols와 같은 모양', () => {
     const a = screenAwareness('U');
     try {
       const entries = readPresence(encodeAwarenessUpdate(a, [a.clientID]));
-      expect(entries).toEqual([{ client: a.clientID, clock: 1, state: { user: { name: 'U', color: 'hsl(1 70% 45%)' } } }]);
+      expect(entries).toEqual([{ client: a.clientID, clock: 1, state: { user: { name: 'U', color: '#b8433a' } } }]);
     } finally {
       a.destroy();
     }
@@ -82,8 +82,8 @@ describe('거르기 — 남의 몫은 빼고, 이름은 서버가 정한다 (D.5
   it('보낸 사람이 주인인 몫은 남기고 이름을 서버가 아는 표시 이름으로 바꾼다 — 화면이 만드는 색과 커서는 그대로', () => {
     const at = { tname: 'default', item: { client: 5, clock: 2 }, assoc: 0 };
     const cursor = { anchor: at, head: { type: { client: 5, clock: 0 }, item: { client: 5, clock: 3 }, assoc: -1 } };
-    const out = screenPresence([entry(5, { user: { name: '관리자', color: 'hsl(120 70% 45%)' }, cursor })], U, new Map([[5, U]]), '진짜 이름');
-    expect(out).toEqual({ keep: [entry(5, { user: { name: '진짜 이름', color: 'hsl(120 70% 45%)' }, cursor })], bind: [] });
+    const out = screenPresence([entry(5, { user: { name: '관리자', color: '#1fa35c' }, cursor })], U, new Map([[5, U]]), '진짜 이름');
+    expect(out).toEqual({ keep: [entry(5, { user: { name: '진짜 이름', color: '#1fa35c' }, cursor })], bind: [] });
   });
 
   it('주인 없는 몫은 보낸 사람에게 묶고 남긴다 — 화면이 열자마자 자기 ID를 알리는 때다 (D.4)', () => {
@@ -119,15 +119,16 @@ describe('상태 거르기 — 화면이 만드는 모양만 (P9 코드 리뷰 6
   const entry = (client: number, state: PresenceEntry['state']): PresenceEntry => ({ client, clock: 1, state });
   const clean = (state: Record<string, unknown>): Record<string, unknown> | null => screenPresence([entry(5, state)], U, new Map([[5, U]]), 'U').keep[0].state;
 
-  it('색은 `hsl(…)`·`#rrggbb` 모양만 — 아니면 뺀다', () => {
-    expect(clean({ user: { name: 'x', color: 'hsl(7 70% 45%)' } })).toEqual({ user: { name: 'U', color: 'hsl(7 70% 45%)' } });
+  it('색은 `#rrggbb`만 — 캐럿(TipTap CollaborationCaret)이 받는 모양이다. 아니면 뺀다', () => {
     expect(clean({ user: { name: 'x', color: '#a1b2c3' } })).toEqual({ user: { name: 'U', color: '#a1b2c3' } });
-    expect(clean({ user: { name: 'x', color: 'red; background:url(/api/pages)' } })).toEqual({ user: { name: 'U' } });
-    expect(clean({ user: { name: 'x', color: 7 } })).toEqual({ user: { name: 'U' } });
+    // 캐럿은 이 밖의 색을 투명으로 바꿔 그린다 — 화면이 예전에 만들던 `hsl(…)`도 그래서 캐럿이 보이지 않았다 (두 번째 자체 점검 5)
+    for (const bad of ['hsl(7 70% 45%)', '#abc', '#a1b2c3ff', 'red; background:url(/api/pages)', 7]) {
+      expect(clean({ user: { name: 'x', color: bad } })).toEqual({ user: { name: 'U' } });
+    }
   });
 
   it('커서는 `{anchor, head}` 상대 위치 모양만 — 비었으면(null) 그대로, 모양이 틀리면 커서를 뺀다', () => {
-    const pos = { type: { client: 1, clock: 2 }, tname: 'default', item: { client: 3, clock: 4 }, assoc: 0 };
+    const pos = { type: null, tname: 'default', item: { client: 3, clock: 4 }, assoc: 0 };
     expect(clean({ user: {}, cursor: { anchor: pos, head: pos } })).toEqual({ user: { name: 'U' }, cursor: { anchor: pos, head: pos } });
     expect(clean({ user: {}, cursor: null })).toEqual({ user: { name: 'U' }, cursor: null });
     for (const bad of [{ anchor: 5, head: pos }, { anchor: pos }, { anchor: { ...pos, evil: 1 }, head: pos }, { anchor: { item: { client: -1, clock: 0 } }, head: pos }, 'x']) {
@@ -150,6 +151,69 @@ describe('묶기 상한 — 한 항목짜리 프레임의 살아 있는 몫만, 
   it('묶을 수 있는 수(`canBind`)가 남지 않았으면 묶지 않고 뺀다', () => {
     expect(screenPresence([entry(7, { user: {} })], U, new Map(), 'U', 0)).toEqual({ keep: [], bind: [] });
     expect(screenPresence([entry(7, { user: {} })], U, new Map(), 'U', 1)).toEqual({ keep: [entry(7, { user: { name: 'U' } })], bind: [7] });
+  });
+});
+
+/**
+ * 커서 위치 — **동료의 편집기가 읽다 던지지 않는 것만** (P9 두 번째 보안 검토 1).
+ *
+ * 화면(y-tiptap의 커서 플러그인)은 남의 커서를 그릴 때마다 `Y.createAbsolutePositionFromRelativePosition`을 부른다. Yjs는
+ * `item`·`type`·`tname`이 모두 비면 던진다. 그 예외는 **남의 변경을 받을 때마다** 편집기의 반영을 멈추고, 그 사람이 다음에 치는
+ * 순간 멈춘 화면이 문서가 되어 **동료들의 편집이 모두에게서 지워졌다** — 브라우저에서 재현됐다.
+ * 화면이 만드는 상대 위치는 늘 `type`·`tname` 중 **하나**가 있다(`Y.createRelativePosition`).
+ */
+describe('커서 위치 — Yjs가 읽어도 던지지 않는 모양만 (두 번째 보안 검토 1)', () => {
+  const entry = (client: number, state: PresenceEntry['state']): PresenceEntry => ({ client, clock: 1, state });
+  const cursorOf = (pos: unknown): unknown => {
+    const kept = screenPresence([entry(5, { user: {}, cursor: { anchor: pos, head: pos } })], U, new Map([[5, U]]), 'U').keep[0].state;
+    return (kept as { cursor?: unknown }).cursor;
+  };
+  /** 화면이 만드는 것과 같게 — `RelativePosition`을 JSON으로(빈 칸은 null로 남는다) */
+  const asSent = (rpos: Y.RelativePosition): unknown => JSON.parse(JSON.stringify(rpos));
+
+  it('화면이 만드는 상대 위치는 그대로 남긴다 — 글자 앞, 문서 끝(최상위 이름), 요소 끝(타입 ID)', () => {
+    const d = new Y.Doc();
+    const f = d.getXmlFragment('default');
+    const p = new Y.XmlElement('paragraph');
+    f.insert(0, [p]);
+    const t = new Y.XmlText();
+    p.insert(0, [t]);
+    t.insert(0, '앞 문단');
+    for (const rpos of [Y.createRelativePositionFromTypeIndex(t, 2), Y.createRelativePositionFromTypeIndex(f, f.length), Y.createRelativePositionFromTypeIndex(p, p.length, -1)]) {
+      const pos = asSent(rpos);
+      expect(cursorOf(pos)).toEqual({ anchor: pos, head: pos });
+    }
+  });
+
+  it.each<[string, unknown]>([
+    ['빈 위치', {}],
+    ['전부 null', { type: null, tname: null, item: null, assoc: 0 }],
+    ['글자만 있고 타입이 없다', { item: { client: 1, clock: 0 }, assoc: 0 }],
+    ['타입 ID와 최상위 이름을 함께', { type: { client: 1, clock: 0 }, tname: 'default', item: null, assoc: 0 }],
+    ['다른 최상위 이름 — 동료의 문서에 빈 최상위 타입이 생긴다', { tname: 'evil', assoc: 0 }],
+    ['ID에 다른 키', { tname: 'default', item: { client: 1, clock: 0, evil: 1 }, assoc: 0 }],
+    ['음수 시계', { tname: 'default', item: { client: 1, clock: -1 }, assoc: 0 }],
+    ['숫자가 아닌 방향', { tname: 'default', item: null, assoc: '0' }],
+  ])('%s는 뺀다', (_label, pos) => {
+    expect(cursorOf(pos)).toBeUndefined();
+  });
+
+  it('남긴 커서는 Yjs가 읽어도 던지지 않는다', () => {
+    const d = new Y.Doc();
+    d.getXmlFragment('default').insert(0, [new Y.XmlElement('paragraph')]);
+    const shapes: unknown[] = [
+      {},
+      { type: null, tname: null, item: null, assoc: 0 },
+      { item: { client: 1, clock: 0 }, assoc: 0 },
+      { tname: 'default', assoc: -1 },
+      { type: { client: 999, clock: 3 }, tname: null, item: null, assoc: 0 },
+      { tname: 'default', item: { client: 999, clock: 3 }, assoc: 0 },
+    ];
+    for (const pos of shapes) {
+      const kept = cursorOf(pos) as { anchor: Record<string, unknown> } | undefined;
+      if (!kept) continue;
+      expect(() => Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(kept.anchor), d)).not.toThrow();
+    }
   });
 });
 

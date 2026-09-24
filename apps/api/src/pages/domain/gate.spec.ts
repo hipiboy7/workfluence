@@ -640,3 +640,89 @@ describe('드문 모양 — 순서가 뒤집혀도, 옛 상태 위에서도', ()
   });
 });
 
+/**
+ * Yjs는 **이미 아는 조각도** 들이기 전에 이웃을 찾고(`getMissing`), **일부만 아는 조각**은 아는 앞부분을 잘라 내고 나머지를 그
+ * 클라이언트의 앞 조각 바로 뒤에 둔다(`Item.integrate`의 `offset`). 관문이 이 둘을 따로 보지 않으면 관문이 본 것과 들어가는 것이
+ * 달라진다 (P9 두 번째 보안 검토 2).
+ */
+describe('아는 조각·일부만 아는 조각 — Yjs가 들이는 대로 (두 번째 보안 검토 2)', () => {
+  const X = 4242;
+  /** 서버가 X를 알기 전 상태에서 X의 번호로 만든 화면 */
+  const forgedFrom = (before: Uint8Array): Y.Doc => {
+    const d = new Y.Doc();
+    Y.applyUpdate(d, before);
+    d.clientID = X;
+    return d;
+  };
+  const copyOf = (srv: Y.Doc): Y.Doc => {
+    const d = new Y.Doc();
+    Y.applyUpdate(d, Y.encodeStateAsUpdate(srv));
+    return d;
+  };
+
+  it('이미 아는 조각에 **없는 이웃**을 적어 보내면 받지 않는다 — Yjs는 그 클라이언트의 뒤 조각까지 보류한다', () => {
+    const srv = server();
+    const before = Y.encodeStateAsUpdate(srv);
+    const owners = new Map<number, string>();
+    const s = screen(srv);
+    s.clientID = X;
+    expect(pass(srv, change(s, (f) => firstText(f).insert(0, '가')), owners).ok).toBe(true);
+    // 꾸민 화면: 서버에 없는 클라이언트 777의 글자 뒤에 X의 '가'(시계 0)를 두고, 떨어진 곳에 X의 '나'(시계 1)를 친다
+    const forged = forgedFrom(before);
+    forged.clientID = 777;
+    forged.transact(() => firstText(forged.getXmlFragment('default')).insert(0, 'z'));
+    forged.clientID = X;
+    forged.transact(() => firstText(forged.getXmlFragment('default')).insert(1, '가'));
+    forged.transact(() => {
+      const t = firstText(forged.getXmlFragment('default'));
+      t.insert(t.length, '나');
+    });
+    // 777의 글자는 빼고 X의 두 조각만 보낸다 — 시계 0은 서버가 아는 조각이다
+    const known = new Map(Y.decodeStateVector(Y.encodeStateVector(srv)));
+    known.delete(X);
+    known.set(777, 1);
+    const update = Y.encodeStateAsUpdate(forged, Y.encodeStateVector(known));
+    expect(Y.decodeUpdate(update).structs.map((x) => [x.id.client, x.id.clock])).toEqual([[X, 0], [X, 1]]);
+    const copy = copyOf(srv);
+    Y.applyUpdate(copy, update);
+    expect(copy.store.pendingStructs).not.toBeNull(); // 그대로 들이면 '나'가 서버에 보류된다
+    expect(refused(judge(srv, update, U, owners))).toEqual({ ok: false, rule: 'complete', reason: '서버에서 보류될 조각' });
+  });
+
+  it('일부만 아는 조각을 **다른 자리**에 이어 쓴 것으로 꾸미면 받지 않는다 — Yjs가 나머지를 앞 조각 옆에 끼우면서 부모는 꾸민 자리로 잡아 문서가 어긋난다', () => {
+    const srv = new Y.Doc();
+    srv.getXmlFragment('default').insert(0, [para('첫 문단'), para('둘째 문단')]);
+    const before = Y.encodeStateAsUpdate(srv);
+    const owners = new Map<number, string>();
+    const s = screen(srv);
+    s.clientID = X;
+    expect(pass(srv, change(s, (f) => firstText(f).insert(0, '가')), owners).ok).toBe(true);
+    // 꾸민 화면: X의 번호로 **둘째 문단**에 '가나'를 한 번에 친다 — 조각 하나(시계 0~1). 서버는 시계 0을 첫 문단에 두었다
+    const forged = forgedFrom(before);
+    const sv = Y.encodeStateVector(forged);
+    forged.transact(() => lastText(forged.getXmlFragment('default')).insert(0, '가나'));
+    const update = Y.encodeStateAsUpdate(forged, sv);
+    expect(Y.decodeUpdate(update).structs.map((x) => [x.id.clock, x.length])).toEqual([[0, 2]]);
+    const copy = copyOf(srv);
+    Y.applyUpdate(copy, update);
+    const second = lastText(copy.getXmlFragment('default'));
+    expect(second.length).not.toBe(second.toString().length); // 그대로 들이면 둘째 문단이 세는 길이와 실제 글자가 어긋난다
+    expect(refused(judge(srv, update, U, owners))).toEqual({ ok: false, rule: 'structure', reason: '앞 조각과 다른 자리에 이어 쓴 조각' });
+  });
+
+  it('일부만 아는 조각을 **같은 자리**에 이어 쓴 것은 받는다 — 같은 Y.Doc으로 다시 붙은 화면이 보내는 전체 상태다', () => {
+    const srv = server();
+    const owners = new Map<number, string>();
+    const s = screen(srv);
+    s.clientID = X;
+    expect(pass(srv, change(s, (f) => firstText(f).insert(0, '가')), owners).ok).toBe(true);
+    // 끊긴 사이 '가' 뒤에 '나다'를 이어 친다 — 전체 상태에서는 조각 하나(시계 0~2)로 합쳐진다
+    s.transact(() => firstText(s.getXmlFragment('default')).insert(1, '나다'));
+    const full = Y.encodeStateAsUpdate(s);
+    expect(Y.decodeUpdate(full).structs.filter((x) => x.id.client === X).map((x) => [x.id.clock, x.length])).toEqual([[0, 3]]);
+    expect(pass(srv, full, owners).ok).toBe(true);
+    expect(firstText(srv.getXmlFragment('default')).toString()).toBe('가나다앞 문단');
+    expect(srv.store.pendingStructs).toBeNull();
+  });
+});
+

@@ -5,6 +5,7 @@ import {
   ALLOWED_MARKS,
   ALLOWED_NODES,
   MARKS_IN,
+  MAX_DOCUMENT_NODES,
   documentSchemaVersion,
   emptyDocument,
   extractText,
@@ -95,6 +96,12 @@ describe('validateDocument', () => {
     const many = doc(...Array.from({ length: 30 }, () => ({ type: 'bogus' })));
     const rMany = validateDocument(many);
     expect((rMany as { errors: string[] }).errors.length).toBe(20);
+  });
+
+  it('노드 수 한도를 넘으면 그 오류를 **한 번만** 적는다 — 넘은 뒤의 노드마다 같은 문장을 더하지 않는다 (P9 D.9)', () => {
+    // 자동 저장이 멈추면 이 문장이 화면에 간다 — "노드 수 초과 외 3건"은 같은 말을 네 번 한 것이었다
+    const r = validateDocument(doc(...Array.from({ length: MAX_DOCUMENT_NODES + 5 }, () => ({ type: 'paragraph' }))));
+    expect(r).toEqual({ ok: false, errors: [`노드 수 ${MAX_DOCUMENT_NODES} 초과`] });
   });
 });
 
@@ -320,6 +327,21 @@ describe('값 규칙 — style에 들어가는 값 (P9 보안 검토 1)', () => 
     expect(validateDocument(cell({ align: 'center', colwidth: [100] }))).toEqual({ ok: true });
     const r = validateDocument(cell({ align: 'left; position:fixed; inset:0' }));
     expect((r as { errors: string[] }).errors[0]).toContain("속성 'align' 값은 left·center·right");
+  });
+});
+
+describe("링크의 rel에 'opener'를 둘 수 없다 (P9 두 번째 코드 리뷰 2 · 두 번째 보안 검토)", () => {
+  const href = 'https://example.internal/doc';
+  it("'opener' 낱말이 있으면 받지 않는다 — 새 창으로 열린 쪽이 원래 창(이 위키)을 다른 곳으로 옮길 수 있다", () => {
+    expect(markProblems('link', { href, target: '_blank', rel: 'opener' })).toEqual(["속성 'rel' 값에 'opener'를 둘 수 없다"]);
+    expect(markProblems('link', { href, rel: 'nofollow OPENER' })).toHaveLength(1);
+    expect(validateDocument(doc(para(text('링크', [{ type: 'link', attrs: { href, rel: 'opener' } }])))).ok).toBe(false);
+  });
+
+  it('붙여 넣은 HTML이 흔히 가져오는 값은 그대로 받는다 — 낱말로 본다(noopener는 opener가 아니다)', () => {
+    for (const rel of ['noopener noreferrer nofollow', 'noopener', 'nofollow', 'ugc nofollow', null]) {
+      expect(markProblems('link', { href, target: '_blank', rel })).toEqual([]);
+    }
   });
 });
 
