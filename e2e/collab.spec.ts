@@ -1,4 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { Client } from 'pg';
+import { readPresence } from '../apps/api/src/pages/domain/presence';
 import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
 const ADMIN = newAdmin('collab');
@@ -183,6 +187,192 @@ test('A가 부르고 B가 마지막으로 고쳐도, 알림함은 A가 불렀다
   await expect(item).toBeVisible({ timeout: 15_000 });
   await expect(item.locator('strong')).toHaveText('E2E 관리자');
 
+  await ctxA.close();
+  await ctxB.close();
+});
+
+/**
+ * Phase 9 (P9_설계서_Gate D.7, FR-1007·1008). **편집기가 만드는 것은 저장된다.**
+ * 전에는 이메일 주소 하나(편집기가 `mailto:` 링크를 만들었다), 정렬된 표나 제목 붙은 링크를 붙여 넣은 것 하나로
+ * 그 문서의 저장이 멈췄다 — 편집기와 서버 허용 목록이 달랐다. 이제 관문이 허용 목록 밖을 받지 않고 **끊으므로**,
+ * 어긋나면 저장이 멈추는 대신 편집이 끊긴다. 둘 다 없어야 한다.
+ */
+test('이메일 주소를 치고 정렬된 표·제목 붙은 링크를 붙여 넣어도 저장된다 — 이메일은 링크가 되지 않는다', async ({ page }) => {
+  await login(page, ADMIN.username, ADMIN.password);
+  const spaceName = `맞춤 공간 ${Date.now()}`;
+  await page.goto('/');
+  await page.getByLabel('이름').fill(spaceName);
+  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('link', { name: spaceName }).click();
+  await page.getByLabel('새 페이지 제목').fill(`맞춤 문서 ${Date.now()}`);
+  await page.getByRole('button', { name: '만들기' }).click();
+  await expect(page.getByText(/쓰는 대로 자동으로 저장된다/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
+
+  const editor = page.locator('.editor .ProseMirror');
+  await editor.click();
+  await page.keyboard.type('연락처 user@example.internal 끝');
+  await expect(editor).toContainText('user@example.internal');
+  await expect(editor.locator('a[href^="mailto:"]')).toHaveCount(0);
+
+  // 붙여 넣기 — 표 칸의 정렬(`align`)과 링크의 `title`은 편집기가 붙여 넣은 HTML에서 만든다
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await editor.evaluate((el) => {
+    const dt = new DataTransfer();
+    dt.setData('text/html', '<p><a href="https://example.internal/doc" title="설명">제목 붙은 링크</a></p><table><tbody><tr><td align="center">가운데 칸</td></tr></tbody></table>');
+    dt.setData('text/plain', '제목 붙은 링크 가운데 칸');
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await expect(editor.locator('a[href="https://example.internal/doc"]')).toHaveCount(1);
+  await expect(editor.locator('td')).toContainText('가운데 칸');
+
+  await page.getByRole('button', { name: '저장하고 보기로' }).click();
+  // 저장되면 보기로 간다. 안 되면 편집 화면에 "저장되지 않았다: 까닭"이 남는다
+  await expect(page).not.toHaveURL(/\/edit$/, { timeout: 15_000 });
+  const body = page.locator('.editor.readonly').first();
+  await expect(body).toContainText('user@example.internal');
+  await expect(body).toContainText('제목 붙은 링크');
+  await expect(body).toContainText('가운데 칸');
+});
+
+/**
+ * **Phase 9 인수 기준** (P9_설계서_Gate, 보류 22·23·24).
+ * "조작한 연결이 편집기가 만들지 않는 노드·속성을 보내거나 남의 클라이언트 ID로 써도, 그것은 문서에 들어가지 않고
+ *  그 연결만 끊긴다. 두 사람은 계속 서로의 편집을 보고 자동 저장이 이어진다. 거절은 감사로그에 남는다."
+ *
+ * 조작한 연결은 **로그인한 브라우저 안에서 연 WebSocket**이다 — Origin·세션 쿠키가 실제 화면과 같다. 보낼 변경은
+ * 이 시험(Node)이 Yjs로 만든다.
+ */
+test('조작한 연결이 보낸 것은 문서에 들어가지 않고 그 연결만 끊긴다 — 두 사람의 편집은 계속 오간다', async ({ browser }) => {
+  const require_ = createRequire(resolve(__dirname, '../apps/api/package.json'));
+  const Y = require_('yjs') as typeof import('yjs');
+  const frameOf = (build: (d: import('yjs').Doc) => void, clientID: number): number[] => {
+    const d = new Y.Doc();
+    d.clientID = clientID;
+    build(d);
+    return [0, ...Y.encodeStateAsUpdate(d)];
+  };
+
+  const ctxA = await browser.newContext();
+  const ctxB = await browser.newContext();
+  const a = await ctxA.newPage();
+  const b = await ctxB.newPage();
+  await login(a, ADMIN.username, ADMIN.password);
+  const spaceName = `관문 공간 ${Date.now()}`;
+  await a.goto('/');
+  await a.getByLabel('이름').fill(spaceName);
+  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('link', { name: spaceName }).click();
+  await a.getByLabel('아이디로 Crew 추가 (editor)').fill(mate.username);
+  await a.getByRole('button', { name: '추가' }).click();
+  await a.getByLabel('새 페이지 제목').fill(`관문 문서 ${Date.now()}`);
+  await a.getByRole('button', { name: '만들기' }).click();
+  await expect(a.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
+  const pageId = /\/pages\/([0-9a-f-]+)/.exec(a.url())?.[1] ?? '';
+
+  // 조작한 연결 — A의 세션으로 같은 페이지에 WebSocket을 하나 더 연다
+  const evil = await ctxA.newPage();
+  await evil.goto('/');
+  await evil.evaluate((id) => {
+    const w = window as unknown as { evilWs: WebSocket; evilIn: number[][]; evilClosed: Promise<number> };
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws/pages/${id}`);
+    ws.binaryType = 'arraybuffer';
+    w.evilWs = ws;
+    w.evilIn = [];
+    ws.onmessage = (e) => w.evilIn.push([...new Uint8Array(e.data as ArrayBuffer)]);
+    w.evilClosed = new Promise((r) => (ws.onclose = (e) => r(e.code)));
+    return new Promise((r) => (ws.onopen = r));
+  }, pageId);
+
+  // B가 들어와 커서를 둔다 — B의 화면은 **열자마자** 사람 표시로 자기 클라이언트 ID를 알린다
+  await login(b, mate.username, mate.password);
+  await b.goto(`/pages/${pageId}/edit`);
+  await expect(b.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
+  await b.locator('.editor .ProseMirror').click();
+  // 조작한 연결이 받은 사람 표시에서 B의 클라이언트 ID를 읽는다
+  let bClient: number | undefined;
+  await expect
+    .poll(async () => {
+      const frames = await evil.evaluate(() => (window as unknown as { evilIn: number[][] }).evilIn.filter((f) => f[0] === 1));
+      for (const f of frames) for (const e of readPresence(Uint8Array.from(f.slice(1)))) if ((e.state as { user?: { name?: string } } | null)?.user?.name === mate.displayName) bClient = e.client;
+      return bClient;
+    }, { timeout: 15_000 })
+    .not.toBeUndefined();
+
+  // ① B의 클라이언트 ID로 먼저 쓴다(보류 24) — B가 아직 아무것도 치지 않았다
+  const claim = frameOf((d) => {
+    const p = new Y.XmlElement('paragraph');
+    const t = new Y.XmlText();
+    p.insert(0, [t]);
+    t.insert(0, '가로챈 글');
+    d.getXmlFragment('default').insert(0, [p]);
+  }, bClient!);
+  const code1 = await evil.evaluate(async (bytes) => {
+    const w = window as unknown as { evilWs: WebSocket; evilClosed: Promise<number> };
+    w.evilWs.send(Uint8Array.from(bytes));
+    return w.evilClosed;
+  }, claim);
+  expect(code1).toBe(4400);
+
+  // ②③ 편집기가 만들지 않는 노드(보류 23), 보이지 않는 속성(보류 22) — 연결마다 하나씩, 매번 끊긴다
+  const hook = frameOf((d) => d.getXmlFragment('default').insert(0, [new Y.XmlHook('evil') as never]), 424242);
+  const hidden = frameOf((d) => {
+    const p = new Y.XmlElement('paragraph');
+    p.setAttribute('onclick', 'x()');
+    const t = new Y.XmlText();
+    p.insert(0, [t]);
+    t.insert(0, '숨은 속성 글');
+    d.getXmlFragment('default').insert(0, [p]);
+  }, 515151);
+  for (const bytes of [hook, hidden]) {
+    const code = await evil.evaluate(
+      ([id, frame]) =>
+        new Promise<number>((resolveCode) => {
+          const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws/pages/${id as string}`);
+          ws.binaryType = 'arraybuffer';
+          ws.onopen = () => ws.send(Uint8Array.from(frame as number[]));
+          ws.onclose = (e) => resolveCode(e.code);
+        }),
+      [pageId, bytes] as const,
+    );
+    expect(code).toBe(4400);
+  }
+
+  // 두 사람의 편집은 계속 오간다 — B는 자기 클라이언트 ID 그대로 쓰고, 그 글이 서버를 거쳐 A에게 간다
+  await a.goto(`/pages/${pageId}/edit`);
+  await expect(a.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
+  const fromB = `B의글${Date.now()}`;
+  await b.locator('.editor .ProseMirror').click();
+  await b.keyboard.type(fromB);
+  await expect(a.locator('.editor .ProseMirror')).toContainText(fromB, { timeout: 15_000 });
+  const fromA = `A의글${Date.now()}`;
+  await a.locator('.editor .ProseMirror').click();
+  await a.keyboard.press('End');
+  await a.keyboard.type(fromA);
+  await expect(b.locator('.editor .ProseMirror')).toContainText(fromA, { timeout: 15_000 });
+  for (const p of [a, b]) await expect(p.getByText(/서버가 이 편집을 받지 않았다/)).toHaveCount(0);
+
+  // 자동 저장이 이어지고, 저장본에는 조작한 것이 없다
+  await a.waitForTimeout(9_000);
+  const c = new Client(process.env.WF_DATABASE_URL);
+  await c.connect();
+  try {
+    const saved = await c.query<{ content: string }>(
+      `SELECT v.content_json::text AS content FROM page_versions v JOIN pages p ON p.id = v.page_id AND v.version_no = p.current_version_no WHERE p.id = $1`,
+      [pageId],
+    );
+    expect(saved.rows[0].content).toContain(fromB);
+    expect(saved.rows[0].content).toContain(fromA);
+    for (const bad of ['가로챈 글', '숨은 속성 글', 'onclick', 'evil']) expect(saved.rows[0].content).not.toContain(bad);
+    const rejected = await c.query<{ rule: string }>(
+      `SELECT detail->>'rule' AS rule FROM audit_events WHERE action = 'page.collab.reject' AND target_id = $1 ORDER BY created_at`,
+      [pageId],
+    );
+    expect(rejected.rows.map((r) => r.rule)).toEqual(['owner', 'structure', 'structure']);
+  } finally {
+    await c.end();
+  }
   await ctxA.close();
   await ctxB.close();
 });
