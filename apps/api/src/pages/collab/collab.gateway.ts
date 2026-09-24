@@ -422,8 +422,6 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
      * 이 순간이 지나면 내용이 사라져(GC) 서식 조각과 글자를 가릴 수 없다.
      */
     doc.on('afterTransaction', (tr: Y.Transaction) => {
-      // 아무것도 안 바뀐 트랜잭션(접속 직후 이미 아는 전체 상태, 저장 때의 정리)은 훑지 않는다
-      if (tr.changed.size === 0 && tr.deleteSet.clients.size === 0) return;
       if (room.attributionBroken) return;
       // **여기서 던지면 방이 멈춘다.** Yjs는 이 관찰자의 예외를 **변경을 이미 적용한 뒤** `Y.applyUpdate` 밖으로
       // 올리고, 받은 쪽은 "적용하지 못했다"로 알고 퍼뜨리지 않는다 — 그 뒤 모두의 변경이 중계되지 않았다
@@ -444,13 +442,18 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   private attribute(room: Room, tr: Y.Transaction, pageId: string): void {
     const doc = room.doc;
     const member = tr.origin && typeof tr.origin === 'object' && 'sending' in tr.origin ? (tr.origin as Member) : null;
+    const integrated = new Map<number, ClockRange>();
+    for (const [client, after] of tr.afterState) {
+      const before = tr.beforeState.get(client) ?? 0;
+      if (after > before) integrated.set(client, { from: before, to: after });
+    }
+    // **자기 클라이언트는 먼저, 따로 알아본다** (네 번째 검토 1·6). 변경을 믿을 수 없어도, 들어온 조각이 이미 지워진
+    // 문단 안이라 문서가 바뀌지 않았어도 — 여기서 놓치면 그 연결이 끝까지 모름이 된다
+    if (member?.sending) claimOwn(member.own, room.ledger.owners, member.principal.id, member.sending, integrated);
+    // 아무것도 안 바뀐 트랜잭션(접속 직후 이미 아는 전체 상태, 저장 때의 정리)은 더 볼 것이 없다
+    if (tr.changed.size === 0 && tr.deleteSet.clients.size === 0) return;
     let maker: string | null = null;
     if (member?.sending) {
-      const integrated = new Map<number, ClockRange>();
-      for (const [client, after] of tr.afterState) {
-        const before = tr.beforeState.get(client) ?? 0;
-        if (after > before) integrated.set(client, { from: before, to: after });
-      }
       // 서식 조각과 속성 값(맵 항목)은 글자를 바꾸지 않는다 — Yjs가 스스로 지우기도 하므로 세지 않는다
       const deleted: DeletedItem[] = [];
       Y.iterateDeletedStructs(tr, tr.deleteSet, (struct) => {
@@ -460,7 +463,6 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       });
       if (isFaithful(member.sending, integrated, deleted)) {
         maker = member.principal.id;
-        claimOwn(member.own, integrated);
         // **한 클라이언트짜리 변경의, 그 연결이 만든 클라이언트의 글자만** 그 사람이 들여온 것으로 적는다
         if (integrated.size === 1) {
           for (const [client, range] of integrated) if (member.own.has(client)) recordDelivered(room.ledger.delivered, client, range, maker);
@@ -473,7 +475,8 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       }
     }
     room.sites = mentionSites(doc, scanMentions);
-    room.ledger = advance(room.ledger, room.sites, maker);
+    // 이 변경에서 새로 들어온 구간을 함께 넘긴다 — 옮김은 멘션이 통째로 생길 때만 따진다
+    room.ledger = advance(room.ledger, room.sites, maker, integrated);
   }
 
   private join(pageId: string, room: Room, socket: WebSocket, principal: Principal, name: string, sid: string, spaceId: string): void {

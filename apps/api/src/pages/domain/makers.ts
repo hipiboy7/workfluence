@@ -30,7 +30,14 @@ export type Delivered = Map<number, [number, number, string | null][]>;
  * 아니라 알림이 되지 않는다. 버전에 없는 이름은 방이 끝날 때까지 기억한다 — 잘라낸 뒤 저장이 끼고 그 뒤에 붙여
  * 넣어도 옮김이다. `seq`는 `advance`를 부를 때마다 하나씩 는다 — "저장을 시작한 뒤에 적힌 것"을 가리는 데 쓴다.
  */
-export type Ledger = { makers: MakerMap; delivered: Delivered; gone: Map<string, Map<string | null, number>>; seq: number };
+export type Ledger = {
+  makers: MakerMap;
+  delivered: Delivered;
+  gone: Map<string, Map<string | null, number>>;
+  seq: number;
+  /** 클라이언트 ID → 그것을 **만든** 사용자(그 사용자의 연결이 시계 0부터 들여왔다). 같은 사람이 다시 붙으면 이어받는다 */
+  owners: Map<number, string>;
+};
 /** 한 클라이언트의 시계 구간 `[from, to)` */
 export type ClockRange = { from: number; to: number };
 /** 한 연결이 보낸 변경에 든 것: 클라이언트별 조각 구간과 삭제 구간(`[clock, len]`) */
@@ -38,7 +45,7 @@ export type SentChange = { structs: ReadonlyMap<number, ClockRange>; deletes: Re
 /** 그 트랜잭션에서 지워진 조각. `parent`는 그 조각이 든 타입의 조각 ID(`client:clock`), 문서 최상위면 `null` */
 export type DeletedItem = { client: number; clock: number; len: number; parent: string | null };
 
-export const emptyLedger = (): Ledger => ({ makers: new Map(), delivered: new Map(), gone: new Map(), seq: 0 });
+export const emptyLedger = (): Ledger => ({ makers: new Map(), delivered: new Map(), gone: new Map(), seq: 0, owners: new Map() });
 
 const siteId = (s: Site): string => `${s.key}|${s.name}`;
 const splitId = (id: string): [string, string] => {
@@ -67,16 +74,30 @@ export function deliveredBy(delivered: Delivered, client: number, clock: number)
 }
 
 /**
- * **그 연결이 만든 클라이언트**를 기억한다 (P8 세 번째 코드 리뷰 3). **제자리에서 바꾼다.**
+ * **그 연결이 만든 클라이언트**를 알아본다 (P8 세 번째 코드 리뷰 3 · 네 번째 검토 1·5·6). `own`·`owners`를 제자리에서 바꾼다.
  *
- * 화면은 자기 클라이언트 ID 하나로만 글자를 만들고, 그 클라이언트의 첫 글자는 시계 0이다. 그래서 **한 클라이언트만,
- * 시계 0부터** 새로 들어온 변경은 그 연결이 만든 것이다. 그 밖의 들여옴 — 남의 클라이언트를 이어 보낸 것, 옛 문서를
- * 통째로 다시 보내 여러 클라이언트가 한꺼번에 들어온 것 — 은 그 연결이 쓴 글자로 치지 않는다.
+ * 화면은 자기 클라이언트 ID 하나로만 글자를 만들고, 그 클라이언트의 첫 글자는 시계 0이다. 그래서 그 연결이 **보낸 것 중
+ * 시계 0부터인 클라이언트가 하나뿐이고 그것이 이 변경에서 0부터 새로 들어왔으면** 그 연결이 만든 것이다. 그 밖의 것 —
+ * 남의 클라이언트를 이어 보낸 것, 옛 문서를 통째로 다시 보내 0부터인 것이 여럿인 것, 보내지 않았는데 묻어 들어온 것 —
+ * 은 그 연결의 것이 아니다.
+ *
+ * - **변경을 믿을 수 있는지와 따로 본다.** 첫 변경에 남이 미리 보내 둔 보류 조각이 묻으면 그 변경은 믿을 수 없지만,
+ *   그 연결이 0부터 보낸 클라이언트가 그 연결의 것인 것은 그대로다. 묻었다고 알아보지 않으면 **그 연결이 끝까지 모름**이 된다.
+ * - **이미 남이 만든 클라이언트는 차지하지 못한다**(`owners`). **같은 사람이 다시 붙으면 이어받는다** — 화면은 표시 이름이
+ *   바뀌면 같은 Y.Doc으로 연결만 다시 열고, 그때 그 클라이언트의 시계는 0이 아니다.
  */
-export function claimOwn(own: Set<number>, integrated: ReadonlyMap<number, ClockRange>): void {
-  if (integrated.size !== 1) return;
-  const [[client, range]] = [...integrated];
-  if (range.from === 0) own.add(client);
+export function claimOwn(own: Set<number>, owners: Map<number, string>, userId: string, sent: SentChange, integrated: ReadonlyMap<number, ClockRange>): void {
+  const fresh = [...integrated].filter(([client, got]) => got.from === 0 && sent.structs.get(client)?.from === 0);
+  if (fresh.length === 1) {
+    const [[client]] = fresh;
+    const maker = owners.get(client);
+    if (maker === undefined) owners.set(client, userId);
+    if (owners.get(client) === userId) own.add(client);
+    return;
+  }
+  if (fresh.length > 1) return;
+  // 0부터가 아니다 — 같은 사람이 이미 만든 클라이언트를 이어 보내는 것만 받는다
+  for (const [client] of integrated) if (owners.get(client) === userId && sent.structs.has(client)) own.add(client);
 }
 
 /** 겹치거나 붙은 구간을 합친다 */
@@ -141,8 +162,11 @@ export function isFaithful(sent: SentChange, integrated: ReadonlyMap<number, Clo
  *   — 잘라 붙인 뒤 다시 다듬어 옮김을 빠져나가는 길이다 (P8 네 번째 코드 리뷰 2).
  * - **새 자리는 `maker`**(그 변경을 보낸 사람, 믿을 수 없으면 `null`)다. 글자를 전부 그 사람이 들여왔고,
  *   같은 이름이 남의 것으로 사라진 적이 없을 때만이다. 아니면 모름.
+ * - **옮김은 멘션이 통째로 생길 때만 따진다**(`created` — 이 변경에서 새로 들어온 구간). 붙여 넣기·되돌리기·문단 재구성은
+ *   멘션을 한 번에 만든다. 한 글자씩 쳐서 만든 멘션은 옮긴 것이 아니다 — 정본에 있던 `@kim`을 지우고 저장한 뒤 같은 사람을
+ *   다시 쳐서 부르는 흔한 흐름이 모름이 되면 안 된다 (네 번째 검토 2). `created`를 주지 않으면 늘 따진다.
  */
-export function advance(ledger: Ledger, sites: readonly Site[], maker: string | null): Ledger {
+export function advance(ledger: Ledger, sites: readonly Site[], maker: string | null, created?: ReadonlyMap<number, ClockRange>): Ledger {
   const present = new Set(sites.map(siteId));
   const namesAt = new Map<string, string[]>();
   for (const s of sites) {
@@ -173,10 +197,14 @@ export function advance(ledger: Ledger, sites: readonly Site[], maker: string | 
     let who = maker;
     if (who !== null && !s.span.every(([c, k]) => deliveredBy(ledger.delivered, c, k) === who)) who = null;
     const lost = gone.get(s.name);
-    if (who !== null && lost && ![...lost.keys()].every((w) => w === who)) who = null;
+    const inOneGo = !created || s.span.every(([c, k]) => {
+      const got = created.get(c);
+      return !!got && got.from <= k && k < got.to;
+    });
+    if (who !== null && lost && inOneGo && ![...lost.keys()].every((w) => w === who)) who = null;
     makers.set(id, who);
   }
-  return { makers, delivered: ledger.delivered, gone, seq };
+  return { makers, delivered: ledger.delivered, gone, seq, owners: ledger.owners };
 }
 
 /**
@@ -191,7 +219,7 @@ export function settle(ledger: Ledger, saved: ReadonlySet<string>, upTo: number)
     const kept = saved.has(name) ? new Map([...whos].filter(([, at]) => at > upTo)) : new Map(whos);
     if (kept.size) gone.set(name, kept);
   }
-  return { makers: ledger.makers, delivered: ledger.delivered, gone, seq: ledger.seq };
+  return { makers: ledger.makers, delivered: ledger.delivered, gone, seq: ledger.seq, owners: ledger.owners };
 }
 
 /** 이름마다, **나온 곳마다** 만든 사람 (문서 순서). 표에 없는 자리는 모름이다 */
@@ -212,6 +240,7 @@ export function ledgerToJson(ledger: Ledger): {
   delivered: [number, number, number, string | null][];
   gone: [string, [string | null, number][]][];
   seq: number;
+  owners: [number, string][];
 } {
   return {
     makers: [...ledger.makers.entries()].map(([id, who]) => {
@@ -222,6 +251,7 @@ export function ledgerToJson(ledger: Ledger): {
     delivered: [...ledger.delivered.entries()].flatMap(([client, list]) => list.map(([from, to, who]) => [client, from, to, who] as [number, number, number, string | null])),
     gone: [...ledger.gone.entries()].map(([name, whos]) => [name, [...whos.entries()]]),
     seq: ledger.seq,
+    owners: [...ledger.owners.entries()],
   };
 }
 
@@ -242,7 +272,7 @@ const isWho = (x: unknown): x is string | null => x === null || (typeof x === 's
 export function ledgerFromJson(raw: unknown): Ledger {
   const out = emptyLedger();
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  const { makers, delivered, gone, seq } = raw as { makers?: unknown; delivered?: unknown; gone?: unknown; seq?: unknown };
+  const { makers, delivered, gone, seq, owners } = raw as { makers?: unknown; delivered?: unknown; gone?: unknown; seq?: unknown; owners?: unknown };
   for (const e of Array.isArray(makers) ? makers : []) {
     if (!Array.isArray(e) || e.length !== 4) continue;
     const [client, clock, name, who] = e as unknown[];
@@ -267,5 +297,11 @@ export function ledgerFromJson(raw: unknown): Ledger {
   }
   // **순번은 적힌 기록보다 작아지지 않는다** — 작아지면 그 뒤에 적히는 기록이 저장 한 번에 잊힌다
   out.seq = last;
+  for (const e of Array.isArray(owners) ? owners : []) {
+    if (!Array.isArray(e) || e.length !== 2) continue;
+    const [client, who] = e as unknown[];
+    if (!isClient(client) || typeof who !== 'string' || !UUID.test(who)) continue;
+    out.owners.set(client, who);
+  }
   return out;
 }

@@ -12,7 +12,8 @@ ALTER TABLE notifications ALTER COLUMN actor_id DROP NOT NULL;
 --
 -- `{"makers": [[<Yjs client>, <clock>, "<이름>", "<users.id>" | null], …],
 --   "delivered": [[<Yjs client>, <from>, <to>, "<users.id>" | null], …],
---   "gone": [["<이름>", [["<users.id>" | null, <순번>], …]], …], "seq": <순번>}`
+--   "gone": [["<이름>", [["<users.id>" | null, <순번>], …]], …], "seq": <순번>,
+--   "owners": [[<Yjs client>, "<users.id>"], …]}`
 -- 멘션 자리(`@` 글자의 ID + 이름)마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름과 그 순번.
 -- `null`은 모름이다.
 -- `state`와 **같은 행**에 둔다 — 둘은 수명이 같고, 방이 끝나 행이 지워질 때 함께 사라져야

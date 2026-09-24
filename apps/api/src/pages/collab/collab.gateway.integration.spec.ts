@@ -472,12 +472,22 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
     socket.emit('message', MSG(Y.encodeStateAsUpdate(doc)));
     return { doc, socket, uid };
   }
-  /** 방에서 받은 것을 반영하고, **자기 트랜잭션 하나**를 보낸다 */
+  /**
+   * 방에서 받은 것을 반영하고, **자기 트랜잭션 하나**를 보낸다.
+   *
+   * 보내는 것은 **그 로컬 트랜잭션의 `update` 이벤트**다 — 화면(`CollabEditor.tsx`의 `onDocUpdate`)과 같다.
+   * `encodeStateAsUpdate(doc, sv)`로 보내면 문서에 보류돼 있던 **남의 조각까지** 실려 화면과 다른 것을 시험하게 된다.
+   */
   function act(p: Peer, fn: (f: Y.XmlFragment) => void, into: RoomLike = room): void {
     Y.applyUpdate(p.doc, Y.encodeStateAsUpdate(into.doc), 'remote');
-    const sv = Y.encodeStateVector(p.doc);
+    let local: Uint8Array | null = null;
+    const onUpdate = (u: Uint8Array, origin: unknown): void => {
+      if (origin !== 'remote') local = u;
+    };
+    p.doc.on('update', onUpdate);
     p.doc.transact(() => fn(frag(p.doc)));
-    p.socket.emit('message', MSG(Y.encodeStateAsUpdate(p.doc, sv)));
+    p.doc.off('update', onUpdate);
+    if (local) p.socket.emit('message', MSG(local));
   }
   /** 한 글자씩 친다 — 치는 동안 `@coll`·`@colla`… 같은 중간 이름이 생겼다 사라진다 */
   function typeAt(p: Peer, which: (f: Y.XmlFragment) => Y.XmlText, at: number, s: string): void {
