@@ -94,7 +94,7 @@ describe('advance — 있던 자리와 사라진 자리', () => {
     expect(l.makers.get('2:0|kim')).toBe(X);
   });
 
-  describe('**옮김** — 사라진 이름이 다음 저장 전에 다시 생기면 (P8 세 번째 코드 리뷰 1)', () => {
+  describe('**옮김** — 사라진 이름이 다시 생기면 (P8 세 번째 코드 리뷰 1)', () => {
     it('**남의 멘션을 잘라 붙이면 모름** — 두 변경에 걸쳐도 (잘라내기 → 붙여 넣기)', () => {
       let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
       l = advance(l, [site(1, 0, 'kim')], U); // U가 부른다
@@ -121,7 +121,8 @@ describe('advance — 있던 자리와 사라진 자리', () => {
     it('**저장된 버전에 그 이름이 있으면 잊는다** — 다시 생겨도 새 멘션이 아니라 알림이 되지 않는다', () => {
       let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
       l = advance(l, [site(1, 0, 'kim')], U);
-      l = settle(advance(l, [], X), new Set(['kim']));
+      l = advance(l, [], X);
+      l = settle(l, new Set(['kim']), l.seq);
       l = advance(l, [site(2, 0, 'kim')], X);
       expect(l.makers.get('2:0|kim')).toBe(X);
     });
@@ -129,9 +130,52 @@ describe('advance — 있던 자리와 사라진 자리', () => {
     it('**저장된 버전에 그 이름이 없으면 잊지 않는다** — 잘라낸 뒤 저장이 끼고 그 뒤에 붙여 넣어도 모름', () => {
       let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
       l = advance(l, [site(1, 0, 'kim')], U);
-      l = settle(advance(l, [], X), new Set(['lee'])); // 잘라낸 상태로 저장됐다
+      l = advance(l, [], X);
+      l = settle(l, new Set(['lee']), l.seq); // 잘라낸 상태로 저장됐다
       l = advance(l, [site(2, 0, 'kim')], X);
       expect(l.makers.get('2:0|kim')).toBeNull();
+    });
+
+    it('**저장하는 사이에 생긴 기억은 그 저장이 지우지 않는다** — 저장을 시작할 때 뜬 것만 잊는다 (네 번째 코드 리뷰 1)', () => {
+      let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
+      l = advance(l, [site(1, 0, 'kim')], U);
+      const atStart = l.seq; // 저장 시작 — 버전에는 kim이 있다
+      l = advance(l, [], X); // 저장이 DB를 기다리는 사이 X가 잘라냈다
+      l = settle(l, new Set(['kim']), atStart);
+      expect([...l.gone.get('kim')!.keys()]).toEqual([U]);
+      l = advance(l, [site(2, 0, 'kim')], X); // (다음 저장에 kim이 없은 뒤) 붙여 넣는다
+      expect(l.makers.get('2:0|kim')).toBeNull();
+    });
+
+    it('**남이 내 멘션을 자라게 한 것은 옮김의 시작일 수 있다** — `@bob` → `@bobx`는 기억한다 (네 번째 코드 리뷰 2)', () => {
+      let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
+      l = advance(l, [site(1, 0, 'bob')], U);
+      l = advance(l, [site(1, 0, 'bobx')], X); // X가 x를 붙였다
+      expect([...l.gone.get('bob')!.keys()]).toEqual([U]);
+      // X가 그것을 잘라 붙이고 x를 지워 `@bob`을 되살린다 — 글자는 X의 것이지만 옮긴 것이다
+      l = advance(l, [site(2, 0, 'bob')], X);
+      expect(l.makers.get('2:0|bob')).toBeNull();
+    });
+
+    it('**같은 사람이 여러 번 사라지게 해도 한 번만 적는다** — 기억이 오타 수만큼 자라지 않는다 (네 번째 코드 리뷰 3)', () => {
+      let l = ledgerWith([1, 0, 50, U]);
+      for (let i = 0; i < 5; i++) {
+        l = advance(l, [site(1, i * 5, 'bob')], U);
+        l = advance(l, [], U);
+      }
+      expect([...l.gone.get('bob')!.keys()]).toEqual([U]);
+    });
+
+    it('**같은 사람이 저장하는 사이에 다시 사라지게 해도 잊지 않는다** — 순번으로 가린다', () => {
+      let l = ledgerWith([1, 0, 50, U], [2, 0, 10, X]);
+      l = advance(l, [site(1, 0, 'bob'), site(1, 10, 'bob')], U);
+      l = advance(l, [site(1, 10, 'bob')], U); // U가 앞의 @bob을 지웠다 — bob:U를 기억한다
+      const atStart = l.seq; // 저장 시작 (버전에는 뒤의 @bob이 있다)
+      l = advance(l, [], X); // 그 사이 X가 뒤의 @bob을 잘라냈다 — 또 bob:U
+      l = settle(l, new Set(['bob']), atStart);
+      expect(l.gone.has('bob')).toBe(true);
+      l = advance(l, [site(2, 0, 'bob')], X);
+      expect(l.makers.get('2:0|bob')).toBeNull();
     });
 
     it('다른 이름이 사라진 것은 상관없다', () => {
@@ -269,11 +313,13 @@ describe('직렬화 — `page_realtime.authors`', () => {
     expect(back.makers).toEqual(l.makers);
     expect(back.delivered).toEqual(l.delivered);
     expect(back.gone).toEqual(l.gone);
+    expect(back.seq).toBe(l.seq);
   });
 
-  it('JSON 모양은 `{makers, delivered, gone}`이다', () => {
-    const l = advance(ledgerWith([7, 3, 7, U]), [site(7, 3, 'kim')], U);
-    expect(ledgerToJson(l)).toEqual({ makers: [[7, 3, 'kim', U]], delivered: [[7, 3, 7, U]], gone: [] });
+  it('JSON 모양은 `{makers, delivered, gone, seq}`이다', () => {
+    let l = advance(ledgerWith([7, 3, 7, U]), [site(7, 3, 'kim')], U);
+    l = advance(l, [], U);
+    expect(ledgerToJson(l)).toEqual({ makers: [], delivered: [[7, 3, 7, U]], gone: [['kim', [[U, 2]]]], seq: 2 });
   });
 
   it('**모양이 맞지 않는 항목은 버린다** — 버린 자리·구간은 "모름"이 된다', () => {
@@ -292,17 +338,20 @@ describe('직렬화 — `page_realtime.authors`', () => {
         'x',
       ],
       delivered: [[7, 0, 3, U], [7, 3, 1, U], [7, -1, 3, U], [7, 0, 3, 'x'], 'x'],
-      gone: [['kim', [U, null]], ['Kim', [U]], ['lee', ['x']], 'x'],
+      gone: [['kim', [[U, 3], [null, 4]]], ['Kim', [[U, 1]]], ['lee', [['x', 1]]], ['park', [[U, -1]]], 'x'],
+      seq: 2,
     });
     expect(got.makers).toEqual(new Map<string, string | null>([['7:0|kim', U], ['8:0|lee', null]]));
     expect(got.delivered).toEqual(new Map([[7, [[0, 3, U]]]]));
-    expect(got.gone).toEqual(new Map([['kim', [U, null]]]));
+    expect(got.gone).toEqual(new Map([['kim', new Map<string | null, number>([[U, 3], [null, 4]])]]));
+    // 순번은 적힌 기록보다 작아지지 않는다 — 작아지면 그 뒤의 기록이 저장 한 번에 잊힌다
+    expect(got.seq).toBe(4);
   });
 
   it('객체가 아니거나 다른 모양이면 빈 장부다', () => {
     for (const raw of [null, [U], 'x', undefined, {}, { makers: 'x' }, { clients: {}, struck: {} }]) {
       const l = ledgerFromJson(raw);
-      expect([l.makers.size, l.delivered.size, l.gone.size]).toEqual([0, 0, 0]);
+      expect([l.makers.size, l.delivered.size, l.gone.size, l.seq]).toEqual([0, 0, 0, 0]);
     }
   });
 });

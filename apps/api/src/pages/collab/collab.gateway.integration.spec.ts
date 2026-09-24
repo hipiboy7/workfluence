@@ -665,33 +665,36 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
 
     it('**보류된 위조 조각이 주인의 변경에 묻어 들어와도 주인 이름으로 나가지 않는다** — 모름 + 경고 (P8 자체 점검 1)', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn');
-      const u = await enter(userId);
-      // 화면처럼 둔다 — U의 문서는 **자기 변경만** 보내고, 이 뒤로는 방에서 받지 않는다
-      const sendOwn = (fn: (f: Y.XmlFragment) => void): void => {
-        const sv = Y.encodeStateVector(u.doc);
-        u.doc.transact(() => fn(frag(u.doc)));
-        u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, sv)));
-      };
-      act(u, (f) => newPara(f, '안녕'));
+      try {
+        const u = await enter(userId);
+        // 화면처럼 둔다 — U의 문서는 **자기 변경만** 보내고, 이 뒤로는 방에서 받지 않는다
+        const sendOwn = (fn: (f: Y.XmlFragment) => void): void => {
+          const sv = Y.encodeStateVector(u.doc);
+          u.doc.transact(() => fn(frag(u.doc)));
+          u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, sv)));
+        };
+        act(u, (f) => newPara(f, '안녕'));
 
-      // X가 U의 ID로 **앞선 시계의** 조각을 만든다: 앞 5글자는 숨기고 뒤의 멘션만 보낸다 → 서버가 보류한다
-      const x = await enter(otherId);
-      const forged = new Y.Doc();
-      Y.applyUpdate(forged, Y.encodeStateAsUpdate(u.doc));
-      forged.clientID = u.doc.clientID;
-      last(frag(forged)).insert(2, 'xxxxx');
-      const hidden = Y.encodeStateVector(forged);
-      last(frag(forged)).insert(7, ' @collab-c 확인');
-      x.socket.emit('message', MSG(Y.encodeStateAsUpdate(forged, hidden)));
-      expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('@collab-c');
+        // X가 U의 ID로 **앞선 시계의** 조각을 만든다: 앞 5글자는 숨기고 뒤의 멘션만 보낸다 → 서버가 보류한다
+        const x = await enter(otherId);
+        const forged = new Y.Doc();
+        Y.applyUpdate(forged, Y.encodeStateAsUpdate(u.doc));
+        forged.clientID = u.doc.clientID;
+        last(frag(forged)).insert(2, 'xxxxx');
+        const hidden = Y.encodeStateVector(forged);
+        last(frag(forged)).insert(7, ' @collab-c 확인');
+        x.socket.emit('message', MSG(Y.encodeStateAsUpdate(forged, hidden)));
+        expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('@collab-c');
 
-      // U가 평범하게 다섯 글자를 친다 — 숨긴 구간과 시계가 같아 위조가 여기 묻어 들어온다
-      sendOwn((f) => last(f).insert(2, '하세요요요'));
-      expect(JSON.stringify(docFromYDoc(room.doc))).toContain('@collab-c');
+        // U가 평범하게 다섯 글자를 친다 — 숨긴 구간과 시계가 같아 위조가 여기 묻어 들어온다
+        sendOwn((f) => last(f).insert(2, '하세요요요'));
+        expect(JSON.stringify(docFromYDoc(room.doc))).toContain('@collab-c');
 
-      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
-      expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringContaining(`user=${userId}`));
-      warn.mockRestore();
+        expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
+        expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringContaining(`user=${userId}`));
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('**보류된 위조 삭제가 주인의 변경을 지워도 주인 이름으로 나가지 않는다** — 모름 (P8 두 번째 검토 1)', async () => {
@@ -736,6 +739,20 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
     });
   });
 
+  it('**적용한 뒤 다른 관찰자가 던져도 퍼뜨린다** — 받은 쪽은 적용됐는지를 예외로 판단하지 않는다 (네 번째 코드 리뷰 5)', async () => {
+    const u = await enter(userId);
+    const x = await enter(otherId);
+    let once = true;
+    room.doc.on('afterTransaction', () => {
+      if (!once) return;
+      once = false;
+      throw new Error('다른 관찰자의 실수');
+    });
+    const before = x.socket.sent.length;
+    act(u, (f) => newPara(f, '안녕'));
+    expect(x.socket.sent.length).toBeGreaterThan(before);
+  });
+
   it('**편집기가 만들지 않는 노드를 넣어도 방이 멈추지 않는다** — 중계도, 저장도 (P8 세 번째 검토 2)', async () => {
     const u = await enter(userId);
     const x = await enter(otherId);
@@ -755,33 +772,39 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
 
     it('X가 치는 동안 U가 그 문단을 지운다 — X의 새 글자가 딸려 지워진다', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn');
-      const u = await enter(userId);
-      const x = await enter(otherId);
-      act(u, (f) => newPara(f, '가나'));
-      act(x, (f) => last(f).insert(2, ' @collab-c'));
-      // U는 X의 글자를 받기 전에 문단을 지웠다
-      const sv = Y.encodeStateVector(u.doc);
-      u.doc.transact(() => frag(u.doc).delete(frag(u.doc).length - 1, 1));
-      u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, sv)));
-      expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('가나');
-      expect(forgeryWarnings(warn)).toEqual([]);
-      warn.mockRestore();
+      try {
+        const u = await enter(userId);
+        const x = await enter(otherId);
+        act(u, (f) => newPara(f, '가나'));
+        act(x, (f) => last(f).insert(2, ' @collab-c'));
+        // U는 X의 글자를 받기 전에 문단을 지웠다
+        const sv = Y.encodeStateVector(u.doc);
+        u.doc.transact(() => frag(u.doc).delete(frag(u.doc).length - 1, 1));
+        u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, sv)));
+        expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('가나');
+        expect(forgeryWarnings(warn)).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('둘이 같은 속성을 동시에 바꾼다 — 진 쪽 값이 들어오자마자 지워진다', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn');
-      const u = await enter(userId);
-      const x = await enter(otherId);
-      act(u, (f) => newPara(f, '제목', 'heading'));
-      Y.applyUpdate(x.doc, Y.encodeStateAsUpdate(room.doc), 'remote');
-      const svU = Y.encodeStateVector(u.doc);
-      const svX = Y.encodeStateVector(x.doc);
-      (frag(u.doc).get(frag(u.doc).length - 1) as Y.XmlElement).setAttribute('level', 3 as never);
-      (frag(x.doc).get(frag(x.doc).length - 1) as Y.XmlElement).setAttribute('level', 1 as never);
-      x.socket.emit('message', MSG(Y.encodeStateAsUpdate(x.doc, svX)));
-      u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, svU)));
-      expect(forgeryWarnings(warn)).toEqual([]);
-      warn.mockRestore();
+      try {
+        const u = await enter(userId);
+        const x = await enter(otherId);
+        act(u, (f) => newPara(f, '제목', 'heading'));
+        Y.applyUpdate(x.doc, Y.encodeStateAsUpdate(room.doc), 'remote');
+        const svU = Y.encodeStateVector(u.doc);
+        const svX = Y.encodeStateVector(x.doc);
+        (frag(u.doc).get(frag(u.doc).length - 1) as Y.XmlElement).setAttribute('level', 3 as never);
+        (frag(x.doc).get(frag(x.doc).length - 1) as Y.XmlElement).setAttribute('level', 1 as never);
+        x.socket.emit('message', MSG(Y.encodeStateAsUpdate(x.doc, svX)));
+        u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, svU)));
+        expect(forgeryWarnings(warn)).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 
