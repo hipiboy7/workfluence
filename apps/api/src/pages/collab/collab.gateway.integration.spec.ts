@@ -567,13 +567,13 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
     });
   });
 
-  describe('남이 손대 멘션이 생겼다 — **원래 쓴 사람의 이름으로 나가지 않는다** (P8 코드 리뷰 1 · 보안 검토 1)', () => {
-    it('남이 글자를 지워 새 이름을 만들면 **지운 사람이 만든 것**이다 (`@collab-cx` → `@collab-c`)', async () => {
+  describe('남이 손대 멘션이 생겼다 — **누구의 이름으로도 나가지 않는다** (P8 코드 리뷰 1 · 보안 검토 1 · 세 번째 코드 리뷰 2)', () => {
+    it('남이 글자를 지워 새 이름을 만들면 모름 (`@collab-cx` → `@collab-c`) — 글자는 U가, 변경은 X가 했다', async () => {
       const u = await enter(userId);
       const x = await enter(otherId);
       act(u, (f) => newPara(f, '@collab-cx 확인'));
       act(x, (f) => last(f).delete(9, 1));
-      expect(await saveAndCarol()).toEqual([{ actor_id: otherId }]);
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
     it('남이 앞글자를 지워 멘션으로 만들어도 마찬가지다 (`x@collab-c` → `@collab-c`)', async () => {
@@ -581,7 +581,7 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
       const x = await enter(otherId);
       act(u, (f) => newPara(f, 'hi x@collab-c'));
       act(x, (f) => last(f).delete(3, 1));
-      expect(await saveAndCarol()).toEqual([{ actor_id: otherId }]);
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
     it('남이 경계에 공백을 끼워도 (`x@collab-c` → `x @collab-c`)', async () => {
@@ -589,7 +589,7 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
       const x = await enter(otherId);
       act(u, (f) => newPara(f, 'x@collab-c'));
       act(x, (f) => last(f).insert(1, ' '));
-      expect(await saveAndCarol()).toEqual([{ actor_id: otherId }]);
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
     it('남이 이름을 갈라도 (`@collab-clee` → `@collab-c lee`)', async () => {
@@ -597,15 +597,33 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
       const x = await enter(otherId);
       act(u, (f) => newPara(f, '@collab-clee'));
       act(x, (f) => last(f).insert(9, ' '));
-      expect(await saveAndCarol()).toEqual([{ actor_id: otherId }]);
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
-    it('둘이 나눠 쳤으면 **마지막 글자로 그 이름을 완성한 사람**이다 (A가 `@collab-`, B가 `c`)', async () => {
+    it('**남의 글을 내 입력이 멘션으로 완성해도 모름** — X가 U의 커서 뒤에 `hello@collab-c`, U가 공백 하나 (세 번째 코드 리뷰 2)', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      act(u, (f) => newPara(f, '메모: '));
+      act(x, (f) => last(f).insert(4, 'hello@collab-c'));
+      act(u, (f) => last(f).insert(9, ' ')); // `hello @collab-c`
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
+    });
+
+    it('**남의 멘션을 잘라 붙이면 모름** — 두 변경에 걸쳐도 (세 번째 코드 리뷰 1)', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      act(u, (f) => newPara(f, '@collab-c 확인'));
+      act(x, (f) => f.delete(f.length - 1, 1)); // 잘라내기
+      act(x, (f) => newPara(f, '@collab-c 확인')); // 붙여 넣기 — 글자는 X가 새로 들여왔다
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
+    });
+
+    it('둘이 나눠 쳤으면 모름 (A가 `@collab-`, B가 `c`)', async () => {
       const u = await enter(userId);
       const x = await enter(otherId);
       act(u, (f) => newPara(f, '@collab-'));
       act(x, (f) => last(f).insert(8, 'c'));
-      expect(await saveAndCarol()).toEqual([{ actor_id: otherId }]);
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
     it('**남의 문단을 제목으로 바꾸면 모름** — 옮긴 사람이 부른 것이 아니고, 원래 사람 이름을 옮겨 붙이지도 않는다 (P8 두 번째 검토 5)', async () => {
@@ -621,7 +639,7 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
   });
 
   describe('조작한 클라이언트 — 남의 이름을 붙이지 못한다 (FR-904)', () => {
-    it('**남의 클라이언트 ID로 보내도 보낸 사람이다** — 이름은 글자의 ID가 아니라 연결이 정한다', async () => {
+    it('**남의 클라이언트 ID로 보내면 모름** — 그 연결이 처음부터 만든 클라이언트가 아니다', async () => {
       const u = await enter(userId);
       act(u, (f) => newPara(f, '안녕'));
       const x = await enter(otherId);
@@ -631,7 +649,7 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
       const sv = Y.encodeStateVector(forged);
       newPara(frag(forged), '@collab-c 이것 좀');
       x.socket.emit('message', MSG(Y.encodeStateAsUpdate(forged, sv)));
-      expect(await saveAndCarol()).toEqual([{ actor_id: otherId }]);
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
     it('**보류된 위조 조각이 주인의 변경에 묻어 들어와도 주인 이름으로 나가지 않는다** — 모름 + 경고 (P8 자체 점검 1)', async () => {
@@ -690,7 +708,7 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
       expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
-    it('옛 문서를 통째로 다시 보내면 **보낸 사람**이 만든 것이다 — 남의 이름이 붙지는 않는다 (P8 자체 점검 2)', async () => {
+    it('**옛 문서를 통째로 다시 보내면 모름** — 남의 글자를 보낸 사람 것으로 치지 않는다 (P8 자체 점검 2 · 세 번째 코드 리뷰 3)', async () => {
       const old = new Y.Doc();
       Y.applyUpdate(old, Y.encodeStateAsUpdate(yDocFromDoc(doc('처음'))));
       const aOld = new Y.Doc();
@@ -703,7 +721,43 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
       const x = await enter(otherId);
       x.socket.emit('message', MSG(Y.encodeStateAsUpdate(bOld)));
       expect(JSON.stringify(docFromYDoc(room.doc))).toContain('@collab-c');
-      expect(await saveAndCarol()).toEqual([{ actor_id: otherId }]);
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
+    });
+  });
+
+  describe('**동시 편집은 위조가 아니다** — Yjs가 스스로 지우는 것 (세 번째 코드 리뷰 4)', () => {
+    const forgeryWarnings = (spy: ReturnType<typeof vi.spyOn>): string[] =>
+      spy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('보낸 것보다'));
+
+    it('X가 치는 동안 U가 그 문단을 지운다 — X의 새 글자가 딸려 지워진다', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn');
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      act(u, (f) => newPara(f, '가나'));
+      act(x, (f) => last(f).insert(2, ' @collab-c'));
+      // U는 X의 글자를 받기 전에 문단을 지웠다
+      const sv = Y.encodeStateVector(u.doc);
+      u.doc.transact(() => frag(u.doc).delete(frag(u.doc).length - 1, 1));
+      u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, sv)));
+      expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('가나');
+      expect(forgeryWarnings(warn)).toEqual([]);
+      warn.mockRestore();
+    });
+
+    it('둘이 같은 속성을 동시에 바꾼다 — 진 쪽 값이 들어오자마자 지워진다', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn');
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      act(u, (f) => newPara(f, '제목', 'heading'));
+      Y.applyUpdate(x.doc, Y.encodeStateAsUpdate(room.doc), 'remote');
+      const svU = Y.encodeStateVector(u.doc);
+      const svX = Y.encodeStateVector(x.doc);
+      (frag(u.doc).get(frag(u.doc).length - 1) as Y.XmlElement).setAttribute('level', 3 as never);
+      (frag(x.doc).get(frag(x.doc).length - 1) as Y.XmlElement).setAttribute('level', 1 as never);
+      x.socket.emit('message', MSG(Y.encodeStateAsUpdate(x.doc, svX)));
+      u.socket.emit('message', MSG(Y.encodeStateAsUpdate(u.doc, svU)));
+      expect(forgeryWarnings(warn)).toEqual([]);
+      warn.mockRestore();
     });
   });
 

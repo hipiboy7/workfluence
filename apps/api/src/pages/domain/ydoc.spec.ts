@@ -231,6 +231,9 @@ describe('mentionSites — 멘션 자리', () => {
     const [before] = sites(ydoc);
     expect(before.name).toBe('kim');
     expect(before.key).toMatch(new RegExp(`^${ydoc.clientID}:\\d+$`));
+    // 자리의 글자들 — `@`부터 이름 끝까지. 첫 글자가 곧 자리다
+    expect(before.span).toHaveLength(4);
+    expect(`${before.span[0][0]}:${before.span[0][1]}`).toBe(before.key);
     firstText(ydoc).insert(0, '앞에 넣은 글 ');
     expect(sites(ydoc)).toEqual([before]);
   });
