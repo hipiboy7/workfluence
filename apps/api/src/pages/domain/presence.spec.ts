@@ -111,11 +111,11 @@ describe('거르기 — 남의 몫은 빼고, 이름은 서버가 정한다 (D.5
 });
 
 /**
- * 상태 거르기 — **화면이 만드는 모양만 남긴다** (P9 코드 리뷰 6 · 보안 검토).
+ * 상태 거르기 — **화면이 만드는 모양만 남긴다** (P9 코드 리뷰 6 · 보안 검토 3).
  * 캐럿(TipTap CollaborationCaret)은 `user.color`를 `style`에 그대로 넣고, 커서(y-prosemirror)는 `cursor`를 상대 위치로 읽는다.
  * 조작한 클라이언트가 그 값으로 동료의 화면에 CSS를 넣거나 커서 그리기를 깨뜨리지 못하게, 알려진 모양이 아니면 그 필드를 뺀다.
  */
-describe('상태 거르기 — 화면이 만드는 모양만 (P9 코드 리뷰 6·보안 검토)', () => {
+describe('상태 거르기 — 화면이 만드는 모양만 (P9 코드 리뷰 6·보안 검토 3)', () => {
   const entry = (client: number, state: PresenceEntry['state']): PresenceEntry => ({ client, clock: 1, state });
   const clean = (state: Record<string, unknown>): Record<string, unknown> | null => screenPresence([entry(5, state)], U, new Map([[5, U]]), 'U').keep[0].state;
 
@@ -140,7 +140,7 @@ describe('상태 거르기 — 화면이 만드는 모양만 (P9 코드 리뷰 6
   });
 });
 
-describe('묶기 상한 — 한 항목짜리 프레임의 살아 있는 몫만, 연결마다 몇 개까지 (P9 코드 리뷰 5·두 번째 검토 3)', () => {
+describe('묶기 상한 — 한 항목짜리 프레임의 살아 있는 몫만, 연결마다 몇 개까지 (P9 코드 리뷰 5·자체 점검 3)', () => {
   const entry = (client: number, state: PresenceEntry['state']): PresenceEntry => ({ client, clock: 1, state });
 
   it('주인 없는 몫이 떠남(null)으로 오면 묶지 않고 뺀다 — 정상 화면은 자기 ID를 먼저 알린 뒤에 떠난다', () => {

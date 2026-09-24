@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 8까지 구현 완료** (2026-09-24). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 9까지 구현 완료** (2026-09-24). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -64,7 +64,7 @@ workfluence/
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
 │   │   │   ├── pages/            [P2] 페이지·버전 / [P6] collab/(WebSocket 게이트웨이) ·
 │   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts / [P8] domain/makers.ts /
-│   │   │                     [P9] domain/{gate,presence}.ts (실시간 편집의 관문)
+│   │   │   │                     [P9] domain/{gate,presence}.ts (실시간 편집의 관문)
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
@@ -86,7 +86,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P8]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P9]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -180,9 +180,9 @@ shared  ←  api(config → db → common → 기능 모듈)
 ## 5. 문서(본문) 계약
 
 - 저장 형식은 **ProseMirror JSON**. 서버는 HTML을 받지 않는다.
-- `shared/document.ts`의 허용 목록(노드·마크·속성) 밖이면 400. 링크는 `http(s)`·내부 경로·앵커만 허용한다.
+- `shared/document.ts`의 허용 목록(노드·속성·마크·자식·노드별 마크)과 값 규칙(링크 주소·제목 단계·표 칸 정렬·열 너비), 깊이·노드 수 한도 밖이면 400. 링크는 `http(s)`·내부 경로·앵커만 허용한다.
 - **편집기 스키마와 서버 허용 목록은 같다** — `apps/web/src/components/extensions.spec.ts`가 노드·속성·마크·자식·노드별 마크를 양쪽으로 대조한다(P9 D.7). 편집기 확장을 추가할 때 허용 목록도 같은 커밋에서 넓히고, 문서 스키마 버전을 올린다. 편집기도 서버와 **같은 식**으로만 링크를 만든다(이메일은 글자로 남는다).
-- **실시간 편집의 변경도 적용하기 전에 같은 목록으로 본다** (`apps/api/src/pages/domain/gate.ts`). 어긋나면 받지 않고 그 연결을 끊는다 — REST의 400에 해당한다. 서버에서 보류될 조각과 남의 클라이언트 ID로 쓴 조각도 받지 않는다 (P9 D.3·D.4).
+- **실시간 편집의 변경도 적용하기 전에 같은 목록으로 본다** (`apps/api/src/pages/domain/gate.ts`). 어긋나면 받지 않고 그 연결을 끊는다 — REST의 400에 해당한다. 서버에서 보류될 조각과 남의 클라이언트 ID로 쓴 조각도 받지 않는다 (P9 D.3·D.4). 노드 수 한도는 문 앞에서 세지 않는다 — 넘기면 자동 저장이 멈추고 서버가 방의 화면에 그 까닭을 알린다 (P9 D.9).
 - 검색용 평문은 서버가 JSON에서 추출한다. 클라이언트가 보낸 텍스트를 믿지 않는다.
 
 ## 6. 교체 가능성 (DIP 경계)

@@ -81,7 +81,7 @@ export function integrable(structs: readonly Pending[], known: Map<number, numbe
     next.set(client, i);
     if (moved) wake(client);
   }
-  return [...queues].flatMap(([client, q]) => q.slice(next.get(client) ?? 0));
+  return [...queues].flatMap(([client, q]) => q.slice(next.get(client)!));
 }
 
 /** 필요한 시계가 작은 것부터 꺼내는 대기열 (키 = 기다리는 시계, 값 = 기다리는 클라이언트) */
@@ -152,11 +152,12 @@ type Place =
 /** `holder` — 부모 타입을 담은 조각. 최상위면 `null`. 깊이를 셀 때 이것을 따라 올라간다 */
 type Located = { place: Place; parentSub: string | null; holder: Y.Item | null };
 
-/** 편집기가 만들지 않는 타입의 이름. **상속 순서대로** 본다 — XmlHook은 Map을, XmlText는 Text를, XmlElement는 XmlFragment를 잇는다 */
+/**
+ * 편집기가 만들지 않는 타입의 이름. **상속 순서대로** 본다 — XmlHook은 Map을 잇는다. 편집기가 만드는 둘(`XmlElement`·`XmlText`,
+ * 각각 XmlFragment·Text를 잇는다)은 부르는 쪽이 먼저 거른다
+ */
 function typeName(t: unknown): string {
   if (t instanceof Y.XmlHook) return 'XmlHook';
-  if (t instanceof Y.XmlElement) return 'XmlElement';
-  if (t instanceof Y.XmlText) return 'XmlText';
   if (t instanceof Y.XmlFragment) return 'XmlFragment';
   if (t instanceof Y.Text) return 'Text';
   if (t instanceof Y.Map) return 'Map';
@@ -164,16 +165,14 @@ function typeName(t: unknown): string {
   return 'unknown';
 }
 
-/** 편집기가 만들지 않는 내용이면 그 이름, 아니면 `null` */
+/** 편집기가 만들지 않는 내용이면 그 이름, 아니면 `null`. 지운 조각(`ContentDeleted`)은 부르는 쪽이 먼저 거른다 */
 function strangeContent(c: Y.Item['content']): string | null {
+  if (c instanceof Y.ContentString || c instanceof Y.ContentFormat || c instanceof Y.ContentAny || c instanceof Y.ContentType) return null;
   if (c instanceof Y.ContentEmbed) return 'Embed';
   if (c instanceof Y.ContentBinary) return 'Binary';
-  if (c instanceof Y.ContentJSON) return 'JSON';
   if (c instanceof Y.ContentDoc) return 'Doc';
-  if (c instanceof Y.ContentString || c instanceof Y.ContentFormat || c instanceof Y.ContentAny || c instanceof Y.ContentType || c instanceof Y.ContentDeleted) {
-    return null;
-  }
-  return 'unknown';
+  // 남은 것은 옛 인코딩의 `ContentJSON`이다 (Yjs 13의 내용은 이 아홉이 전부다)
+  return 'JSON';
 }
 
 /** 서버 문서나 변경 안에서 조각을 찾는다. 완결 규칙을 지난 뒤에만 부른다 — 그때는 이웃·부모가 반드시 있다 */
@@ -200,7 +199,7 @@ class Lookup {
 
   /**
    * 조각이 나타내는 노드의 **깊이** — 정본 JSON에서의 깊이와 같다(문서 0, 맨 위 블록 1, 그 안 2 …). 부모를 담은 조각을 따라
-   * 최상위까지 올라간다. 한도를 넘으면 더 세지 않는다 (P9 코드 리뷰 3·두 번째 검토 1)
+   * 최상위까지 올라간다. 한도를 넘으면 더 세지 않는다 (P9 코드 리뷰 3·자체 점검 1)
    */
   depthOf(item: Y.Item): number {
     let depth = 0;
@@ -355,17 +354,18 @@ function structureProblem(item: Y.Item, lookup: Lookup): string | null {
 function blockCount(encoded: Uint8Array): number {
   let n = 0;
   let mult = 1;
-  for (let i = 0; i < encoded.length; i++) {
-    n += (encoded[i] & 0x7f) * mult;
-    if (encoded[i] < 0x80) return n;
+  // 읽을 수 있었던 변경에만 부른다 — 숫자를 끝내는 바이트(0x80 미만)가 반드시 있다
+  for (const b of encoded) {
+    n += (b & 0x7f) * mult;
+    if (b < 0x80) break;
     mult *= 128;
   }
-  return -1;
+  return n;
 }
 
 /**
  * **클라이언트마다 한 덩어리인가.** `Y.decodeUpdate`는 덩어리를 전부 돌려주지만 `Y.applyUpdate`는 같은 클라이언트의 **마지막
- * 덩어리만** 들인다 — 되풀이된 변경이면 관문이 본 조각과 Yjs가 들이는 조각이 달라진다 (P9 보안 검토). 정상 인코더는 클라이언트마다
+ * 덩어리만** 들인다 — 되풀이된 변경이면 관문이 본 조각과 Yjs가 들이는 조각이 달라진다 (P9 보안 검토 2). 정상 인코더는 클라이언트마다
  * 한 덩어리로 쓴다. 떨어져 다시 나오는 것은 풀어 낸 조각만으로 알고, 붙어 되풀이된 것은 인코딩의 덩어리 수와 대조해 안다.
  */
 function repeatsClient(decoded: Decoded, encoded?: Uint8Array): boolean {
@@ -414,7 +414,7 @@ export function inspectUpdate(decoded: Decoded, doc: Y.Doc, sender: string, owne
   if (integrable(pending, known).length) return { ok: false, rule: 'complete', reason: '서버에서 보류될 조각' };
   for (const [client, ranges] of decoded.ds.clients) {
     stateOf(client);
-    const upTo = known.get(client) ?? 0;
+    const upTo = known.get(client)!;
     if (ranges.some((r) => r.clock + r.len > upTo)) return { ok: false, rule: 'complete', reason: '아직 없는 글자를 지우는 삭제' };
   }
 

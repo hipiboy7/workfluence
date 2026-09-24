@@ -372,7 +372,7 @@ describe('지워진 부모 — Yjs가 버리는 조각은 보지 않는다 (P9 �
   });
 });
 
-describe('깊이 — 정본 검증의 한도를 문 앞에서 본다 (P9 코드 리뷰 3·두 번째 검토 1)', () => {
+describe('깊이 — 정본 검증의 한도를 문 앞에서 본다 (P9 코드 리뷰 3·자체 점검 1)', () => {
   /** `n`겹 인용 안의 문단 하나와 그 글자 */
   const nested = (n: number): Y.XmlElement => {
     let inner: Y.XmlElement = para('깊은 곳');
@@ -406,7 +406,7 @@ describe('깊이 — 정본 검증의 한도를 문 앞에서 본다 (P9 코드 
   });
 });
 
-describe('같은 클라이언트가 되풀이된 변경 — 관문이 보는 것과 Yjs가 들이는 것이 달라진다 (P9 보안 검토)', () => {
+describe('같은 클라이언트가 되풀이된 변경 — 관문이 보는 것과 Yjs가 들이는 것이 달라진다 (P9 보안 검토 2)', () => {
   it('한 클라이언트의 조각이 두 덩어리로 나뉘어 오면 받지 않는다 — 정상 인코더는 클라이언트마다 한 덩어리로 쓴다', () => {
     const srv = server();
     const s = screen(srv);
@@ -446,6 +446,197 @@ describe('들이는 순서의 흉내는 클라이언트가 많아도 빠르다 (
     const started = performance.now();
     expect(integrable(structs, new Map())).toEqual([]);
     expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe('들이는 순서 — 여럿이 한 클라이언트의 서로 다른 시계를 기다린다 (D.3)', () => {
+  it('시계가 작은 것부터 풀리고, 끝내 모자란 것은 남긴다', () => {
+    // 기다리는 쪽이 먼저 줄을 선다 — 클라이언트 1의 조각(시계 0~9)은 맨 나중에 들인다
+    const waits = [7, 2, 9, 4, 0, 5, 12, 3];
+    const structs = [
+      ...Array.from({ length: 10 }, (_, i) => ({ client: 1, clock: i, length: 1, deps: [] })),
+      ...waits.map((c, i) => ({ client: 100 + i, clock: 0, length: 1, deps: [{ client: 1, clock: c }] })),
+    ];
+    const known = new Map<number, number>();
+    const left = integrable(structs, known);
+    expect(left.map((s) => s.client)).toEqual([106]); // 시계 12를 기다렸다 — 클라이언트 1은 10까지뿐이다
+    expect(known.get(1)).toBe(10);
+    expect(waits.map((_, i) => known.get(100 + i) ?? 0)).toEqual(waits.map((c) => (c < 10 ? 1 : 0)));
+  });
+});
+
+/**
+ * 드문 모양 — **어떤 순서로 와도**, **Phase 9 전에 남은 상태 위에서도** 편집기가 만들지 않는 것은 받지 않는다 (D.2, D.8).
+ *
+ * 합친 변경은 클라이언트 번호가 큰 쪽부터 적힌다(`Y.mergeUpdates`). 그래서 번호가 큰 클라이언트가 번호가 작은 클라이언트의
+ * 이상한 타입 **안에** 쓰면, 관문은 그 타입보다 안의 조각을 먼저 본다 — 자리를 그 타입으로 찾아야 한다.
+ */
+describe('드문 모양 — 순서가 뒤집혀도, 옛 상태 위에서도', () => {
+  /** 클라이언트 번호를 정한 화면 */
+  const screenAs = (from: Y.Doc, clientID: number): Y.Doc => {
+    const d = screen(from);
+    d.clientID = clientID;
+    return d;
+  };
+  /** 두 화면의 변경을 하나로 — 번호가 큰 쪽이 앞에 적힌다 */
+  const twoClients = (srv: Y.Doc, outer: (f: Y.XmlFragment) => void, inner: (f: Y.XmlFragment) => void): Uint8Array => {
+    const a = screenAs(srv, 5);
+    const ua = change(a, outer);
+    const b = screenAs(a, 9);
+    const ub = change(b, inner);
+    return Y.mergeUpdates([ua, ub]);
+  };
+  /** 편집기로는 만들 수 없는 내용을 조각에 끼운다 — 인코더는 조각의 내용을 그대로 쓴다 */
+  const forged = (make: (d: Y.Doc) => Y.Item, content: Y.Item['content']): { srv: Y.Doc; update: Uint8Array } => {
+    const srv = server();
+    const s = screen(srv);
+    const sv = Y.encodeStateVector(s);
+    let item: Y.Item | null = null;
+    s.transact(() => {
+      item = make(s);
+    });
+    item!.content = content;
+    return { srv, update: Y.encodeStateAsUpdate(s, sv) };
+  };
+  /** 문단에 목록 자식으로 값 하나를 넣고 그 조각을 돌려준다 */
+  const valueInParagraph = (d: Y.Doc): Y.Item => {
+    const p = d.getXmlFragment('default').get(0) as Y.XmlElement;
+    p.insert(0, ['x' as never]);
+    return p._start!;
+  };
+
+  it.each<[string, () => unknown, string]>([
+    ['Y.Array', () => new Y.Array(), 'Array'],
+    ['Y.XmlFragment', () => new Y.XmlFragment(), 'XmlFragment'],
+  ])('문단 안의 %s는 받지 않는다', (_label, make, name) => {
+    const srv = server();
+    const s = screen(srv);
+    expect(refused(judge(srv, change(s, (f) => (f.get(0) as Y.XmlElement).insert(0, [make() as never])))).reason).toBe(`편집기가 만들지 않는 타입 '${name}'`);
+  });
+
+  it('남의 이상한 타입 **안에** 쓴 것이 먼저 와도 받지 않는다 — Map에 속성, XmlHook에 속성', () => {
+    const srv = server();
+    const map = twoClients(
+      srv,
+      (f) => (f.get(0) as Y.XmlElement).insert(0, [new Y.Map() as never]),
+      (f) => ((f.get(0) as Y.XmlElement).get(0) as unknown as Y.Map<number>).set('k', 1),
+    );
+    expect(refused(judge(srv, map)).reason).toBe("'Map'에 속성");
+    const hook = twoClients(
+      srv,
+      (f) => f.insert(0, [new Y.XmlHook('h') as never]),
+      (f) => (f.get(0) as unknown as Y.XmlHook).set('k', 1 as never),
+    );
+    expect(refused(judge(srv, hook)).reason).toBe("'XmlHook'에 속성");
+  });
+
+  it('맨 위에 놓인 남의 글자 조각 안에 서식을 먼저 보내도 받지 않는다 — 글자를 담은 노드가 없다', () => {
+    const srv = server();
+    const u = twoClients(
+      srv,
+      (f) => f.insert(0, [new Y.XmlText()]),
+      (f) => (f.get(0) as unknown as Y.XmlText).insert(0, '굵게', { bold: {} }),
+    );
+    expect(refused(judge(srv, u)).reason).toBe("'' 안의 글자는 마크 'bold'를 받지 않는다");
+  });
+
+  it.each<[string, (d: Y.Doc) => void, string]>([
+    [
+      '맨 위의 XmlHook에 속성',
+      (d) => d.getXmlFragment('default').insert(0, [new Y.XmlHook('h') as never]),
+      "'XmlHook'에 속성",
+    ],
+    [
+      '문단 안의 Y.Map에 속성',
+      (d) => (d.getXmlFragment('default').get(0) as Y.XmlElement).insert(0, [new Y.Map() as never]),
+      "'Map'에 속성",
+    ],
+  ])('Phase 9 전에 들어간 %s을 이어 쓰는 것은 받지 않는다', (_label, legacy, reason) => {
+    const srv = server();
+    legacy(srv);
+    const s = screen(srv);
+    const u = change(s, (f) => {
+      // 옛 XmlHook은 맨 위 첫 자리에, 옛 Map은 첫 문단의 첫 자식에 있다
+      const holder = reason.includes('XmlHook') ? f.get(0) : (f.get(0) as Y.XmlElement).get(0);
+      (holder as unknown as Y.Map<number>).set('k', 1);
+    });
+    expect(refused(judge(srv, u)).reason).toBe(reason);
+  });
+
+  it('Phase 9 전에 맨 위에 들어간 글자 조각에 서식을 쳐도 받지 않는다', () => {
+    const srv = server();
+    srv.getXmlFragment('default').insert(0, [new Y.XmlText()]);
+    const s = screen(srv);
+    const u = change(s, (f) => (f.get(0) as unknown as Y.XmlText).insert(0, '굵게', { bold: {} }));
+    expect(refused(judge(srv, u)).reason).toBe("'' 안의 글자는 마크 'bold'를 받지 않는다");
+  });
+
+  it('속성 자리에 타입을 두면 받지 않는다', () => {
+    const srv = server();
+    const s = screen(srv);
+    const u = change(s, (f) => (f.get(0) as Y.XmlElement).setAttribute('k', new Y.XmlText() as never));
+    expect(refused(judge(srv, u)).reason).toBe("'paragraph'의 속성 자리에 올 수 없는 내용");
+  });
+
+  it('글자 조각 안에 요소를 끼워 넣으면 받지 않는다', () => {
+    const srv = server();
+    const s = screen(srv);
+    const u = change(s, (f) => firstText(f).insertEmbed(0, new Y.XmlElement('paragraph') as never));
+    expect(refused(judge(srv, u)).reason).toBe("'text' 안에 올 수 없는 'paragraph'");
+  });
+
+  it.each<[string, Y.Item['content'], string]>([
+    ['값', new Y.ContentAny(['x']), "'paragraph' 안에 올 수 없는 값"],
+    ['글자', new Y.ContentString('x'), "'paragraph' 안에 올 수 없는 글자"],
+    ['서식', new Y.ContentFormat('bold', {}), "'paragraph' 안에 올 수 없는 서식"],
+    ['옛 JSON 내용', new Y.ContentJSON(['x']), "편집기가 만들지 않는 내용 'JSON'"],
+  ])('문단의 목록 자식으로 %s을 두면 받지 않는다', (_label, content, reason) => {
+    const { srv, update } = forged(valueInParagraph, content);
+    expect(refused(judge(srv, update)).reason).toBe(reason);
+  });
+
+  it('글자 조각 안에 값(`ContentAny`)을 두면 받지 않는다', () => {
+    const { srv, update } = forged((d) => {
+      const t = firstText(d.getXmlFragment('default'));
+      t.insert(t.length, '끝');
+      let last = t._start!;
+      while (last.right) last = last.right;
+      return last;
+    }, new Y.ContentAny(['x']));
+    expect(refused(judge(srv, update)).reason).toBe("'text' 안에 올 수 없는 값");
+  });
+
+  it('서버가 치워 버린(GC) 요소 안에 친 첫 글자는 보지 않는다 — Yjs가 버린다', () => {
+    const srv = new Y.Doc();
+    const list = new Y.XmlElement('bulletList');
+    const item = new Y.XmlElement('listItem');
+    item.insert(0, [new Y.XmlElement('paragraph')]);
+    list.insert(0, [item]);
+    srv.getXmlFragment('default').insert(0, [list]);
+    const s = screen(srv);
+    // 동료가 목록을 지웠다 — 서버는 목록 안의 조각을 치운다(GC). 화면은 아직 모른다
+    srv.transact(() => srv.getXmlFragment('default').delete(0, 1));
+    const u = change(s, (f) => (((f.get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) as Y.XmlElement).insert(0, [new Y.XmlText('늦은 글')]));
+    expect(judge(srv, u).ok).toBe(true);
+  });
+
+  it('지운 채 보낸 조각(치운 조각 GC 포함)은 구조를 보지 않는다', () => {
+    const srv = server();
+    const s = screen(srv);
+    const sv = Y.encodeStateVector(s);
+    s.transact(() => s.getXmlFragment('default').insert(1, [para('곧 지울 글')]));
+    s.transact(() => s.getXmlFragment('default').delete(1, 1));
+    const update = Y.encodeStateAsUpdate(s, sv);
+    expect(Y.decodeUpdate(update).structs.some((x) => x instanceof Y.GC)).toBe(true);
+    expect(judge(srv, update).ok).toBe(true);
+  });
+
+  it('클라이언트 덩어리가 128개를 넘어도(덩어리 수가 두 바이트) 되풀이로 보지 않는다', () => {
+    const srv = server();
+    const updates = Array.from({ length: 130 }, (_, i) => change(screenAs(srv, 1000 + i), (f) => firstText(f).insert(0, '가')));
+    const merged = Y.mergeUpdates(updates);
+    expect([...merged.subarray(0, 2)]).toEqual([0x82, 0x01]); // 130
+    expect(inspectUpdate(Y.decodeUpdate(merged), srv, U, new Map(), merged)).toEqual({ ok: true, bind: null });
   });
 });
 

@@ -209,7 +209,7 @@ export function nodeAttrProblems(type: string, attrs: unknown, opts: { partial?:
   if ((type === 'tableCell' || type === 'tableHeader') && isRecord(attrs)) {
     // **화면이 style에 그대로 넣는 값**이다 — `align`은 `text-align: …`에, `colwidth`는 표 `colgroup`의 `width: …px`에
     // (TipTap 3.31.3). "원시값이면 된다"로는 `left; position:fixed; inset:0`이 지나가 보는 사람 모두의 화면을 덮는다
-    // (P9 보안 검토). 편집기는 붙여 넣은 HTML에서도 `align`을 이 셋으로, `colwidth`를 `parseInt`한 숫자로 만든다
+    // (P9 보안 검토 1). 편집기는 붙여 넣은 HTML에서도 `align`을 이 셋으로, `colwidth`를 `parseInt`한 숫자로 만든다
     const { align, colwidth } = attrs;
     if (align !== undefined && align !== null && !TABLE_ALIGN.has(align as string)) out.push("속성 'align' 값은 left·center·right");
     if (colwidth !== undefined && colwidth !== null && !(Array.isArray(colwidth) && colwidth.every((w) => w === null || typeof w === 'number'))) {

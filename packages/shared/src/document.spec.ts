@@ -293,12 +293,12 @@ describe('속성·마크 판정 함수 (P9 FR-1001)', () => {
 
 
 /**
- * 값 규칙 — **화면이 style에 넣는 값은 편집기가 만드는 모양만** (P9 보안 검토 · 두 번째 검토).
+ * 값 규칙 — **화면이 style에 넣는 값은 편집기가 만드는 모양만** (P9 보안 검토 1).
  * TipTap은 표 칸의 `align`을 `style="text-align: …"`에, `colwidth`를 표의 `colgroup`의 `style="width: …px"`에 **그대로** 넣는다.
  * "원시값이면 된다"로는 `left; position:fixed; inset:0`이 지나가 보는 사람 모두의 화면을 덮는다(CSP는 `style.cssText`를 막지 않는다).
  * 편집기는 붙여 넣은 HTML에서도 `align`을 left·center·right로, `colwidth`를 숫자(`parseInt`)로 만든다 — 정상 편집은 걸리지 않는다.
  */
-describe('값 규칙 — style에 들어가는 값 (P9 보안 검토·두 번째 검토)', () => {
+describe('값 규칙 — style에 들어가는 값 (P9 보안 검토 1)', () => {
   it('표 칸·표 머리의 `align`은 left·center·right만 받는다', () => {
     expect(nodeAttrProblems('tableCell', { align: 'center' })).toEqual([]);
     expect(nodeAttrProblems('tableHeader', { align: 'right' })).toEqual([]);

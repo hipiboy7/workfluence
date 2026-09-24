@@ -4,7 +4,7 @@
 - 구현 방법: [`docs/설계서_Architecture.md`](설계서_Architecture.md)
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 8까지 완료** (2026-09-24)
+- 상태: **Phase 9까지 완료** (2026-09-24)
 
 > 이 문서는 **무엇을 왜 만드는가**를 정한다. 어떻게 만드는가는 `설계서_Architecture.md`, 어떤 규칙으로 만드는가는 `CLAUDE.md`다.
 > 판단이 바뀌면 지우지 않고 머리에 개정 사유를 남긴다 (`CLAUDE.md` 10절).

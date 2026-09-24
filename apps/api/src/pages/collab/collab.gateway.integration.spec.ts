@@ -1012,7 +1012,34 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       }
     });
 
-    it('**한 연결이 사람 표시로 묶는 ID는 몇 개까지다** — 주인 없는 ID를 잔뜩 알려 표를 불리지 못한다. 넘친 것은 퍼뜨리지도 않는다 (P9 두 번째 검토 3)', async () => {
+    it('**붙어 되풀이된 덩어리는 받지 않는다** — 게이트웨이가 받은 바이트를 관문에 넘긴다. 받았다면 뒤 덩어리가 서버에 보류됐다 (P9 보안 검토 2)', async () => {
+      const u = await enter(userId);
+      act(u, (f) => newPara(f, '안녕'));
+      const x = await enter(otherId);
+      /** X의 화면에서 한 번 친 것 — 보내지 않고 모은다 */
+      const piece = (fn: (f: Y.XmlFragment) => void): Uint8Array => {
+        Y.applyUpdate(x.doc, Y.encodeStateAsUpdate(room.doc), 'remote');
+        let local: Uint8Array | null = null;
+        const onUpdate = (upd: Uint8Array, origin: unknown): void => {
+          if (origin !== 'remote') local = upd;
+        };
+        x.doc.on('update', onUpdate);
+        x.doc.transact(() => fn(frag(x.doc)));
+        x.doc.off('update', onUpdate);
+        return local!;
+      };
+      const u1 = piece((f) => last(f).insert(0, '가'));
+      const u2 = piece((f) => last(f).insert(1, '나'));
+      // 1판 인코딩 [덩어리 수, 덩어리…, 삭제 집합] — 둘 다 덩어리 하나에 빈 삭제 집합이다. 같은 클라이언트의 덩어리 둘로 이어 붙인다
+      for (const one of [u1, u2]) expect([one[0], one[one.length - 1]]).toEqual([1, 0]);
+      x.socket.emit('message', MSG(Uint8Array.from([2, ...u1.slice(1, -1), ...u2.slice(1, -1), 0])));
+      expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(room.doc.store.pendingStructs).toBeNull();
+      expect(JSON.stringify(docFromYDoc(room.doc))).not.toContain('나');
+      await vi.waitFor(async () => expect((await rejections()).map((r) => r.reason)).toEqual(['같은 클라이언트가 두 번 나온 변경']));
+    });
+
+    it('**한 연결이 사람 표시로 묶는 ID는 몇 개까지다** — 주인 없는 ID를 잔뜩 알려 표를 불리지 못한다. 넘친 것은 퍼뜨리지도 않는다 (P9 코드 리뷰 5·자체 점검 3)', async () => {
       const x = await enter(otherId);
       const watcher = await enter(userId);
       const ids: number[] = [];
