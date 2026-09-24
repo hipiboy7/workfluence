@@ -32,7 +32,7 @@ Phase 7은 **유실만** 막았다 — 자기 자신 필터를 꺼서 bob의 알
 | FR-901 | 부른 사람을 **확실히 알 수 없으면 비운다.** 알림함은 "문서에서 불렸다", 메일은 이름 없이 보낸다. **틀린 이름을 적지 않는다** | FR-503·P6 코드 리뷰 6의 판단 유지 |
 | FR-902 | 자기 자신을 부른 멘션은 알림을 만들지 않는다. **다만 부른 사람을 알 때만** 그렇게 판정한다 | FR-503 |
 | FR-903 | 작성자 대응표는 실시간 상태와 함께 `page_realtime`에 남고, 서버가 다시 떠도 이어진다 | 쟁점 2 |
-| FR-904 | 한 사람이 **다른 사람의 클라이언트 ID로** 변경을 보내도 그 사람 이름으로 부를 수 없다. 같은 ID를 둘이 주장하면 그 ID는 "모름"이 된다 | 쓰기 권한자 사이의 사칭 방지 |
+| FR-904 | 한 사람이 **다른 사람의 클라이언트 ID로** 변경을 보내도 그 사람 이름으로 부를 수 없다. 같은 ID를 둘이 주장하면 그 ID는 "모름"이 되고, **그 사실을 경고 로그로 남긴다** | 쓰기 권한자 사이의 사칭 방지. 로그가 없으면 "이름이 없다" 말고는 흔적이 남지 않는다 (운영가이드 7.22절) |
 | FR-905 | 멘션 메일도 부른 사람을 알면 그 이름을 적는다. 받는 사람마다 부른 사람이 다를 수 있다 | FR-750 |
 | FR-906 | REST 저장·댓글이 보낸 멘션 메일의 감사 기록에도 **일으킨 사람**을 남긴다 | FR-756. 설계 중 발견 — 두 호출부가 `actorId`를 넘기지 않아 `mail.send`의 actor가 비어 있었다 |
 | NFR-80 | 변경 한 건마다 드는 추가 비용은 **그 변경을 두 번 더 훑는 것**(보낸 것·새로 들어간 것의 클라이언트 ID 읽기)뿐이다. DB 질의를 더하지 않는다. 대응표는 이미 있는 `rememberState` 때만 쓴다 | P7 NFR-70, P6 코드 리뷰 13 |
@@ -75,6 +75,8 @@ Yjs 문서의 글자는 `Item`이라는 조각으로 저장되고, 조각마다 
 **사칭의 한계.** 쓰기 권한자가 할 수 있는 최악은 남의 ID로 조각을 보내 **그 ID를 `null`로 만드는 것**이다.
 그러면 그 사람이 친 멘션이 "문서에서 불렸다"로 보인다. 남의 이름으로 부르는 것은 되지 않는다 —
 남의 ID를 알려면 그 사람이 먼저 써야 하고, 먼저 쓰면 이미 그 사람으로 적혀 있다.
+굳히는 순간 게이트웨이가 `같은 클라이언트 ID를 다른 사용자가 주장했다`를 경고로 남긴다(주장한 사용자의 불투명 id와 함께).
+ID는 무작위 32비트라 정상 사용에서는 거의 생기지 않는다.
 
 **어디에 남기나.** `page_realtime.authors`(jsonb, `{"<clientId>": "<userId>" | null}`). 실시간 상태(`state`)와
 **같은 쓰기에서 함께** 남기므로 둘이 어긋나지 않는다. 방이 끝나 행이 지워지면 대응표도 함께 사라진다.
@@ -97,9 +99,11 @@ Yjs 문서의 글자는 `Item`이라는 조각으로 저장되고, 조각마다 
 
 ### C.4 알림과 메일 (FR-901·902·905·906)
 
-`notifyMentions`의 `actorWroteMentions?: boolean`을 **`mentionedBy?: Map<이름, userId | null>`로 바꾼다.**
+`notifyMentions`의 `actorWroteMentions?: boolean`을 **`typedBy?: { text, authors }`(글자마다 친 사람)로 바꾼다.**
+이름마다 누가 쳤는지(`mentionAuthors`)는 **알림 서비스 안에서** 가린다 — 멘션 규칙은 알림 모듈의 것이고,
+게이트웨이는 "이 글자를 누가 넣었나"만 안다 (설계서_Architecture 2.1절: 기능 모듈끼리는 서비스 export로만 의존한다).
 
-| 호출부 | `mentionedBy` | 알림의 `actor_id` | 자기 자신 필터 |
+| 호출부 | `typedBy` | 알림의 `actor_id` | 자기 자신 필터 |
 |---|---|---|---|
 | REST 저장·새 페이지·댓글 | 주지 않는다 | 요청한 사람 | 요청한 사람 = 불린 사람이면 건너뜀 (지금과 같다) |
 | 실시간 편집 저장 | 준다 | 그 이름을 친 사람. 모르면 `NULL` | **친 사람을 알고** 그 사람이 불린 사람일 때만 건너뜀 |
@@ -146,9 +150,9 @@ Yjs 문서의 글자는 `Item`이라는 조각으로 저장되고, 조각마다 
 | `packages/shared/src/schemas.ts` | A | `NotificationView.actorName`이 `null`일 수 있다 |
 | `apps/api/drizzle/0008_mention_attribution.sql` (신규) | — | §D |
 | `apps/api/src/db/schema.ts` | B | 두 열 |
-| `apps/api/src/notifications/notifications.service.ts` | B | `mentionedBy`, `leftJoin`, 받는 사람별 `calledBy` |
-| `apps/api/src/pages/pages.service.ts` | B | 협업 저장이 `mentionedBy`를 넘긴다 |
-| `apps/api/src/pages/collab/collab.gateway.ts` | B | 대응표를 적고, 남기고, 잇는다. 저장 때 멘션 작성자를 읽는다 |
+| `apps/api/src/notifications/notifications.service.ts` | B | `typedBy` → 이름별 친 사람, `leftJoin`, 받는 사람별 `calledBy` |
+| `apps/api/src/pages/pages.service.ts` | B | 협업 저장이 `typedBy`를 넘긴다 |
+| `apps/api/src/pages/collab/collab.gateway.ts` | B | 대응표를 적고, 남기고, 잇는다. 저장 때 글자마다 친 사람을 읽어 넘긴다. ID를 굳히면 경고 로그 |
 | `apps/api/src/mail/mention-mail.service.ts` | B | 받는 사람별 이름 |
 | `apps/api/src/pages/pages.module.ts`, `apps/api/src/comments/comments.module.ts` | B | 메일에 `actorId`를 넘긴다 (FR-906) |
 | `apps/web/src/pages/NotificationsPage.tsx` | B | 부른 사람이 없을 때의 문구 |

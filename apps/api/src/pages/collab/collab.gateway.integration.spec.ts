@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
@@ -502,6 +503,7 @@ describe('멘션을 친 사람 (P8 FR-900~904)', () => {
   });
 
   it('**남의 클라이언트 ID로 보내도 그 사람 이름으로 부르지 못한다** — 겹치면 모름이 된다 (FR-904)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
     const a = await attach(userId);
     const aDoc = new Y.Doc();
     // A가 먼저 자기 ID로 한 글자를 써서 그 ID를 차지한다
@@ -518,6 +520,9 @@ describe('멘션을 친 사람 (P8 FR-900~904)', () => {
     await gw.flush(pageId);
     // "A가 A를 불렀다"(스스로 부름 → 알림 없음)도, "B가 불렀다"도 아니다. **모른다**
     expect(await mentionRows(userId)).toEqual([{ actor_id: null }]);
+    // **흔적이 남는다** — 이것이 없으면 "이름이 없다" 말고는 아무것도 남지 않는다 (운영가이드 7.22절)
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringContaining(`user=${otherId}, ids=${aDoc.clientID}`));
+    warn.mockRestore();
   });
 
   it('**방(서버)의 클라이언트 ID는 누구도 차지하지 못한다**', async () => {

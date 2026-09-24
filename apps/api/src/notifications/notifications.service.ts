@@ -3,7 +3,7 @@ import { can, spaceAccess, type DocNode, type NotificationView, type Principal, 
 import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { comments, notifications, pages, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
-import { extractMentions } from './domain/mention';
+import { extractMentions, mentionAuthors } from './domain/mention';
 
 /** 알림을 보내는 경계 (FR-509). 지금은 앱 안 저장뿐이고, 메일·메신저는 이 뒤에 붙인다 */
 export const NOTIFY = Symbol('NOTIFY');
@@ -77,16 +77,19 @@ export class NotificationsService {
       /** 직전 내용. 주면 **새로 생긴 멘션만** 부른다 (코드 리뷰 6) */
       previousDoc?: DocNode | null;
       /**
-       * 이름마다 **그 멘션을 친 사람** (P8_설계서_Mention C.4절). 없으면 `actorId`가 전부 쳤다
+       * **글자마다 친 사람** (P8_설계서_Mention C.3·C.4절). `text`는 본문, `authors[i]`는
+       * `text[i]`를 넣은 사용자 id(모르면 `null`)다. 없으면 `actorId`가 전부 쳤다
        * (REST 저장·댓글 — 요청한 사람이 쓴 사람이다).
        *
        * 실시간 편집의 자동 저장은 이것을 준다. 거기서 `actorId`는 "마지막으로 키를 누른
        * 사람"이라 멘션을 쓴 사람이 아니다. A가 `@bob`을 쓰고 bob이 다른 문단을 고치면
        * 저장의 actor가 bob이 된다 — 그것으로 부르면 **"bob 님이 불렀다"가 bob에게** 가고,
        * 자기 자신 필터를 걸면 **그 알림이 영영 사라진다** (P6 코드 리뷰 6, 보류 21).
-       * 표에 없거나 `null`인 이름은 **모름**이다 — 알림의 actor를 비운다 (FR-901).
+       *
+       * 이름마다 누가 쳤는지는 **여기서** 가린다(`mentionAuthors`). 멘션 규칙은 이 모듈의 것이라
+       * 부르는 쪽이 알 필요가 없다. 가려지지 않는 이름은 **모름**이다 — actor를 비운다 (FR-901).
        */
-      mentionedBy?: ReadonlyMap<string, string | null>;
+      typedBy?: { text: string; authors: readonly (string | null)[] };
     },
     tx: Db = this.db,
   ): Promise<MentionOutcome> {
@@ -101,7 +104,8 @@ export class NotificationsService {
     if (names.length === 0) return none;
 
     const mentioned = await tx.query.users.findMany({ where: inArray(users.username, names) });
-    const callerOf = (username: string): string | null => (args.mentionedBy ? (args.mentionedBy.get(username) ?? null) : args.actorId);
+    const mentionedBy = args.typedBy ? mentionAuthors(args.typedBy.text, args.typedBy.authors) : null;
+    const callerOf = (username: string): string | null => (mentionedBy ? (mentionedBy.get(username) ?? null) : args.actorId);
     // 자기 자신은 부르지 않는다 — **다만 부른 사람을 확실히 알 때만** (FR-503·902).
     // 모르면(`null`) 부른다. 불린 사람이 마침 스스로를 불렀을 수도 있지만, 그 한 건을 막으려고
     // 남이 부른 알림을 버리는 쪽이 더 나쁘다
@@ -116,7 +120,7 @@ export class NotificationsService {
     const like = { ...space, kind: space.kind as SpaceRow['kind'] & ('personal' | 'team'), status: space.status as 'active' | 'suspended' };
 
     // 부른 사람의 이름은 **메일에만** 쓴다. 실시간 편집일 때만 찾는다 — REST·댓글은 호출부가 안다
-    const callerIds = args.mentionedBy ? [...new Set(candidates.map((u) => callerOf(u.username)).filter((x): x is string => x !== null))] : [];
+    const callerIds = mentionedBy ? [...new Set(candidates.map((u) => callerOf(u.username)).filter((x): x is string => x !== null))] : [];
     const callers = callerIds.length ? await tx.query.users.findMany({ where: inArray(users.id, callerIds) }) : [];
     const nameOf = (id: string | null): string | null => (id ? (callers.find((c) => c.id === id)?.displayName ?? null) : null);
 

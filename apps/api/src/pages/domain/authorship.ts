@@ -28,17 +28,27 @@ export type AuthorMap = Map<number, string | null>;
  * 이미 **다른 사람**으로 적힌 ID를 주장하면 `null`로 굳힌다 — 누가 진짜인지 모르므로
  * 둘 다 쓰지 않는다. 사칭하려는 쪽이 얻는 최악은 남의 멘션을 "모름"으로 만드는 것이고,
  * 남의 이름으로 부르는 것은 되지 않는다.
+ *
+ * **이번에 새로 굳힌 ID를 돌려준다.** 정상 사용에서는 거의 생기지 않는 일이라(ID는 무작위
+ * 32비트) 생기면 사칭 시도일 수 있다. 게이트웨이가 경고로 남긴다 — 이것이 없으면 그 일은
+ * **"알림에 이름이 없다"는 증상 말고는 아무 흔적도 남기지 않는다.**
  */
-export function claimAuthors(authors: AuthorMap, userId: string, sent: Iterable<number>, integrated: Iterable<number>): void {
+export function claimAuthors(authors: AuthorMap, userId: string, sent: Iterable<number>, integrated: Iterable<number>): number[] {
   const mine = new Set(sent);
+  const frozen: number[] = [];
   for (const client of integrated) {
     if (!mine.has(client)) continue;
     if (!authors.has(client)) {
       authors.set(client, userId);
       continue;
     }
-    if (authors.get(client) !== userId) authors.set(client, null);
+    const owner = authors.get(client);
+    if (owner !== null && owner !== userId) {
+      authors.set(client, null);
+      frozen.push(client);
+    }
   }
+  return frozen;
 }
 
 /**

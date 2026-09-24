@@ -189,8 +189,8 @@ export class PagesService {
    * **충돌(409)을 보지 않는다.** 그것이 실시간 편집의 요지다 — Yjs가 이미 병합했고,
    * 여기 오는 문서는 그 병합의 결과다. 대신 `FOR UPDATE`로 REST 저장과 줄을 세운다.
    *
-   * `mentionedBy`는 이름마다 **그 멘션을 친 사람**이다 (P8_설계서_Mention C.3절). 게이트웨이가
-   * `content`를 뽑은 **같은 순간의** 문서에서 읽어 넘긴다.
+   * `typedBy`는 본문의 **글자마다 친 사람**이다 (P8_설계서_Mention C.3절). 게이트웨이가
+   * `content`를 뽑은 **같은 순간의** 문서에서 읽어 넘긴다. 멘션마다 누가 쳤는지는 알림 쪽이 가린다.
    */
   async saveCollabVersion(
     id: string,
@@ -198,7 +198,7 @@ export class PagesService {
     content: DocNode,
     actorId: string,
     tx: Db,
-    mentionedBy: ReadonlyMap<string, string | null>,
+    typedBy: { text: string; authors: readonly (string | null)[] },
     onMentions?: (m: MentionOutcome) => void,
   ): Promise<PageRow> {
     const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');
@@ -222,7 +222,7 @@ export class PagesService {
         // **여기서 actorId는 "마지막으로 키를 누른 사람"이지 멘션을 쓴 사람이 아니다.**
         // 그것으로 부르면 불린 사람이 마침 마지막 타이핑을 했을 때 "자기가 자기를 불렀다"가
         // 된다 (P6 코드 리뷰 6, 보류 21). 친 사람은 따로 넘겨받는다
-        mentionedBy,
+        typedBy,
       },
       tx,
     );

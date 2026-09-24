@@ -19,7 +19,6 @@ import { PagesService } from '../pages.service';
 import { shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
 import { attributedText, docFromYDoc, yDocFromDoc } from '../domain/ydoc';
 import { authorsFromJson, authorsToJson, claimAuthors, freezeUnknown, type AuthorMap } from '../domain/authorship';
-import { mentionAuthors } from '../../notifications/domain/mention';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
 import { readPageId, readSessionId } from './session-auth';
 
@@ -367,7 +366,13 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       room.lastActor = member.principal.id;
       // **누가 어느 클라이언트 ID를 쓰는지 적는다** (P8 C.2절). 이 연결이 보낸 것 중 실제로
       // 새로 들어간 것만이다 — 판정은 `claimAuthors`(A등급)가 한다
-      if (member.sending) claimAuthors(room.authors, member.principal.id, member.sending, Y.parseUpdateMeta(update).from.keys());
+      if (!member.sending) return;
+      const frozen = claimAuthors(room.authors, member.principal.id, member.sending, Y.parseUpdateMeta(update).from.keys());
+      // **흔적을 남긴다.** 남이 쓰던 ID를 이 연결이 주장했다 — 사칭 시도일 수 있다 (FR-904).
+      // 이 로그가 없으면 "알림에 이름이 없다" 말고는 아무것도 남지 않는다 (운영가이드 7.22절)
+      if (frozen.length) {
+        this.log.warn(`같은 클라이언트 ID를 다른 사용자가 주장했다 — 그 ID의 글자를 "모름"으로 돌린다 (page=${pageId}, user=${member.principal.id}, ids=${frozen.join(',')})`);
+      }
     });
 
     this.rooms.set(pageId, room);
@@ -586,8 +591,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const next = docFromYDoc(room.doc);
     // **멘션을 친 사람을 `next`와 같은 순간에 읽는다** (P8 C.3절). 아래 `await` 사이에 문서가
     // 더 바뀌면, 나중에 읽은 작성자는 저장되는 본문과 짝이 맞지 않는다
-    const shown = attributedText(room.doc, (client) => room.authors.get(client) ?? null);
-    const mentionedBy = mentionAuthors(shown.text, shown.authors);
+    const typedBy = attributedText(room.doc, (client) => room.authors.get(client) ?? null);
     const current = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId) });
     if (!current) {
       this.drop(pageId, room);
@@ -640,7 +644,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const collected: MentionOutcome[] = [];
     let savedVersionNo = current.currentVersionNo + 1;
     await this.db.transaction(async (tx) => {
-      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, mentionedBy, (m) => collected.push(m));
+      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, typedBy, (m) => collected.push(m));
       // **락 안에서 만들어진 번호를 쓴다.** 밖에서 계산한 `+1`은 REST 저장과 겹치면
       // 실제와 다른 번호가 감사로그에 남는다 (P6 코드 리뷰 16)
       savedVersionNo = saved.currentVersionNo;

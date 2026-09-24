@@ -273,10 +273,13 @@ describe('권한이 회수되면 제목이 가려진다 (보안 검토 3)', () =
 /**
  * 실시간 편집 저장의 멘션 귀속 (P8_설계서_Mention C.4절, FR-900~902·905).
  *
- * 여기서는 `mentionedBy`를 **직접** 넘긴다. 그 표를 게이트웨이가 어떻게 만드는지는
+ * 여기서는 `typedBy`(글자마다 친 사람)를 **직접** 넘긴다. 그 표를 게이트웨이가 어떻게 만드는지는
  * `collab.gateway.integration.spec.ts`가 본다.
  */
-describe('멘션을 친 사람 — `mentionedBy` (P8)', () => {
+describe('멘션을 친 사람 — `typedBy` (P8)', () => {
+  /** 본문 전체를 한 사람이 친 것으로 */
+  const typed = (text: string, who: string | null) => ({ text, authors: [...text].map(() => who) });
+
   async function setup() {
     const owner = await user('owner');
     const mate = await user('mate');
@@ -291,7 +294,7 @@ describe('멘션을 친 사람 — `mentionedBy` (P8)', () => {
   it('**부른 사람은 저장한 사람이 아니라 그 이름을 친 사람이다** (FR-900)', async () => {
     const { mate, typist, sp, pid } = await setup();
     // 저장한 사람(마지막으로 키를 누른 사람)은 mate 자신이다 — 예전에는 이것이 "부른 사람"이 됐다
-    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, mentionedBy: new Map([['mate', typist.id]]) });
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, typedBy: typed('@mate 확인', typist.id) });
 
     expect(r.count).toBe(1);
     const list = await svc.list(mate, 20);
@@ -302,7 +305,7 @@ describe('멘션을 친 사람 — `mentionedBy` (P8)', () => {
 
   it('**친 사람을 모르면 비운다** — 알림은 가고, 목록에서 사라지지 않는다 (FR-901)', async () => {
     const { mate, typist, sp, pid } = await setup();
-    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: new Map([['mate', null]]) });
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, typedBy: typed('@mate 확인', null) });
 
     expect(r.count).toBe(1);
     const [row] = await db.select().from(notifications).where(eq(notifications.userId, mate.id));
@@ -314,27 +317,27 @@ describe('멘션을 친 사람 — `mentionedBy` (P8)', () => {
     expect(r.recipients[0].calledBy).toBeNull();
   });
 
-  it('표에 없는 이름도 모름이다 — 저장한 사람으로 대신하지 않는다', async () => {
+  it('**글자 기록에서 그 멘션을 못 찾으면 모름이다** — 저장한 사람으로 대신하지 않는다', async () => {
     const { mate, typist, sp, pid } = await setup();
-    await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: new Map() });
+    await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, typedBy: typed('다른 글', typist.id) });
     const [row] = await db.select().from(notifications).where(eq(notifications.userId, mate.id));
     expect(row.actorId).toBeNull();
   });
 
   it('**스스로를 부른 것이 확실하면** 알림을 만들지 않는다 (FR-902)', async () => {
     const { mate, typist, sp, pid } = await setup();
-    const r = await svc.notifyMentions({ doc: body('@mate 메모'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: new Map([['mate', mate.id]]) });
+    const r = await svc.notifyMentions({ doc: body('@mate 메모'), pageId: pid, spaceId: sp.id, actorId: typist.id, typedBy: typed('@mate 메모', mate.id) });
     expect(r.count).toBe(0);
   });
 
   it('**저장한 사람이 불린 사람이어도 친 사람이 남이면 알림이 간다** — Phase 7 전에는 여기서 사라졌다', async () => {
     const { owner, mate, sp, pid } = await setup();
-    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, mentionedBy: new Map([['mate', owner.id]]) });
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, typedBy: typed('@mate 확인', owner.id) });
     expect(r.count).toBe(1);
     expect((await svc.list(mate, 20))[0].actorName).toBe('owner');
   });
 
-  it('REST 경로(`mentionedBy` 없음)는 그대로 요청한 사람이 부른 사람이고, 메일 이름은 호출부가 준다', async () => {
+  it('REST 경로(`typedBy` 없음)는 그대로 요청한 사람이 부른 사람이고, 메일 이름은 호출부가 준다', async () => {
     const { owner, mate, sp, pid } = await setup();
     const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: owner.id });
     expect((await svc.list(mate, 20))[0].actorName).toBe('owner');
