@@ -134,3 +134,55 @@ test('두 버전을 골라 비교하고 HTML로 내보낸다', async ({ page }) 
   ]);
   expect(download.suggestedFilename()).toMatch(/\.html$/);
 });
+
+/**
+ * Phase 8 인수 기준 (P8_설계서_Mention G절, 보류 21).
+ * "A가 `@B`를 치고 **그 뒤에 B가 다른 곳을 고쳐 마지막 작성자가 된다.** 버전이 남으면
+ *  B의 알림함에 'A 님이 불렀다'가 뜬다." — 예전에는 B 자신의 이름이 떴다.
+ */
+test('A가 부르고 B가 마지막으로 고쳐도, 알림함은 A가 불렀다고 말한다', async ({ browser }) => {
+  const ctxA = await browser.newContext();
+  const ctxB = await browser.newContext();
+  const a = await ctxA.newPage();
+  const b = await ctxB.newPage();
+
+  await login(a, ADMIN.username, ADMIN.password);
+  const spaceName = `멘션 공간 ${Date.now()}`;
+  await a.goto('/');
+  await a.getByLabel('이름').fill(spaceName);
+  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('link', { name: spaceName }).click();
+  await a.getByLabel('아이디로 Crew 추가 (editor)').fill(mate.username);
+  await a.getByRole('button', { name: '추가' }).click();
+  await a.getByLabel('새 페이지 제목').fill(`멘션 문서 ${Date.now()}`);
+  await a.getByRole('button', { name: '만들기' }).click();
+  await expect(a.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
+  const pageId = /\/pages\/([0-9a-f-]+)/.exec(a.url())?.[1] ?? '';
+
+  await login(b, mate.username, mate.password);
+  await b.goto(`/pages/${pageId}/edit`);
+  await expect(a.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
+  await expect(b.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
+
+  // A가 B를 부른다
+  const tag = `확인부탁${Date.now()}`;
+  await a.locator('.editor .ProseMirror').click();
+  await a.keyboard.type(`@${mate.username} ${tag}`);
+  await expect(b.locator('.editor .ProseMirror')).toContainText(tag, { timeout: 15_000 });
+
+  // **유휴 저장이 끼기 전에** B가 이어서 고친다 — 이제 마지막으로 키를 누른 사람은 B다
+  await b.locator('.editor .ProseMirror').click();
+  await b.keyboard.press('End');
+  await b.keyboard.type(' B가덧붙임');
+  await expect(a.locator('.editor .ProseMirror')).toContainText('B가덧붙임', { timeout: 15_000 });
+
+  // 편집이 멈추면 버전이 남고 알림이 생긴다. 유휴 5초 + 여유
+  await b.waitForTimeout(9_000);
+  await b.goto('/notifications');
+  const item = b.locator('li.card', { hasText: '님이 불렀다' }).first();
+  await expect(item).toBeVisible({ timeout: 15_000 });
+  await expect(item.locator('strong')).toHaveText('E2E 관리자');
+
+  await ctxA.close();
+  await ctxB.close();
+});
