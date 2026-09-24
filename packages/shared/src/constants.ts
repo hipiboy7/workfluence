@@ -98,14 +98,14 @@ export const AUDIT_ACTIONS = [
 export const COLLAB_CLOSE_REFUSED = 4400;
 
 /**
- * 거절·검증 실패의 **까닭**에 적는 이름·키의 최대 길이 (P9 코드 리뷰 4). 까닭은 경고 로그와 감사로그(지울 수 없다)로 가고, 이름·키는
+ * 거절·검증 실패의 **까닭**에 적는 이름·키의 최대 길이 (P9 코드 리뷰 4 · 두 번째 코드 리뷰 8). 까닭은 경고 로그와 감사로그(지울 수 없다)로 가고, 이름·키는
  * 조작한 클라이언트가 정한다 — 넘으면 자른다(`cutName`)
  */
 export const MAX_NAME_IN_REASON = 40;
 
 /**
  * 실시간 편집 프레임의 **앞 한 바이트** — 무엇이 실렸나 (P6_설계서_Collab C.2절 · P9_설계서_Gate D.9, FR-1011).
- * 서버(`collab.gateway.ts`)와 화면(`CollabEditor.tsx`)이 이것 하나를 쓴다 — 따로 적으면 한쪽만 바뀐다.
+ * 서버(`collab.gateway.ts`)와 화면(`collabLink.ts`)이 이것 하나를 쓴다 — 따로 적으면 한쪽만 바뀐다.
  *
  * - `update` 문서 변경(Yjs), `awareness` 사람 표시(y-protocols) — 양쪽이 보낸다
  * - `status` **서버만 보낸다.** 이 방의 자동 저장이 멈췄는지(`CollabStatus`). 화면이 보낸 것은 서버가 버린다

@@ -624,7 +624,7 @@ describe('자동 저장이 멈추면 화면에 알린다 (P9 FR-1011)', () => {
  *
  * **실제 게이트웨이를 탄다.** 규칙을 옮겨 적은 도우미로 시험하면 규칙이 바뀔 때 시험이 따라오지 않는다
  * (P8 두 번째 검토 8). 사람마다 **화면처럼** 문서 하나를 두고, 방에서 받은 것은 되돌려 보내지 않으며,
- * 자기 트랜잭션 하나씩만 보낸다 (`CollabEditor.tsx`와 같다).
+ * 자기 트랜잭션 하나씩만 보낸다 (화면의 `collabLink.ts`와 같다).
  */
 describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
   const MSG = (u: Uint8Array): Buffer => Buffer.concat([Buffer.of(0), Buffer.from(u)]);
@@ -658,7 +658,7 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
   /**
    * 방에서 받은 것을 반영하고, **자기 트랜잭션 하나**를 보낸다.
    *
-   * 보내는 것은 **그 로컬 트랜잭션의 `update` 이벤트**다 — 화면(`CollabEditor.tsx`의 `onDocUpdate`)과 같다.
+   * 보내는 것은 **그 로컬 트랜잭션의 `update` 이벤트**다 — 화면(`collabLink.ts`의 `onDocUpdate`)과 같다.
    * `encodeStateAsUpdate(doc, sv)`로 보내면 문서에 보류돼 있던 **남의 조각까지** 실려 화면과 다른 것을 시험하게 된다.
    */
   function act(p: Peer, fn: (f: Y.XmlFragment) => void, into: RoomLike = room): void {
@@ -912,7 +912,7 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       const daveId = await mkUser('collab-d');
       const x = await enter(otherId);
       const u = await enter(userId);
-      // 화면은 열자마자 커서 정보(awareness)로 **자기 클라이언트 ID**를 알린다(`CollabEditor.tsx`) — 커서를 보이려면 알려야 한다
+      // 화면은 열자마자 커서 정보(awareness)로 **자기 클라이언트 ID**를 알린다(`collabLink.ts`) — 커서를 보이려면 알려야 한다
       const told = new Awareness(u.doc);
       const heard = new Awareness(new Y.Doc());
       try {

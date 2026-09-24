@@ -93,7 +93,7 @@ export function writePresence(entries: readonly PresenceEntry[]): Uint8Array {
 
 /**
  * 캐럿(TipTap `CollaborationCaret`의 `isValidColor`)이 받는 색 — `#rrggbb`. 캐럿은 이 밖의 색을 투명으로 바꿔 그린다. 화면
- * (`CollabEditor.tsx`의 `colorFor`)도 이 모양으로 만든다 — 전에는 `hsl(…)`을 만들어 동료의 캐럿이 보이지 않았다 (두 번째 자체 점검 5)
+ * (`collabLink.ts`의 `colorFor`)도 이 모양으로 만든다 — 전에는 `hsl(…)`을 만들어 동료의 캐럿이 보이지 않았다 (두 번째 자체 점검 5)
  */
 const COLOR = /^#[0-9a-fA-F]{6}$/;
 const isUint = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;

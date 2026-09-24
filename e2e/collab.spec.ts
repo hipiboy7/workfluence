@@ -76,7 +76,11 @@ test('두 사람이 같은 페이지를 동시에 고치면 서로 보이고, �
   // 서로의 이름이 보인다 (FR-705) — **두 곳에서** 보여야 한다:
   // 같이 보는 사람 목록과, 그 사람 커서에 붙은 이름표
   await expect(a.getByText(`같이 보는 사람: ${mate.displayName}`)).toBeVisible({ timeout: 15_000 });
-  await expect(a.locator('.collaboration-carets__label', { hasText: mate.displayName })).toBeVisible({ timeout: 15_000 });
+  const caret = a.locator('.collaboration-carets__label', { hasText: mate.displayName });
+  await expect(caret).toBeVisible({ timeout: 15_000 });
+  // **색이 칠해져야 한다** — 캐럿은 `#rrggbb`가 아닌 색을 투명으로 그린다. 화면이 `hsl(…)`을 만들던 동안(Phase 6~9) 이름표는
+  // 크기만 있고 투명했다 — 위의 "보인다"는 그것을 잡지 못했다 (P9 두 번째 자체 점검 5)
+  await expect(caret).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
 
   // 편집을 멈추면 버전이 남는다 (FR-706). 유휴 5초 + 여유
   await a.waitForTimeout(9_000);
@@ -430,13 +434,16 @@ test('남은 옛 상태로 자동 저장이 멈추면 화면이 까닭을 말하
     await expect(page.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
     const editor = page.locator('.editor .ProseMirror');
     await expect(editor).toContainText('옛 가운데 정렬 문단');
+    // **들어가자마자 안다** — 서버가 방을 열 때 한 번 검증한다 (P9 D.9, 두 번째 코드 리뷰 4)
+    const banner = page.getByText(/자동 저장이 멈췄다: .*'textAlign'/);
+    await expect(banner).toBeVisible({ timeout: 15_000 });
 
-    // 다른 문단을 고친다 — 정렬이 붙은 문단은 그대로라 저장이 검증에 걸린다. 유휴 5초 뒤 판정
+    // 다른 문단을 고친다 — 정렬이 붙은 문단은 그대로라 유휴 뒤의 판정도 검증에 걸린다. 알림은 그대로 남는다
     await editor.getByText('다른 문단').click();
     await page.keyboard.press('End');
     await page.keyboard.type(' 덧붙임');
-    const banner = page.getByText(/자동 저장이 멈췄다: .*'textAlign'/);
-    await expect(banner).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(7_000); // 유휴 5초 + 판정 주기
+    await expect(banner).toBeVisible();
 
     // 그 문단을 고친다 — 편집기가 모르는 속성을 지워 보낸다. 다음 판정에서 저장되고 알림이 사라진다
     await editor.getByText('옛 가운데 정렬 문단').click();
