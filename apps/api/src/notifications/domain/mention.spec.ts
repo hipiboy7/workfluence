@@ -69,7 +69,7 @@ describe('extractMentions', () => {
 });
 
 /**
- * P8_설계서_Mention C.3절 (FR-900·901). **테스트를 먼저 썼다.**
+ * P8_설계서_Mention C.2절 (FR-900·901). **테스트를 먼저 썼다.**
  *
  * `scanMentions`는 `extractMentions`가 쓰는 규칙을 **위치까지** 돌려준다. 규칙이 둘이 되면
  * 알림은 가는데 "누가 불렀나"만 비는 식으로 조용히 어긋난다 — 그래서 하나를 나눠 쓴다.
@@ -117,7 +117,7 @@ describe('callerFor — 받는 사람에게 누가 불렀다고 말하나 (P8 �
     expect(callerFor(['bob', null], 'bob')).toEqual({ skip: false, caller: null });
   });
 
-  it('글자 기록에서 못 찾았으면 모름이다', () => {
+  it('만든 사람 표에 그 이름이 없으면 모름이다', () => {
     expect(callerFor(undefined, 'bob')).toEqual({ skip: false, caller: null });
     expect(callerFor([], 'bob')).toEqual({ skip: false, caller: null });
   });

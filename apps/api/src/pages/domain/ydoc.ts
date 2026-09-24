@@ -143,7 +143,7 @@ export function docFromYDoc(ydoc: Y.Doc): DocNode {
 }
 
 /**
- * 문서의 **멘션 자리** — `@` 글자의 ID와 이름 (P8_설계서_Mention C.2절, FR-900).
+ * 문서의 **멘션 자리** — `@` 글자의 ID와 이름, 그리고 `@`부터 이름 끝까지 글자의 ID (P8_설계서_Mention C.2절, FR-900).
  *
  * 걷는 규칙은 `extractText`와 **같아야 한다** — 한쪽이 찾은 멘션을 다른 쪽이 못 찾으면 그 멘션은 조용히
  * "모름"이 된다. 테스트가 둘의 일치를 강제한다. 마지막 정리(빈 줄 줄이기·앞뒤 공백)는 하지 않는다 — 멘션
@@ -156,7 +156,10 @@ export function docFromYDoc(ydoc: Y.Doc): DocNode {
  * 정리 트랜잭션을 일으킨다. 지운 조각·서식 조각·끼워 넣기(embed)는 글자가 아니므로 건너뛴다.
  * 비용은 한 번 걷기다 — 6만 자·멘션 1,000개 문서에서 2.76ms (`P8_검증기록_Mention` 2절).
  */
-export function mentionSites(ydoc: Y.Doc, scan: (text: string) => readonly { name: string; start: number }[]): { key: string; name: string }[] {
+export function mentionSites(
+  ydoc: Y.Doc,
+  scan: (text: string) => readonly { name: string; start: number; end: number }[],
+): { key: string; name: string; span: [number, number][] }[] {
   const parts: string[] = [];
   /** 글자마다 `client`·`clock`. 구조 글자(줄바꿈)는 -1 */
   const clients: number[] = [];
@@ -189,10 +192,13 @@ export function mentionSites(ydoc: Y.Doc, scan: (text: string) => readonly { nam
   };
   for (const child of ydoc.getXmlFragment(COLLAB_FIELD).toArray()) walk(child as Y.XmlElement | Y.XmlText);
 
-  const out: { key: string; name: string }[] = [];
+  const out: { key: string; name: string; span: [number, number][] }[] = [];
   for (const hit of scan(parts.join(''))) {
     if (clients[hit.start] === undefined || clients[hit.start] < 0) continue;
-    out.push({ key: `${clients[hit.start]}:${clocks[hit.start]}`, name: hit.name });
+    // `@`부터 이름 끝까지 글자의 ID — 누가 들여왔는지를 이것으로 묻는다 (C.2절)
+    const span: [number, number][] = [];
+    for (let i = hit.start; i < hit.end; i++) span.push([clients[i], clocks[i]]);
+    out.push({ key: `${clients[hit.start]}:${clocks[hit.start]}`, name: hit.name, span });
   }
   return out;
 }

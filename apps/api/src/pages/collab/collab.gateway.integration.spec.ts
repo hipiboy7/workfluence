@@ -437,13 +437,13 @@ describe('저장할 수 없는 문서 (P7 자체 점검 3)', () => {
 });
 
 /**
- * 멘션을 **생기게 한** 사람 (P8_설계서_Mention C.2절, 보류 21).
+ * 멘션을 **만든** 사람 — 그 멘션의 글자를 전부 자기 연결로 들여오고 그 멘션을 생기게 한 사람 (P8_설계서_Mention C.2절, 보류 21).
  *
  * **실제 게이트웨이를 탄다.** 규칙을 옮겨 적은 도우미로 시험하면 규칙이 바뀔 때 시험이 따라오지 않는다
  * (P8 두 번째 검토 8). 사람마다 **화면처럼** 문서 하나를 두고, 방에서 받은 것은 되돌려 보내지 않으며,
  * 자기 트랜잭션 하나씩만 보낸다 (`CollabEditor.tsx`와 같다).
  */
-describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
+describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
   const MSG = (u: Uint8Array): Buffer => Buffer.concat([Buffer.of(0), Buffer.from(u)]);
   type RoomLike = Awaited<ReturnType<Internals['room']>>;
   type Peer = { doc: Y.Doc; socket: FakeSocket; uid: string };
@@ -726,7 +726,7 @@ describe('멘션을 생기게 한 사람 (P8 FR-900~908)', () => {
   });
 
   describe('**동시 편집은 위조가 아니다** — Yjs가 스스로 지우는 것 (세 번째 코드 리뷰 4)', () => {
-    const forgeryWarnings = (spy: ReturnType<typeof vi.spyOn>): string[] =>
+    const forgeryWarnings = (spy: { mock: { calls: unknown[][] } }): string[] =>
       spy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('보낸 것보다'));
 
     it('X가 치는 동안 U가 그 문단을 지운다 — X의 새 글자가 딸려 지워진다', async () => {

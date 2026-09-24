@@ -23,7 +23,7 @@ const USERNAME = /^[a-z0-9._-]{2,64}$/;
 export type MentionHit = { name: string; start: number; end: number };
 
 /**
- * 본문에서 멘션을 **위치까지** 찾는다 (P8_설계서_Mention C.3절).
+ * 본문에서 멘션을 **위치까지** 찾는다 (P8_설계서_Mention C.2절).
  *
  * `.`·`-`·`_`는 아이디에도 쓰이고 문장부호로도 쓰인다 — `@kim.`은 "kim에게"일 수도
  * `kim.`이라는 아이디일 수도 있다. 그래서 **자르지 않은 것을 먼저** 두고, 뒤쪽 구분자를
@@ -61,7 +61,7 @@ export function extractMentions(doc: DocNode): string[] {
  * - 남이 부른 곳이 하나라도 있으면 **문서 순서로 처음 나온 그 사람**이다. 그 사람이 부른 것은 사실이다.
  * - 없고 모르는 곳이 있으면 부르되 이름을 비운다 (`caller: null`) — 모르는 곳이 남이 부른 것일 수 있다.
  * - **스스로 부른 곳뿐이면 알림을 만들지 않는다** (`skip`). 이것만이 "자기 자신 필터"를 거는 경우다.
- * - 글자 기록에서 그 이름을 못 찾았으면 모름이다.
+ * - 만든 사람 표에 그 이름이 없으면 모름이다.
  */
 export function callerFor(occurrences: readonly (string | null)[] | undefined, recipientId: string): { skip: boolean; caller: string | null } {
   if (!occurrences?.length) return { skip: false, caller: null };

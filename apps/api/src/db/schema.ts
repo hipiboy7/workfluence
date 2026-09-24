@@ -285,7 +285,7 @@ export const notifications = pgTable(
     pageId: uuid('page_id').references(() => pages.id),
     commentId: uuid('comment_id').references(() => comments.id),
     /**
-     * 부른 사람. **`null`이면 모른다** — 실시간 편집에서 그 멘션을 누가 생기게 했는지 확실하지
+     * 부른 사람. **`null`이면 모른다** — 실시간 편집에서 그 멘션을 누가 만들었는지 확실하지
      * 않을 때다. 틀린 이름을 적는 대신 비운다 (P8_설계서_Mention FR-901, `0008`)
      */
     actorId: uuid('actor_id').references(() => users.id),
@@ -322,7 +322,7 @@ export const pageRealtime = pgTable(
     /** 이 상태가 어느 버전에서 시작했는가 */
     versionNo: integer('version_no').notNull(),
     /**
-     * 멘션 자리(`@` 글자 ID + 이름) → 그 멘션을 생기게 한 사용자 id(`null` = 모름). `{makers: [[client, clock, name, userId]…]}`
+     * 멘션을 만든 사람의 장부 `{makers, delivered, gone}` — 멘션 자리마다 만든 사람(`null` = 모름), 어느 연결이 어느 글자를 들여왔나
      * (P8_설계서_Mention C.2절). `state`와 **같은 쓰기에서** 남긴다 — 둘은 수명이 같다
      */
     authors: jsonb('authors').notNull().default({}),
