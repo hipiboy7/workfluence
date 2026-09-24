@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
+import { DOCUMENT_SCHEMA_VERSION } from '@workfluence/shared';
 import { COLLAB_CLOSE_REFUSED } from '@workfluence/shared';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
@@ -108,7 +109,7 @@ let mail: { notify: ReturnType<typeof vi.fn> };
 let build: () => CollabGateway;
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA';
-const doc = (t: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
+const doc = (t: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
 
 async function mkUser(username: string): Promise<string> {
   const r = await db.execute<{ id: string }>(
@@ -754,6 +755,28 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       await vi.waitFor(async () =>
         expect(await rejections()).toEqual([{ actor_id: otherId, target_id: pageId, rule: 'owner', reason: '남의 클라이언트 ID로 쓴 조각', ip: '10.0.0.8' }]),
       );
+    });
+
+    it('**주인 없는 클라이언트를 이어 쓴 사람이 그 주인이 된다** — 정본에서 만든 서버 클라이언트처럼. 다음 사람은 받지 않는다 (D.4)', async () => {
+      const x = await enter(otherId);
+      const u = await enter(userId);
+      const serverClient = room.doc.clientID; // 정본에서 방을 만든 문서의 클라이언트 — 아무도 알리지 않았다
+      const continueAs = (text: string): Buffer => {
+        const forged = new Y.Doc();
+        Y.applyUpdate(forged, Y.encodeStateAsUpdate(room.doc));
+        forged.clientID = serverClient;
+        const sv = Y.encodeStateVector(forged);
+        newPara(frag(forged), text);
+        return MSG(Y.encodeStateAsUpdate(forged, sv));
+      };
+      x.socket.emit('message', continueAs('X가 이어 씀'));
+      expect(refusedCode(x)).toBeUndefined();
+      expect(ownerOf(serverClient)).toBe(otherId);
+      u.socket.emit('message', continueAs('U도 이어 씀'));
+      expect(refusedCode(u)).toBe(COLLAB_CLOSE_REFUSED);
+      const text = JSON.stringify(docFromYDoc(room.doc));
+      expect(text).toContain('X가 이어 씀');
+      expect(text).not.toContain('U도 이어 씀');
     });
 
     it('**끊은 뒤에 온 말은 듣지 않는다** — 답하지 않는 클라이언트가 닫기 핸드셰이크 동안 계속 쓰지 못한다 (P7 F2와 같은 자리)', async () => {

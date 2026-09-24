@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { validateDocument, type DocNode } from '@workfluence/shared';
+import { validateDocument, type DocNode, DOCUMENT_SCHEMA_VERSION } from '@workfluence/shared';
 import { extractMentions, scanMentions } from '../../notifications/domain/mention';
 import { COLLAB_FIELD, docFromYDoc, mentionSites, yDocFromDoc } from './ydoc';
 
@@ -11,7 +11,7 @@ import { COLLAB_FIELD, docFromYDoc, mentionSites, yDocFromDoc } from './ydoc';
  * 안에 든 것이 다르다. 그래서 테스트의 축은 **왕복**이다 — 넣은 것이 그대로 나오는가.
  */
 
-const doc = (...c: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content: c });
+const doc = (...c: DocNode[]): DocNode => ({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: c });
 // **빈 문단에는 `content` 키를 넣지 않는다.** `emptyDocument()`가 그렇게 만들고
 // 편집기도 그렇게 낸다 — 왕복이 `content: []`를 만들어 내면 정본의 모양이 달라진다
 const p = (...c: DocNode[]): DocNode => (c.length ? { type: 'paragraph', content: c } : { type: 'paragraph' });
@@ -104,7 +104,7 @@ describe('경계 — 변환이 조용히 틀리지 않게', () => {
   });
 
   it('**속성이 `undefined`면 넣지 않는다** — Yjs가 문자열 `"undefined"`로 굳힌다', () => {
-    const d: DocNode = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'heading', attrs: { level: 2, textAlign: undefined }, content: [t('제목')] }] };
+    const d: DocNode = { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'heading', attrs: { level: 2, textAlign: undefined }, content: [t('제목')] }] };
     const back = roundTrip(d);
     expect(back.content![0].attrs).toEqual({ level: 2 });
   });
@@ -120,7 +120,7 @@ describe('경계 — 변환이 조용히 틀리지 않게', () => {
 
   it('**`schemaVersion`을 다시 찍는다** — 실시간 상태에는 그것이 없다', () => {
     const noVersion: DocNode = { type: 'doc', content: [p(t('가'))] };
-    expect(roundTrip(noVersion).attrs).toEqual({ schemaVersion: 1 });
+    expect(roundTrip(noVersion).attrs).toEqual({ schemaVersion: DOCUMENT_SCHEMA_VERSION });
   });
 });
 
@@ -190,7 +190,7 @@ describe('편집기가 붙이는 것들', () => {
   it('**링크의 `title: null`이 검증을 막지 않는다** — 이것 때문에 링크 있는 문서는 버전이 안 생겼다', () => {
     const withLink: DocNode = {
       type: 'doc',
-      attrs: { schemaVersion: 1 },
+      attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION },
       content: [{ type: 'paragraph', content: [{ type: 'text', text: '보기', marks: [{ type: 'link', attrs: { href: '/a', title: null, target: null } }] }] }],
     };
     const back = roundTrip(withLink);
@@ -202,7 +202,7 @@ describe('편집기가 붙이는 것들', () => {
   it('표 칸의 `align: null`도 마찬가지다', () => {
     const t: DocNode = {
       type: 'doc',
-      attrs: { schemaVersion: 1 },
+      attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION },
       content: [{ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', attrs: { colspan: 1, align: null }, content: [p(tx('칸'))] }] }] }],
     };
     expect(validateDocument(roundTrip(t)).ok).toBe(true);

@@ -22,8 +22,14 @@ export const SPACE_MEMBER_ROLES = ['owner', 'editor', 'viewer'] as const;
 export type SpaceMemberRole = (typeof SPACE_MEMBER_ROLES)[number];
 export const ASSIGNABLE_MEMBER_ROLES = ['editor', 'viewer'] as const;
 
-/** 문서(ProseMirror JSON) 스키마 버전. 노드·마크 허용 목록이 바뀌면 올린다. */
-export const DOCUMENT_SCHEMA_VERSION = 1;
+/**
+ * 문서(ProseMirror JSON) 스키마 버전. 노드·마크 허용 목록이 바뀌면 올린다.
+ *
+ * - 1: Phase 2~8.
+ * - 2: Phase 9 (P9_설계서_Gate D.7) — 링크 `title`·표 칸 `align`을 더하고, 편집기가 만들 수 없던 `textAlign`을 뺐다.
+ *   자식 규칙·노드별 마크 규칙이 생겼다. 1로 찍힌 문서는 그 규칙 이전에 저장된 것이다.
+ */
+export const DOCUMENT_SCHEMA_VERSION = 2;
 
 /** 감사 이벤트 종류 (CLAUDE.md 6절 감사로그 대상) */
 export const AUDIT_ACTIONS = [

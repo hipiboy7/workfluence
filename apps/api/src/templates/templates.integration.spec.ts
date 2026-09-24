@@ -2,6 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
+import { DOCUMENT_SCHEMA_VERSION } from '@workfluence/shared';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { TemplatesService } from './templates.service';
 
@@ -12,7 +13,7 @@ let svc: TemplatesService;
 let adminId = '';
 let memberId = '';
 
-const doc = (t: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
+const doc = (t: string): DocNode => ({ type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] });
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA';
 
 async function mkUser(username: string, role: string): Promise<string> {
@@ -91,6 +92,6 @@ describe('고치기·없는 것', () => {
 
   it('저장할 때 `schemaVersion`을 찍는다 — 템플릿도 스스로 어느 스키마인지 말해야 한다', async () => {
     const { template } = await svc.create({ name: 'a', content: { type: 'doc', content: [{ type: 'paragraph' }] } }, admin());
-    expect(template.content.attrs?.schemaVersion).toBe(1);
+    expect(template.content.attrs?.schemaVersion).toBe(DOCUMENT_SCHEMA_VERSION);
   });
 });
