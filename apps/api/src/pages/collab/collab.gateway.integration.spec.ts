@@ -618,6 +618,16 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
     });
 
+    it('**잘라낸 뒤 저장이 끼고 그 뒤에 붙여 넣어도 모름** — 저장된 버전에 그 이름이 없다', async () => {
+      const u = await enter(userId);
+      const x = await enter(otherId);
+      act(u, (f) => newPara(f, '@collab-c 확인'));
+      act(x, (f) => f.delete(f.length - 1, 1)); // 잘라내기
+      expect((await gw.flush(pageId)).saved).toBe(true); // 생각하는 사이 저장이 끼었다
+      act(x, (f) => newPara(f, '@collab-c 확인')); // 붙여 넣기
+      expect(await saveAndCarol()).toEqual([{ actor_id: null }]);
+    });
+
     it('둘이 나눠 쳤으면 모름 (A가 `@collab-`, B가 `c`)', async () => {
       const u = await enter(userId);
       const x = await enter(otherId);

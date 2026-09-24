@@ -118,12 +118,20 @@ describe('advance — 있던 자리와 사라진 자리', () => {
       expect(l.makers.get('1:10|kim')).toBe(U);
     });
 
-    it('**저장이 끝나면 잊는다** — 저장된 멘션은 직전 버전에 있어 다시 알림이 되지 않는다', () => {
+    it('**저장된 버전에 그 이름이 있으면 잊는다** — 다시 생겨도 새 멘션이 아니라 알림이 되지 않는다', () => {
       let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
       l = advance(l, [site(1, 0, 'kim')], U);
-      l = settle(advance(l, [], X));
+      l = settle(advance(l, [], X), new Set(['kim']));
       l = advance(l, [site(2, 0, 'kim')], X);
       expect(l.makers.get('2:0|kim')).toBe(X);
+    });
+
+    it('**저장된 버전에 그 이름이 없으면 잊지 않는다** — 잘라낸 뒤 저장이 끼고 그 뒤에 붙여 넣어도 모름', () => {
+      let l = ledgerWith([1, 0, 10, U], [2, 0, 10, X]);
+      l = advance(l, [site(1, 0, 'kim')], U);
+      l = settle(advance(l, [], X), new Set(['lee'])); // 잘라낸 상태로 저장됐다
+      l = advance(l, [site(2, 0, 'kim')], X);
+      expect(l.makers.get('2:0|kim')).toBeNull();
     });
 
     it('다른 이름이 사라진 것은 상관없다', () => {
