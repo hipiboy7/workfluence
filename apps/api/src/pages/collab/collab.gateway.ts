@@ -55,6 +55,9 @@ import { readPageId, readSessionId } from './session-auth';
  * **Phase 8에서 더한 것.** 멘션을 만든 사람을 가리려고 **누가 무엇을 보냈는지는 본다** — 보낸 변경의 조각·삭제 구간
  * (`sentChange`), 그것이 보낸 것만큼만 문서를 바꿨나(`isFaithful`), 그 연결이 들여온 글자와 새로 생긴 멘션 자리
  * (`advance`). 변경의 병합은 여전히 Yjs가 한다 (P8_설계서_Mention C.2절).
+ *
+ * **`room.doc`에 관찰자를 더하면 그 안에서 던지지 않게 한다.** Yjs는 관찰자의 예외를 변경을 **적용한 뒤**
+ * `Y.applyUpdate` 밖으로 올린다 — 길목의 예외가 편집 전체를 막았다 (T-035).
  */
 
 const MSG_UPDATE = 0;
@@ -107,7 +110,7 @@ type Room = {
   /** 마지막으로 **실제로 문서를 바꾼** 사람. 자동 저장의 `createdBy`가 된다 (FR-712·802) */
   lastActor: string | null;
   /**
-   * 멘션을 **만든** 사람의 장부 — 멘션 자리마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 저장 전까지
+   * 멘션을 **만든** 사람의 장부 — 멘션 자리마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 옮김을 가리는
    * 사라진 이름 (P8_설계서_Mention C.2절, FR-900·903). 멤버의 변경마다 고친다. 실시간 상태와 함께
    * `page_realtime.authors`에 남는다
    */
@@ -491,18 +494,27 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       const kind = data[0];
       const payload = data.subarray(1);
       if (kind === MSG_UPDATE) {
+        // 보낸 것에 든 조각·삭제 구간을 먼저 읽어 둔다 — 관찰자가 그 변경을 믿을지 정할 때 쓴다 (P8 C.2절).
+        // 변경을 한 번 더 훑는 값이고 DB는 건드리지 않는다 (NFR-80)
+        let sending: SentChange;
+        try {
+          sending = this.sentChange(payload);
+        } catch (e) {
+          // **읽을 수 없는 변경은 버린다.** 방을 죽이지 않는다 — 한 사람의 잘못된 프레임이
+          // 나머지의 편집을 끊으면 안 된다. 읽기에서 실패했으니 적용되지 않았다
+          this.log.warn(`변경을 읽지 못해 버린다 (page=${pageId}): ${String(e)}`);
+          return;
+        }
+        member.sending = sending;
         try {
           // **오리진으로 멤버를 실어 보낸다.** 위의 `update` 관찰자가 이것을 보고
-          // "실제로 바뀐 경우에만" 작성자를 고친다.
-          // 보낸 것에 든 조각·삭제 구간을 먼저 읽어 둔다 — 관찰자가 그 변경을 믿을지 정할 때 쓴다 (P8 C.2절).
-          // 변경을 한 번 더 훑는 값이고 DB는 건드리지 않는다 (NFR-80)
-          member.sending = this.sentChange(payload);
+          // "실제로 바뀐 경우에만" 작성자를 고친다
           Y.applyUpdate(room.doc, payload, member);
         } catch (e) {
-          // 깨진 변경은 **버린다.** 방을 죽이지 않는다 — 한 사람의 잘못된 프레임이
-          // 나머지의 편집을 끊으면 안 된다
-          this.log.warn(`변경을 적용하지 못했다 (page=${pageId}): ${String(e)}`);
-          return;
+          // **읽을 수 있었던 변경이 던졌으면 이미 적용된 것이다** — Yjs는 관찰자의 예외를 변경을 적용한 **뒤에** 올린다.
+          // 예전에는 여기서 돌아가 퍼뜨리지 않았고, 서버 문서만 바뀐 채 모두의 화면이 조용히 갈렸다 (네 번째 코드 리뷰 5).
+          // 퍼뜨린다 — 받은 쪽도 같은 변경을 적용한다
+          this.log.error(`변경을 적용하는 중 예외가 났다 — 퍼뜨린다 (page=${pageId}): ${String(e)}`);
         } finally {
           // **반드시 비운다.** 남아 있으면 이 연결과 무관한 다음 변경(서버가 직접 고치는 것)에
           // 이 연결이 보낸 ID 목록이 묻어 간다
@@ -706,6 +718,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     // 더 바뀌면, 나중에 읽은 표는 저장되는 본문과 짝이 맞지 않는다. 자리는 마지막 변경 때 훑어 둔 것이다
     const mentionedBy = room.attributionBroken ? new Map<string, (string | null)[]>() : makersFor(room.ledger.makers, room.sites);
     const savedNames = new Set(room.sites.map((s) => s.name));
+    const seqAtStart = room.ledger.seq;
     const current = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId) });
     if (!current) {
       this.drop(pageId, room);
@@ -780,9 +793,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       this.track(this.mentionMail.notify(mentions, null, title, caller ?? undefined));
     }
     room.versionNo = savedVersionNo;
-    // **저장된 버전에 있는 이름은 옮김 기억에서 잊는다** (C.2절) — 다시 생겨도 새 멘션이 아니다.
-    // 버전에 없는 이름은 그대로 둔다: 잘라낸 채 저장되고 그 뒤에 붙여 넣는 것도 옮김이다
-    room.ledger = settle(room.ledger, savedNames);
+    // **저장된 버전에 있는 이름은 옮김 기억에서 잊는다** (C.2절) — 다시 생겨도 새 멘션이 아니다. 다만 **저장을 시작한 뒤에**
+    // 적힌 것은 이 버전에 없는 일이라 남긴다 (네 번째 코드 리뷰 1). 버전에 없는 이름도 그대로 둔다: 잘라낸 채 저장되고
+    // 그 뒤에 붙여 넣는 것도 옮김이다
+    room.ledger = settle(room.ledger, savedNames, seqAtStart);
     // **저장하는 동안 들어온 변경은 그대로 둔다.** 무조건 0으로 밀면 그 변경은
     // 다음 타이핑이나 퇴장까지 저장되지 않는다 (자체 점검 12)
     if (room.lastChangeAt === changedAt) room.lastChangeAt = 0;

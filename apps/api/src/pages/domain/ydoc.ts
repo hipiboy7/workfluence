@@ -157,7 +157,7 @@ export function docFromYDoc(ydoc: Y.Doc): DocNode {
  *
  * `Y.XmlText`의 조각 사슬(`_start` → `right`)을 직접 걷는다 — `toDelta()`는 글자의 ID를 버리고, 부를 때마다
  * 정리 트랜잭션을 일으킨다. 지운 조각·서식 조각·끼워 넣기(embed)는 글자가 아니므로 건너뛴다.
- * 비용은 한 번 걷기다 — 6만 자·멘션 1,000개 문서에서 2.76ms (`P8_검증기록_Mention` 2절).
+ * 비용은 한 번 걷기다 — 4.5만~6.2만 자·멘션 1,000~1,500개 문서에서 3~6ms (`P8_검증기록_Mention` 2절).
  */
 export function mentionSites(
   ydoc: Y.Doc,

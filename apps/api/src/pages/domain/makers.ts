@@ -25,11 +25,12 @@ export type MakerMap = Map<string, string | null>;
 /** 어느 연결이 어느 조각 구간을 들여왔나: 클라이언트 → `[from, to, userId | null]` (from 순, 같은 사람의 붙은 구간은 합친다) */
 export type Delivered = Map<number, [number, number, string | null][]>;
 /**
- * 장부. `gone`은 사라진 이름과 그 멘션을 만든 사람들이다 — 옮김을 가리는 데 쓴다. **저장된 버전에 그 이름이
- * 있으면** 잊는다(`settle`) — 그 이름이 다시 생겨도 새 멘션이 아니라 알림이 되지 않는다. 버전에 없는 이름은
- * 방이 끝날 때까지 기억한다 — 잘라낸 뒤 저장이 끼고 그 뒤에 붙여 넣어도 옮김이다.
+ * 장부. `gone`은 사라진 이름 → (그 멘션을 만든 사람 → 마지막으로 적힌 순번)이다 — 옮김을 가리는 데 쓴다.
+ * **저장된 버전에 그 이름이 있으면** 저장을 시작하기 전에 적힌 것을 잊는다(`settle`) — 그 이름이 다시 생겨도 새 멘션이
+ * 아니라 알림이 되지 않는다. 버전에 없는 이름은 방이 끝날 때까지 기억한다 — 잘라낸 뒤 저장이 끼고 그 뒤에 붙여
+ * 넣어도 옮김이다. `seq`는 `advance`를 부를 때마다 하나씩 는다 — "저장을 시작한 뒤에 적힌 것"을 가리는 데 쓴다.
  */
-export type Ledger = { makers: MakerMap; delivered: Delivered; gone: Map<string, (string | null)[]> };
+export type Ledger = { makers: MakerMap; delivered: Delivered; gone: Map<string, Map<string | null, number>>; seq: number };
 /** 한 클라이언트의 시계 구간 `[from, to)` */
 export type ClockRange = { from: number; to: number };
 /** 한 연결이 보낸 변경에 든 것: 클라이언트별 조각 구간과 삭제 구간(`[clock, len]`) */
@@ -37,7 +38,7 @@ export type SentChange = { structs: ReadonlyMap<number, ClockRange>; deletes: Re
 /** 그 트랜잭션에서 지워진 조각. `parent`는 그 조각이 든 타입의 조각 ID(`client:clock`), 문서 최상위면 `null` */
 export type DeletedItem = { client: number; clock: number; len: number; parent: string | null };
 
-export const emptyLedger = (): Ledger => ({ makers: new Map(), delivered: new Map(), gone: new Map() });
+export const emptyLedger = (): Ledger => ({ makers: new Map(), delivered: new Map(), gone: new Map(), seq: 0 });
 
 const siteId = (s: Site): string => `${s.key}|${s.name}`;
 const splitId = (id: string): [string, string] => {
@@ -53,7 +54,8 @@ export function recordDelivered(delivered: Delivered, client: number, range: Clo
   if (tail && tail[1] === range.from && tail[2] === who) tail[1] = range.to;
   else {
     list.push([range.from, range.to, who]);
-    list.sort((a, b) => a[0] - b[0]);
+    // 한 클라이언트의 시계는 늘기만 해서 대개 끝에 붙는다 — 어긋났을 때만 다시 줄 세운다
+    if (tail && tail[0] > range.from) list.sort((a, b) => a[0] - b[0]);
   }
   delivered.set(client, list);
 }
@@ -134,8 +136,9 @@ export function isFaithful(sent: SentChange, integrated: ReadonlyMap<number, Clo
  * 변경 하나를 적용한 뒤의 장부. 앞의 장부는 바꾸지 않는다(들여온 기록 `delivered`는 함께 쓴다).
  *
  * - **있던 자리는 그대로다.** 남이 다른 곳을 고쳐도, 서식을 걸었다 풀어도 그 멘션의 주인은 바뀌지 않는다.
- * - **사라진 자리는 표에서 빼고 `gone`에 적는다.** 다만 같은 `@`의 이름이 **자라기만** 했으면(`@kim` → `@kiml`)
- *   적지 않는다 — 치는 동안의 중간 이름이다.
+ * - **사라진 자리는 표에서 빼고 `gone`에 적는다.** 다만 같은 `@`의 이름이 **자라기만** 했고 **그 멘션을 만든 사람이
+ *   스스로 자라게 했으면**(`@kim` → `@kiml`, 치는 중) 적지 않는다. 남이 내 멘션을 자라게 한 것(`@bob` → `@bobx`)은 적는다
+ *   — 잘라 붙인 뒤 다시 다듬어 옮김을 빠져나가는 길이다 (P8 네 번째 코드 리뷰 2).
  * - **새 자리는 `maker`**(그 변경을 보낸 사람, 믿을 수 없으면 `null`)다. 글자를 전부 그 사람이 들여왔고,
  *   같은 이름이 남의 것으로 사라진 적이 없을 때만이다. 아니면 모름.
  */
@@ -147,15 +150,17 @@ export function advance(ledger: Ledger, sites: readonly Site[], maker: string | 
     if (list) list.push(s.name);
     else namesAt.set(s.key, [s.name]);
   }
-  const gone = new Map([...ledger.gone].map(([name, who]) => [name, [...who]]));
+  const seq = ledger.seq + 1;
+  const gone = new Map([...ledger.gone].map(([name, whos]) => [name, new Map(whos)]));
   for (const [id, who] of ledger.makers) {
     if (present.has(id)) continue;
     const [key, name] = splitId(id);
     const grew = (namesAt.get(key) ?? []).some((n) => n !== name && n.startsWith(name));
-    if (grew) continue;
-    const list = gone.get(name);
-    if (list) list.push(who);
-    else gone.set(name, [who]);
+    if (grew && who !== null && who === maker) continue;
+    // 같은 사람은 한 번만 두되 **순번은 새로 적는다** — 저장하는 사이 다시 사라진 것을 그 저장이 지우지 않게
+    const whos = gone.get(name);
+    if (whos) whos.set(who, seq);
+    else gone.set(name, new Map([[who, seq]]));
   }
   const makers: MakerMap = new Map();
   for (const s of sites) {
@@ -168,19 +173,25 @@ export function advance(ledger: Ledger, sites: readonly Site[], maker: string | 
     let who = maker;
     if (who !== null && !s.span.every(([c, k]) => deliveredBy(ledger.delivered, c, k) === who)) who = null;
     const lost = gone.get(s.name);
-    if (who !== null && lost && !lost.every((w) => w === who)) who = null;
+    if (who !== null && lost && ![...lost.keys()].every((w) => w === who)) who = null;
     makers.set(id, who);
   }
-  return { makers, delivered: ledger.delivered, gone };
+  return { makers, delivered: ledger.delivered, gone, seq };
 }
 
 /**
- * 저장이 끝났다 — **저장된 버전에 있는 이름**은 `gone`에서 잊는다. 그 이름은 이제 직전 버전에 있어, 다시 생겨도
- * 새 멘션이 아니다. 버전에 없는 이름은 그대로 둔다 — 잘라낸 채 저장되고 그 뒤에 붙여 넣는 것도 옮김이다.
- * 오래 들고 있으면 모름이 늘 뿐 틀린 이름은 나가지 않는다.
+ * 저장이 끝났다 — **저장된 버전에 있는 이름**은 `gone`에서 **저장을 시작하기 전(`upTo` 이하)에 적힌 것만** 잊는다.
+ * 그 이름은 이제 직전 버전에 있어, 그때까지의 옮김은 다시 생겨도 새 멘션이 아니다. 저장이 DB를 기다리는 사이 적힌
+ * 것은 그 버전에 없는 일이라 그대로 둔다 (P8 네 번째 코드 리뷰 1). 버전에 없는 이름도 그대로 둔다 — 잘라낸 채
+ * 저장되고 그 뒤에 붙여 넣는 것도 옮김이다. 오래 들고 있으면 모름이 늘 뿐 틀린 이름은 나가지 않는다.
  */
-export function settle(ledger: Ledger, saved: ReadonlySet<string>): Ledger {
-  return { makers: ledger.makers, delivered: ledger.delivered, gone: new Map([...ledger.gone].filter(([name]) => !saved.has(name))) };
+export function settle(ledger: Ledger, saved: ReadonlySet<string>, upTo: number): Ledger {
+  const gone = new Map<string, Map<string | null, number>>();
+  for (const [name, whos] of ledger.gone) {
+    const kept = saved.has(name) ? new Map([...whos].filter(([, at]) => at > upTo)) : new Map(whos);
+    if (kept.size) gone.set(name, kept);
+  }
+  return { makers: ledger.makers, delivered: ledger.delivered, gone, seq: ledger.seq };
 }
 
 /** 이름마다, **나온 곳마다** 만든 사람 (문서 순서). 표에 없는 자리는 모름이다 */
@@ -199,7 +210,8 @@ export function makersFor(makers: ReadonlyMap<string, string | null>, sites: rea
 export function ledgerToJson(ledger: Ledger): {
   makers: [number, number, string, string | null][];
   delivered: [number, number, number, string | null][];
-  gone: [string, (string | null)[]][];
+  gone: [string, [string | null, number][]][];
+  seq: number;
 } {
   return {
     makers: [...ledger.makers.entries()].map(([id, who]) => {
@@ -208,7 +220,8 @@ export function ledgerToJson(ledger: Ledger): {
       return [client, clock, name, who];
     }),
     delivered: [...ledger.delivered.entries()].flatMap(([client, list]) => list.map(([from, to, who]) => [client, from, to, who] as [number, number, number, string | null])),
-    gone: [...ledger.gone.entries()].map(([name, who]) => [name, [...who]]),
+    gone: [...ledger.gone.entries()].map(([name, whos]) => [name, [...whos.entries()]]),
+    seq: ledger.seq,
   };
 }
 
@@ -229,7 +242,7 @@ const isWho = (x: unknown): x is string | null => x === null || (typeof x === 's
 export function ledgerFromJson(raw: unknown): Ledger {
   const out = emptyLedger();
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  const { makers, delivered, gone } = raw as { makers?: unknown; delivered?: unknown; gone?: unknown };
+  const { makers, delivered, gone, seq } = raw as { makers?: unknown; delivered?: unknown; gone?: unknown; seq?: unknown };
   for (const e of Array.isArray(makers) ? makers : []) {
     if (!Array.isArray(e) || e.length !== 4) continue;
     const [client, clock, name, who] = e as unknown[];
@@ -242,11 +255,17 @@ export function ledgerFromJson(raw: unknown): Ledger {
     if (!isClient(client) || !isClock(from) || !isClock(to) || to <= from || !isWho(who)) continue;
     recordDelivered(out.delivered, client, { from, to }, who);
   }
+  let last = isClock(seq) ? seq : 0;
   for (const e of Array.isArray(gone) ? gone : []) {
     if (!Array.isArray(e) || e.length !== 2) continue;
-    const [name, who] = e as unknown[];
-    if (typeof name !== 'string' || !USERNAME.test(name) || !Array.isArray(who) || !who.every(isWho)) continue;
-    out.gone.set(name, [...(who as (string | null)[])]);
+    const [name, whos] = e as unknown[];
+    if (typeof name !== 'string' || !USERNAME.test(name) || !Array.isArray(whos)) continue;
+    const entries = whos.filter((w): w is [string | null, number] => Array.isArray(w) && w.length === 2 && isWho(w[0]) && isClock(w[1]));
+    if (entries.length !== whos.length || entries.length === 0) continue;
+    out.gone.set(name, new Map(entries));
+    for (const [, at] of entries) last = Math.max(last, at);
   }
+  // **순번은 적힌 기록보다 작아지지 않는다** — 작아지면 그 뒤에 적히는 기록이 저장 한 번에 잊힌다
+  out.seq = last;
   return out;
 }
