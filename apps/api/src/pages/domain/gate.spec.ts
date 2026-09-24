@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
+import { MAX_DOCUMENT_DEPTH, validateDocument } from '@workfluence/shared';
 import { inspectUpdate, integrable, type GateVerdict } from './gate';
+import { docFromYDoc } from './ydoc';
 
 /**
  * A등급 — 실시간 편집의 관문 (P9_설계서_Gate D.2~D.4, FR-1000~1003).
@@ -344,3 +346,87 @@ describe('주인 — 남의 클라이언트 ID로 쓰지 못한다 (보류 24, F
     expect(judge(srv, change(s, (f) => firstText(f).insert(0, '가')))).toEqual({ ok: true, bind: srv.clientID });
   });
 });
+
+describe('지워진 부모 — Yjs가 버리는 조각은 보지 않는다 (P9 코드 리뷰 1)', () => {
+  it('지워져 치워진 **빈 문단 안에 새 글자 조각**을 만든다 — 부모가 적힌 조각이다. 정상 동시 편집이다', () => {
+    const srv = new Y.Doc();
+    srv.getXmlFragment('default').insert(0, [new Y.XmlElement('paragraph')]);
+    const s = screen(srv);
+    srv.transact(() => srv.getXmlFragment('default').delete(0, 1)); // 서버에서 누가 그 빈 문단을 지웠다
+    const u = change(s, (f) => {
+      const t = new Y.XmlText();
+      (f.get(0) as Y.XmlElement).insert(0, [t]);
+      t.insert(0, '늦은 글');
+    });
+    expect(judge(srv, u).ok).toBe(true);
+  });
+
+  it('**지워진 제목의 단계**를 바꾼다 — 속성의 부모가 지워졌다', () => {
+    const srv = new Y.Doc();
+    const h = para('제목', 'heading');
+    h.setAttribute('level', 1 as never);
+    srv.getXmlFragment('default').insert(0, [h]);
+    const s = screen(srv);
+    srv.transact(() => srv.getXmlFragment('default').delete(0, 1));
+    expect(judge(srv, change(s, (f) => (f.get(0) as Y.XmlElement).setAttribute('level', 2 as never))).ok).toBe(true);
+  });
+});
+
+describe('깊이 — 정본 검증의 한도를 문 앞에서 본다 (P9 코드 리뷰 3·두 번째 검토 1)', () => {
+  /** `n`겹 인용 안의 문단 하나와 그 글자 */
+  const nested = (n: number): Y.XmlElement => {
+    let inner: Y.XmlElement = para('깊은 곳');
+    for (let i = 0; i < n; i++) {
+      const q = new Y.XmlElement('blockquote');
+      q.insert(0, [inner]);
+      inner = q;
+    }
+    return inner;
+  };
+
+  it.each([MAX_DOCUMENT_DEPTH - 2, MAX_DOCUMENT_DEPTH - 1])('인용 %i겹 — 관문의 판정이 정본 검증과 같다', (n) => {
+    const srv = server();
+    const s = screen(srv);
+    const v = judge(srv, change(s, (f) => f.insert(f.length, [nested(n)])));
+    const saved = validateDocument(docFromYDoc(s));
+    expect(v.ok).toBe(saved.ok);
+    if (!v.ok) expect(v.reason).toContain(`중첩 깊이 ${MAX_DOCUMENT_DEPTH} 초과`);
+  });
+
+  it('한도에 닿은 곳에 한 겹을 더 넣는 작은 변경도 본다 — 서버에 있는 조상까지 센다', () => {
+    const srv = server();
+    srv.transact(() => srv.getXmlFragment('default').insert(1, [nested(MAX_DOCUMENT_DEPTH - 3)]));
+    const s = screen(srv);
+    let deepest = s.getXmlFragment('default').get(1) as Y.XmlElement;
+    while (deepest.get(0) instanceof Y.XmlElement && (deepest.get(0) as Y.XmlElement).nodeName === 'blockquote') deepest = deepest.get(0) as Y.XmlElement;
+    // 가장 깊은 인용(깊이 61) 안에 인용 두 겹 + 문단 + 글자 → 글자의 깊이 65
+    const u = change(s, () => deepest.insert(0, [nested(2)]));
+    expect(validateDocument(docFromYDoc(s)).ok).toBe(false);
+    expect(refused(judge(srv, u)).reason).toContain('중첩 깊이');
+  });
+});
+
+describe('같은 클라이언트가 되풀이된 변경 — 관문이 보는 것과 Yjs가 들이는 것이 달라진다 (P9 보안 검토)', () => {
+  it('한 클라이언트의 조각이 두 덩어리로 나뉘어 오면 받지 않는다 — 정상 인코더는 클라이언트마다 한 덩어리로 쓴다', () => {
+    const srv = server();
+    const s = screen(srv);
+    const other = screen(srv);
+    const first = Y.decodeUpdate(change(s, (f) => firstText(f).insert(0, '가')));
+    const middle = Y.decodeUpdate(change(other, (f) => firstText(f).insert(0, '나')));
+    const second = Y.decodeUpdate(change(s, (f) => firstText(f).insert(1, '다')));
+    const v = inspectUpdate({ structs: [...first.structs, ...middle.structs, ...second.structs], ds: first.ds }, srv, U, new Map());
+    expect(v.ok).toBe(false);
+    expect((v as { reason: string }).reason).toContain('같은 클라이언트가 두 번');
+  });
+});
+
+describe('들이는 순서의 흉내는 클라이언트가 많아도 빠르다 (P9 코드 리뷰 2)', () => {
+  it('서로를 거꾸로 기다리는 2만 개의 클라이언트를 1초 안에 들인다 — 전에는 도는 수가 제곱으로 늘었다', () => {
+    const n = 20_000;
+    const structs = Array.from({ length: n }, (_, i) => ({ client: i + 1, clock: 0, length: 1, deps: i + 1 < n ? [{ client: i + 2, clock: 0 }] : [] }));
+    const started = performance.now();
+    expect(integrable(structs, new Map())).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
