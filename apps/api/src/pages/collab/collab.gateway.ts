@@ -360,7 +360,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     // **장부를 지금 문서에 맞춘다.** 표에 있는 자리는 그대로, 없는 자리는 모름이다 — 정본에서 만든 방의
     // 멘션은 전부 직전 버전에 이미 있어 새 알림이 되지 않는다(이름 차이 비교, C.3절)
     const sites = mentionSites(doc, scanMentions);
-    ledger = settle(advance(ledger, sites, null));
+    ledger = advance(ledger, sites, null);
 
     const room: Room = {
       doc,
@@ -684,7 +684,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     // **멘션을 만든 사람을 `next`와 같은 순간에 읽는다** (P8 C.3절). 아래 `await` 사이에 문서가
     // 더 바뀌면, 나중에 읽은 표는 저장되는 본문과 짝이 맞지 않는다. 자리는 마지막 변경 때 훑어 둔 것이다
     const mentionedBy = makersFor(room.ledger.makers, room.sites);
-    const goneAtStart = room.ledger.gone;
+    const savedNames = new Set(room.sites.map((s) => s.name));
     const current = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId) });
     if (!current) {
       this.drop(pageId, room);
@@ -759,9 +759,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       this.track(this.mentionMail.notify(mentions, null, title, caller ?? undefined));
     }
     room.versionNo = savedVersionNo;
-    // **저장했으니 옮김을 가리려고 들고 있던 이름을 잊는다** (C.2절). 저장하는 사이 누가 고쳤으면(장부가 바뀌었으면)
-    // 잊지 않는다 — 그 변경은 이 버전에 없을 수 있다. 오래 들고 있으면 모름이 늘 뿐 틀린 이름은 나가지 않는다
-    if (room.ledger.gone === goneAtStart) room.ledger = settle(room.ledger);
+    // **저장된 버전에 있는 이름은 옮김 기억에서 잊는다** (C.2절) — 다시 생겨도 새 멘션이 아니다.
+    // 버전에 없는 이름은 그대로 둔다: 잘라낸 채 저장되고 그 뒤에 붙여 넣는 것도 옮김이다
+    room.ledger = settle(room.ledger, savedNames);
     // **저장하는 동안 들어온 변경은 그대로 둔다.** 무조건 0으로 밀면 그 변경은
     // 다음 타이핑이나 퇴장까지 저장되지 않는다 (자체 점검 12)
     if (room.lastChangeAt === changedAt) room.lastChangeAt = 0;

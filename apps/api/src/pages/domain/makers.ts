@@ -8,7 +8,7 @@
  * 1. 그 변경이 **보낸 것만큼만** 문서를 바꿨다 (`isFaithful`) — 보류된 위조가 묻어 들어오지 않았다
  * 2. `@`부터 이름 끝까지 **모든 글자를 M의 연결이 들여왔다** (`delivered`) — 남의 글을 내 공백 하나가
  *    멘션으로 완성하거나, 내 글을 남의 삭제가 멘션으로 만든 것이 아니다
- * 3. 다음 저장 전까지 **같은 이름이 남의 것으로 사라진 적이 없다** (`gone`) — 남의 멘션을 옮긴 것이 아니다
+ * 3. **같은 이름이 남의 것으로 사라진 적이 없다** (`gone`) — 남의 멘션을 옮긴 것이 아니다
  *
  * **믿는 것은 서버가 직접 본 사실뿐이다** — 어느 연결이 어떤 변경을 보냈고 무엇을 들여왔나. 글자의 클라이언트
  * ID, Yjs가 적어 둔 이웃(`origin`·`rightOrigin`), 지운 흔적은 **전부 클라이언트가 정하는 값**이라 믿지 않는다.
@@ -25,8 +25,9 @@ export type MakerMap = Map<string, string | null>;
 /** 어느 연결이 어느 조각 구간을 들여왔나: 클라이언트 → `[from, to, userId | null]` (from 순, 같은 사람의 붙은 구간은 합친다) */
 export type Delivered = Map<number, [number, number, string | null][]>;
 /**
- * 장부. `gone`은 **다음 저장 전까지** 사라진 이름과 그 멘션을 만든 사람들이다 — 옮김을 가리는 데 쓴다.
- * 저장이 끝나면 비운다(`settle`). 저장된 멘션은 직전 버전에 있어 다시 알림이 되지 않는다.
+ * 장부. `gone`은 사라진 이름과 그 멘션을 만든 사람들이다 — 옮김을 가리는 데 쓴다. **저장된 버전에 그 이름이
+ * 있으면** 잊는다(`settle`) — 그 이름이 다시 생겨도 새 멘션이 아니라 알림이 되지 않는다. 버전에 없는 이름은
+ * 방이 끝날 때까지 기억한다 — 잘라낸 뒤 저장이 끼고 그 뒤에 붙여 넣어도 옮김이다.
  */
 export type Ledger = { makers: MakerMap; delivered: Delivered; gone: Map<string, (string | null)[]> };
 /** 한 클라이언트의 시계 구간 `[from, to)` */
@@ -173,9 +174,13 @@ export function advance(ledger: Ledger, sites: readonly Site[], maker: string | 
   return { makers, delivered: ledger.delivered, gone };
 }
 
-/** 저장이 끝났다 — 옮김을 가리려고 들고 있던 `gone`을 비운다 */
-export function settle(ledger: Ledger): Ledger {
-  return { makers: ledger.makers, delivered: ledger.delivered, gone: new Map() };
+/**
+ * 저장이 끝났다 — **저장된 버전에 있는 이름**은 `gone`에서 잊는다. 그 이름은 이제 직전 버전에 있어, 다시 생겨도
+ * 새 멘션이 아니다. 버전에 없는 이름은 그대로 둔다 — 잘라낸 채 저장되고 그 뒤에 붙여 넣는 것도 옮김이다.
+ * 오래 들고 있으면 모름이 늘 뿐 틀린 이름은 나가지 않는다.
+ */
+export function settle(ledger: Ledger, saved: ReadonlySet<string>): Ledger {
+  return { makers: ledger.makers, delivered: ledger.delivered, gone: new Map([...ledger.gone].filter(([name]) => !saved.has(name))) };
 }
 
 /** 이름마다, **나온 곳마다** 만든 사람 (문서 순서). 표에 없는 자리는 모름이다 */
