@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { validateDocument, type DocNode } from '@workfluence/shared';
-import { COLLAB_FIELD, docFromYDoc, yDocFromDoc } from './ydoc';
+import { extractText, validateDocument, type DocNode } from '@workfluence/shared';
+import { attributedText, COLLAB_FIELD, docFromYDoc, yDocFromDoc } from './ydoc';
 
 /**
  * A등급 — 실시간 상태와 정본 JSON 사이의 변환 (P6_설계서_Collab C.1절).
@@ -194,5 +194,89 @@ describe('편집기가 붙이는 것들', () => {
       { type: 'text', text: '굵게', marks: [{ type: 'bold' }] },
       { type: 'text', text: '보통' },
     ]);
+  });
+});
+
+/**
+ * `attributedText` — 글자마다 넣은 사람을 붙인 본문 (P8_설계서_Mention C.3절, FR-900).
+ *
+ * 축은 둘이다. ① **`extractText`와 같은 글자열**이어야 한다 — 한쪽이 찾은 멘션을 다른 쪽이
+ * 못 찾으면 그 멘션은 조용히 "모름"이 된다. ② 글자의 작성자는 **그 글자를 넣은 클라이언트**다.
+ */
+describe('attributedText — 글자마다 넣은 사람', () => {
+  /** `extractText`의 마지막 정리. 멘션 판정은 이 정리 전후로 같다 (C.3절) */
+  const normalize = (s: string): string => s.replace(/\n{3,}/g, '\n\n').trim();
+  const who = (ydoc: Y.Doc, names: Record<number, string>) => attributedText(ydoc, (c) => names[c] ?? null);
+
+  /** 다른 클라이언트가 붙어 `edit`를 하고, 그 변경을 원래 문서에 적용한다 */
+  function editAs(target: Y.Doc, edit: (frag: Y.XmlFragment) => void): number {
+    const client = new Y.Doc();
+    Y.applyUpdate(client, Y.encodeStateAsUpdate(target));
+    edit(client.getXmlFragment(COLLAB_FIELD));
+    Y.applyUpdate(target, Y.encodeStateAsUpdate(client, Y.encodeStateVector(target)));
+    return client.clientID;
+  }
+  const firstText = (frag: Y.XmlFragment): Y.XmlText => (frag.get(0) as Y.XmlElement).get(0) as Y.XmlText;
+
+  it('**`extractText`와 같은 글자열을 만든다** — 블록·줄바꿈·중첩·표·마크까지', () => {
+    const samples: DocNode[] = [
+      doc(p(t('안녕 @kim'))),
+      doc({ type: 'heading', attrs: { level: 1 }, content: [t('제목')] }, p(t('본문')), { type: 'horizontalRule' }, p(t('끝'))),
+      doc(p(t('윗줄'), { type: 'hardBreak' }, t('@lee 아랫줄'))),
+      doc(p(t('굵게', [{ type: 'bold' }]), t(' @park'), t('링크', [{ type: 'link', attrs: { href: '/a' } }]))),
+      doc({ type: 'bulletList', content: [{ type: 'listItem', content: [p(t('항목 @a1'))] }, { type: 'listItem', content: [p(t('둘'))] }] }),
+      doc({ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', content: [p(t('칸'))] }, { type: 'tableCell', content: [p(t('@b2'))] }] }] }),
+      doc({ type: 'blockquote', content: [p(t('인용'))] }, { type: 'codeBlock', content: [t('code @x')] }),
+      doc(p(), p(), p(), p(t('빈 문단 뒤'))),
+      doc(),
+    ];
+    for (const d of samples) {
+      const ydoc = yDocFromDoc(d);
+      const got = who(ydoc, {});
+      expect(normalize(got.text)).toBe(extractText(docFromYDoc(ydoc)));
+      expect(got.authors).toHaveLength(got.text.length);
+    }
+  });
+
+  it('처음 문서의 글자는 방(서버)의 클라이언트가 넣은 것이다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('@kim'))));
+    const got = who(ydoc, { [ydoc.clientID]: 'server' });
+    expect(got.text).toBe('@kim\n');
+    expect(got.authors).toEqual(['server', 'server', 'server', 'server', null]);
+  });
+
+  it('**다른 클라이언트가 넣은 글자는 그 클라이언트의 것이다**', () => {
+    const ydoc = yDocFromDoc(doc(p(t('가나'))));
+    const b = editAs(ydoc, (f) => firstText(f).insert(2, ' @lee'));
+    const got = who(ydoc, { [ydoc.clientID]: 'A', [b]: 'B' });
+    expect(got.text).toBe('가나 @lee\n');
+    expect(got.authors.slice(0, 7)).toEqual(['A', 'A', 'B', 'B', 'B', 'B', 'B']);
+  });
+
+  it('**남이 서식을 걸어도 글자의 주인은 그대로다** — 굵게는 글자를 새로 만들지 않는다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('@kim 확인'))));
+    editAs(ydoc, (f) => firstText(f).format(0, 4, { bold: {} }));
+    const got = who(ydoc, { [ydoc.clientID]: 'A' });
+    expect(got.authors.slice(0, 4)).toEqual(['A', 'A', 'A', 'A']);
+  });
+
+  it('지운 글자는 들어오지 않는다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('@kim 지울말'))));
+    editAs(ydoc, (f) => firstText(f).delete(4, 4));
+    const got = who(ydoc, { [ydoc.clientID]: 'A' });
+    expect(got.text).toBe('@kim\n');
+  });
+
+  it('모르는 클라이언트의 글자는 `null`이다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('ab'))));
+    expect(who(ydoc, {}).authors).toEqual([null, null, null]);
+  });
+
+  it('**글자가 아닌 끼워 넣기(embed)는 건너뛴다** — `docFromYDoc`도 버린다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('ab'))));
+    firstText(ydoc.getXmlFragment(COLLAB_FIELD)).insertEmbed(1, { image: 'x' });
+    const got = who(ydoc, {});
+    expect(got.text).toBe('ab\n');
+    expect(normalize(got.text)).toBe(extractText(docFromYDoc(ydoc)));
   });
 });
