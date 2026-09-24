@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldSaveVersion, type SaveDecision } from './realtime';
+import { blockedReason, saveBlockedReason, shouldSaveVersion, type SaveDecision } from './realtime';
 import type { DocNode } from '@workfluence/shared';
 import { DOCUMENT_SCHEMA_VERSION } from '@workfluence/shared';
 
@@ -53,6 +53,20 @@ describe('shouldSaveVersion — 안 만드는 쪽 (FR-707·708)', () => {
     const d = shouldSaveVersion({ next: bad, previous: doc('이전'), idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' });
     expect(d.save).toBe(false);
     if (!d.save) expect(d.errors.length).toBeGreaterThan(0);
+  });
+
+  it('**방을 열 때의 알림도 같은 검증 단계다** — 두 벌로 두면 한쪽만 고쳐져 들어오는 사람과 판정이 다른 까닭을 본다 (P9 세 번째 코드 리뷰 5)', () => {
+    const bad = { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'iframe' }, { type: 'video' }] } as DocNode;
+    const d = shouldSaveVersion({ next: bad, previous: doc('이전'), idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' });
+    expect(d.save).toBe(false);
+    if (!d.save) expect(saveBlockedReason(bad)).toBe(blockedReason(d.errors));
+    expect(saveBlockedReason(doc('멀쩡한 문서'))).toBeNull();
+  });
+
+  it('까닭 한 줄은 첫 오류와 나머지 건수다 — 오류가 없으면 `null` (D.9)', () => {
+    expect(blockedReason([])).toBeNull();
+    expect(blockedReason(['하나'])).toBe('하나');
+    expect(blockedReason(['하나', '둘', '셋'])).toBe('하나 외 2건');
   });
 
   it('**빈 문서로 덮어쓰지 않는다** — 연결이 끊기며 빈 상태가 올라오면 내용이 사라진다', () => {

@@ -2,7 +2,8 @@ import { getSchema } from '@tiptap/core';
 import type { ContentMatch, NodeType } from '@tiptap/pm/model';
 import { ALLOWED_CHILDREN, ALLOWED_MARKS, ALLOWED_NODES, MARKS_IN } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
-import { editorExtensions, linkAllowed } from './extensions';
+import { Fragment, Slice } from '@tiptap/pm/model';
+import { editorExtensions, linkAllowed, relWithoutOpener, sliceWithoutOpener } from './extensions';
 
 /**
  * **편집기 스키마 = 서버 허용 목록** (P9_설계서_Gate D.7, FR-1007).
@@ -80,5 +81,30 @@ describe('링크 규칙 — 7절: http(s)·내부 경로·앵커만 (FR-1008)', 
 
   it.each(['mailto:user@example.internal', 'tel:0200000000', 'javascript:alert(1)', 'data:text/html,x', '//evil.example/'])('%s → 링크가 되지 않는다', (url) => {
     expect(linkAllowed(url)).toBe(false);
+  });
+});
+
+describe("붙여 넣은 링크의 rel에서 'opener' 낱말을 뺀다 — 편집기가 만든 것을 서버가 받게 (P9 세 번째 묶음 · FR-1007)", () => {
+  it.each<[string | null, string | null]>([
+    ['opener', null],
+    ['opener nofollow', 'nofollow'],
+    ['  Opener   noreferrer ', 'noreferrer'],
+    ['noopener noreferrer nofollow', 'noopener noreferrer nofollow'],
+    [null, null],
+  ])('%j → %j', (rel, out) => {
+    expect(relWithoutOpener(rel)).toBe(out);
+  });
+
+  it('붙여 넣는 조각 안의 링크마다 — 표 칸 안의 링크도', () => {
+    const link = (rel: string | null) => schema.marks.link.create({ href: 'https://example.internal', rel });
+    const para = (rel: string | null) => schema.nodes.paragraph.create(null, schema.text('링크', [link(rel)]));
+    const cell = schema.nodes.tableCell.create(null, para('opener nofollow'));
+    const table = schema.nodes.table.create(null, schema.nodes.tableRow.create(null, cell));
+    const slice = new Slice(Fragment.fromArray([para('OPENER'), table, para('nofollow')]), 0, 0);
+    const rels: unknown[] = [];
+    sliceWithoutOpener(slice).content.descendants((n) => {
+      for (const m of n.marks) if (m.type.name === 'link') rels.push(m.attrs.rel);
+    });
+    expect(rels).toEqual([null, 'nofollow', 'nofollow']);
   });
 });

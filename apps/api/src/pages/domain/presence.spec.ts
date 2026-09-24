@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
-import { readPresence, screenPresence, writePresence, type PresenceEntry } from './presence';
+import { MAX_UNWRITTEN_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence, type PresenceEntry } from './presence';
 
 /**
  * A등급 — 사람 표시(awareness) 프레임 (P9_설계서_Gate D.5, FR-1004).
@@ -151,6 +151,26 @@ describe('묶기 상한 — 한 항목짜리 프레임의 살아 있는 몫만, 
   it('묶을 수 있는 수(`canBind`)가 남지 않았으면 묶지 않고 뺀다', () => {
     expect(screenPresence([entry(7, { user: {} })], U, new Map(), 'U', 0)).toEqual({ keep: [], bind: [] });
     expect(screenPresence([entry(7, { user: {} })], U, new Map(), 'U', 1)).toEqual({ keep: [entry(7, { user: { name: 'U' } })], bind: [7] });
+  });
+});
+
+describe('사람 표시로만 묶은 ID — 풀지 않고, 사람마다 방에 몇 개까지 (P9 세 번째 코드 리뷰 2·자체 점검 1)', () => {
+  const none = (): boolean => false;
+
+  it('그 사람이 묶고 아직 쓰지 않은 ID만 센다 — 쓴 ID와 남의 ID는 세지 않는다', () => {
+    const owners = new Map<number, string>([
+      [1, U],
+      [2, U],
+      [3, X],
+    ]);
+    expect(unwrittenBindsLeft(owners, U, none)).toBe(MAX_UNWRITTEN_PRESENCE_BINDS - 2);
+    expect(unwrittenBindsLeft(owners, U, (c) => c === 1)).toBe(MAX_UNWRITTEN_PRESENCE_BINDS - 1);
+    expect(unwrittenBindsLeft(owners, X, none)).toBe(MAX_UNWRITTEN_PRESENCE_BINDS - 1);
+  });
+
+  it('상한에 닿으면 0이다 — 음수가 되지 않는다', () => {
+    const owners = new Map<number, string>(Array.from({ length: MAX_UNWRITTEN_PRESENCE_BINDS + 3 }, (_, i) => [i, U] as [number, string]));
+    expect(unwrittenBindsLeft(owners, U, none)).toBe(0);
   });
 });
 

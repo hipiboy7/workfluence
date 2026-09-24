@@ -15,7 +15,7 @@ import { UsersService } from '../../users/users.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../../test/db';
 import { PagesService } from '../pages.service';
 import type { Ledger } from '../domain/makers';
-import { MAX_PRESENCE_BINDS } from '../domain/presence';
+import { MAX_PRESENCE_BINDS, MAX_UNWRITTEN_PRESENCE_BINDS } from '../domain/presence';
 import { docFromYDoc, yDocFromDoc } from '../domain/ydoc';
 import { CollabGateway } from './collab.gateway';
 
@@ -506,6 +506,8 @@ describe('자동 저장이 멈추면 화면에 알린다 (P9 FR-1011)', () => {
   /** 서버가 보낸 저장 상태 알림(`COLLAB_MSG.status`)을 받은 차례대로 */
   const statuses = (s: FakeSocket): CollabStatus[] =>
     s.sent.filter((f) => f[0] === COLLAB_MSG.status).map((f) => JSON.parse(f.subarray(1).toString('utf8')) as CollabStatus);
+  /** 저장 트랜잭션이 던졌을 때의 까닭 (세 번째 코드 리뷰 3) */
+  const SAVE_FAILED = '서버가 버전을 남기지 못했다 — 잠시 뒤 다시 한다';
   /** 관문 앞에서 막히지 않는 **저장할 수 없는 상태** — P9 전에 남은 실시간 상태가 그렇다. 여기서는 방의 문서에 직접 넣는다 */
   const breakDoc = (d: Y.Doc): void =>
     d.transact(() => {
@@ -598,12 +600,38 @@ describe('자동 저장이 멈추면 화면에 알린다 (P9 FR-1011)', () => {
       await idle();
       await inner.sweep();
       expect(fail).toHaveBeenCalledTimes(1);
-      expect(statuses(a.socket)).toHaveLength(1); // 여전히 "멈췄다" — 버전이 남지 않았다
+      // 여전히 "멈췄다" — 버전이 남지 않았다. 까닭은 저장 실패로 바뀐다 (세 번째 코드 리뷰 3)
+      expect(statuses(a.socket).map((x) => x.saveBlocked)).toEqual([expect.stringContaining("'script'"), SAVE_FAILED]);
       // 다음 판정에서 저장되면 그때 푼다
       a.room.doc.transact(() => a.room.doc.getXmlFragment('default').insert(0, [new Y.XmlElement('paragraph')]), { principal: { id: userId } });
       await idle();
       await inner.sweep();
       expect(statuses(a.socket).at(-1)).toEqual({ saveBlocked: null });
+    } finally {
+      fail.mockRestore();
+    }
+  });
+
+  it('**저장이 던지면 방의 모두에게 알린다** — 전에는 아무 알림이 없어 화면은 저장되는 줄 알았다. 다음 저장이 되면 푼다 (세 번째 코드 리뷰 3)', async () => {
+    const a = await attach();
+    const b = await attach(otherId, await mkSession(otherId));
+    const pagesSvc = (gw as unknown as { pagesSvc: PagesService }).pagesSvc;
+    const fail = vi.spyOn(pagesSvc, 'saveCollabVersion').mockRejectedValueOnce(new Error('DB가 잠깐 흔들렸다'));
+    const para = (text: string): Y.XmlElement => {
+      const p = new Y.XmlElement('paragraph');
+      p.insert(0, [new Y.XmlText(text)]);
+      return p;
+    };
+    try {
+      a.room.doc.transact(() => a.room.doc.getXmlFragment('default').insert(0, [para('저장될 글')]), { principal: { id: userId } });
+      await idle();
+      await inner.sweep();
+      expect(fail).toHaveBeenCalledTimes(1);
+      for (const s of [a.socket, b.socket]) expect(statuses(s)).toEqual([{ saveBlocked: SAVE_FAILED }]);
+      a.room.doc.transact(() => a.room.doc.getXmlFragment('default').insert(0, [para('하나 더')]), { principal: { id: userId } });
+      await idle();
+      await inner.sweep();
+      for (const s of [a.socket, b.socket]) expect(statuses(s).at(-1)).toEqual({ saveBlocked: null });
     } finally {
       fail.mockRestore();
     }
@@ -1068,7 +1096,7 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       }
     });
 
-    it('**사람 표시로만 묶고 쓰지 않은 ID는 나갈 때 푼다** — 붙었다 끊기를 되풀이해 주인 표를 불리지 못한다. 쓴 ID와 다른 연결이 쓰는 ID는 남긴다 (두 번째 코드 리뷰 3)', async () => {
+    it('**사람 표시로만 묶은 ID는 나가도 풀지 않는다** — 풀면 퇴장을 본 남이 그 ID를 알려 주인이 되고, 같은 Y.Doc으로 다시 붙은 원래 사람이 끊겼다 (세 번째 코드 리뷰 2·자체 점검 1)', async () => {
       const announce = (p: Peer, clientID: number): void => {
         const d = new Y.Doc();
         d.clientID = clientID;
@@ -1080,25 +1108,48 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
           a.destroy();
         }
       };
-      // 알리기만 하고 나간다 — 풀린다
-      const x = await enter(otherId);
+      // V가 알리기만 하고 나간다 — 여전히 V의 것이다
+      const v = await enter(otherId);
+      announce(v, 91001);
+      v.socket.close();
+      expect(ownerOf(91001)).toBe(otherId);
+      // 퇴장을 본 X가 그 ID를 알린다 — 묶지도 퍼뜨리지도 않는다
+      const watcher = await enter(carolId);
+      const x = await enter(userId);
+      const sentBefore = watcher.socket.sent.length;
       announce(x, 91001);
       expect(ownerOf(91001)).toBe(otherId);
-      x.socket.close();
-      expect(ownerOf(91001)).toBeUndefined();
-      // 알리고 쓴 뒤 나간다 — 그 글자의 주인이라 남는다
-      const w = await enter(otherId);
-      announce(w, w.doc.clientID);
-      act(w, (f) => newPara(f, '쓴 글'));
-      w.socket.close();
-      expect(ownerOf(w.doc.clientID)).toBe(otherId);
-      // 같은 ID를 새 연결이 먼저 알린 뒤 옛 연결이 닫힌다(같은 Y.Doc으로 다시 붙은 화면) — 남는다
-      const old = await enter(otherId);
-      announce(old, 91002);
+      expect(watcher.socket.sent.length).toBe(sentBefore);
+      // V가 같은 Y.Doc으로 다시 붙어 쓴다 — 받는다. 기록에 V가 조작자로 남지 않는다
       const again = await enter(otherId);
-      announce(again, 91002);
-      old.socket.close();
-      expect(ownerOf(91002)).toBe(otherId);
+      again.doc.clientID = 91001;
+      act(again, (f) => newPara(f, '다시 붙어 쓴 글'));
+      expect(refusedCode(again)).toBeUndefined();
+      expect(JSON.stringify(docFromYDoc(room.doc))).toContain('다시 붙어 쓴 글');
+      expect(await rejections()).toEqual([]);
+    });
+
+    it('**사람 표시로만 묶고 쓰지 않은 ID는 사람마다 방에 몇 개까지다** — 붙었다 끊기를 되풀이해 주인 표를 불리지 못한다. 넘친 ID는 첫 편집에서 묶인다 (세 번째 코드 리뷰 2)', async () => {
+      const ids: number[] = [];
+      for (let i = 0; i < MAX_UNWRITTEN_PRESENCE_BINDS + 2; i++) {
+        const p = await enter(otherId);
+        const a = new Awareness(p.doc);
+        try {
+          a.setLocalStateField('user', { name: 'x' });
+          p.socket.emit('message', AWARE(encodeAwarenessUpdate(a, [p.doc.clientID])));
+        } finally {
+          a.destroy();
+        }
+        ids.push(p.doc.clientID);
+        if (i < MAX_UNWRITTEN_PRESENCE_BINDS + 1) p.socket.close();
+        else {
+          // 넘친 연결 — 알림으로는 묶이지 않았다. 쓰면 관문이 묶는다
+          expect(ownerOf(p.doc.clientID)).toBeUndefined();
+          act(p, (f) => newPara(f, '넘친 연결의 글'));
+          expect(refusedCode(p)).toBeUndefined();
+        }
+      }
+      expect(ids.map((c) => ownerOf(c) === otherId)).toEqual(ids.map((_, i) => i < MAX_UNWRITTEN_PRESENCE_BINDS || i === MAX_UNWRITTEN_PRESENCE_BINDS + 1));
     });
 
     it('**붙어 되풀이된 덩어리는 받지 않는다** — 게이트웨이가 받은 바이트를 관문에 넘긴다. 받았다면 뒤 덩어리가 서버에 보류됐다 (P9 보안 검토 2)', async () => {

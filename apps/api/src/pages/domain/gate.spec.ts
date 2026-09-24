@@ -710,6 +710,32 @@ describe('아는 조각·일부만 아는 조각 — Yjs가 들이는 대로 (�
     expect(refused(judge(srv, update, U, owners))).toEqual({ ok: false, rule: 'structure', reason: '앞 조각과 다른 자리에 이어 쓴 조각' });
   });
 
+  it('일부만 아는 **지운** 조각도 다른 자리에 이어 쓴 것으로 꾸미면 받지 않는다 — 지운 조각도 Yjs가 앞 조각 옆에 끼워 목록과 부모가 어긋난다 (P9 세 번째 코드 리뷰 1)', () => {
+    const srv = new Y.Doc();
+    srv.getXmlFragment('default').insert(0, [para('첫 문단'), para('둘째 문단')]);
+    const before = Y.encodeStateAsUpdate(srv);
+    const owners = new Map<number, string>();
+    const s = screen(srv);
+    s.clientID = X;
+    expect(pass(srv, change(s, (f) => firstText(f).insert(0, '가')), owners).ok).toBe(true);
+    // 꾸민 화면: X의 번호로 **둘째 문단**에 '가나'를 치고 같은 트랜잭션에서 지운다 — 지운 조각 하나(시계 0~1)
+    const forged = forgedFrom(before);
+    const sv = Y.encodeStateVector(forged);
+    forged.transact(() => {
+      const t = lastText(forged.getXmlFragment('default'));
+      t.insert(0, '가나');
+      t.delete(0, 2);
+    });
+    const update = Y.encodeStateAsUpdate(forged, sv);
+    const [struct] = Y.decodeUpdate(update).structs.filter((x) => x.id.client === X);
+    expect([struct.id.clock, struct.length, (struct as Y.Item).content instanceof Y.ContentDeleted]).toEqual([0, 2, true]);
+    const copy = copyOf(srv);
+    Y.applyUpdate(copy, update);
+    const tail = Y.getItem(copy.store, Y.createID(X, 1)) as Y.Item;
+    expect(tail.parent).not.toBe(tail.left?.parent); // 그대로 들이면 첫 문단의 목록에 둘째 문단을 부모로 둔 조각이 낀다
+    expect(refused(judge(srv, update, U, owners))).toEqual({ ok: false, rule: 'structure', reason: '앞 조각과 다른 자리에 이어 쓴 조각' });
+  });
+
   it('일부만 아는 조각을 **같은 자리**에 이어 쓴 것은 받는다 — 같은 Y.Doc으로 다시 붙은 화면이 보내는 전체 상태다', () => {
     const srv = server();
     const owners = new Map<number, string>();
