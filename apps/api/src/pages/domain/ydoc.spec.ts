@@ -224,6 +224,18 @@ describe('편집기가 붙이는 것들', () => {
       { type: 'text', text: '보통' },
     ]);
   });
+
+  it('**단계가 없는 제목은 편집기처럼 1단계로 읽는다** — 조작한 클라이언트가 `level`만 지우면 화면은 1단계를 보이는데 저장은 "단계 없음"으로 멈췄다 (P9 D.2, 보류 22)', () => {
+    const y = new Y.Doc();
+    const h = new Y.XmlElement('heading');
+    const text = new Y.XmlText();
+    h.insert(0, [text]);
+    text.insert(0, '단계 없는 제목');
+    y.getXmlFragment(COLLAB_FIELD).insert(0, [h]);
+    const back = docFromYDoc(y);
+    expect(back.content).toEqual([{ type: 'heading', attrs: { level: 1 }, content: [tx('단계 없는 제목')] }]);
+    expect(validateDocument(back).ok).toBe(true);
+  });
 });
 
 /**
