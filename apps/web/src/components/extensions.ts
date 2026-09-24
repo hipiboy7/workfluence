@@ -1,4 +1,6 @@
-import type { AnyExtension } from '@tiptap/core';
+import { Extension, type AnyExtension } from '@tiptap/core';
+import { Fragment, Slice, type Node as PMNode } from '@tiptap/pm/model';
+import { Plugin } from '@tiptap/pm/state';
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import StarterKit from '@tiptap/starter-kit';
 import { ALLOWED_LINK_HREF } from '@workfluence/shared';
@@ -14,6 +16,51 @@ import { ALLOWED_LINK_HREF } from '@workfluence/shared';
 export function linkAllowed(url: string): boolean {
   return ALLOWED_LINK_HREF.test(url.trim());
 }
+
+/**
+ * **링크 `rel`에서 `opener` 낱말을 뺀다** — 남는 것이 없으면 `null` (P9 세 번째 묶음 "스스로 찾은 것", FR-1007).
+ *
+ * TipTap의 링크는 붙여 넣은 `<a rel="…">`의 `rel`을 그대로 둔다. 서버(정본 검증·관문)는 `opener` 낱말을 받지 않으므로 — 새 창이 이
+ * 위키 창을 다른 곳으로 옮길 수 있다 — 그대로 두면 **편집기가 만든 것 때문에 정상 사용자가 끊긴다.** 다른 낱말은 서버가 받는다.
+ */
+export function relWithoutOpener(rel: string | null): string | null {
+  if (rel === null) return null;
+  const kept = rel.split(/\s+/).filter((w) => w && w.toLowerCase() !== 'opener');
+  return kept.length ? kept.join(' ') : null;
+}
+
+function withoutOpener(fragment: Fragment): Fragment {
+  const nodes: PMNode[] = [];
+  fragment.forEach((node) => {
+    if (!node.isText) {
+      nodes.push(node.copy(withoutOpener(node.content)));
+      return;
+    }
+    const marks = node.marks.map((m) =>
+      m.type.name === 'link' && typeof m.attrs.rel === 'string' && relWithoutOpener(m.attrs.rel) !== m.attrs.rel
+        ? m.type.create({ ...m.attrs, rel: relWithoutOpener(m.attrs.rel) })
+        : m,
+    );
+    nodes.push(node.mark(marks));
+  });
+  return Fragment.fromArray(nodes);
+}
+
+/** 붙여 넣거나 끌어 놓는 조각의 링크마다 `relWithoutOpener`를 적용한다 */
+export function sliceWithoutOpener(slice: Slice): Slice {
+  return new Slice(withoutOpener(slice.content), slice.openStart, slice.openEnd);
+}
+
+/**
+ * 붙여 넣기·끌어 놓기의 **조각**을 고친다. HTML 문자열(`transformPastedHTML`)이 아니라 스키마로 읽힌 조각을 본다 — 다시 파싱하지
+ * 않고, 스키마가 바뀌지 않아 대조 시험(`extensions.spec.ts`)이 그대로다. ProseMirror는 끌어 놓기에도 `transformPasted`를 부른다
+ */
+const PastedLinkRel = Extension.create({
+  name: 'pastedLinkRel',
+  addProseMirrorPlugins() {
+    return [new Plugin({ props: { transformPasted: sliceWithoutOpener } })];
+  },
+});
 
 /**
  * **두 편집기가 쓰는 확장 목록** (P9 D.7, FR-1007). 보기·편집용(`Editor.tsx`)과 실시간(`CollabEditor.tsx`)이 이것 하나를 쓴다 —
@@ -36,5 +83,6 @@ export function editorExtensions(opts: { collab?: boolean } = {}): AnyExtension[
     TableRow,
     TableHeader,
     TableCell,
+    PastedLinkRel,
   ];
 }

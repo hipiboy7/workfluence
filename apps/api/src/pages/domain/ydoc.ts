@@ -90,7 +90,8 @@ function toYNode(node: DocNode): Y.XmlElement {
     el.setAttribute(k, v as never);
   }
   const kids = toYChildren(node.content ?? []);
-  if (kids.length) el.push(kids);
+  // `insert(0, …)`로 넣는다 — `push`는 아직 문서에 붙지 않은 요소의 길이를 읽어 방을 만들 때마다 Yjs 경고가 찍혔다 (P9 세 번째 자체 점검 5)
+  if (kids.length) el.insert(0, kids);
   return el;
 }
 

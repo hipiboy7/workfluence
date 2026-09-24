@@ -19,6 +19,23 @@ export type PresenceEntry = { client: number; clock: number; state: Record<strin
  */
 export const MAX_PRESENCE_BINDS = 4;
 
+/**
+ * **한 사람이 한 방에서 사람 표시로만 묶고 아직 한 글자도 쓰지 않은 클라이언트 ID의 수** (D.5, P9 세 번째 코드 리뷰 2).
+ *
+ * 묶은 ID는 나가도 풀지 않는다 — 풀면 같은 Y.Doc으로 다시 붙는 사이 퇴장을 본 남이 그 ID를 알려 주인이 되고, 원래 사람의 편집이
+ * "남의 클라이언트 ID"로 거절돼 감사로그에 그 사람이 조작자로 남았다(자체 점검 1). 대신 붙었다 끊기를 되풀이해 주인 표를 불리지
+ * 못하게 사람마다 이만큼만 둔다. 넘친 ID는 묶지도 퍼뜨리지도 않고 그 ID의 첫 편집에서 관문이 묶는다. 정상 사용자는 창 하나에
+ * 하나를 쓴다 — 탭 여럿·새로고침을 넉넉히 덮는다.
+ */
+export const MAX_UNWRITTEN_PRESENCE_BINDS = 16;
+
+/** 이 사람이 더 묶을 수 있는 쓰지 않은 ID의 수 — `written`은 그 ID로 서버에 글자가 들어갔는가 */
+export function unwrittenBindsLeft(owners: ReadonlyMap<number, string>, user: string, written: (client: number) => boolean): number {
+  let n = 0;
+  for (const [client, owner] of owners) if (owner === user && !written(client)) n += 1;
+  return Math.max(0, MAX_UNWRITTEN_PRESENCE_BINDS - n);
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 class Reader {

@@ -104,13 +104,33 @@ function fingerprint(node: DocNode): string {
   ]);
 }
 
+/** 검증 오류 목록. 통과하면 빈 목록 */
+function validationErrors(doc: DocNode): string[] {
+  const v = validateDocument(doc);
+  return v.ok ? [] : v.errors;
+}
+
+/** 검증 오류를 화면에 알릴 까닭 한 줄로 — 첫 문장과 나머지 건수. 오류가 없으면 `null` (P9 D.9) */
+export function blockedReason(errors: readonly string[]): string | null {
+  if (!errors.length) return null;
+  return errors.length > 1 ? `${errors[0]} 외 ${errors.length - 1}건` : errors[0];
+}
+
+/**
+ * **이 문서로는 자동 저장이 멈추는가** — 그 까닭 한 줄, 아니면 `null` (P9 D.9). 방을 열 때 쓴다. `shouldSaveVersion`의 첫 단계와
+ * 같은 검증이다 — 두 벌로 두면 한쪽만 바뀌어 들어오는 사람이 판정과 다른 까닭을 본다 (P9 세 번째 코드 리뷰 5)
+ */
+export function saveBlockedReason(doc: DocNode): string | null {
+  return blockedReason(validationErrors(doc));
+}
+
 export function shouldSaveVersion(input: SaveInput): SaveDecision {
   const { trigger } = input;
 
   // **검증이 가장 먼저다.** 어떤 계기도 이것은 넘지 못한다 — 깨진 문서가 정본이 되면
   // 그 뒤의 검색·내보내기·비교가 전부 그것을 읽는다 (FR-708)
-  const validation = validateDocument(input.next);
-  if (!validation.ok) return { save: false, reason: `문서 검증 실패 (${validation.errors.length}건)`, errors: validation.errors };
+  const errors = validationErrors(input.next);
+  if (errors.length) return { save: false, reason: `문서 검증 실패 (${errors.length}건)`, errors };
 
   // 같으면 만들지 않는다. 커서만 움직여도 Yjs 변경이 오기 때문에 이것이 없으면
   // 가만히 보고만 있어도 버전이 쌓인다 (FR-707). **강제 저장도 예외가 아니다**

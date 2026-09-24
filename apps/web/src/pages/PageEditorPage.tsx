@@ -158,7 +158,7 @@ export function PageEditorPage() {
               {/* **자동 저장이 멈춘 것도 말한다** (P9 FR-1011). 편집은 동료에게 계속 보여 저장되는 줄 알기 쉽다 */}
               {saveBlocked !== null && link !== 'refused' && (
                 <strong className="badge fail">
-                  자동 저장이 멈췄다: {saveBlocked}. 고치기 전에는 버전이 남지 않는다 — 모르겠으면 쓰던 내용을 복사해 두고 관리자에게 알린다
+                  자동 저장이 멈췄다: {saveBlocked}. 풀리기 전에는 버전이 남지 않는다 — 모르겠으면 쓰던 내용을 복사해 두고 관리자에게 알린다
                 </strong>
               )}
             </p>

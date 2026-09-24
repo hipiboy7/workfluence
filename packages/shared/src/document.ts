@@ -125,7 +125,7 @@ export function validateDocument(input: unknown): DocumentValidation {
     }
     const type = node.type;
     if (typeof type !== 'string' || !Object.hasOwn(ALLOWED_NODES, type)) {
-      errors.push(`${path}: 허용되지 않는 노드 '${cut(String(type))}'`);
+      errors.push(`${path}: 허용되지 않는 노드 '${cutName(String(type))}'`);
       return;
     }
     for (const problem of nodeAttrProblems(type, node.attrs)) errors.push(`${path}(${type}): ${problem}`);
@@ -186,7 +186,7 @@ function placementProblems(parent: string, child: unknown, path: string, errors:
 
 function checkMark(mark: unknown, path: string, errors: string[]): void {
   if (!isRecord(mark) || typeof mark.type !== 'string') {
-    errors.push(`${path}: 허용되지 않는 마크 '${isRecord(mark) ? cut(String(mark.type)) : typeof mark}'`);
+    errors.push(`${path}: 허용되지 않는 마크 '${isRecord(mark) ? cutName(String(mark.type)) : typeof mark}'`);
     return;
   }
   for (const problem of markProblems(mark.type, mark.attrs)) errors.push(`${path}: ${problem}`);
@@ -200,7 +200,7 @@ function checkMark(mark: unknown, path: string, errors: string[]): void {
  * 그 자리는 변환이 편집기와 같은 기본값으로 채운다(P9 FR-1010). 있는 값은 그래도 본다.
  */
 export function nodeAttrProblems(type: string, attrs: unknown, opts: { partial?: boolean } = {}): string[] {
-  if (!Object.hasOwn(ALLOWED_NODES, type)) return [`허용되지 않는 노드 '${cut(type)}'`];
+  if (!Object.hasOwn(ALLOWED_NODES, type)) return [`허용되지 않는 노드 '${cutName(type)}'`];
   const out = attrProblems(attrs, ALLOWED_NODES[type]);
   if (type === 'heading') {
     const level = isRecord(attrs) ? attrs.level : undefined;
@@ -230,11 +230,10 @@ const TABLE_ALIGN: ReadonlySet<string> = new Set(['left', 'center', 'right']);
 export function cutName(s: string): string {
   return s.length > MAX_NAME_IN_REASON ? `${s.slice(0, MAX_NAME_IN_REASON)}…` : s;
 }
-const cut = cutName;
 
 /** **마크 하나의 문제** — 정본 검증과 관문이 같이 쓴다 (P9 FR-1001). 링크 주소도 적지 않는다 */
 export function markProblems(type: string, attrs: unknown): string[] {
-  if (!Object.hasOwn(ALLOWED_MARKS, type)) return [`허용되지 않는 마크 '${cut(type)}'`];
+  if (!Object.hasOwn(ALLOWED_MARKS, type)) return [`허용되지 않는 마크 '${cutName(type)}'`];
   const out = attrProblems(attrs, ALLOWED_MARKS[type]);
   if (type === 'link') {
     const href = isRecord(attrs) ? attrs.href : undefined;
@@ -267,10 +266,10 @@ function attrProblems(attrs: unknown, allowed: readonly string[]): string[] {
     // 목록을 넓히면 편집기가 새 속성을 더할 때마다 같은 일이 반복된다.
     if (value === null || value === undefined) continue;
     if (!allowed.includes(key)) {
-      errors.push(`허용되지 않는 속성 '${cut(key)}'`);
+      errors.push(`허용되지 않는 속성 '${cutName(key)}'`);
       continue;
     }
-    if (!isPrimitiveOrPrimitiveArray(value)) errors.push(`속성 '${cut(key)}' 값은 원시값 또는 원시값 배열`);
+    if (!isPrimitiveOrPrimitiveArray(value)) errors.push(`속성 '${cutName(key)}' 값은 원시값 또는 원시값 배열`);
   }
   return errors;
 }

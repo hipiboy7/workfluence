@@ -202,7 +202,7 @@ test('A가 부르고 B가 마지막으로 고쳐도, 알림함은 A가 불렀다
  * 그 문서의 저장이 멈췄다 — 편집기와 서버 허용 목록이 달랐다. 이제 관문이 허용 목록 밖을 받지 않고 **끊으므로**,
  * 어긋나면 저장이 멈추는 대신 편집이 끊긴다. 둘 다 없어야 한다.
  */
-test('이메일 주소를 치고 정렬된 표·제목 붙은 링크를 붙여 넣어도 저장된다 — 이메일은 링크가 되지 않는다', async ({ page }) => {
+test('이메일 주소를 치고 정렬된 표·제목 붙은 링크·rel=opener 링크를 붙여 넣어도 저장된다 — 이메일은 링크가 되지 않는다', async ({ page }) => {
   await login(page, ADMIN.username, ADMIN.password);
   const spaceName = `맞춤 공간 ${Date.now()}`;
   await page.goto('/');
@@ -220,16 +220,18 @@ test('이메일 주소를 치고 정렬된 표·제목 붙은 링크를 붙여 �
   await expect(editor).toContainText('user@example.internal');
   await expect(editor.locator('a[href^="mailto:"]')).toHaveCount(0);
 
-  // 붙여 넣기 — 표 칸의 정렬(`align`)과 링크의 `title`은 편집기가 붙여 넣은 HTML에서 만든다
+  // 붙여 넣기 — 표 칸의 정렬(`align`)과 링크의 `title`·`rel`은 편집기가 붙여 넣은 HTML에서 만든다. `rel`의 `opener` 낱말은
+  // 편집기가 뺀다 — 서버가 받지 않아 그대로 두면 이 사람이 끊긴다 (P9 세 번째 묶음)
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
   await editor.evaluate((el) => {
     const dt = new DataTransfer();
-    dt.setData('text/html', '<p><a href="https://example.internal/doc" title="설명">제목 붙은 링크</a></p><table><tbody><tr><td align="center">가운데 칸</td></tr></tbody></table>');
+    dt.setData('text/html', '<p><a href="https://example.internal/doc" title="설명">제목 붙은 링크</a> <a href="https://example.internal/rel" rel="opener nofollow">열기 링크</a></p><table><tbody><tr><td align="center">가운데 칸</td></tr></tbody></table>');
     dt.setData('text/plain', '제목 붙은 링크 가운데 칸');
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   });
   await expect(editor.locator('a[href="https://example.internal/doc"]')).toHaveCount(1);
+  await expect(editor.locator('a[href="https://example.internal/rel"]')).toHaveAttribute('rel', 'nofollow');
   await expect(editor.locator('td')).toContainText('가운데 칸');
 
   await page.getByRole('button', { name: '저장하고 보기로' }).click();
@@ -239,6 +241,7 @@ test('이메일 주소를 치고 정렬된 표·제목 붙은 링크를 붙여 �
   await expect(body).toContainText('user@example.internal');
   await expect(body).toContainText('제목 붙은 링크');
   await expect(body).toContainText('가운데 칸');
+  await expect(body.locator('a[href="https://example.internal/rel"]')).toHaveAttribute('rel', 'nofollow');
 });
 
 /**

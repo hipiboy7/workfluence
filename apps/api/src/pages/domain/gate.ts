@@ -138,8 +138,6 @@ class MinHeap {
   }
 }
 
-/** 이름·키는 조작한 클라이언트가 정한다 — 기록이 불어나지 않게 자른다 (D.2) */
-const cut = cutName;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isId = (v: unknown): v is IdLike => typeof v === 'object' && v !== null && 'client' in v && 'clock' in v;
 
@@ -324,7 +322,12 @@ class Lookup {
 /** 새 조각 하나가 편집기가 만드는 것인가. 아니면 그 까닭 */
 function structureProblem(item: Y.Item, lookup: Lookup): string | null {
   const c = item.content;
-  if (c instanceof Y.ContentDeleted) return null;
+  // **지운 조각도 자리는 본다** (P9 세 번째 코드 리뷰 1). 일부만 아는 지운 조각도 Yjs가 앞 조각 옆에 끼우고 부모는 적힌 이웃에서
+  // 잡아, 목록과 부모가 어긋난다. 내용은 없으니 그 밖의 규칙은 보지 않는다
+  if (c instanceof Y.ContentDeleted) {
+    const at = lookup.locate(item);
+    return at.place.kind === 'gone' || lookup.continuesInPlace(item, at) ? null : '앞 조각과 다른 자리에 이어 쓴 조각';
+  }
   const strange = strangeContent(c);
   if (strange) return `편집기가 만들지 않는 내용 '${strange}'`;
   if (c instanceof Y.ContentType && !(c.type instanceof Y.XmlElement) && !(c.type instanceof Y.XmlText)) {
@@ -334,16 +337,16 @@ function structureProblem(item: Y.Item, lookup: Lookup): string | null {
   const { place, parentSub } = at;
   if (place.kind === 'gone') return null;
   if (!lookup.continuesInPlace(item, at)) return '앞 조각과 다른 자리에 이어 쓴 조각';
-  if (place.kind === 'root' && place.name !== COLLAB_FIELD) return `최상위 타입 '${cut(place.name)}'`;
+  if (place.kind === 'root' && place.name !== COLLAB_FIELD) return `최상위 타입 '${cutName(place.name)}'`;
   const here = place.kind === 'root' ? 'doc' : place.kind === 'element' ? place.name : place.kind === 'text' ? 'text' : place.name;
 
   // 속성(맵 항목) — 요소에만, 값 하나(`ContentAny`)로
   if (parentSub !== null) {
     if (place.kind === 'text') return '글자 조각에 속성';
-    if (place.kind !== 'element') return `'${cut(here)}'에 속성`;
-    if (!(c instanceof Y.ContentAny) || c.arr.length !== 1) return `'${cut(here)}'의 속성 자리에 올 수 없는 내용`;
+    if (place.kind !== 'element') return `'${cutName(here)}'에 속성`;
+    if (!(c instanceof Y.ContentAny) || c.arr.length !== 1) return `'${cutName(here)}'의 속성 자리에 올 수 없는 내용`;
     const problems = nodeAttrProblems(place.name, { [parentSub]: c.arr[0] }, { partial: true });
-    return problems.length ? `${problems[0]} (${cut(place.name)})` : null;
+    return problems.length ? `${problems[0]} (${cutName(place.name)})` : null;
   }
 
   // 목록의 자식
@@ -352,21 +355,21 @@ function structureProblem(item: Y.Item, lookup: Lookup): string | null {
     const kids = place.kind === 'root' || place.kind === 'element' ? (Object.hasOwn(ALLOWED_CHILDREN, here) ? ALLOWED_CHILDREN[here] : []) : [];
     // `text`는 글자(`Y.XmlText`)의 자리다 — 이름이 `text`인 요소가 아니다
     const fits = c.type instanceof Y.XmlText ? kids.includes('text') : child !== 'text' && child !== 'doc' && kids.includes(child);
-    if (!fits) return `'${cut(here)}' 안에 올 수 없는 '${cut(child)}'`;
+    if (!fits) return `'${cutName(here)}' 안에 올 수 없는 '${cutName(child)}'`;
     // **깊이도 정본 검증과 같게 본다.** 자리마다 맞는 인용을 65겹 쌓으면 관문은 지나도 저장이 영영 멈췄다 (P9 코드 리뷰 3)
     return lookup.depthOf(item) > MAX_DOCUMENT_DEPTH ? `중첩 깊이 ${MAX_DOCUMENT_DEPTH} 초과` : null;
   }
-  if (place.kind !== 'text') return `'${cut(here)}' 안에 올 수 없는 ${c instanceof Y.ContentFormat ? '서식' : c instanceof Y.ContentString ? '글자' : '값'}`;
+  if (place.kind !== 'text') return `'${cutName(here)}' 안에 올 수 없는 ${c instanceof Y.ContentFormat ? '서식' : c instanceof Y.ContentString ? '글자' : '값'}`;
   if (c instanceof Y.ContentString) return null;
   if (c instanceof Y.ContentFormat) {
     // 서식 끝(`null`)은 마크가 아니다
     if (c.value === null) return null;
-    if (!isRecord(c.value)) return `마크 '${cut(c.key)}'의 속성은 객체`;
+    if (!isRecord(c.value)) return `마크 '${cutName(c.key)}'의 속성은 객체`;
     const problems = markProblems(c.key, c.value);
     if (problems.length) return problems[0];
     const holder = place.holder ?? '';
     const allowed = Object.hasOwn(MARKS_IN, holder) ? MARKS_IN[holder] : [];
-    return allowed.includes(c.key) ? null : `'${cut(holder)}' 안의 글자는 마크 '${c.key}'를 받지 않는다`;
+    return allowed.includes(c.key) ? null : `'${cutName(holder)}' 안의 글자는 마크 '${c.key}'를 받지 않는다`;
   }
   return `'text' 안에 올 수 없는 값`;
 }

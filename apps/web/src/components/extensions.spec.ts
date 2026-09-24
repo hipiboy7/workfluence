@@ -2,7 +2,7 @@ import { getSchema } from '@tiptap/core';
 import type { ContentMatch, NodeType } from '@tiptap/pm/model';
 import { ALLOWED_CHILDREN, ALLOWED_MARKS, ALLOWED_NODES, MARKS_IN } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
-import { Fragment, Slice } from '@tiptap/pm/model';
+import { Fragment, Slice, type Node as PMNode } from '@tiptap/pm/model';
 import { editorExtensions, linkAllowed, relWithoutOpener, sliceWithoutOpener } from './extensions';
 
 /**
@@ -102,7 +102,7 @@ describe("붙여 넣은 링크의 rel에서 'opener' 낱말을 뺀다 — 편집
     const table = schema.nodes.table.create(null, schema.nodes.tableRow.create(null, cell));
     const slice = new Slice(Fragment.fromArray([para('OPENER'), table, para('nofollow')]), 0, 0);
     const rels: unknown[] = [];
-    sliceWithoutOpener(slice).content.descendants((n) => {
+    sliceWithoutOpener(slice).content.descendants((n: PMNode) => {
       for (const m of n.marks) if (m.type.name === 'link') rels.push(m.attrs.rel);
     });
     expect(rels).toEqual([null, 'nofollow', 'nofollow']);

@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, validateDocument, type CollabStatus, type DocNode, type Principal } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, type CollabStatus, type DocNode, type Principal } from '@workfluence/shared';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -16,7 +16,7 @@ import { UsersService } from '../../users/users.service';
 import { MentionMailService } from '../../mail/mention-mail.service';
 import { scanMentions, type MentionOutcome } from '../../notifications/notifications.service';
 import { PagesService } from '../pages.service';
-import { shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
+import { blockedReason, saveBlockedReason, shouldSaveVersion, type SaveDecision, type SaveTrigger } from '../domain/realtime';
 import { docFromYDoc, mentionSites, yDocFromDoc } from '../domain/ydoc';
 import {
   advance,
@@ -36,7 +36,7 @@ import {
 } from '../domain/makers';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
 import { inspectUpdate, type GateRule } from '../domain/gate';
-import { MAX_PRESENCE_BINDS, readPresence, screenPresence, writePresence } from '../domain/presence';
+import { MAX_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence } from '../domain/presence';
 import { readClientIp, readPageId, readSessionId } from './session-auth';
 
 /**
@@ -72,15 +72,11 @@ import { readClientIp, readPageId, readSessionId } from './session-auth';
 /** 권한을 잃어 끊을 때 쓰는 닫기 코드. 1008 = policy violation */
 const CLOSE_REVOKED = 1008;
 
-/** 검증 오류를 화면에 알릴 까닭 한 줄로 — 첫 문장과 나머지 건수. 오류가 없으면 `null` (P9 D.9) */
-function blockedReason(errors: readonly string[]): string | null {
-  if (!errors.length) return null;
-  return errors.length > 1 ? `${errors[0]} 외 ${errors.length - 1}건` : errors[0];
-}
-const validationErrors = (doc: DocNode): string[] => {
-  const v = validateDocument(doc);
-  return v.ok ? [] : v.errors;
-};
+/**
+ * 저장 트랜잭션이 던졌을 때 방에 알리는 까닭 (P9 D.9, 세 번째 코드 리뷰 3). 실시간 상태는 살아 있고 다음 유휴에 다시 한다 —
+ * 알리지 않으면 화면은 저장되는 줄 안다
+ */
+const SAVE_FAILED_REASON = '서버가 버전을 남기지 못했다 — 잠시 뒤 다시 한다';
 
 /** 아무도 없는 방을 이만큼 두고도 아무 일이 없으면 치운다 (고아 방 회수) */
 const EMPTY_ROOM_TTL_MS = 60_000;
@@ -116,10 +112,11 @@ type Member = {
   own: Set<number>;
   /** 연결한 사람의 주소 — 거절을 감사로그에 남길 때 쓴다 (P9 D.6). HTTP의 `req.ip`와 같은 규칙으로 구한다 */
   ip: string | null;
-  /** 이 연결이 사람 표시로 묶은 클라이언트 ID. `MAX_PRESENCE_BINDS`개까지다 (P9 D.5). 나갈 때 한 글자도 쓰지 않았으면 푼다 */
+  /**
+   * 이 연결이 사람 표시로 묶은 클라이언트 ID. `MAX_PRESENCE_BINDS`개까지다 (P9 D.5). 나가도 풀지 않는다 — 사람마다의 상한은
+   * `unwrittenBindsLeft`가 본다 (세 번째 코드 리뷰 2)
+   */
   presenceBound: number[];
-  /** 이 연결이 자기 것으로 알린 클라이언트 ID — 다른 연결이 쓰고 있는 ID는 풀지 않으려고 센다 */
-  announced: Set<number>;
 };
 
 type Room = {
@@ -414,7 +411,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       emptyAt: Date.now(),
       // **방을 열 때도 저장할 수 있는 상태인지 본다** (P9 D.9, 두 번째 코드 리뷰 4·자체 점검 1). 알림은 방의 메모리에만 있어, 다시
       // 만든 방(재기동 뒤·모두 나간 뒤 남은 실시간 상태, Phase 9 전의 정본)은 첫 판정까지 몰랐다 — 들어오는 사람이 곧바로 안다
-      saveBlocked: blockedReason(validationErrors(docFromYDoc(doc))),
+      saveBlocked: saveBlockedReason(docFromYDoc(doc)),
     };
 
     /**
@@ -526,7 +523,6 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       own: new Set(),
       ip,
       presenceBound: [],
-      announced: new Set(),
     };
     room.members.add(member);
     room.emptyAt = null;
@@ -589,7 +585,6 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
 
     socket.on('close', () => {
       room.members.delete(member);
-      this.releasePresence(room, member);
       if (room.members.size === 0) {
         room.emptyAt = Date.now();
         // **마지막 사람이 나가면 남기고 정리한다** (FR-710).
@@ -604,7 +599,8 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   /**
    * 사람 표시를 걸러 퍼뜨린다 (P9_설계서_Gate D.5, FR-1004). **남의 몫은 빼고, 이름은 서버가 아는 표시 이름으로 바꾸고, 색·커서는
    * 화면이 만드는 모양만 남긴다.** 주인 없는 클라이언트 ID는 보낸 사람에게 묶는다 — 화면은 열자마자 자기 ID를 알리므로, 여기서
-   * 묶으면 그 ID가 남에게 퍼지기 전에 주인이 정해진다(D.4). 한 연결이 묶는 수는 `MAX_PRESENCE_BINDS`까지다. 읽지 못하면 거절이다.
+   * 묶으면 그 ID가 남에게 퍼지기 전에 주인이 정해진다(D.4). 한 연결이 묶는 수는 `MAX_PRESENCE_BINDS`까지, 한 사람이 방에 쓰지 않고 쥔 수는
+   * `MAX_UNWRITTEN_PRESENCE_BINDS`까지다. **나가도 풀지 않는다** (세 번째 코드 리뷰 2). 읽지 못하면 거절이다.
    */
   private relayPresence(pageId: string, room: Room, member: Member, payload: Uint8Array): void {
     let entries: ReturnType<typeof readPresence>;
@@ -614,24 +610,17 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       this.refuse(pageId, room, member, 'presence', '읽을 수 없는 사람 표시');
       return;
     }
-    const { keep, bind } = screenPresence(entries, member.principal.id, room.ledger.owners, member.name, MAX_PRESENCE_BINDS - member.presenceBound.length);
-    for (const client of bind) room.ledger.owners.set(client, member.principal.id);
+    const owners = room.ledger.owners;
+    const user = member.principal.id;
+    // 사람마다의 상한은 **묶을 후보가 있을 때만** 센다 — 주인 표를 훑으므로 커서가 움직일 때마다 세지 않는다
+    const unowned = entries.length === 1 && !owners.has(entries[0].client);
+    const canBind = unowned
+      ? Math.min(MAX_PRESENCE_BINDS - member.presenceBound.length, unwrittenBindsLeft(owners, user, (c) => Y.getState(room.doc.store, c) > 0))
+      : 0;
+    const { keep, bind } = screenPresence(entries, user, owners, member.name, canBind);
+    for (const client of bind) owners.set(client, user);
     member.presenceBound.push(...bind);
-    for (const e of keep) if (e.state !== null) member.announced.add(e.client);
     if (keep.length) this.broadcast(room, this.frame(COLLAB_MSG.awareness, writePresence(keep)), member);
-  }
-
-  /**
-   * **사람 표시로만 묶고 한 글자도 쓰지 않은 ID는 나갈 때 푼다** (P9 두 번째 코드 리뷰 3). 묶기 상한은 연결마다라, 붙었다 끊기를
-   * 되풀이하면 주인 표(`page_realtime.authors`와 함께 남는다)가 끝없이 불었다. 쓴 ID는 남긴다 — 그 글자의 주인이다. 방의 다른
-   * 연결이 자기 것으로 알린 ID도 남긴다 — 같은 Y.Doc으로 다시 붙은 화면은 새 연결이 옛 연결보다 먼저 닿을 수 있다.
-   */
-  private releasePresence(room: Room, member: Member): void {
-    for (const client of member.presenceBound) {
-      if (Y.getState(room.doc.store, client) > 0 || room.ledger.owners.get(client) !== member.principal.id) continue;
-      if ([...room.members].some((m) => m !== member && m.announced.has(client))) continue;
-      room.ledger.owners.delete(client);
-    }
   }
 
   /**
@@ -904,16 +893,22 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const actor = room.lastActor ?? current.updatedBy;
     const collected: MentionOutcome[] = [];
     let savedVersionNo = current.currentVersionNo + 1;
-    await this.db.transaction(async (tx) => {
-      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, mentionedBy, (m) => collected.push(m));
-      // **락 안에서 만들어진 번호를 쓴다.** 밖에서 계산한 `+1`은 REST 저장과 겹치면
-      // 실제와 다른 번호가 감사로그에 남는다 (P6 코드 리뷰 16)
-      savedVersionNo = saved.currentVersionNo;
-      await this.audit.record(
-        { action: 'page.collab.save', actorId: actor, targetType: 'page', targetId: pageId, detail: { versionNo: savedVersionNo, trigger } },
-        tx,
-      );
-    });
+    try {
+      await this.db.transaction(async (tx) => {
+        const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, mentionedBy, (m) => collected.push(m));
+        // **락 안에서 만들어진 번호를 쓴다.** 밖에서 계산한 `+1`은 REST 저장과 겹치면
+        // 실제와 다른 번호가 감사로그에 남는다 (P6 코드 리뷰 16)
+        savedVersionNo = saved.currentVersionNo;
+        await this.audit.record(
+          { action: 'page.collab.save', actorId: actor, targetType: 'page', targetId: pageId, detail: { versionNo: savedVersionNo, trigger } },
+          tx,
+        );
+      });
+    } catch (e) {
+      // **던지면 방에 알리고 다시 던진다** (세 번째 코드 리뷰 3). 전에는 아무 알림이 없어 옛 까닭이 남거나 화면이 아무것도 몰랐다
+      this.announceSave(room, SAVE_FAILED_REASON);
+      throw e;
+    }
     this.announceSave(room, null);
     // 메일은 **커밋 뒤에** 보낸다 (FR-754). 기다리지 않는다.
     // **기본 이름을 넘기지 않는다** — 자동 저장의 actor는 "마지막으로 키를 누른 사람"이라
