@@ -25,9 +25,17 @@ describe('claimAuthors — 적을 때', () => {
 
   it('**다른 사용자가 같은 ID를 주장하면 `null`로 굳는다** — 누가 진짜인지 모른다 (FR-904)', () => {
     const m: AuthorMap = new Map([[7, A]]);
-    claimAuthors(m, B, [7], [7]);
+    expect(claimAuthors(m, B, [7], [7])).toEqual([7]);
     expect(m.has(7)).toBe(true);
     expect(m.get(7)).toBeNull();
+  });
+
+  it('**이번에 새로 굳힌 ID만** 돌려준다 — 게이트웨이가 그것을 경고로 남긴다', () => {
+    const m: AuthorMap = new Map([[7, A], [8, null]]);
+    // 7은 이번에 굳고, 8은 이미 굳어 있었고, 9는 처음 본다
+    expect(claimAuthors(m, B, [7, 8, 9], [7, 8, 9])).toEqual([7]);
+    expect(claimAuthors(m, A, [9], [9])).toEqual([9]);
+    expect(claimAuthors(m, A, [9], [9])).toEqual([]);
   });
 
   it('**한번 굳은 ID는 되살리지 않는다** — 원래 주인이 다시 보내도 `null`이다', () => {
