@@ -736,6 +736,19 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
     });
   });
 
+  it('**편집기가 만들지 않는 노드를 넣어도 방이 멈추지 않는다** — 중계도, 저장도 (P8 세 번째 검토 2)', async () => {
+    const u = await enter(userId);
+    const x = await enter(otherId);
+    // X가 조작한 클라이언트로 문서에 `Y.XmlHook` 하나를 넣는다
+    act(x, (f) => f.insert(f.length, [new Y.XmlHook('hook') as never]));
+    // 그 뒤 U가 평범하게 친다 — X에게 전달돼야 한다
+    const before = x.socket.sent.length;
+    act(u, (f) => newPara(f, '@collab-c 확인'));
+    expect(x.socket.sent.length).toBeGreaterThan(before);
+    // 저장도 된다 — 그 노드는 정본에 뜻이 없어 빠진다
+    expect(await saveAndCarol()).toEqual([{ actor_id: userId }]);
+  });
+
   describe('**동시 편집은 위조가 아니다** — Yjs가 스스로 지우는 것 (세 번째 코드 리뷰 4)', () => {
     const forgeryWarnings = (spy: { mock: { calls: unknown[][] } }): string[] =>
       spy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('보낸 것보다'));

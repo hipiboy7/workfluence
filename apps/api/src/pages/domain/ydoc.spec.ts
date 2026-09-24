@@ -136,6 +136,34 @@ describe('경계 — 서식 값이 이상할 때', () => {
   });
 });
 
+describe('**편집기가 만들지 않는 노드**가 들어와도 던지지 않는다 (P8 세 번째 검토 2)', () => {
+  /**
+   * 조작한 클라이언트는 문서에 `Y.XmlHook`·`Y.Text`·`Y.Map`을 자식으로 넣을 수 있다. 예전에는 여기서 던져
+   * **그 페이지의 자동 저장이 영영 실패했고**(P6부터), 멘션 자리를 훑는 관찰자가 던져 **방의 중계가 멈췄다**(P8).
+   * 그런 노드는 정본 JSON에 뜻이 없다 — 버린다.
+   */
+  const withForeign = (make: () => Y.AbstractType<unknown>): Y.Doc => {
+    const ydoc = yDocFromDoc(doc(p(t('앞 @kim'))));
+    const frag = ydoc.getXmlFragment(COLLAB_FIELD);
+    frag.insert(1, [make() as never]);
+    const para = frag.get(0) as Y.XmlElement;
+    para.insert(para.length, [make() as never]);
+    return ydoc;
+  };
+
+  for (const [label, make] of [
+    ['XmlHook', () => new Y.XmlHook('hook')],
+    ['Text', () => new Y.Text('글')],
+    ['Map', () => new Y.Map()],
+  ] as const) {
+    it(`${label} — 정본에서는 빠지고, 멘션 자리는 그대로 찾는다`, () => {
+      const ydoc = withForeign(make);
+      expect(docFromYDoc(ydoc)).toEqual(doc(p(t('앞 @kim'))));
+      expect(mentionSites(ydoc, scanMentions).map((s) => s.name)).toEqual(['kim']);
+    });
+  }
+});
+
 describe('경계 — 값이 아예 없을 때', () => {
   it('`text` 키가 없는 글자 노드도 터지지 않는다', () => {
     expect(roundTrip(doc(p({ type: 'text' })))).toEqual(doc(p()));
