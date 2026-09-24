@@ -6,7 +6,7 @@ import { PagesService } from '../pages/pages.service';
 import { comments, notifications, pages, spaceMembers, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { InAppChannel, NotificationsService, type TypedText } from './notifications.service';
+import { InAppChannel, NotificationsService } from './notifications.service';
 
 /** B등급 (P4_설계서_Admin E절). 실제 PostgreSQL. */
 
@@ -286,35 +286,17 @@ describe('권한이 회수되면 제목이 가려진다 (보안 검토 3)', () =
 /**
  * 실시간 편집 저장의 멘션 귀속 (P8_설계서_Mention C.4절, FR-900~902·905).
  *
- * 여기서는 `typedBy`(글자마다 친 사람)를 **직접** 넘긴다. 그 표를 게이트웨이가 어떻게 만드는지는
+ * 여기서는 `mentionedBy`(이름마다·나온 곳마다 만든 사람)를 **직접** 넘긴다. 그 표를 게이트웨이가 어떻게 만드는지는
  * `collab.gateway.integration.spec.ts`가 본다.
  */
-describe('멘션을 친 사람 — `typedBy` (P8)', () => {
-  /** 본문 전체를 한 사람이 차례로 친 것으로 (지운 흔적·끼워 넣기 없음) */
-  const typed = (text: string, who: string | null | (string | null)[]): TypedText => ({
-    text,
-    authors: Array.isArray(who) ? who : [...text].map(() => who),
-    structural: [...text].map(() => false),
-    afterLeft: [...text].map(() => true),
-    before: [...text].map(() => null),
-    gaps: [...text, ''].map(() => undefined),
-  });
+describe('멘션을 만든 사람 — `mentionedBy` (P8)', () => {
+  /** 이름마다, 나온 곳마다 그 멘션을 만든 사람 (게이트웨이가 만드는 모양) */
+  const by = (entries: Record<string, (string | null)[]>): ReadonlyMap<string, readonly (string | null)[]> => new Map(Object.entries(entries));
 
-  async function setup() {
-    const owner = await user('owner');
-    const mate = await user('mate');
-    const typist = await user('typist');
-    const sp = await team(owner);
-    await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
-    await db.update(users).set({ email: 'mate@example.internal' }).where(eq(users.id, mate.id));
-    const pid = await page(sp.id, owner.id);
-    return { owner, mate, typist, sp, pid };
-  }
-
-  it('**부른 사람은 저장한 사람이 아니라 그 이름을 친 사람이다** (FR-900)', async () => {
+  it('**부른 사람은 저장한 사람이 아니라 그 멘션을 만든 사람이다** (FR-900)', async () => {
     const { mate, typist, sp, pid } = await setup();
     // 저장한 사람(마지막으로 키를 누른 사람)은 mate 자신이다 — 예전에는 이것이 "부른 사람"이 됐다
-    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, typedBy: typed('@mate 확인', typist.id) });
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, mentionedBy: by({ mate: [typist.id] }) });
 
     expect(r.count).toBe(1);
     const list = await svc.list(mate, 20);
@@ -323,9 +305,9 @@ describe('멘션을 친 사람 — `typedBy` (P8)', () => {
     expect(r.recipients).toEqual([{ email: 'mate@example.internal', displayName: 'mate', calledBy: 'typist', calledById: typist.id }]);
   });
 
-  it('**친 사람을 모르면 비운다** — 알림은 가고, 목록에서 사라지지 않는다 (FR-901)', async () => {
+  it('**만든 사람을 모르면 비운다** — 알림은 가고, 목록에서 사라지지 않는다 (FR-901)', async () => {
     const { mate, typist, sp, pid } = await setup();
-    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, typedBy: typed('@mate 확인', null) });
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: by({ mate: [null] }) });
 
     expect(r.count).toBe(1);
     const [row] = await db.select().from(notifications).where(eq(notifications.userId, mate.id));
@@ -337,22 +319,22 @@ describe('멘션을 친 사람 — `typedBy` (P8)', () => {
     expect(r.recipients[0].calledBy).toBeNull();
   });
 
-  it('**글자 기록에서 그 멘션을 못 찾으면 모름이다** — 저장한 사람으로 대신하지 않는다', async () => {
+  it('**표에서 그 이름을 못 찾으면 모름이다** — 저장한 사람으로 대신하지 않는다', async () => {
     const { mate, typist, sp, pid } = await setup();
-    await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, typedBy: typed('다른 글', typist.id) });
+    await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: by({}) });
     const [row] = await db.select().from(notifications).where(eq(notifications.userId, mate.id));
     expect(row.actorId).toBeNull();
   });
 
   it('**스스로를 부른 것이 확실하면** 알림을 만들지 않는다 (FR-902)', async () => {
     const { mate, typist, sp, pid } = await setup();
-    const r = await svc.notifyMentions({ doc: body('@mate 메모'), pageId: pid, spaceId: sp.id, actorId: typist.id, typedBy: typed('@mate 메모', mate.id) });
+    const r = await svc.notifyMentions({ doc: body('@mate 메모'), pageId: pid, spaceId: sp.id, actorId: typist.id, mentionedBy: by({ mate: [mate.id] }) });
     expect(r.count).toBe(0);
   });
 
-  it('**저장한 사람이 불린 사람이어도 친 사람이 남이면 알림이 간다** — Phase 7 전에는 여기서 사라졌다', async () => {
+  it('**저장한 사람이 불린 사람이어도 만든 사람이 남이면 알림이 간다** — Phase 7 전에는 여기서 사라졌다', async () => {
     const { owner, mate, sp, pid } = await setup();
-    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, typedBy: typed('@mate 확인', owner.id) });
+    const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: mate.id, mentionedBy: by({ mate: [owner.id] }) });
     expect(r.count).toBe(1);
     expect((await svc.list(mate, 20))[0].actorName).toBe('owner');
   });
@@ -360,15 +342,13 @@ describe('멘션을 친 사람 — `typedBy` (P8)', () => {
   it('**스스로 부른 곳이 앞에 있어도 남이 부른 곳이 있으면 알림이 간다** (P8 코드 리뷰 2)', async () => {
     const { mate, typist, sp, pid } = await setup();
     // mate가 앞에서 `@mate`를 스스로 적고, typist가 뒤에서 `@mate`를 불렀다
-    const text = '@mate @mate';
-    const who = [...text].map((_, i) => (i < 5 ? mate.id : i === 5 ? null : typist.id));
-    const r = await svc.notifyMentions({ doc: body(text), pageId: pid, spaceId: sp.id, actorId: mate.id, typedBy: typed(text, who) });
+    const r = await svc.notifyMentions({ doc: body('@mate @mate'), pageId: pid, spaceId: sp.id, actorId: mate.id, mentionedBy: by({ mate: [mate.id, typist.id] }) });
     expect(r.count).toBe(1);
     expect((await svc.list(mate, 20))[0].actorName).toBe('typist');
     expect(r.recipients[0]).toMatchObject({ calledBy: 'typist', calledById: typist.id });
   });
 
-  it('REST 경로(`typedBy` 없음)는 그대로 요청한 사람이 부른 사람이고, 메일 이름은 호출부가 준다', async () => {
+  it('REST 경로(`mentionedBy` 없음)는 그대로 요청한 사람이 부른 사람이고, 메일 이름은 호출부가 준다', async () => {
     const { owner, mate, sp, pid } = await setup();
     const r = await svc.notifyMentions({ doc: body('@mate 확인'), pageId: pid, spaceId: sp.id, actorId: owner.id });
     expect((await svc.list(mate, 20))[0].actorName).toBe('owner');
