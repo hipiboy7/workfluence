@@ -113,6 +113,15 @@ describe('advance — 있던 자리와 사라진 자리', () => {
       l = advance(l, [site(2, 0, 'kim')], U, made(2, 0, 4));
       expect(l.makers.get('2:0|kim')).toBeNull();
     });
+
+    it('**잘라낸 남의 멘션을 나눠 붙이면 붙인 사람이다** — 한 글자씩 친 것과 가릴 수 없다. 글자를 들여오고 완성한 것이 그 사람이라 사칭은 아니다', () => {
+      let l = ledgerWith([1, 0, 10, X], [2, 0, 10, U]);
+      l = advance(l, [site(1, 0, 'carol')], X); // X가 부른다
+      l = advance(l, [], U); // U가 잘라낸다 → carol: X
+      l = advance(l, [site(2, 0, 'ca')], U, made(2, 0, 3)); // `@ca`를 붙여 넣고
+      l = advance(l, [site(2, 0, 'carol')], U, made(2, 3, 6)); // 이어서 `rol`
+      expect(l.makers.get('2:0|carol')).toBe(U);
+    });
   });
 
   describe('**옮김** — 사라진 이름이 다시 생기면 (P8 세 번째 코드 리뷰 1)', () => {
