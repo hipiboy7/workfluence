@@ -44,22 +44,26 @@ export function integrable(structs: readonly Pending[], known: Map<number, numbe
   }
   for (const q of queues.values()) q.sort((a, b) => a.clock - b.clock);
   const has = (id: IdLike): boolean => id.clock < (known.get(id.client) ?? 0);
+  // 대기열마다 **어디까지 들였나**만 센다 — 앞에서 꺼내면(`shift`) 조각이 많은 붙여 넣기에서 비용이 제곱으로 는다
+  const next = new Map<number, number>([...queues.keys()].map((c) => [c, 0]));
   let progress = true;
   while (progress) {
     progress = false;
     for (const [client, q] of queues) {
-      while (q.length) {
-        const s = q[0];
+      let i = next.get(client) ?? 0;
+      while (i < q.length) {
+        const s = q[i];
         // 시계가 비었다 — 이 클라이언트의 앞선 조각이 없다. 남의 조각으로는 채워지지 않는다
         if (s.clock > (known.get(client) ?? 0)) break;
         if (!s.deps.every(has)) break;
         known.set(client, Math.max(known.get(client) ?? 0, s.clock + s.length));
-        q.shift();
+        i += 1;
         progress = true;
       }
+      next.set(client, i);
     }
   }
-  return [...queues.values()].flat();
+  return [...queues].flatMap(([client, q]) => q.slice(next.get(client) ?? 0));
 }
 
 /** 이름·키는 조작한 클라이언트가 정한다 — 기록이 불어나지 않게 자른다 (D.2) */
