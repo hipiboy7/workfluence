@@ -17,7 +17,7 @@ import { PagesService } from '../pages.service';
 import type { Ledger } from '../domain/makers';
 import { MAX_PRESENCE_BINDS, MAX_UNWRITTEN_PRESENCE_BINDS } from '../domain/presence';
 import { docFromYDoc, yDocFromDoc } from '../domain/ydoc';
-import { CollabGateway } from './collab.gateway';
+import { CollabGateway, SAVE_FAILED_REASON } from './collab.gateway';
 
 /**
  * B등급 통합 — **실제 PostgreSQL** (3절).
@@ -506,8 +506,8 @@ describe('자동 저장이 멈추면 화면에 알린다 (P9 FR-1011)', () => {
   /** 서버가 보낸 저장 상태 알림(`COLLAB_MSG.status`)을 받은 차례대로 */
   const statuses = (s: FakeSocket): CollabStatus[] =>
     s.sent.filter((f) => f[0] === COLLAB_MSG.status).map((f) => JSON.parse(f.subarray(1).toString('utf8')) as CollabStatus);
-  /** 저장 트랜잭션이 던졌을 때의 까닭 (세 번째 코드 리뷰 3) */
-  const SAVE_FAILED = '서버가 버전을 남기지 못했다 — 잠시 뒤 다시 한다';
+  /** 저장이 던졌을 때의 까닭 (세 번째 코드 리뷰 3) */
+  const SAVE_FAILED = SAVE_FAILED_REASON;
   /** 관문 앞에서 막히지 않는 **저장할 수 없는 상태** — P9 전에 남은 실시간 상태가 그렇다. 여기서는 방의 문서에 직접 넣는다 */
   const breakDoc = (d: Y.Doc): void =>
     d.transact(() => {
@@ -632,6 +632,18 @@ describe('자동 저장이 멈추면 화면에 알린다 (P9 FR-1011)', () => {
       await idle();
       await inner.sweep();
       for (const s of [a.socket, b.socket]) expect(statuses(s).at(-1)).toEqual({ saveBlocked: null });
+      // **정본 읽기가 던져도** 알린다 — DB가 흔들리면 트랜잭션보다 먼저 여기서 던진다 (세 번째 자체 점검 1)
+      const pages = (gw as unknown as { db: { query: { pages: { findFirst: (...a: unknown[]) => unknown } } } }).db.query.pages;
+      const readFail = vi.spyOn(pages, 'findFirst').mockRejectedValueOnce(new Error('연결이 끊겼다'));
+      try {
+        a.room.doc.transact(() => a.room.doc.getXmlFragment('default').insert(0, [para('셋째 글')]), { principal: { id: userId } });
+        await idle();
+        await inner.sweep();
+        expect(readFail).toHaveBeenCalled();
+        for (const s of [a.socket, b.socket]) expect(statuses(s).at(-1)).toEqual({ saveBlocked: SAVE_FAILED });
+      } finally {
+        readFail.mockRestore();
+      }
     } finally {
       fail.mockRestore();
     }

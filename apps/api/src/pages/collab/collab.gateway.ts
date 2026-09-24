@@ -73,10 +73,10 @@ import { readClientIp, readPageId, readSessionId } from './session-auth';
 const CLOSE_REVOKED = 1008;
 
 /**
- * 저장 트랜잭션이 던졌을 때 방에 알리는 까닭 (P9 D.9, 세 번째 코드 리뷰 3). 실시간 상태는 살아 있고 다음 유휴에 다시 한다 —
+ * 저장이 던졌을 때(정본 읽기·저장 트랜잭션·상태 남기기) 방에 알리는 까닭 (P9 D.9, 세 번째 코드 리뷰 3). 실시간 상태는 살아 있고 다음 유휴에 다시 한다 —
  * 알리지 않으면 화면은 저장되는 줄 안다
  */
-const SAVE_FAILED_REASON = '서버가 버전을 남기지 못했다 — 잠시 뒤 다시 한다';
+export const SAVE_FAILED_REASON = '서버가 버전을 남기지 못했다 — 잠시 뒤 다시 한다';
 
 /** 아무도 없는 방을 이만큼 두고도 아무 일이 없으면 치운다 (고아 방 회수) */
 const EMPTY_ROOM_TTL_MS = 60_000;
@@ -813,7 +813,14 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const room = this.rooms.get(pageId);
     if (!room) return Promise.resolve();
     const prior = room.saving ?? Promise.resolve();
-    const next = prior.then(() => this.runSave(pageId, room, trigger));
+    // **던지면 방에 알리고 다시 던진다** (P9 세 번째 코드 리뷰 3·자체 점검 1). 저장 트랜잭션만이 아니라 그 앞의 정본 읽기도 DB를
+    // 탄다 — DB가 흔들리면 거기서 먼저 던진다. 전에는 아무 알림이 없어 옛 까닭이 남거나 화면이 아무것도 몰랐다
+    const next = prior
+      .then(() => this.runSave(pageId, room, trigger))
+      .catch((e: unknown) => {
+        if (this.rooms.get(pageId) === room) this.announceSave(room, SAVE_FAILED_REASON);
+        throw e;
+      });
     // 사슬은 삼킨 것으로 잇는다 — 한 번 실패했다고 다음 저장까지 막히면 안 된다
     room.saving = next.then(
       () => undefined,
@@ -893,22 +900,16 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     const actor = room.lastActor ?? current.updatedBy;
     const collected: MentionOutcome[] = [];
     let savedVersionNo = current.currentVersionNo + 1;
-    try {
-      await this.db.transaction(async (tx) => {
-        const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, mentionedBy, (m) => collected.push(m));
-        // **락 안에서 만들어진 번호를 쓴다.** 밖에서 계산한 `+1`은 REST 저장과 겹치면
-        // 실제와 다른 번호가 감사로그에 남는다 (P6 코드 리뷰 16)
-        savedVersionNo = saved.currentVersionNo;
-        await this.audit.record(
-          { action: 'page.collab.save', actorId: actor, targetType: 'page', targetId: pageId, detail: { versionNo: savedVersionNo, trigger } },
-          tx,
-        );
-      });
-    } catch (e) {
-      // **던지면 방에 알리고 다시 던진다** (세 번째 코드 리뷰 3). 전에는 아무 알림이 없어 옛 까닭이 남거나 화면이 아무것도 몰랐다
-      this.announceSave(room, SAVE_FAILED_REASON);
-      throw e;
-    }
+    await this.db.transaction(async (tx) => {
+      const saved = await this.pagesSvc.saveCollabVersion(pageId, title, next, actor, tx, mentionedBy, (m) => collected.push(m));
+      // **락 안에서 만들어진 번호를 쓴다.** 밖에서 계산한 `+1`은 REST 저장과 겹치면
+      // 실제와 다른 번호가 감사로그에 남는다 (P6 코드 리뷰 16)
+      savedVersionNo = saved.currentVersionNo;
+      await this.audit.record(
+        { action: 'page.collab.save', actorId: actor, targetType: 'page', targetId: pageId, detail: { versionNo: savedVersionNo, trigger } },
+        tx,
+      );
+    });
     this.announceSave(room, null);
     // 메일은 **커밋 뒤에** 보낸다 (FR-754). 기다리지 않는다.
     // **기본 이름을 넘기지 않는다** — 자동 저장의 actor는 "마지막으로 키를 누른 사람"이라
