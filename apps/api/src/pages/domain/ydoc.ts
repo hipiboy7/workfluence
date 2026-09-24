@@ -185,8 +185,8 @@ export function mentionSites(
       }
       return;
     }
-    // **편집기가 만들지 않는 노드는 글자가 아니다** — `docFromYDoc`도 버린다. 여기서 던지면 트랜잭션 관찰자가
-    // 던져 **방의 중계가 멈춘다** (P8 세 번째 검토 2)
+    // **편집기가 만들지 않는 노드는 글자가 아니다** — `docFromYDoc`도 버린다. 여기서 던지면 장부가 고장 나 그 방의
+    // 멘션이 전부 모름이 된다 (처음에는 방의 중계가 멈췄다 — P8 세 번째 검토 2, T-035)
     if (!(node instanceof Y.XmlElement)) return;
     // `extractText`와 같은 순서·같은 규칙이다: 줄바꿈 노드 → 자식 → 블록 끝 줄바꿈
     if (node.nodeName === 'hardBreak') {

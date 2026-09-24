@@ -93,8 +93,9 @@ type Member = {
    */
   sending: SentChange | null;
   /**
-   * 이 연결이 **만든** 클라이언트 ID — 한 클라이언트만, 시계 0부터 들여온 것 (P8 C.2절, `claimOwn`).
-   * 이 연결이 들여온 글자 중 이 클라이언트의 것만 이 사람이 쓴 글자로 친다
+   * 이 연결의 클라이언트 ID — 이 연결이 시계 0부터 만든 것, 또는 같은 사람이 전에 만들어 이어받은 것(`owners`, 같은 Y.Doc
+   * 재접속) (P8 C.2절, `claimOwn`). 여럿일 수 있다 — Yjs는 남이 같은 ID를 쓰는 것을 보면 스스로 새 ID로 바꾼다.
+   * 이 연결이 들여온 글자 중 이 클라이언트들의 것만 이 사람이 쓴 글자로 친다
    */
   own: Set<number>;
 };
@@ -423,9 +424,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
      */
     doc.on('afterTransaction', (tr: Y.Transaction) => {
       if (room.attributionBroken) return;
-      // **여기서 던지면 방이 멈춘다.** Yjs는 이 관찰자의 예외를 **변경을 이미 적용한 뒤** `Y.applyUpdate` 밖으로
-      // 올리고, 받은 쪽은 "적용하지 못했다"로 알고 퍼뜨리지 않는다 — 그 뒤 모두의 변경이 중계되지 않았다
-      // (P8 세 번째 검토 2). 장부는 부가 기능이다: 실패하면 그 방의 멘션을 모름으로 두고 편집은 계속 흐르게 한다
+      // **여기서 던지지 않는다.** Yjs는 이 관찰자의 예외를 **변경을 이미 적용한 뒤** `Y.applyUpdate` 밖으로 올린다.
+      // 처음에는 받은 쪽이 그것을 "적용하지 못했다"로 알고 퍼뜨리지 않아, 그 뒤 모두의 변경이 중계되지 않았다
+      // (P8 세 번째 검토 2, T-035). 지금은 받은 쪽도 퍼뜨리지만, 반쯤 고친 장부로는 그 뒤의 판정을 믿을 수 없다.
+      // 장부는 부가 기능이다: 실패하면 그 방의 멘션을 모름으로 두고 편집은 계속 흐르게 한다
       try {
         this.attribute(room, tr, pageId);
       } catch (e) {
@@ -757,6 +759,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         this.log.warn(`검증 실패로 저장하지 않았다 (page=${pageId}): ${decision.errors.slice(0, 3).join(' / ')}`);
       }
       await this.rememberState(pageId, room, current.currentVersionNo);
+      // **바뀌지 않은 문서로 다시 판정하지 않는다.** 내용이 그대로이거나 검증에 실패한 것은 다음 변경이 오기 전까지 같은
+      // 판정이 난다 — 그대로 두면 `sweep`이 매초 질의 둘과 상태 쓰기를 되풀이하고, 검증 실패는 매초 경고를 남긴다
+      // (P8 FR-910 — P6 코드 리뷰 13이 "아직 편집 중"만 막았다). 판정하는 사이 들어온 변경은 그대로 둔다
+      if (room.lastChangeAt === changedAt) room.lastChangeAt = 0;
       // **검증에 실패한 상태는 지우지 않는다.** 지우면 고칠 기회가 사라진다 (자체 점검 6).
       // **다만 사람이 남아 있으면 방도 지우지 않는다** — 지우면 그 사람들은 맵에 없는 방에서
       // 계속 편집하고 아무도 저장하지 않는다. 다음에 들어온 사람은 두 번째 방을 만들어
