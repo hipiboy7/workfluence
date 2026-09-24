@@ -95,6 +95,10 @@ describe("붙여 넣은 링크의 rel에서 'opener' 낱말을 뺀다 — 편집
     expect(relWithoutOpener(rel)).toBe(out);
   });
 
+  it('두 편집기의 확장 목록에 들어 있다 — 빠지면 붙여 넣은 링크가 그대로 들어가 그 사람이 끊긴다', () => {
+    for (const collab of [false, true]) expect(editorExtensions({ collab }).map((e) => e.name)).toContain('pastedLinkRel');
+  });
+
   it('붙여 넣는 조각 안의 링크마다 — 표 칸 안의 링크도', () => {
     const link = (rel: string | null) => schema.marks.link.create({ href: 'https://example.internal', rel });
     const para = (rel: string | null) => schema.nodes.paragraph.create(null, schema.text('링크', [link(rel)]));
