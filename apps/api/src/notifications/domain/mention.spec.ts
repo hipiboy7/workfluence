@@ -1,6 +1,7 @@
 import type { DocNode } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
-import { extractMentions } from './mention';
+import { extractText } from '@workfluence/shared';
+import { callerFor, extractMentions, scanMentions } from './mention';
 
 /** A등급 (P4_설계서_Admin E절, FR-501). 테스트를 먼저 썼다. */
 
@@ -64,5 +65,60 @@ describe('extractMentions', () => {
   it('빈 문서·멘션 없는 문서는 빈 배열', () => {
     expect(extractMentions(doc())).toEqual([]);
     expect(extractMentions(doc('아무도 부르지 않는다'))).toEqual([]);
+  });
+});
+
+/**
+ * P8_설계서_Mention C.2절 (FR-900·901). **테스트를 먼저 썼다.**
+ *
+ * `scanMentions`는 `extractMentions`가 쓰는 규칙을 **위치까지** 돌려준다. 규칙이 둘이 되면
+ * 알림은 가는데 "누가 불렀나"만 비는 식으로 조용히 어긋난다 — 그래서 하나를 나눠 쓴다.
+ */
+describe('scanMentions — 위치까지', () => {
+  it('`@`의 위치와 이름 끝(제외)을 준다', () => {
+    expect(scanMentions('hi @kim 님')).toEqual([{ name: 'kim', start: 3, end: 7 }]);
+  });
+
+  it('뒤쪽 구분자를 뗀 후보는 **더 짧은 구간**이다', () => {
+    expect(scanMentions('@kim.')).toEqual([
+      { name: 'kim.', start: 0, end: 5 },
+      { name: 'kim', start: 0, end: 4 },
+    ]);
+  });
+
+  it('**같은 이름이 여러 번 나오면 전부 낸다** — 그 멘션을 만든 사람은 곳마다 다를 수 있다', () => {
+    expect(scanMentions('@kim 그리고 @kim').map((m) => m.start)).toEqual([0, 9]);
+  });
+
+  it('**`extractMentions`와 같은 이름을 같은 순서로 찾는다**', () => {
+    const samples = ['@kim 확인', '(@lee) "@park"', 'kim@example.internal', '@kim. @kim_ 그리고 @a', '첫 줄 @x1\n\n\n둘째 @y2'];
+    for (const text of samples) {
+      const d = doc(...text.split('\n'));
+      const names = [...new Set(scanMentions(extractText(d)).map((m) => m.name))];
+      expect(names).toEqual(extractMentions(d));
+    }
+  });
+});
+
+describe('callerFor — 받는 사람에게 누가 불렀다고 말하나 (P8 코드 리뷰 2)', () => {
+  it('**남이 부른 것이 하나라도 있으면 그 사람이다** — 스스로 부른 것이 앞에 있어도', () => {
+    expect(callerFor(['bob', 'A'], 'bob')).toEqual({ skip: false, caller: 'A' });
+  });
+
+  it('남이 여럿이면 문서 순서로 먼저 나온 사람', () => {
+    expect(callerFor([null, 'B', 'A'], 'bob')).toEqual({ skip: false, caller: 'B' });
+  });
+
+  it('**스스로 부른 것뿐이면** 알림을 만들지 않는다 (FR-902)', () => {
+    expect(callerFor(['bob', 'bob'], 'bob')).toEqual({ skip: true, caller: 'bob' });
+  });
+
+  it('모르는 곳이 섞였으면 부른다 — 이름은 비운다', () => {
+    expect(callerFor(['bob', null], 'bob')).toEqual({ skip: false, caller: null });
+  });
+
+  it('만든 사람 표에 그 이름이 없으면 모름이다', () => {
+    expect(callerFor(undefined, 'bob')).toEqual({ skip: false, caller: null });
+    expect(callerFor([], 'bob')).toEqual({ skip: false, caller: null });
   });
 });

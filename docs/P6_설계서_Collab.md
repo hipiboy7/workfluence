@@ -206,7 +206,7 @@ page_templates(
 )
 ```
 
-`page_realtime`에 **CHECK 제약이 없는 이유**: 담는 것이 이진 상태뿐이고 값 집합이 없다.
+`page_realtime`에 **CHECK 제약이 없는 이유**: 담는 것이 이진 상태뿐이고 값 집합이 없다. (Phase 6 시점. **P8에서 `authors` jsonb와 객체 CHECK가 더해졌다** — 지금 모양은 `docs/설계서_Architecture.md` 3.1절)
 `page_templates.name`은 유일해야 하므로 DB가 막는다 (FR-745).
 
 ## D.2 새 감사 이벤트

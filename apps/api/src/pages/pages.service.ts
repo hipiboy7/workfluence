@@ -91,7 +91,7 @@ export class PagesService {
     };
   }
 
-  async create(dto: CreatePageDto, principal: Principal, tx: Db = this.db): Promise<PageView> {
+  async create(dto: CreatePageDto, principal: Principal, tx: Db = this.db, onMentions?: (m: MentionOutcome) => void): Promise<PageView> {
     await this.spaces.assertWrite(dto.spaceId, principal, tx);
     if (dto.parentId) await this.assertParent(tx, dto.parentId, dto.spaceId, null);
 
@@ -127,10 +127,13 @@ export class PagesService {
       .values({ pageId: page.id, versionNo: 1, title: dto.title, contentJson: content, contentText: text, createdBy: principal.id });
     // 본문의 멘션도 알림을 만든다 (FR-500 — 설계서는 "댓글·페이지 본문 둘 다"다).
     // 자체 점검 1이 여기 호출부가 빠진 것을 잡았다 — 오류 없이 조용히 아무 일도 안 했다
-    await this.notifications.notifyMentions(
+    // **부른 사람들을 호출부에 넘긴다** — 메일은 커밋 뒤에 보낸다 (FR-754). 이것이 없어 새 페이지 본문의
+    // 멘션은 알림함에만 가고 메일은 가지 않았다 (P8 자체 점검 6, Phase 6부터)
+    const mentions = await this.notifications.notifyMentions(
       { doc: content, pageId: page.id, commentId: null, spaceId: page.spaceId, actorId: principal.id },
       tx,
     );
+    onMentions?.(mentions);
     return { ...toPageSummary(page), content, createdBy: principal.id, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
@@ -188,6 +191,9 @@ export class PagesService {
    *
    * **충돌(409)을 보지 않는다.** 그것이 실시간 편집의 요지다 — Yjs가 이미 병합했고,
    * 여기 오는 문서는 그 병합의 결과다. 대신 `FOR UPDATE`로 REST 저장과 줄을 세운다.
+   *
+   * `mentionedBy`는 이름마다·나온 곳마다 **그 멘션을 만든 사람**이다 (P8_설계서_Mention C.2절). 게이트웨이가
+   * `content`를 뽑은 **같은 순간의** 문서에서 읽어 넘긴다. 받는 사람에게 누구를 말할지는 알림 쪽이 고른다.
    */
   async saveCollabVersion(
     id: string,
@@ -195,6 +201,7 @@ export class PagesService {
     content: DocNode,
     actorId: string,
     tx: Db,
+    mentionedBy: ReadonlyMap<string, readonly (string | null)[]>,
     onMentions?: (m: MentionOutcome) => void,
   ): Promise<PageRow> {
     const [locked] = await tx.select().from(pages).where(and(eq(pages.id, id), isNull(pages.deletedAt))).for('update');
@@ -216,9 +223,9 @@ export class PagesService {
         actorId,
         previousDoc: (previous?.contentJson as DocNode | undefined) ?? null,
         // **여기서 actorId는 "마지막으로 키를 누른 사람"이지 멘션을 쓴 사람이 아니다.**
-        // 자기 자신 필터를 그대로 두면 불린 사람이 마침 마지막 타이핑을 했을 때
-        // 그 멘션이 조용히 사라진다 (P6 코드 리뷰 6)
-        actorWroteMentions: false,
+        // 그것으로 부르면 불린 사람이 마침 마지막 타이핑을 했을 때 "자기가 자기를 불렀다"가
+        // 된다 (P6 코드 리뷰 6, 보류 21). 만든 사람은 따로 넘겨받는다
+        mentionedBy,
       },
       tx,
     );

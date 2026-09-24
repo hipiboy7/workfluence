@@ -51,7 +51,8 @@ export class CommentsController {
       // **제목만 필요하다.** `PagesService`를 끌어오면 모듈 의존이 늘어난다 —
       // 권한은 댓글을 만들 때 이미 봤으므로 여기서는 제목 한 칸만 읽는다
       const row = await this.db.query.pages.findFirst({ where: eq(pages.id, pageId), columns: { title: true } });
-      void this.mentionMail.notify(mentions, me.displayName, row?.title ?? '문서');
+      // 일으킨 사람을 넘긴다 — 빠뜨리면 `mail.send` 감사의 actor가 빈다 (P8 FR-906)
+      void this.mentionMail.notify(mentions, me.displayName, row?.title ?? '문서', me.id);
     }
     return view;
   }

@@ -57,6 +57,13 @@
       "when": 1790052459181,
       "tag": "0007_collab",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790222400000,
+      "tag": "0008_mention_attribution",
+      "breakpoints": true
     }
   ]
 }

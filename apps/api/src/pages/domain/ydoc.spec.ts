@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { validateDocument, type DocNode } from '@workfluence/shared';
-import { COLLAB_FIELD, docFromYDoc, yDocFromDoc } from './ydoc';
+import { extractMentions, scanMentions } from '../../notifications/domain/mention';
+import { COLLAB_FIELD, docFromYDoc, mentionSites, yDocFromDoc } from './ydoc';
 
 /**
  * A등급 — 실시간 상태와 정본 JSON 사이의 변환 (P6_설계서_Collab C.1절).
@@ -135,6 +136,34 @@ describe('경계 — 서식 값이 이상할 때', () => {
   });
 });
 
+describe('**편집기가 만들지 않는 노드**가 들어와도 던지지 않는다 (P8 세 번째 검토 2)', () => {
+  /**
+   * 조작한 클라이언트는 문서에 `Y.XmlHook`·`Y.Text`·`Y.Map`을 자식으로 넣을 수 있다. 예전에는 여기서 던져
+   * **그 페이지의 자동 저장이 영영 실패했고**(P6부터), 멘션 자리를 훑는 관찰자가 던져 **방의 중계가 멈췄다**(P8).
+   * 그런 노드는 정본 JSON에 뜻이 없다 — 버린다.
+   */
+  const withForeign = (make: () => unknown): Y.Doc => {
+    const ydoc = yDocFromDoc(doc(p(t('앞 @kim'))));
+    const frag = ydoc.getXmlFragment(COLLAB_FIELD);
+    frag.insert(1, [make() as never]);
+    const para = frag.get(0) as Y.XmlElement;
+    para.insert(para.length, [make() as never]);
+    return ydoc;
+  };
+
+  for (const [label, make] of [
+    ['XmlHook', () => new Y.XmlHook('hook')],
+    ['Text', () => new Y.Text('글')],
+    ['Map', () => new Y.Map()],
+  ] as const) {
+    it(`${label} — 정본에서는 빠지고, 멘션 자리는 그대로 찾는다`, () => {
+      const ydoc = withForeign(make);
+      expect(docFromYDoc(ydoc)).toEqual(doc(p(t('앞 @kim'))));
+      expect(mentionSites(ydoc, scanMentions).map((s) => s.name)).toEqual(['kim']);
+    });
+  }
+});
+
 describe('경계 — 값이 아예 없을 때', () => {
   it('`text` 키가 없는 글자 노드도 터지지 않는다', () => {
     expect(roundTrip(doc(p({ type: 'text' })))).toEqual(doc(p()));
@@ -194,5 +223,65 @@ describe('편집기가 붙이는 것들', () => {
       { type: 'text', text: '굵게', marks: [{ type: 'bold' }] },
       { type: 'text', text: '보통' },
     ]);
+  });
+});
+
+/**
+ * `mentionSites` — 문서의 멘션 자리 (P8_설계서_Mention C.2절).
+ *
+ * 멘션 하나를 **`@` 글자의 ID + 이름**으로 가린다. 축은 둘이다. ① **`extractMentions`와 같은 이름을**
+ * 찾아야 한다 — 한쪽이 찾은 멘션을 다른 쪽이 못 찾으면 그 멘션은 조용히 "모름"이 된다. ② 자리는
+ * **글자의 ID**다 — 위치(몇 번째 글자)는 앞에 누가 치기만 해도 바뀐다.
+ */
+describe('mentionSites — 멘션 자리', () => {
+  const sites = (ydoc: Y.Doc) => mentionSites(ydoc, scanMentions);
+  const firstText = (ydoc: Y.Doc): Y.XmlText => (ydoc.getXmlFragment(COLLAB_FIELD).get(0) as Y.XmlElement).get(0) as Y.XmlText;
+
+  it('**`extractMentions`와 같은 이름을 같은 순서로 찾는다** — 블록·줄바꿈·중첩·표·마크까지', () => {
+    const samples: DocNode[] = [
+      doc(p(t('안녕 @kim'))),
+      doc(p(t('윗줄'), { type: 'hardBreak' }, t('@lee 아랫줄'))),
+      doc(p(t('굵게', [{ type: 'bold' }]), t(' @park'), t('링크', [{ type: 'link', attrs: { href: '/a' } }]))),
+      doc({ type: 'bulletList', content: [{ type: 'listItem', content: [p(t('항목 @a1'))] }, { type: 'listItem', content: [p(t('@b2.'))] }] }),
+      doc({ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', content: [p(t('칸'))] }, { type: 'tableCell', content: [p(t('@c3'))] }] }] }),
+      doc({ type: 'blockquote', content: [p(t('인용 kim@example.internal'))] }, { type: 'codeBlock', content: [t('code @x1')] }),
+      doc(p(), p(), p(), p(t('빈 문단 뒤 @kim @kim'))),
+      doc(),
+    ];
+    for (const d of samples) {
+      const ydoc = yDocFromDoc(d);
+      expect([...new Set(sites(ydoc).map((s) => s.name))]).toEqual(extractMentions(docFromYDoc(ydoc)));
+    }
+  });
+
+  it('**자리는 `@` 글자의 ID다** — 앞에 글자를 넣어도 바뀌지 않는다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('hi @kim'))));
+    const [before] = sites(ydoc);
+    expect(before.name).toBe('kim');
+    expect(before.key).toMatch(new RegExp(`^${ydoc.clientID}:\\d+$`));
+    // 자리의 글자들 — `@`부터 이름 끝까지. 첫 글자가 곧 자리다
+    expect(before.span).toHaveLength(4);
+    expect(`${before.span[0][0]}:${before.span[0][1]}`).toBe(before.key);
+    firstText(ydoc).insert(0, '앞에 넣은 글 ');
+    expect(sites(ydoc)).toEqual([before]);
+  });
+
+  it('같은 이름이 여러 곳이면 **곳마다** 낸다. 뒤쪽 구분자를 뗀 후보도 같은 자리다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('@kim. 그리고 @kim'))));
+    expect(sites(ydoc).map((s) => s.name)).toEqual(['kim.', 'kim', 'kim']);
+    expect(sites(ydoc)[0].key).toBe(sites(ydoc)[1].key);
+  });
+
+  it('지운 글자·서식·끼워 넣기(embed)는 글자가 아니다', () => {
+    const ydoc = yDocFromDoc(doc(p(t('x@kim 확인'))));
+    expect(sites(ydoc)).toEqual([]);
+    firstText(ydoc).delete(0, 1); // `x`를 지우면 멘션이 된다
+    firstText(ydoc).format(0, 4, { bold: {} });
+    firstText(ydoc).insertEmbed(4, { image: 'x' });
+    expect(sites(ydoc).map((s) => s.name)).toEqual(['kim']);
+  });
+
+  it('빈 문서는 빈 목록이다', () => {
+    expect(sites(new Y.Doc())).toEqual([]);
   });
 });

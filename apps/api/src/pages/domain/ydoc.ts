@@ -1,4 +1,4 @@
-import { DOCUMENT_SCHEMA_VERSION, type DocMark, type DocNode } from '@workfluence/shared';
+import { BLOCK_NODES, DOCUMENT_SCHEMA_VERSION, type DocMark, type DocNode } from '@workfluence/shared';
 import * as Y from 'yjs';
 
 /**
@@ -113,15 +113,18 @@ function fromYText(text: Y.XmlText): DocNode[] {
   return out;
 }
 
-function fromYNode(node: Y.XmlElement | Y.XmlText | Y.XmlHook): DocNode[] {
+function fromYNode(node: unknown): DocNode[] {
   if (node instanceof Y.XmlText) return fromYText(node);
-  // `Y.XmlHook`은 **우리가 만들지 않는다.** 만드는 코드가 없으므로 여기 올 수 없다 —
-  // 타입에는 있으니 좁히기는 하되, 닿지 않는 분기를 남겨 두지 않는다 (`diff.ts`와 같은 판단)
-  const el = node as Y.XmlElement;
+  // **편집기가 만들지 않는 노드는 버린다** (P8 세 번째 검토 2). 우리 편집기는 `Y.XmlElement`·`Y.XmlText`만
+  // 만들지만 **조작한 클라이언트는 `Y.XmlHook`·`Y.Text`·`Y.Map`을 넣을 수 있다.** 예전에는 "만드는 코드가 없으니
+  // 올 수 없다"고 보고 좁히기만 했는데, 그런 노드 하나로 여기서 던져 **그 페이지의 자동 저장이 영영 실패했다.**
+  // 그 노드는 정본 JSON에 뜻이 없다
+  if (!(node instanceof Y.XmlElement)) return [];
+  const el = node;
   // 편집기 쪽에서 온 `null` 기본값을 여기서 떨어뜨린다 (자체 점검 1·18)
   const attrs = Object.fromEntries(Object.entries(el.getAttributes() as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined));
   const content: DocNode[] = [];
-  for (const child of el.toArray()) content.push(...fromYNode(child as Y.XmlElement | Y.XmlText));
+  for (const child of el.toArray()) content.push(...fromYNode(child));
 
   const out: DocNode = { type: el.nodeName };
   if (Object.keys(attrs).length) out.attrs = attrs;
@@ -138,6 +141,70 @@ function fromYNode(node: Y.XmlElement | Y.XmlText | Y.XmlHook): DocNode[] {
 export function docFromYDoc(ydoc: Y.Doc): DocNode {
   const fragment = ydoc.getXmlFragment(COLLAB_FIELD);
   const content: DocNode[] = [];
-  for (const child of fragment.toArray()) content.push(...fromYNode(child as Y.XmlElement | Y.XmlText));
+  for (const child of fragment.toArray()) content.push(...fromYNode(child));
   return { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content };
+}
+
+/**
+ * 문서의 **멘션 자리** — `@` 글자의 ID와 이름, 그리고 `@`부터 이름 끝까지 글자의 ID (P8_설계서_Mention C.2절, FR-900).
+ *
+ * 걷는 규칙은 `extractText`와 **같아야 한다** — 한쪽이 찾은 멘션을 다른 쪽이 못 찾으면 그 멘션은 조용히
+ * "모름"이 된다. 테스트가 둘의 일치를 강제한다. 마지막 정리(빈 줄 줄이기·앞뒤 공백)는 하지 않는다 — 멘션
+ * 판정은 그 정리 앞뒤로 같고(`@` 앞의 공백은 공백으로 남는다), 하면 글자와 ID의 짝이 어긋난다.
+ *
+ * 자리를 **글자의 ID**로 가리는 이유: 위치(몇 번째 글자)는 앞에 누가 치기만 해도 바뀐다. ID는 그 글자가
+ * 지워지기 전까지 그대로다. 멘션 규칙(무엇이 멘션인가)은 알림 쪽이 들고 있어 `scan`으로 받는다.
+ *
+ * `Y.XmlText`의 조각 사슬(`_start` → `right`)을 직접 걷는다 — `toDelta()`는 글자의 ID를 버리고, 부를 때마다
+ * 정리 트랜잭션을 일으킨다. 지운 조각·서식 조각·끼워 넣기(embed)는 글자가 아니므로 건너뛴다.
+ * 비용은 한 번 걷기다 — 4.5만~6.2만 자·멘션 1,000~1,500개 문서에서 3~6ms (`P8_검증기록_Mention` 2절).
+ */
+export function mentionSites(
+  ydoc: Y.Doc,
+  scan: (text: string) => readonly { name: string; start: number; end: number }[],
+): { key: string; name: string; span: [number, number][] }[] {
+  const parts: string[] = [];
+  /** 글자마다 `client`·`clock`. 구조 글자(줄바꿈)는 -1 */
+  const clients: number[] = [];
+  const clocks: number[] = [];
+  const pushBreak = (): void => {
+    parts.push('\n');
+    clients.push(-1);
+    clocks.push(-1);
+  };
+  const walk = (node: unknown): void => {
+    if (node instanceof Y.XmlText) {
+      for (let item = node._start; item; item = item.right) {
+        if (item.deleted || !(item.content instanceof Y.ContentString)) continue;
+        const str = item.content.str;
+        parts.push(str);
+        for (let k = 0; k < str.length; k++) {
+          clients.push(item.id.client);
+          clocks.push(item.id.clock + k);
+        }
+      }
+      return;
+    }
+    // **편집기가 만들지 않는 노드는 글자가 아니다** — `docFromYDoc`도 버린다. 여기서 던지면 장부가 고장 나 그 방의
+    // 멘션이 전부 모름이 된다 (처음에는 방의 중계가 멈췄다 — P8 세 번째 검토 2, T-035)
+    if (!(node instanceof Y.XmlElement)) return;
+    // `extractText`와 같은 순서·같은 규칙이다: 줄바꿈 노드 → 자식 → 블록 끝 줄바꿈
+    if (node.nodeName === 'hardBreak') {
+      pushBreak();
+      return;
+    }
+    for (const child of node.toArray()) walk(child);
+    if (BLOCK_NODES.has(node.nodeName)) pushBreak();
+  };
+  for (const child of ydoc.getXmlFragment(COLLAB_FIELD).toArray()) walk(child);
+
+  const out: { key: string; name: string; span: [number, number][] }[] = [];
+  for (const hit of scan(parts.join(''))) {
+    if (clients[hit.start] === undefined || clients[hit.start] < 0) continue;
+    // `@`부터 이름 끝까지 글자의 ID — 누가 들여왔는지를 이것으로 묻는다 (C.2절)
+    const span: [number, number][] = [];
+    for (let i = hit.start; i < hit.end; i++) span.push([clients[i], clocks[i]]);
+    out.push({ key: `${clients[hit.start]}:${clocks[hit.start]}`, name: hit.name, span });
+  }
+  return out;
 }

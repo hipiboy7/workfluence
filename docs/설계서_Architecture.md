@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 7까지 구현 완료** (2026-09-23). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 8까지 구현 완료** (2026-09-24). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -63,11 +63,11 @@ workfluence/
 │   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 정책값 (세 겹 출처 · 캐시)
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
 │   │   │   ├── pages/            [P2] 페이지·버전 / [P6] collab/(WebSocket 게이트웨이) ·
-│   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts
+│   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts / [P8] domain/makers.ts
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
-│   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계)
+│   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계) / [P8] scanMentions·callerFor
 │   │   │   ├── trash/            [P4] 휴지통·되살리기
 │   │   │   ├── labels/           [P4] 라벨
 │   │   │   ├── templates/        [P6] 페이지 템플릿
@@ -85,7 +85,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P7]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P8]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -137,8 +137,8 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `attachments` | `id`, `page_id`, `sha256`, `filename`, `mime`, `size`, `uploaded_by`, `deleted_at` | P3 | 내용 해시로 저장, 원본 파일명은 메타데이터 |
 | `comments` | `id`, `page_id`, `parent_id`, `body_json`, `created_by`, `deleted_at` | P3 | |
 | `labels` / `page_labels` | `id`,`name` / (`page_id`,`label_id`) | P3 | |
-| `notifications` | `id`, `user_id`, `type`, `payload`, `read_at` | P4 | 앱 내 알림함 |
-| `page_realtime` | `page_id` PK, `state` bytea, `version_no`, `updated_by`, `updated_at` | P6 | Yjs 상태. **파생 데이터**라 지워도 정본에서 다시 시작한다 (보류 4). 페이지가 지워지면 CASCADE |
+| `notifications` | `id`, `user_id`, `kind`, `page_id`, `comment_id`, `actor_id`, `read_at`, `created_at` | P4 | 앱 내 알림함. **`actor_id`는 P8부터 null 가능** — 같이 쓴 문서에서 부른 사람을 확실히 모를 때다 (`P8_설계서_Mention` D절) |
+| `page_realtime` | `page_id` PK, `state` bytea, `version_no`, `authors` jsonb, `updated_by`, `updated_at` | P6 · P8(`authors`) | Yjs 상태. **파생 데이터**라 지워도 정본에서 다시 시작한다 (보류 4). 페이지가 지워지면 CASCADE. `authors`는 멘션을 만든 사람의 장부다 — 멘션 자리마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름 (`P8_설계서_Mention` C.2절) |
 | `page_templates` | `id`, `name` uq, `content_json`, `created_by`, `updated_at` | P6 | 페이지 시작 틀. 관리자만 만든다 |
 
 ### 3.2 규약
@@ -263,6 +263,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 5 | 배포·운영 문서, 백업·복원, 부하·보안 점검 |
 | 6 | 실시간 편집(JSON 정본 + Yjs 파생, 보류 4), 버전 비교, HTML 내보내기, 템플릿, 멘션 메일. PDF·가져오기는 하지 않는다 |
 | 7 | 반입 전 강화 — 살아 있는 연결의 권한 재판정·하트비트, 이미지 군살 제거 |
+| 8 | 멘션 귀속 — `pages/domain/makers.ts`(멘션을 만든 사람의 장부: 새로 생긴 멘션 자리 · 어느 연결이 어느 글자를 들여왔나 · 옮김을 가리는 사라진 이름), `page_realtime.authors`, `notifications.actor_id` null 허용 (`0008`) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

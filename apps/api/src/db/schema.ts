@@ -284,10 +284,11 @@ export const notifications = pgTable(
     /** 어디서 불렸나. 댓글이면 pageId와 commentId가 함께 있다 */
     pageId: uuid('page_id').references(() => pages.id),
     commentId: uuid('comment_id').references(() => comments.id),
-    /** 부른 사람 */
-    actorId: uuid('actor_id')
-      .notNull()
-      .references(() => users.id),
+    /**
+     * 부른 사람. **`null`이면 모른다** — 실시간 편집에서 그 멘션을 누가 만들었는지 확실하지
+     * 않을 때다. 틀린 이름을 적는 대신 비운다 (P8_설계서_Mention FR-901, `0008`)
+     */
+    actorId: uuid('actor_id').references(() => users.id),
     readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -320,6 +321,12 @@ export const pageRealtime = pgTable(
     state: customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' })('state').notNull(),
     /** 이 상태가 어느 버전에서 시작했는가 */
     versionNo: integer('version_no').notNull(),
+    /**
+     * 멘션을 만든 사람의 장부 `{makers, delivered, gone, seq, owners}` — 멘션 자리마다 만든 사람(`null` = 모름), 어느 연결이
+     * 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름과 그 순번, 클라이언트를 만든 사람 (P8_설계서_Mention C.2절).
+     * `state`와 **같은 쓰기에서** 남긴다 — 둘은 수명이 같다
+     */
+    authors: jsonb('authors').notNull().default({}),
     updatedBy: uuid('updated_by').references(() => users.id),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

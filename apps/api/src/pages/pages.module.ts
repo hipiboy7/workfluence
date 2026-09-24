@@ -47,19 +47,24 @@ export class PagesController {
   }
 
   @Post()
-  create(
+  async create(
     @Body(new ZodPipe(createPageDto)) dto: ReturnType<typeof createPageDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<PageView> {
-    return this.db.transaction(async (tx) => {
-      const page = await this.pages.create(dto, me, tx);
+    const collected: MentionOutcome[] = [];
+    const page = await this.db.transaction(async (tx) => {
+      const p = await this.pages.create(dto, me, tx, (m) => collected.push(m));
       await this.audit.record(
-        { action: 'page.create', actorId: me.id, targetType: 'page', targetId: page.id, detail: { spaceId: dto.spaceId, title: dto.title }, ip: req.ip },
+        { action: 'page.create', actorId: me.id, targetType: 'page', targetId: p.id, detail: { spaceId: dto.spaceId, title: dto.title }, ip: req.ip },
         tx,
       );
-      return page;
+      return p;
     });
+    // 커밋된 뒤에 보낸다 (FR-754). 저장(PATCH)과 같은 길이다 — 새 페이지만 빠져 있었다 (P8 자체 점검 6)
+    const mentions = collected[0];
+    if (mentions?.count) void this.mentionMail.notify(mentions, me.displayName, page.title, me.id);
+    return page;
   }
 
   @Patch(':id')
@@ -81,7 +86,8 @@ export class PagesController {
     // **커밋된 뒤에 보낸다** (FR-754). 기다리지 않는다 — 메일이 느려도 저장 응답은 나가야 한다.
     // 실패해도 던지지 않는 것은 `MentionMailService`가 보장한다 (FR-753)
     const mentions = collected[0];
-    if (mentions?.count) void this.mentionMail.notify(mentions, me.displayName, page.title);
+    // 일으킨 사람을 넘긴다 — 빠뜨리면 `mail.send` 감사의 actor가 빈다 (P8 FR-906)
+    if (mentions?.count) void this.mentionMail.notify(mentions, me.displayName, page.title, me.id);
     return page;
   }
 
