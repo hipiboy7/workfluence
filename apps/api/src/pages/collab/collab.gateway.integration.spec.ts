@@ -553,6 +553,62 @@ describe('자동 저장이 멈추면 화면에 알린다 (P9 FR-1011)', () => {
     for (const s of [a.socket, b.socket, c.socket]) expect(statuses(s).at(-1)).toEqual({ saveBlocked: null });
   });
 
+  it('**방을 열 때 이미 저장할 수 없는 상태면 들어오는 사람이 곧바로 안다** — 재기동 뒤·모두 나간 뒤 남은 실시간 상태 (두 번째 코드 리뷰 4·자체 점검 1)', async () => {
+    const legacy = new Y.Doc();
+    const aligned = (text: string): Y.XmlElement => {
+      const p = new Y.XmlElement('paragraph');
+      p.setAttribute('textAlign', 'center' as never);
+      p.insert(0, [new Y.XmlText(text)]);
+      return p;
+    };
+    legacy.getXmlFragment('default').insert(0, [aligned('옛 가운데 정렬'), aligned('하나 더')]);
+    await db.execute(
+      sql`INSERT INTO page_realtime (page_id, state, version_no, authors) VALUES (${pageId}, ${Buffer.from(Y.encodeStateAsUpdate(legacy))}, ${await currentVersion()}, '{}'::jsonb)`,
+    );
+    const a = await attach();
+    expect(a.socket.sent.map((f) => f[0])).toEqual([COLLAB_MSG.update, COLLAB_MSG.status]);
+    // 까닭은 검증의 첫 문장과 나머지 건수다 — 값은 없다
+    expect(statuses(a.socket)).toEqual([{ saveBlocked: "doc.content[0](paragraph): 허용되지 않는 속성 'textAlign' 외 1건" }]);
+    // 정본에서 만든 방은 알리지 않는다
+    await gw.onModuleDestroy();
+    await db.execute(sql`DELETE FROM page_realtime WHERE page_id = ${pageId}`);
+    gw = build();
+    inner = gw as unknown as Internals;
+    const b = await attach();
+    expect(b.socket.sent.map((f) => f[0])).toEqual([COLLAB_MSG.update]);
+  });
+
+  it('**저장이 실패하면 풀렸다고 알리지 않는다** — 검증을 지나도 버전이 남은 뒤에 푼다 (두 번째 코드 리뷰 5·자체 점검 3)', async () => {
+    const a = await attach();
+    breakDoc(a.room.doc);
+    await idle();
+    await inner.sweep();
+    expect(statuses(a.socket)).toHaveLength(1);
+    const pagesSvc = (gw as unknown as { pagesSvc: PagesService }).pagesSvc;
+    const fail = vi.spyOn(pagesSvc, 'saveCollabVersion').mockRejectedValueOnce(new Error('DB가 잠깐 흔들렸다'));
+    try {
+      // 고치면서 글도 더한다 — 정본과 같아지면 저장할 것이 없어 곧바로 풀린다(그것은 맞다)
+      a.room.doc.transact(() => {
+        const f = a.room.doc.getXmlFragment('default');
+        f.delete(f.toArray().findIndex((n) => n instanceof Y.XmlElement && n.nodeName === 'script'), 1);
+        const p = new Y.XmlElement('paragraph');
+        p.insert(0, [new Y.XmlText('고친 글')]);
+        f.insert(f.length, [p]);
+      }, { principal: { id: userId } });
+      await idle();
+      await inner.sweep();
+      expect(fail).toHaveBeenCalledTimes(1);
+      expect(statuses(a.socket)).toHaveLength(1); // 여전히 "멈췄다" — 버전이 남지 않았다
+      // 다음 판정에서 저장되면 그때 푼다
+      a.room.doc.transact(() => a.room.doc.getXmlFragment('default').insert(0, [new Y.XmlElement('paragraph')]), { principal: { id: userId } });
+      await idle();
+      await inner.sweep();
+      expect(statuses(a.socket).at(-1)).toEqual({ saveBlocked: null });
+    } finally {
+      fail.mockRestore();
+    }
+  });
+
   it('**화면이 보낸 상태 알림은 버린다** — 서버만 보내는 종류다. 퍼뜨리지도 끊지도 않는다', async () => {
     const a = await attach();
     const b = await attach(otherId, await mkSession(otherId));
@@ -995,7 +1051,7 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       const seen = new Awareness(new Y.Doc());
       try {
         // U가 자기 몫을 알리면서 이름을 '관리자'라고 적는다 — 서버는 U의 표시 이름으로 바꿔 퍼뜨린다
-        mine.setLocalStateField('user', { name: '관리자', color: 'hsl(10 70% 45%)' });
+        mine.setLocalStateField('user', { name: '관리자', color: '#b8433a' });
         u.socket.emit('message', AWARE(encodeAwarenessUpdate(mine, [u.doc.clientID])));
         // X가 U의 몫을 꾸며 보낸다(같은 클라이언트 ID) — 퍼뜨리지 않는다
         fake.setLocalStateField('user', { name: '가짜 U' });
@@ -1003,13 +1059,46 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
         x.socket.emit('message', AWARE(encodeAwarenessUpdate(fake, [u.doc.clientID])));
         expect(watcher.socket.sent.length).toBe(sentBefore);
         for (const f of watcher.socket.sent) if (f[0] === 1) applyAwarenessUpdate(seen, new Uint8Array(f.subarray(1)), 'remote');
-        expect(seen.getStates().get(u.doc.clientID)).toEqual({ user: { name: userId, color: 'hsl(10 70% 45%)' } });
+        expect(seen.getStates().get(u.doc.clientID)).toEqual({ user: { name: userId, color: '#b8433a' } });
         expect(refusedCode(x)).toBeUndefined(); // 메아리일 수 있어 끊지는 않는다
       } finally {
         mine.destroy();
         fake.destroy();
         seen.destroy();
       }
+    });
+
+    it('**사람 표시로만 묶고 쓰지 않은 ID는 나갈 때 푼다** — 붙었다 끊기를 되풀이해 주인 표를 불리지 못한다. 쓴 ID와 다른 연결이 쓰는 ID는 남긴다 (두 번째 코드 리뷰 3)', async () => {
+      const announce = (p: Peer, clientID: number): void => {
+        const d = new Y.Doc();
+        d.clientID = clientID;
+        const a = new Awareness(d);
+        try {
+          a.setLocalStateField('user', { name: 'x' });
+          p.socket.emit('message', AWARE(encodeAwarenessUpdate(a, [clientID])));
+        } finally {
+          a.destroy();
+        }
+      };
+      // 알리기만 하고 나간다 — 풀린다
+      const x = await enter(otherId);
+      announce(x, 91001);
+      expect(ownerOf(91001)).toBe(otherId);
+      x.socket.close();
+      expect(ownerOf(91001)).toBeUndefined();
+      // 알리고 쓴 뒤 나간다 — 그 글자의 주인이라 남는다
+      const w = await enter(otherId);
+      announce(w, w.doc.clientID);
+      act(w, (f) => newPara(f, '쓴 글'));
+      w.socket.close();
+      expect(ownerOf(w.doc.clientID)).toBe(otherId);
+      // 같은 ID를 새 연결이 먼저 알린 뒤 옛 연결이 닫힌다(같은 Y.Doc으로 다시 붙은 화면) — 남는다
+      const old = await enter(otherId);
+      announce(old, 91002);
+      const again = await enter(otherId);
+      announce(again, 91002);
+      old.socket.close();
+      expect(ownerOf(91002)).toBe(otherId);
     });
 
     it('**붙어 되풀이된 덩어리는 받지 않는다** — 게이트웨이가 받은 바이트를 관문에 넘긴다. 받았다면 뒤 덩어리가 서버에 보류됐다 (P9 보안 검토 2)', async () => {

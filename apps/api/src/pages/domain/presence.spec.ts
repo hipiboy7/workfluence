@@ -112,8 +112,8 @@ describe('거르기 — 남의 몫은 빼고, 이름은 서버가 정한다 (D.5
 
 /**
  * 상태 거르기 — **화면이 만드는 모양만 남긴다** (P9 코드 리뷰 6 · 보안 검토 3).
- * 캐럿(TipTap CollaborationCaret)은 `user.color`를 `style`에 그대로 넣고, 커서(y-prosemirror)는 `cursor`를 상대 위치로 읽는다.
- * 조작한 클라이언트가 그 값으로 동료의 화면에 CSS를 넣거나 커서 그리기를 깨뜨리지 못하게, 알려진 모양이 아니면 그 필드를 뺀다.
+ * 캐럿(TipTap CollaborationCaret)은 `user.color`가 `#rrggbb`일 때만 칠하고, 커서(y-tiptap의 커서 플러그인)는 `cursor`를 상대 위치로
+ * 읽는다. 조작한 클라이언트가 그 값으로 동료의 화면을 꾸미거나 커서 그리기를 깨뜨리지 못하게, 알려진 모양이 아니면 그 필드를 뺀다.
  */
 describe('상태 거르기 — 화면이 만드는 모양만 (P9 코드 리뷰 6·보안 검토 3)', () => {
   const entry = (client: number, state: PresenceEntry['state']): PresenceEntry => ({ client, clock: 1, state });

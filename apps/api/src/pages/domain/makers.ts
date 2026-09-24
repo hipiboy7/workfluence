@@ -35,7 +35,11 @@ export type Ledger = {
   delivered: Delivered;
   gone: Map<string, Map<string | null, number>>;
   seq: number;
-  /** 클라이언트 ID → 그것을 **만든** 사용자(그 사용자의 연결이 시계 0부터 들여왔다). 같은 사람이 다시 붙으면 이어받는다 */
+  /**
+   * 클라이언트 ID → 그 ID의 **주인**. 그 사용자의 연결이 시계 0부터 들여왔거나(P8), Phase 9부터는 사람 표시로 처음 알렸거나 주인 없는
+   * 클라이언트를 처음 이어 쓴 사람이다 — 관문은 남이 주인인 ID로 쓴 변경을 받지 않는다 (P9_설계서_Gate D.4). 같은 사람이 다시 붙으면
+   * 이어받는다
+   */
   owners: Map<number, string>;
 };
 /** 한 클라이언트의 시계 구간 `[from, to)` */

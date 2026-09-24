@@ -29,12 +29,16 @@ export function PageEditorPage() {
   const [doc, setDoc] = useState<DocNode | null>(null);
   const [title, setTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // **저장 실패는 편집기 옆에 말한다** — 불러오기 실패(`error`)처럼 화면 전체를 갈아 치우면 편집기가 사라져 "쓰던 내용을 복사해
+  // 두라"를 따를 수 없었다 (P9 두 번째 자체 점검 2)
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = () => {
     setConflict(null);
     setError(null);
+    setSaveError(null);
     api<PageView>(`/api/pages/${id}`)
       .then((p) => {
         setPage(p);
@@ -60,7 +64,7 @@ export function PageEditorPage() {
       // **지금 바로 남긴다.** 화면이 그렇게 약속했으므로 그대로 해야 한다 —
       // 유휴를 기다리게 하면 눌러도 아무 일이 없는 것처럼 보인다
       setBusy(true);
-      setError(null);
+      setSaveError(null);
       try {
         const r = await api<{ saved: boolean; reason: string }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
         // **저장되지 않았으면 넘어가지 않는다.** 연결이 끊긴 채 누르거나 문서가 검증을
@@ -68,12 +72,12 @@ export function PageEditorPage() {
         // 넘어갔다 — 사용자는 저장됐다고 믿고 화면에는 옛 내용이 뜬다 (P6 코드 리뷰 5a).
         // **왜 안 됐는지도 말한다** — "저장이 안 됐다"만으로는 무엇을 고쳐야 할지 모른다
         if (!r.saved) {
-          setError(r.reason ? `저장되지 않았다: ${r.reason}` : '저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
+          setSaveError(r.reason ? `저장되지 않았다: ${r.reason}` : '저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
           setBusy(false);
           return;
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setSaveError(e instanceof Error ? e.message : String(e));
         setBusy(false);
         return;
       }
@@ -83,7 +87,7 @@ export function PageEditorPage() {
     }
     if (!page || !doc) return;
     setBusy(true);
-    setError(null);
+    setSaveError(null);
     try {
       await api<PageView>(`/api/pages/${id}`, { method: 'PATCH', json: { title, content: doc, baseVersionNo: page.currentVersionNo } });
       nav(`/pages/${id}`);
@@ -92,7 +96,7 @@ export function PageEditorPage() {
         const b = e.body as { currentVersionNo: number; baseVersionNo: number; message: string };
         setConflict(b);
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        setSaveError(e instanceof Error ? e.message : String(e));
       }
     } finally {
       setBusy(false);
@@ -167,6 +171,11 @@ export function PageEditorPage() {
         )}
 
         {/* 끊긴 상태에서 누르면 **저장되지 않는다.** 누를 수 있게 두면 "눌렀으니 됐다"가 된다 */}
+        {saveError && (
+          <p className="badge fail" role="alert">
+            {saveError}
+          </p>
+        )}
         <button type="button" onClick={() => void save()} disabled={busy || conflict !== null || (collab && (link === 'offline' || link === 'refused'))}>
           {busy ? '저장 중…' : collab ? '저장하고 보기로' : '저장'}
         </button>

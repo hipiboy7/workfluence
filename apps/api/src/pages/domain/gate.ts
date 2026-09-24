@@ -1,4 +1,4 @@
-import { ALLOWED_CHILDREN, MARKS_IN, MAX_DOCUMENT_DEPTH, markProblems, nodeAttrProblems } from '@workfluence/shared';
+import { ALLOWED_CHILDREN, MARKS_IN, MAX_DOCUMENT_DEPTH, cutName, markProblems, nodeAttrProblems } from '@workfluence/shared';
 import * as Y from 'yjs';
 import { COLLAB_FIELD } from './ydoc';
 
@@ -6,7 +6,8 @@ import { COLLAB_FIELD } from './ydoc';
  * 실시간 편집의 **관문** (A등급, P9_설계서_Gate D.2~D.4, FR-1000~1003).
  *
  * 멤버가 보낸 변경을 **적용하기 전에** 서버 문서에 대어 보고, 편집기가 만들 수 있는 모양이 아니면 받지 않는다.
- * 규칙은 셋이고 이 순서로 본다.
+ * 규칙은 셋이고 이 순서로 본다. 그 앞에서 변경 자체의 모양(같은 클라이언트의 덩어리가 되풀이되지 않는가)을 먼저 본다 —
+ * 기록에는 구조 규칙(`structure`)으로 남는다.
  *
  * 1. **완결** — Yjs가 이 변경을 전부 곧바로 들일 수 있는가. 들이지 못한 조각·삭제는 서버에 보류됐다가 나중에 남의
  *    변경에 묻어 들어간다(보류 24 — 피해자의 입력이 서버에 닿지 않는다).
@@ -15,7 +16,8 @@ import { COLLAB_FIELD } from './ydoc';
  * 3. **주인** — 새 조각이 든 클라이언트의 주인이 보낸 사람인가(보류 24 — 남의 클라이언트 ID로 먼저 쓰기).
  *
  * **판정만 한다.** 서버 문서를 읽기만 하고 고치지 않는다. 받지 않은 뒤의 일(끊기·기록)과 묶기(`bind`)는 게이트웨이가 한다.
- * 서버가 **이미 아는** 조각은 보지 않는다 — Yjs가 건너뛰고, 접속 직후의 전체 상태 재전송에는 그런 조각이 대부분이다.
+ * 서버가 **이미 아는** 조각은 구조를 보지 않는다 — Yjs가 들이지 않고, 접속 직후의 전체 상태 재전송에는 그런 조각이 대부분이다.
+ * 다만 Yjs는 그런 조각도 **이웃을 찾는다** — 그래서 완결 규칙에는 넣는다 (P9 두 번째 보안 검토 2).
  */
 
 export type GateRule = 'structure' | 'complete' | 'owner';
@@ -137,7 +139,7 @@ class MinHeap {
 }
 
 /** 이름·키는 조작한 클라이언트가 정한다 — 기록이 불어나지 않게 자른다 (D.2) */
-const cut = (s: string): string => (s.length > 40 ? `${s.slice(0, 40)}…` : s);
+const cut = cutName;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isId = (v: unknown): v is IdLike => typeof v === 'object' && v !== null && 'client' in v && 'clock' in v;
 
@@ -209,6 +211,23 @@ class Lookup {
       cur = this.integrated(cur) ? ((cur.parent as Y.AbstractType<unknown>)._item ?? null) : this.locate(cur).holder;
     }
     return depth;
+  }
+
+  /**
+   * **일부만 아는 조각이 앞 조각과 같은 자리에 이어지는가** (P9 두 번째 보안 검토 2). Yjs는 서버가 아는 앞부분을 잘라 내고
+   * 나머지를 그 클라이언트의 앞 조각(시계 = 서버 상태 - 1) 바로 뒤에 둔다 — 부모는 적힌 이웃에서 찾은 그대로다
+   * (`Item.getMissing` → `integrate(offset)`). 둘이 다르면 나머지는 앞 조각의 목록에 끼고 길이는 적힌 부모가 세어 문서가
+   * 어긋난다. 정상 화면이 다시 보내는 전체 상태는 합쳐진 조각이라 앞 조각과 부모가 같다
+   */
+  continuesInPlace(item: Y.Item, at: Located): boolean {
+    const store = this.doc.store;
+    const state = Y.getState(store, item.id.client);
+    if (item.id.clock >= state) return true;
+    const prev = Y.getItem(store, Y.createID(item.id.client, state - 1));
+    if (!(prev instanceof Y.Item) || prev.parentSub !== at.parentSub) return false;
+    const parent = prev.parent as Y.AbstractType<unknown>;
+    if (at.place.kind === 'root') return parent._item === null && this.doc.share.get(at.place.name) === parent;
+    return parent._item !== null && parent._item === at.holder;
   }
 
   /** 서버에 있으면 서버의 조각, 아니면 변경 안의 조각 */
@@ -311,8 +330,10 @@ function structureProblem(item: Y.Item, lookup: Lookup): string | null {
   if (c instanceof Y.ContentType && !(c.type instanceof Y.XmlElement) && !(c.type instanceof Y.XmlText)) {
     return `편집기가 만들지 않는 타입 '${typeName(c.type)}'`;
   }
-  const { place, parentSub } = lookup.locate(item);
+  const at = lookup.locate(item);
+  const { place, parentSub } = at;
   if (place.kind === 'gone') return null;
+  if (!lookup.continuesInPlace(item, at)) return '앞 조각과 다른 자리에 이어 쓴 조각';
   if (place.kind === 'root' && place.name !== COLLAB_FIELD) return `최상위 타입 '${cut(place.name)}'`;
   const here = place.kind === 'root' ? 'doc' : place.kind === 'element' ? place.name : place.kind === 'text' ? 'text' : place.name;
 
@@ -391,15 +412,17 @@ function repeatsClient(decoded: Decoded, encoded?: Uint8Array): boolean {
 export function inspectUpdate(decoded: Decoded, doc: Y.Doc, sender: string, owners: ReadonlyMap<number, string>, encoded?: Uint8Array): GateVerdict {
   const store = doc.store;
   if (repeatsClient(decoded, encoded)) return { ok: false, rule: 'structure', reason: '같은 클라이언트가 두 번 나온 변경' };
-  // 서버가 아직 모르는 조각만 본다 — 일부만 아는 조각도 본다
-  const fresh = decoded.structs.filter((s) => !(s instanceof Y.Skip) && s.id.clock + s.length > Y.getState(store, s.id.client)) as (Y.Item | Y.GC)[];
+  const structs = decoded.structs.filter((s) => !(s instanceof Y.Skip)) as (Y.Item | Y.GC)[];
+  // 구조·주인은 서버가 아직 모르는 조각만 본다 — 일부만 아는 조각도 본다
+  const fresh = structs.filter((s) => s.id.clock + s.length > Y.getState(store, s.id.client));
 
-  // 1. 완결 (D.3)
+  // 1. 완결 (D.3). **이미 아는 조각도 넣는다** — Yjs는 들이기 전에 아는 조각의 이웃도 찾고, 없으면 그 클라이언트의 뒤 조각까지
+  // 보류한다 (두 번째 보안 검토 2). 정상 화면이 다시 보낸 아는 조각은 이웃이 늘 서버에 있다 — 그 조각이 들어갈 때 있었다
   const known = new Map<number, number>();
   const stateOf = (client: number): void => {
     if (!known.has(client)) known.set(client, Y.getState(store, client));
   };
-  const pending: Pending[] = fresh.map((s) => {
+  const pending: Pending[] = structs.map((s) => {
     stateOf(s.id.client);
     const deps: IdLike[] = [];
     if (s instanceof Y.Item) {

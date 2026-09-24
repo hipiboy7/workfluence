@@ -8,6 +8,8 @@
  * 의존성을 더하지 않으려고 직접 읽는다 — 형식이 세 줄이다. lib0을 들이면 서버가 부르는 곳이 하나 늘 뿐이다.
  */
 
+import { COLLAB_FIELD } from './ydoc';
+
 export type PresenceEntry = { client: number; clock: number; state: Record<string, unknown> | null };
 
 /**
@@ -89,31 +91,39 @@ export function writePresence(entries: readonly PresenceEntry[]): Uint8Array {
   return Uint8Array.from(out);
 }
 
-/** 화면(`CollabEditor.tsx`의 `colorFor`)이 만드는 색 모양 — 캐럿이 이 값을 `style`에 그대로 넣는다 */
-const COLOR = /^(hsl\(\d{1,3}(\.\d+)? \d{1,3}(\.\d+)?% \d{1,3}(\.\d+)?%\)|#[0-9a-fA-F]{3,8})$/;
+/**
+ * 캐럿(TipTap `CollaborationCaret`의 `isValidColor`)이 받는 색 — `#rrggbb`. 캐럿은 이 밖의 색을 투명으로 바꿔 그린다. 화면
+ * (`CollabEditor.tsx`의 `colorFor`)도 이 모양으로 만든다 — 전에는 `hsl(…)`을 만들어 동료의 캐럿이 보이지 않았다 (두 번째 자체 점검 5)
+ */
+const COLOR = /^#[0-9a-fA-F]{6}$/;
 const isUint = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isId = (v: unknown): boolean => isRecord(v) && Object.keys(v).every((k) => k === 'client' || k === 'clock') && isUint(v.client) && isUint(v.clock);
 
-/** y-prosemirror가 쓰는 상대 위치(`Y.relativePositionToJSON`)의 모양인가 */
+const given = (x: unknown): boolean => x !== null && x !== undefined;
+
+/**
+ * 화면(y-tiptap의 커서 플러그인)이 만드는 **상대 위치**(`Y.RelativePosition`을 JSON으로 쓴 것)의 모양인가 (두 번째 보안 검토 1).
+ * 화면은 늘 `type`(타입 ID)과 `tname`(최상위 이름) 중 **하나**를 적고, `item`(글자 ID)은 있거나 없다(`Y.createRelativePosition`).
+ *
+ * 셋이 다 비면 동료의 화면이 이 위치를 읽다 던진다(`Y.createAbsolutePositionFromRelativePosition` → Unexpected case). 커서는 남의
+ * 변경을 받을 때마다 다시 그리므로 그 편집기는 남의 편집을 더 반영하지 못하고, 그 사람이 다음에 치는 순간 멈춘 화면이 문서가 되어
+ * **동료들의 편집이 모두에게서 지워졌다**(브라우저에서 재현). 최상위 이름은 편집기의 것만 — 다른 이름을 읽으면 동료의 문서에 빈
+ * 최상위 타입이 생긴다.
+ */
 function isRelPos(v: unknown): boolean {
-  if (!isRecord(v)) return false;
-  for (const [k, x] of Object.entries(v)) {
-    if (k === 'type' || k === 'item') {
-      if (x !== null && x !== undefined && !isId(x)) return false;
-    } else if (k === 'tname') {
-      if (x !== null && x !== undefined && !(typeof x === 'string' && x.length <= 64)) return false;
-    } else if (k === 'assoc') {
-      if (x !== null && x !== undefined && !Number.isSafeInteger(x)) return false;
-    } else return false;
-  }
-  return true;
+  if (!isRecord(v) || Object.keys(v).some((k) => k !== 'type' && k !== 'tname' && k !== 'item' && k !== 'assoc')) return false;
+  if (given(v.type) === given(v.tname)) return false;
+  if (given(v.type) && !isId(v.type)) return false;
+  if (given(v.tname) && v.tname !== COLLAB_FIELD) return false;
+  if (given(v.item) && !isId(v.item)) return false;
+  return !given(v.assoc) || Number.isSafeInteger(v.assoc);
 }
 
 /**
- * **화면이 만드는 모양만 남긴다** (P9 코드 리뷰 6 · 보안 검토 3). 상태는 `{ user: { name, color }, cursor: { anchor, head } | null }`이다.
- * 이름은 서버가 아는 표시 이름으로 바꾸고, 색은 화면의 모양(`hsl(…)`·`#…`)일 때만, 커서는 상대 위치 모양일 때만 남긴다.
- * 캐럿은 색을 `style`에 그대로 넣고 커서 플러그인은 커서를 상대 위치로 읽는다 — 조작한 값으로 동료의 화면에 CSS를 넣거나 커서
- * 그리기를 깨뜨리지 못하게. 모르는 필드는 뺀다.
+ * **화면이 만드는 모양만 남긴다** (P9 코드 리뷰 6 · 보안 검토 3 · 두 번째 보안 검토 1). 상태는
+ * `{ user: { name, color }, cursor: { anchor, head } | null }`이다. 이름은 서버가 아는 표시 이름으로 바꾸고, 색은 캐럿이 받는
+ * `#rrggbb`일 때만, 커서는 화면이 만드는 상대 위치 모양일 때만 남긴다 — 커서 플러그인이 동료의 화면에서 이 값을 읽는다.
+ * 모르는 필드는 뺀다.
  */
 function cleanState(state: Record<string, unknown>, name: string): Record<string, unknown> {
   const user = isRecord(state.user) ? state.user : {};

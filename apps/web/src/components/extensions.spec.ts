@@ -68,7 +68,7 @@ describe('편집기 스키마 = 서버 허용 목록 (FR-1007)', () => {
     }
   });
 
-  it('모든 마크가 스스로를 배제한다 — 아니면 y-prosemirror가 `이름--해시` 서식 키를 만들어 관문이 받지 않는다', () => {
+  it('모든 마크가 스스로를 배제한다 — 아니면 화면의 동기화(y-tiptap)가 `이름--해시` 서식 키를 만들어 관문이 받지 않는다', () => {
     for (const m of Object.values(schema.marks)) expect([m.name, m.excludes(m)]).toEqual([m.name, true]);
   });
 });

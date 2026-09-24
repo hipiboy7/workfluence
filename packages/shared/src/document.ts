@@ -1,4 +1,4 @@
-import { DOCUMENT_SCHEMA_VERSION } from './constants';
+import { DOCUMENT_SCHEMA_VERSION, MAX_NAME_IN_REASON } from './constants';
 
 /**
  * 페이지 본문(ProseMirror/TipTap JSON) 검증·텍스트 추출 (CLAUDE.md 6절·7절).
@@ -114,8 +114,9 @@ export function validateDocument(input: unknown): DocumentValidation {
       errors.push(`${path}: 중첩 깊이 ${MAX_DOCUMENT_DEPTH} 초과`);
       return;
     }
+    // 넘은 뒤의 노드는 세기만 한다 — 같은 문장을 노드마다 더하면 "외 N건"이 같은 말의 되풀이가 된다(자동 저장 멈춤 알림, P9 D.9)
     if (++nodeCount > MAX_DOCUMENT_NODES) {
-      errors.push(`노드 수 ${MAX_DOCUMENT_NODES} 초과`);
+      if (nodeCount === MAX_DOCUMENT_NODES + 1) errors.push(`노드 수 ${MAX_DOCUMENT_NODES} 초과`);
       return;
     }
     if (!isRecord(node)) {
@@ -222,10 +223,14 @@ export function nodeAttrProblems(type: string, attrs: unknown, opts: { partial?:
 /** 표 칸 정렬 — TipTap `normalizeTableCellAlign`이 받는 값과 같다 */
 const TABLE_ALIGN: ReadonlySet<string> = new Set(['left', 'center', 'right']);
 
-/** 이름·키는 조작한 클라이언트가 정한다 — 까닭(경고 로그·감사로그로 간다)이 불어나지 않게 40자로 자른다 (P9 코드 리뷰 4) */
-function cut(s: string): string {
-  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
+/**
+ * 이름·키는 조작한 클라이언트가 정한다 — 까닭(경고 로그·감사로그로 간다)이 불어나지 않게 `MAX_NAME_IN_REASON`자로 자른다
+ * (P9 코드 리뷰 4). 실시간 편집의 관문(`gate.ts`)도 이것을 쓴다 — 한 곳에서 자른다
+ */
+export function cutName(s: string): string {
+  return s.length > MAX_NAME_IN_REASON ? `${s.slice(0, MAX_NAME_IN_REASON)}…` : s;
 }
+const cut = cutName;
 
 /** **마크 하나의 문제** — 정본 검증과 관문이 같이 쓴다 (P9 FR-1001). 링크 주소도 적지 않는다 */
 export function markProblems(type: string, attrs: unknown): string[] {
@@ -234,6 +239,11 @@ export function markProblems(type: string, attrs: unknown): string[] {
   if (type === 'link') {
     const href = isRecord(attrs) ? attrs.href : undefined;
     if (typeof href !== 'string' || !ALLOWED_LINK_HREF.test(href.trim())) out.push('허용되지 않는 링크 주소');
+    // **`rel`의 `opener` 낱말은 받지 않는다** (P9 두 번째 코드 리뷰 2 · 두 번째 보안 검토). 편집기는 `rel`을 그대로 그리고,
+    // `target="_blank"`와 함께면 새 창으로 열린 쪽이 원래 창(이 위키)을 다른 곳으로 옮길 수 있다. 붙여 넣은 HTML이 흔히 가져오는
+    // 값(`nofollow`·`noopener` 등)은 받는다 — 값 전체를 좁히면 정상적인 붙여 넣기가 막힌다
+    const rel = isRecord(attrs) ? attrs.rel : undefined;
+    if (typeof rel === 'string' && rel.toLowerCase().split(/\s+/).includes('opener')) out.push("속성 'rel' 값에 'opener'를 둘 수 없다");
   }
   return out;
 }

@@ -48,7 +48,7 @@ describe('shouldSaveVersion — 안 만드는 쪽 (FR-707·708)', () => {
     expect(why(d)).toContain('문서 검증 실패');
   });
 
-  it('검증 실패 사유를 함께 준다 — 로그만 남기므로 사유가 없으면 고칠 수 없다', () => {
+  it('검증 실패 사유를 함께 준다 — 로그와 화면 알림(P9 FR-1011)에 쓰므로 사유가 없으면 고칠 수 없다', () => {
     const bad = { type: 'paragraph' } as DocNode;
     const d = shouldSaveVersion({ next: bad, previous: doc('이전'), idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'idle' });
     expect(d.save).toBe(false);

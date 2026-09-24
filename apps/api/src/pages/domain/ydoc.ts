@@ -39,7 +39,7 @@ function attributesToMarks(attrs: Record<string, unknown> | undefined): DocMark[
 /**
  * 자식들을 Yjs 노드로 바꾼다. **연속된 글자 노드는 `Y.XmlText` 하나로 묶는다.**
  *
- * 처음에는 글자 노드마다 `Y.XmlText`를 따로 만들었다. 그러면 편집기(y-prosemirror)가
+ * 처음에는 글자 노드마다 `Y.XmlText`를 따로 만들었다. 그러면 편집기(y-tiptap — y-prosemirror의 TipTap 판)가
  * 보는 구조와 달라져, **각 클라이언트의 첫 편집이 문단을 통째로 다시 쓴다** — 둘이
  * 겹치면 Yjs가 둘 다 살려 `"Hello worldworld"`처럼 글자가 복제된다. 다른 문단만
  * 고쳐도 일어난다 (자체 점검 2, 실측으로 재현됐다).
