@@ -96,6 +96,18 @@ export const AUDIT_ACTIONS = [
  * 끊긴 것과 달리 **다시 붙어도 같은 편집은 다시 거절된다**는 뜻이라 따로 말한다.
  */
 export const COLLAB_CLOSE_REFUSED = 4400;
+
+/**
+ * 실시간 편집 프레임의 **앞 한 바이트** — 무엇이 실렸나 (P6_설계서_Collab C.2절 · P9_설계서_Gate D.6, FR-1011).
+ * 서버(`collab.gateway.ts`)와 화면(`CollabEditor.tsx`)이 이것 하나를 쓴다 — 따로 적으면 한쪽만 바뀐다.
+ *
+ * - `update` 문서 변경(Yjs), `awareness` 사람 표시(y-protocols) — 양쪽이 보낸다
+ * - `status` **서버만 보낸다.** 이 방의 자동 저장이 멈췄는지(`CollabStatus`). 화면이 보낸 것은 서버가 버린다
+ */
+export const COLLAB_MSG = { update: 0, awareness: 1, status: 2 } as const;
+
+/** `COLLAB_MSG.status`에 실리는 것(UTF-8 JSON). `saveBlocked`는 자동 저장이 멈춘 까닭이고, 풀리면 `null`이다 */
+export type CollabStatus = { saveBlocked: string | null };
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /** 페이지 트리 최대 깊이. 무한 중첩은 이동·경로 계산 비용을 키운다. */

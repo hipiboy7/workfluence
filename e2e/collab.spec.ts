@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { Client } from 'pg';
 import { readPresence } from '../apps/api/src/pages/domain/presence';
+import { CSRF_HEADER, CSRF_HEADER_VALUE, DOCUMENT_SCHEMA_VERSION } from '../packages/shared/src/constants';
 import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
 const ADMIN = newAdmin('collab');
@@ -375,4 +376,87 @@ test('조작한 연결이 보낸 것은 문서에 들어가지 않고 그 연결
   }
   await ctxA.close();
   await ctxB.close();
+});
+
+/**
+ * **자동 저장이 멈추면 화면이 말한다** (P9_설계서_Gate FR-1011).
+ *
+ * Phase 9 전에 남은 실시간 상태에는 지금 허용 목록 밖의 속성(`textAlign` — 스키마 버전 2에서 뺐다)이 들어 있을 수 있다.
+ * 관문이 생기기 전에 들어간 것이라 문 앞에서 막을 수 없고, 그 상태로는 자동 저장이 검증에 걸린다. 전에는 서버 로그에만
+ * 남아 편집하는 사람은 저장되는 줄 알았다. 그 문단을 고치면 편집기가 모르는 속성을 지우므로 다시 저장된다.
+ */
+test('남은 옛 상태로 자동 저장이 멈추면 화면이 까닭을 말하고, 그 문단을 고치면 다시 저장되며 알림이 사라진다', async ({ page }) => {
+  const require_ = createRequire(resolve(__dirname, '../apps/api/package.json'));
+  const Y = require_('yjs') as typeof import('yjs');
+
+  await login(page, ADMIN.username, ADMIN.password);
+  const spaceName = `옛 상태 공간 ${Date.now()}`;
+  await page.goto('/');
+  await page.getByLabel('이름').fill(spaceName);
+  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('link', { name: spaceName }).click();
+  const spaceId = /\/spaces\/([0-9a-f-]+)/.exec(page.url())?.[1] ?? '';
+  expect(spaceId).not.toBe('');
+  // 편집 화면을 거치지 않고 만든다 — 열면 방이 생겨 아래에서 넣는 옛 상태를 읽지 않는다
+  const created = await page.request.post('/api/pages', {
+    headers: { [CSRF_HEADER]: CSRF_HEADER_VALUE },
+    data: {
+      spaceId,
+      title: `옛 상태 문서 ${Date.now()}`,
+      content: { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'paragraph', content: [{ type: 'text', text: '정본 문단' }] }] },
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const { id: pageId, currentVersionNo } = (await created.json()) as { id: string; currentVersionNo: number };
+
+  // Phase 9 전의 실시간 상태 — 가운데 정렬(`textAlign`)이 붙은 문단과 평범한 문단
+  const old = new Y.Doc();
+  const aligned = new Y.XmlElement('paragraph');
+  aligned.setAttribute('textAlign', 'center');
+  aligned.insert(0, [new Y.XmlText('옛 가운데 정렬 문단')]);
+  const plain = new Y.XmlElement('paragraph');
+  plain.insert(0, [new Y.XmlText('다른 문단')]);
+  old.getXmlFragment('default').insert(0, [aligned, plain]);
+  const c = new Client(process.env.WF_DATABASE_URL);
+  await c.connect();
+  try {
+    await c.query(`INSERT INTO page_realtime (page_id, state, version_no, authors) VALUES ($1, $2, $3, '{}'::jsonb)`, [
+      pageId,
+      Buffer.from(Y.encodeStateAsUpdate(old)),
+      currentVersionNo,
+    ]);
+
+    await page.goto(`/pages/${pageId}/edit`);
+    await expect(page.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
+    const editor = page.locator('.editor .ProseMirror');
+    await expect(editor).toContainText('옛 가운데 정렬 문단');
+
+    // 다른 문단을 고친다 — 정렬이 붙은 문단은 그대로라 저장이 검증에 걸린다. 유휴 5초 뒤 판정
+    await editor.getByText('다른 문단').click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' 덧붙임');
+    const banner = page.getByText(/자동 저장이 멈췄다: .*'textAlign'/);
+    await expect(banner).toBeVisible({ timeout: 15_000 });
+
+    // 그 문단을 고친다 — 편집기가 모르는 속성을 지워 보낸다. 다음 판정에서 저장되고 알림이 사라진다
+    await editor.getByText('옛 가운데 정렬 문단').click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' 고침');
+    await expect(banner).toHaveCount(0, { timeout: 15_000 });
+    // 알림은 검증을 지난 순간 풀린다 — 버전은 그 뒤 트랜잭션에서 남으므로 기다려 본다
+    const current = async (): Promise<{ n: number; content: string }> =>
+      (
+        await c.query<{ n: number; content: string }>(
+          `SELECT p.current_version_no AS n, v.content_json::text AS content FROM pages p JOIN page_versions v ON v.page_id = p.id AND v.version_no = p.current_version_no WHERE p.id = $1`,
+          [pageId],
+        )
+      ).rows[0];
+    await expect.poll(async () => Number((await current()).n), { timeout: 15_000 }).toBe(currentVersionNo + 1);
+    const saved = await current();
+    expect(saved.content).toContain('고침');
+    expect(saved.content).toContain('덧붙임');
+    expect(saved.content).not.toContain('textAlign');
+  } finally {
+    await c.end();
+  }
 });

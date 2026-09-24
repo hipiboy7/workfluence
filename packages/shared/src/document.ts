@@ -124,7 +124,7 @@ export function validateDocument(input: unknown): DocumentValidation {
     }
     const type = node.type;
     if (typeof type !== 'string' || !Object.hasOwn(ALLOWED_NODES, type)) {
-      errors.push(`${path}: 허용되지 않는 노드 '${String(type)}'`);
+      errors.push(`${path}: 허용되지 않는 노드 '${cut(String(type))}'`);
       return;
     }
     for (const problem of nodeAttrProblems(type, node.attrs)) errors.push(`${path}(${type}): ${problem}`);
@@ -185,7 +185,7 @@ function placementProblems(parent: string, child: unknown, path: string, errors:
 
 function checkMark(mark: unknown, path: string, errors: string[]): void {
   if (!isRecord(mark) || typeof mark.type !== 'string') {
-    errors.push(`${path}: 허용되지 않는 마크 '${isRecord(mark) ? String(mark.type) : typeof mark}'`);
+    errors.push(`${path}: 허용되지 않는 마크 '${isRecord(mark) ? cut(String(mark.type)) : typeof mark}'`);
     return;
   }
   for (const problem of markProblems(mark.type, mark.attrs)) errors.push(`${path}: ${problem}`);
@@ -199,19 +199,37 @@ function checkMark(mark: unknown, path: string, errors: string[]): void {
  * 그 자리는 변환이 편집기와 같은 기본값으로 채운다(P9 FR-1010). 있는 값은 그래도 본다.
  */
 export function nodeAttrProblems(type: string, attrs: unknown, opts: { partial?: boolean } = {}): string[] {
-  if (!Object.hasOwn(ALLOWED_NODES, type)) return [`허용되지 않는 노드 '${type}'`];
+  if (!Object.hasOwn(ALLOWED_NODES, type)) return [`허용되지 않는 노드 '${cut(type)}'`];
   const out = attrProblems(attrs, ALLOWED_NODES[type]);
   if (type === 'heading') {
     const level = isRecord(attrs) ? attrs.level : undefined;
     const present = level !== undefined && level !== null;
     if ((present || !opts.partial) && (typeof level !== 'number' || level < 1 || level > 6)) out.push('heading.level은 1~6');
   }
+  if ((type === 'tableCell' || type === 'tableHeader') && isRecord(attrs)) {
+    // **화면이 style에 그대로 넣는 값**이다 — `align`은 `text-align: …`에, `colwidth`는 표 `colgroup`의 `width: …px`에
+    // (TipTap 3.31.3). "원시값이면 된다"로는 `left; position:fixed; inset:0`이 지나가 보는 사람 모두의 화면을 덮는다
+    // (P9 보안 검토). 편집기는 붙여 넣은 HTML에서도 `align`을 이 셋으로, `colwidth`를 `parseInt`한 숫자로 만든다
+    const { align, colwidth } = attrs;
+    if (align !== undefined && align !== null && !TABLE_ALIGN.has(align as string)) out.push("속성 'align' 값은 left·center·right");
+    if (colwidth !== undefined && colwidth !== null && !(Array.isArray(colwidth) && colwidth.every((w) => w === null || typeof w === 'number'))) {
+      out.push("속성 'colwidth' 값은 숫자 배열");
+    }
+  }
   return out;
+}
+
+/** 표 칸 정렬 — TipTap `normalizeTableCellAlign`이 받는 값과 같다 */
+const TABLE_ALIGN: ReadonlySet<string> = new Set(['left', 'center', 'right']);
+
+/** 이름·키는 조작한 클라이언트가 정한다 — 까닭(경고 로그·감사로그로 간다)이 불어나지 않게 40자로 자른다 (P9 코드 리뷰 4) */
+function cut(s: string): string {
+  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
 }
 
 /** **마크 하나의 문제** — 정본 검증과 관문이 같이 쓴다 (P9 FR-1001). 링크 주소도 적지 않는다 */
 export function markProblems(type: string, attrs: unknown): string[] {
-  if (!Object.hasOwn(ALLOWED_MARKS, type)) return [`허용되지 않는 마크 '${type}'`];
+  if (!Object.hasOwn(ALLOWED_MARKS, type)) return [`허용되지 않는 마크 '${cut(type)}'`];
   const out = attrProblems(attrs, ALLOWED_MARKS[type]);
   if (type === 'link') {
     const href = isRecord(attrs) ? attrs.href : undefined;
@@ -239,10 +257,10 @@ function attrProblems(attrs: unknown, allowed: readonly string[]): string[] {
     // 목록을 넓히면 편집기가 새 속성을 더할 때마다 같은 일이 반복된다.
     if (value === null || value === undefined) continue;
     if (!allowed.includes(key)) {
-      errors.push(`허용되지 않는 속성 '${key}'`);
+      errors.push(`허용되지 않는 속성 '${cut(key)}'`);
       continue;
     }
-    if (!isPrimitiveOrPrimitiveArray(value)) errors.push(`속성 '${key}' 값은 원시값 또는 원시값 배열`);
+    if (!isPrimitiveOrPrimitiveArray(value)) errors.push(`속성 '${cut(key)}' 값은 원시값 또는 원시값 배열`);
   }
   return errors;
 }

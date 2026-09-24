@@ -23,6 +23,8 @@ export function PageEditorPage() {
   const [collab, setCollab] = useState<boolean | null>(null);
   const [peers, setPeers] = useState<string[]>([]);
   const [link, setLink] = useState<CollabState>('connecting');
+  // 서버가 알린 **자동 저장이 멈춘 까닭** (P9 FR-1011). 풀리면 `null`
+  const [saveBlocked, setSaveBlocked] = useState<string | null>(null);
   const [page, setPage] = useState<PageView | null>(null);
   const [doc, setDoc] = useState<DocNode | null>(null);
   const [title, setTitle] = useState('');
@@ -49,6 +51,7 @@ export function PageEditorPage() {
   }, []);
   const onPeers = useCallback((names: string[]) => setPeers(names), []);
   const onState = useCallback((s: CollabState) => setLink(s), []);
+  const onSaveBlocked = useCallback((r: string | null) => setSaveBlocked(r), []);
 
   const save = async () => {
     // **실시간 편집에서는 서버가 이미 저장하고 있다.** 여기서 또 PATCH를 보내면
@@ -123,7 +126,7 @@ export function PageEditorPage() {
         <label htmlFor="ed-body">본문</label>
         <div id="ed-body">
           {collab && me ? (
-            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} />
+            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} onSaveBlocked={onSaveBlocked} />
           ) : (
             <Editor value={page.content} onChange={setDoc} />
           )}
@@ -146,6 +149,12 @@ export function PageEditorPage() {
               {link === 'refused' && (
                 <strong className="badge fail">
                   서버가 이 편집을 받지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다 — 계속되면 관리자에게 알린다
+                </strong>
+              )}
+              {/* **자동 저장이 멈춘 것도 말한다** (P9 FR-1011). 편집은 동료에게 계속 보여 저장되는 줄 알기 쉽다 */}
+              {saveBlocked !== null && link !== 'refused' && (
+                <strong className="badge fail">
+                  자동 저장이 멈췄다: {saveBlocked}. 고치기 전에는 버전이 남지 않는다 — 모르겠으면 쓰던 내용을 복사해 두고 관리자에게 알린다
                 </strong>
               )}
             </p>

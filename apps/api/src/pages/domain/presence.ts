@@ -10,6 +10,13 @@
 
 export type PresenceEntry = { client: number; clock: number; state: Record<string, unknown> | null };
 
+/**
+ * **한 연결이 사람 표시로 묶을 수 있는 클라이언트 ID의 수** (D.5). 정상 화면은 한 연결에서 하나를 알린다 — 사람 표시의 ID는
+ * 만들 때의 문서 ID로 정해지고 연결이 사는 동안 바뀌지 않는다(같은 문서로 다시 붙으면 이미 자기 것이다). 넉넉히 둔다.
+ * 상한이 없으면 주인 없는 ID를 알림마다 하나씩 끝없이 묶어 표(`page_realtime.authors`와 함께 남는다)를 불릴 수 있다.
+ */
+export const MAX_PRESENCE_BINDS = 4;
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 class Reader {
@@ -82,10 +89,50 @@ export function writePresence(entries: readonly PresenceEntry[]): Uint8Array {
   return Uint8Array.from(out);
 }
 
+/** 화면(`CollabEditor.tsx`의 `colorFor`)이 만드는 색 모양 — 캐럿이 이 값을 `style`에 그대로 넣는다 */
+const COLOR = /^(hsl\(\d{1,3}(\.\d+)? \d{1,3}(\.\d+)?% \d{1,3}(\.\d+)?%\)|#[0-9a-fA-F]{3,8})$/;
+const isUint = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+const isId = (v: unknown): boolean => isRecord(v) && Object.keys(v).every((k) => k === 'client' || k === 'clock') && isUint(v.client) && isUint(v.clock);
+
+/** y-prosemirror가 쓰는 상대 위치(`Y.relativePositionToJSON`)의 모양인가 */
+function isRelPos(v: unknown): boolean {
+  if (!isRecord(v)) return false;
+  for (const [k, x] of Object.entries(v)) {
+    if (k === 'type' || k === 'item') {
+      if (x !== null && x !== undefined && !isId(x)) return false;
+    } else if (k === 'tname') {
+      if (x !== null && x !== undefined && !(typeof x === 'string' && x.length <= 64)) return false;
+    } else if (k === 'assoc') {
+      if (x !== null && x !== undefined && !Number.isSafeInteger(x)) return false;
+    } else return false;
+  }
+  return true;
+}
+
 /**
- * 거른다 (D.5). 보낸 사람이 주인인 몫과 주인 없는 몫만 남기고, **이름을 서버가 아는 표시 이름으로** 바꾼다.
- * 주인 없는 몫은 `bind`로 돌려준다 — 게이트웨이가 보낸 사람을 주인으로 적는다(D.4). 화면은 열자마자 자기 ID를
- * 알리므로, 그 알림을 처리하는 순간 묶으면 그 ID가 남에게 퍼지기 전에 주인이 정해진다.
+ * **화면이 만드는 모양만 남긴다** (P9 코드 리뷰 6 · 보안 검토). 상태는 `{ user: { name, color }, cursor: { anchor, head } | null }`이다.
+ * 이름은 서버가 아는 표시 이름으로 바꾸고, 색은 화면의 모양(`hsl(…)`·`#…`)일 때만, 커서는 상대 위치 모양일 때만 남긴다.
+ * 캐럿은 색을 `style`에 그대로 넣고 커서 플러그인은 커서를 상대 위치로 읽는다 — 조작한 값으로 동료의 화면에 CSS를 넣거나 커서
+ * 그리기를 깨뜨리지 못하게. 모르는 필드는 뺀다.
+ */
+function cleanState(state: Record<string, unknown>, name: string): Record<string, unknown> {
+  const user = isRecord(state.user) ? state.user : {};
+  const out: Record<string, unknown> = { user: typeof user.color === 'string' && COLOR.test(user.color) ? { name, color: user.color } : { name } };
+  const cursor = state.cursor;
+  if (cursor === null) out.cursor = null;
+  else if (isRecord(cursor) && Object.keys(cursor).every((k) => k === 'anchor' || k === 'head') && isRelPos(cursor.anchor) && isRelPos(cursor.head)) {
+    out.cursor = { anchor: cursor.anchor, head: cursor.head };
+  }
+  return out;
+}
+
+/**
+ * 거른다 (D.5). 보낸 사람이 주인인 몫만 남기고 **상태를 화면이 만드는 모양으로** 고친다(이름은 서버가 정한다).
+ *
+ * 주인 없는 몫은 **한 항목짜리 프레임의 살아 있는 몫일 때만** `bind`로 돌려준다 — 화면은 열자마자 자기 ID 하나를 알린다(D.4).
+ * 여럿인 프레임은 정상 화면이면 메아리(남의 몫)이고, 떠남(null)은 자기 ID를 알린 뒤에만 온다. 묶을 수 있는 수(`canBind`)도
+ * 게이트웨이가 연결마다 정한다 — 한 프레임에 주인 없는 ID를 수십만 개 담아 표를 불리던 길 (P9 코드 리뷰 5·두 번째 검토 3).
+ * 묶지 못한 주인 없는 몫은 뺀다.
  *
  * 남이 주인인 몫은 뺀다 — 정상 화면은 받은 남의 표시를 되돌려 보내고(메아리), 그것은 이미 퍼뜨린 것이다.
  */
@@ -94,19 +141,17 @@ export function screenPresence(
   sender: string,
   owners: ReadonlyMap<number, string>,
   name: string,
+  canBind = 1,
 ): { keep: PresenceEntry[]; bind: number[] } {
   const keep: PresenceEntry[] = [];
   const bind: number[] = [];
   for (const e of entries) {
     const owner = owners.get(e.client);
-    if (owner === undefined) bind.push(e.client);
-    else if (owner !== sender) continue;
-    if (e.state === null) {
-      keep.push(e);
-      continue;
-    }
-    const user = isRecord(e.state.user) ? e.state.user : {};
-    keep.push({ ...e, state: { ...e.state, user: { ...user, name } } });
+    if (owner === undefined) {
+      if (entries.length !== 1 || e.state === null || bind.length >= canBind) continue;
+      bind.push(e.client);
+    } else if (owner !== sender) continue;
+    keep.push(e.state === null ? e : { ...e, state: cleanState(e.state, name) });
   }
   return { keep, bind };
 }

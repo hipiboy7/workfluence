@@ -4,23 +4,20 @@ import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import * as Y from 'yjs';
-import { COLLAB_CLOSE_REFUSED } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, type CollabStatus } from '@workfluence/shared';
 import { editorExtensions } from './extensions';
 
 /**
  * 실시간 동시 편집기 (P6_설계서_Collab F절, FR-700·705).
  *
- * **서버가 정한 것과 같은 프로토콜을 쓴다** — 앞 한 바이트가 종류다 (0=문서, 1=사람).
- * `y-websocket`을 쓰지 않는 이유는 서버 쪽과 같다: 우리가 다루는 것이 둘뿐이라
+ * **서버가 정한 것과 같은 프로토콜을 쓴다** — 앞 한 바이트가 종류다 (`COLLAB_MSG`: 0=문서, 1=사람, 2=저장 상태).
+ * `y-websocket`을 쓰지 않는 이유는 서버 쪽과 같다: 우리가 다루는 것이 몇 가지뿐이라
  * 남의 규약을 들이는 것보다 우리 것이 분명하다.
  *
  * **저장은 서버가 한다.** 이 컴포넌트는 저장을 모른다 — 변경을 보내면 서버가 유휴를
  * 보고 버전을 남긴다 (FR-706). 화면에 저장 버튼이 남아 있는 것은 "지금 남겨 달라"를
  * 말하기 위해서다.
  */
-
-const MSG_UPDATE = 0;
-const MSG_AWARENESS = 1;
 
 /** 사람마다 다른 색. 이름의 글자 코드로 정해 **같은 사람은 늘 같은 색**이 되게 한다 */
 function colorFor(name: string): string {
@@ -38,17 +35,23 @@ export function CollabEditor({
   editable = true,
   onPeers,
   onState,
+  onSaveBlocked,
 }: {
   pageId: string;
   me: { id: string; displayName: string };
   editable?: boolean;
   onPeers?: (names: string[]) => void;
   onState?: (s: CollabState) => void;
+  /** 서버가 이 문서의 자동 저장이 멈췄다고(까닭), 또는 풀렸다고(`null`) 알렸다 (P9 FR-1011) */
+  onSaveBlocked?: (reason: string | null) => void;
 }) {
   const ydoc = useMemo(() => new Y.Doc(), [pageId]);
   const awareness = useMemo(() => new Awareness(ydoc), [ydoc]);
   const socketRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<CollabState>('connecting');
+  // 알림 받는 함수가 바뀌어도 다시 붙지 않게 참조로 둔다 — 연결 효과의 의존에 넣으면 부모가 다시 그릴 때마다 끊고 붙는다
+  const onSaveBlockedRef = useRef(onSaveBlocked);
+  onSaveBlockedRef.current = onSaveBlocked;
 
   useEffect(() => {
     onState?.(state);
@@ -72,25 +75,34 @@ export function CollabEditor({
 
     const onDocUpdate = (update: Uint8Array, origin: unknown): void => {
       if (origin === 'remote') return; // 받은 것을 되돌려 보내지 않는다
-      send(MSG_UPDATE, update);
+      send(COLLAB_MSG.update, update);
     };
     const onAwareness = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }): void => {
-      send(MSG_AWARENESS, encodeAwarenessUpdate(awareness, [...added, ...updated, ...removed]));
+      send(COLLAB_MSG.awareness, encodeAwarenessUpdate(awareness, [...added, ...updated, ...removed]));
     };
 
     ws.onopen = () => {
       setState('live');
       awareness.setLocalStateField('user', { name: me.displayName, color: colorFor(me.displayName) });
       // 내가 가진 것을 먼저 보낸다. 서버가 전체 상태를 돌려주므로 둘이 합쳐진다
-      send(MSG_UPDATE, Y.encodeStateAsUpdate(ydoc));
-      send(MSG_AWARENESS, encodeAwarenessUpdate(awareness, [ydoc.clientID]));
+      send(COLLAB_MSG.update, Y.encodeStateAsUpdate(ydoc));
+      send(COLLAB_MSG.awareness, encodeAwarenessUpdate(awareness, [ydoc.clientID]));
     };
     ws.onmessage = (ev: MessageEvent<ArrayBuffer>) => {
       const data = new Uint8Array(ev.data);
       if (data.length < 1) return;
       const body = data.subarray(1);
-      if (data[0] === MSG_UPDATE) Y.applyUpdate(ydoc, body, 'remote');
-      else if (data[0] === MSG_AWARENESS) applyAwarenessUpdate(awareness, body, 'remote');
+      if (data[0] === COLLAB_MSG.update) Y.applyUpdate(ydoc, body, 'remote');
+      else if (data[0] === COLLAB_MSG.awareness) applyAwarenessUpdate(awareness, body, 'remote');
+      else if (data[0] === COLLAB_MSG.status) {
+        // 서버가 알린 저장 상태 (FR-1011). 읽지 못하면 무시한다 — 이 알림 때문에 편집이 멈추면 안 된다
+        try {
+          const status = JSON.parse(new TextDecoder().decode(body)) as CollabStatus;
+          onSaveBlockedRef.current?.(typeof status.saveBlocked === 'string' ? status.saveBlocked : null);
+        } catch {
+          /* 무시 */
+        }
+      }
     };
     // **끊기면 그렇다고 말한다.** 조용히 끊기면 사람은 계속 쓰고 있는데 아무에게도
     // 안 가고, 새로고침하면 그 내용이 사라진다 — 가장 나쁜 실패다
@@ -107,7 +119,14 @@ export function CollabEditor({
       // 전파되지 않아 남의 화면에 내 이름과 커서가 30초까지 남는다 (자체 점검 29)
       removeAwarenessStates(awareness, [ydoc.clientID], 'unmount');
       awareness.off('update', onAwareness);
+      // **옛 연결의 소식은 더 듣지 않는다.** 다시 붙을 때(이름이 바뀌어 이 효과가 다시 돌 때) 옛 연결이 늦게 닫히며
+      // 새 연결이 살아 있는 화면에 "연결이 끊겼다"를 띄웠다 (P9 코드 리뷰 7)
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onclose = null;
+      ws.onerror = null;
       ws.close();
+      onSaveBlockedRef.current?.(null);
     };
   }, [pageId, ydoc, awareness, me.displayName]);
 

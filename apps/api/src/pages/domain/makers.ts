@@ -85,10 +85,10 @@ export function deliveredBy(delivered: Delivered, client: number, clock: number)
  *   그 연결이 0부터 보낸 클라이언트가 그 연결의 것인 것은 그대로다. 묻었다고 알아보지 않으면 **그 연결이 끝까지 모름**이 된다.
  * - **이미 남이 만든 클라이언트는 차지하지 못한다**(`owners`) — 0부터 먼저 보낸 연결이 임자다. **같은 사람이 다시 붙으면
  *   이어받는다** — 화면은 표시 이름이 바뀌면 같은 Y.Doc으로 연결만 다시 열고, 그때 그 클라이언트의 시계는 0이 아니다.
- * - **"먼저"가 진짜 주인이라는 보장은 없다.** 화면은 열자마자 커서 정보(awareness)로 자기 클라이언트 ID를 알리고, 남이 그
- *   ID로 먼저 보낼 수 있다 (P8 다섯 번째 검토 1). 그래도 그 ID의 글자는 **먼저 보낸 사람의 것으로만** 적혀 제3자의 이름은
- *   붙지 않는다. 피해자의 화면은 그 변경으로 자기 ID의 글자가 늘면 Yjs가 스스로 새 ID로 바꾸고, 아니면 피해자가 그 ID로 이어
- *   친 글자는 아무의 것도 아니다(모름). 그 사이 피해자의 입력이 서버에 닿지 않는 것은 이 장부가 아니라 Yjs 수준의 일이다 — 보류 24.
+ * - **"먼저"는 Phase 9부터 관문이 정한다** (P9_설계서_Gate D.4). 화면은 열자마자 사람 표시(awareness)로 자기 클라이언트 ID를
+ *   알리고, 관문은 그 순간 그 ID를 보낸 사람에게 묶는다. 그 뒤 남이 그 ID로 쓰면 받지 않는다. Phase 8에서는 남이 알려진 ID로
+ *   먼저 보내 차지할 수 있었고, 그러면 피해자의 입력이 서버에 닿지 않았다 (P8 다섯 번째 검토 1, 보류 24). 여기서 주인을 적는 것은
+ *   관문을 지난 변경뿐이다 — 이 함수가 적는 주인과 관문이 묶는 주인은 같은 표(`owners`)다.
  */
 export function claimOwn(own: Set<number>, owners: Map<number, string>, userId: string, sent: SentChange, integrated: ReadonlyMap<number, ClockRange>): void {
   const fresh = [...integrated].filter(([client, got]) => got.from === 0 && sent.structs.get(client)?.from === 0);

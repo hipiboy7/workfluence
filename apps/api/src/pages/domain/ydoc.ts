@@ -118,7 +118,8 @@ function fromYNode(node: unknown): DocNode[] {
   // **편집기가 만들지 않는 노드는 버린다** (P8 세 번째 검토 2). 우리 편집기는 `Y.XmlElement`·`Y.XmlText`만
   // 만들지만 **조작한 클라이언트는 `Y.XmlHook`·`Y.Text`·`Y.Map`을 넣을 수 있다.** 예전에는 "만드는 코드가 없으니
   // 올 수 없다"고 보고 좁히기만 했는데, 그런 노드 하나로 여기서 던져 **그 페이지의 자동 저장이 영영 실패했다.**
-  // 그 노드는 정본 JSON에 뜻이 없다
+  // 그 노드는 정본 JSON에 뜻이 없다. Phase 9부터는 관문이 그런 변경을 문 앞에서 받지 않지만(P9_설계서_Gate D.2) 여기서도
+  // 버린다 — Phase 9 전에 남은 실시간 상태에는 들어 있을 수 있다
   if (!(node instanceof Y.XmlElement)) return [];
   const el = node;
   // 편집기 쪽에서 온 `null` 기본값을 여기서 떨어뜨린다 (자체 점검 1·18)

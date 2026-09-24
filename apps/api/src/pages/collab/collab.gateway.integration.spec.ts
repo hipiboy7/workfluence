@@ -2,8 +2,7 @@ import { Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
-import { DOCUMENT_SCHEMA_VERSION } from '@workfluence/shared';
-import { COLLAB_CLOSE_REFUSED } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, DOCUMENT_SCHEMA_VERSION, MAX_DOCUMENT_NODES, type CollabStatus } from '@workfluence/shared';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { AuditService } from '../../audit/audit.service';
@@ -16,6 +15,7 @@ import { UsersService } from '../../users/users.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../../test/db';
 import { PagesService } from '../pages.service';
 import type { Ledger } from '../domain/makers';
+import { MAX_PRESENCE_BINDS } from '../domain/presence';
 import { docFromYDoc, yDocFromDoc } from '../domain/ydoc';
 import { CollabGateway } from './collab.gateway';
 
@@ -501,6 +501,68 @@ describe('바뀌지 않은 문서로 다시 판정하지 않는다 (P8 다섯 �
   });
 });
 
+describe('자동 저장이 멈추면 화면에 알린다 (P9 FR-1011)', () => {
+  const idle = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+  /** 서버가 보낸 저장 상태 알림(`COLLAB_MSG.status`)을 받은 차례대로 */
+  const statuses = (s: FakeSocket): CollabStatus[] =>
+    s.sent.filter((f) => f[0] === COLLAB_MSG.status).map((f) => JSON.parse(f.subarray(1).toString('utf8')) as CollabStatus);
+  /** 관문 앞에서 막히지 않는 **저장할 수 없는 상태** — P9 전에 남은 실시간 상태가 그렇다. 여기서는 방의 문서에 직접 넣는다 */
+  const breakDoc = (d: Y.Doc): void =>
+    d.transact(() => {
+      const f = d.getXmlFragment('default');
+      f.insert(f.length, [new Y.XmlElement('script')]);
+    }, { principal: { id: userId } });
+
+  it('**검증에 실패하면 방의 모두에게 까닭을 알리고, 뒤에 들어온 사람에게도 알린다. 고쳐서 저장되면 풀렸다고 알린다**', async () => {
+    const a = await attach();
+    const b = await attach(otherId, await mkSession(otherId));
+    expect(statuses(a.socket)).toEqual([]); // 평소에는 아무것도 보내지 않는다
+    breakDoc(a.room.doc);
+    await idle();
+    await inner.sweep();
+    const blocked = statuses(a.socket);
+    expect(blocked).toEqual([{ saveBlocked: expect.stringContaining("허용되지 않는 노드 'script'") }]);
+    expect(statuses(b.socket)).toEqual(blocked);
+
+    // 새로 들어온 사람은 전체 상태 **다음에** 같은 알림을 받는다
+    const c = await attach();
+    expect(c.socket.sent.map((f) => f[0])).toEqual([COLLAB_MSG.update, COLLAB_MSG.status]);
+    expect(statuses(c.socket)).toEqual(blocked);
+
+    // 같은 까닭이면 다시 알리지 않는다 — 다음 변경이 와서 다시 판정해도
+    a.room.doc.transact(() => {
+      const f = a.room.doc.getXmlFragment('default');
+      f.insert(f.length, [new Y.XmlElement('paragraph')]);
+    }, { principal: { id: userId } });
+    await idle();
+    await inner.sweep();
+    expect(statuses(a.socket)).toHaveLength(1);
+
+    // 고친다 — 저장되고, 풀렸다고 알린다
+    const before = await currentVersion();
+    a.room.doc.transact(() => {
+      const f = a.room.doc.getXmlFragment('default');
+      f.delete(f.toArray().findIndex((n) => n instanceof Y.XmlElement && n.nodeName === 'script'), 1);
+      const p = new Y.XmlElement('paragraph');
+      p.insert(0, [new Y.XmlText('고쳤다')]);
+      f.insert(f.length, [p]);
+    }, { principal: { id: userId } });
+    await idle();
+    await inner.sweep();
+    expect(await currentVersion()).toBe(before + 1);
+    for (const s of [a.socket, b.socket, c.socket]) expect(statuses(s).at(-1)).toEqual({ saveBlocked: null });
+  });
+
+  it('**화면이 보낸 상태 알림은 버린다** — 서버만 보내는 종류다. 퍼뜨리지도 끊지도 않는다', async () => {
+    const a = await attach();
+    const b = await attach(otherId, await mkSession(otherId));
+    const before = b.socket.sent.length;
+    a.socket.emit('message', Buffer.concat([Buffer.of(COLLAB_MSG.status), Buffer.from(JSON.stringify({ saveBlocked: '가짜' }))]));
+    expect(b.socket.sent.length).toBe(before);
+    expect(a.socket.closed).toBeNull();
+  });
+});
+
 /**
  * 멘션을 **만든** 사람 — 그 멘션의 글자를 전부 자기 연결로 들여오고 그 멘션을 생기게 한 사람 (P8_설계서_Mention C.2절, 보류 21).
  *
@@ -933,7 +995,7 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       const seen = new Awareness(new Y.Doc());
       try {
         // U가 자기 몫을 알리면서 이름을 '관리자'라고 적는다 — 서버는 U의 표시 이름으로 바꿔 퍼뜨린다
-        mine.setLocalStateField('user', { name: '관리자', color: 'red' });
+        mine.setLocalStateField('user', { name: '관리자', color: 'hsl(10 70% 45%)' });
         u.socket.emit('message', AWARE(encodeAwarenessUpdate(mine, [u.doc.clientID])));
         // X가 U의 몫을 꾸며 보낸다(같은 클라이언트 ID) — 퍼뜨리지 않는다
         fake.setLocalStateField('user', { name: '가짜 U' });
@@ -941,13 +1003,38 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
         x.socket.emit('message', AWARE(encodeAwarenessUpdate(fake, [u.doc.clientID])));
         expect(watcher.socket.sent.length).toBe(sentBefore);
         for (const f of watcher.socket.sent) if (f[0] === 1) applyAwarenessUpdate(seen, new Uint8Array(f.subarray(1)), 'remote');
-        expect(seen.getStates().get(u.doc.clientID)).toEqual({ user: { name: userId, color: 'red' } });
+        expect(seen.getStates().get(u.doc.clientID)).toEqual({ user: { name: userId, color: 'hsl(10 70% 45%)' } });
         expect(refusedCode(x)).toBeUndefined(); // 메아리일 수 있어 끊지는 않는다
       } finally {
         mine.destroy();
         fake.destroy();
         seen.destroy();
       }
+    });
+
+    it('**한 연결이 사람 표시로 묶는 ID는 몇 개까지다** — 주인 없는 ID를 잔뜩 알려 표를 불리지 못한다. 넘친 것은 퍼뜨리지도 않는다 (P9 두 번째 검토 3)', async () => {
+      const x = await enter(otherId);
+      const watcher = await enter(userId);
+      const ids: number[] = [];
+      for (let i = 0; i < MAX_PRESENCE_BINDS + 2; i++) {
+        const a = new Awareness(new Y.Doc());
+        try {
+          a.setLocalStateField('user', { name: 'x' });
+          x.socket.emit('message', AWARE(encodeAwarenessUpdate(a, [a.clientID])));
+          ids.push(a.clientID);
+        } finally {
+          a.destroy();
+        }
+      }
+      expect(ids.map((c) => ownerOf(c) === otherId)).toEqual(ids.map((_, i) => i < MAX_PRESENCE_BINDS));
+      const seen = new Awareness(new Y.Doc());
+      try {
+        for (const f of watcher.socket.sent) if (f[0] === 1) applyAwarenessUpdate(seen, new Uint8Array(f.subarray(1)), 'remote');
+        expect(ids.filter((c) => seen.getStates().has(c))).toEqual(ids.slice(0, MAX_PRESENCE_BINDS));
+      } finally {
+        seen.destroy();
+      }
+      expect(refusedCode(x)).toBeUndefined(); // 넘친 알림은 버릴 뿐 끊지 않는다 — 정상 화면은 여기에 닿지 않는다
     });
 
     it('**옛 문서를 통째로 다시 보내면 모름** — 남의 글자를 보낸 사람 것으로 치지 않는다 (P8 자체 점검 2 · 세 번째 코드 리뷰 3)', async () => {
@@ -1101,16 +1188,11 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
   it('**만든 사람 표는 실시간 상태와 함께 남고, 재기동한 게이트웨이가 잇는다** (FR-903)', async () => {
     const u = await enter(userId);
     // 멘션과 함께 **저장할 수 없는 문서**를 만든다 — 버전은 안 생기고 상태만 남는 경로다. 관문이 받는 모양이어야 해서
-    // (P9부터 `script` 같은 요소는 문 앞에서 끊긴다) 정상 편집기도 만들 수 있는 **깊이 한도(64) 넘는 인용**으로 만든다
+    // (P9부터 편집기가 만들지 않는 요소와 깊이 한도를 넘는 중첩은 문 앞에서 끊긴다) 관문이 세지 않는 **노드 수 한도**를
+    // 넘긴다 — 빈 문단을 한도만큼 더한다 (P9 D.8)
     act(u, (f) => {
       newPara(f, '@collab-c 확인');
-      let inner: Y.XmlElement = new Y.XmlElement('paragraph');
-      for (let i = 0; i < 70; i++) {
-        const q = new Y.XmlElement('blockquote');
-        q.insert(0, [inner]);
-        inner = q;
-      }
-      f.insert(f.length, [inner]);
+      f.insert(f.length, Array.from({ length: MAX_DOCUMENT_NODES }, () => new Y.XmlElement('paragraph')));
     });
     expect((await gw.flush(pageId)).saved).toBe(false);
     const saved = await db.execute<{ authors: { makers: [number, number, string, string | null][] } }>(
@@ -1125,8 +1207,8 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       const room2 = await inner2.room(pageId, await currentVersion());
       expect(room2).not.toBe(room);
       const x = await enter(otherId, room2, inner2);
-      // X가 그 깊은 인용을 지운다. **지우기만 했다** — 새 멘션은 없다
-      act(x, (f) => f.delete(f.length - 1, 1), room2);
+      // X가 더한 문단을 지운다. **지우기만 했다** — 새 멘션은 없다
+      act(x, (f) => f.delete(f.length - MAX_DOCUMENT_NODES, MAX_DOCUMENT_NODES), room2);
 
       expect((await gw2.flush(pageId)).saved).toBe(true);
       // 표가 없었으면 방을 다시 만들 때 그 자리는 "모름"이 됐다

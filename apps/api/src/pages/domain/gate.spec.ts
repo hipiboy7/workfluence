@@ -418,6 +418,25 @@ describe('같은 클라이언트가 되풀이된 변경 — 관문이 보는 것
     expect(v.ok).toBe(false);
     expect((v as { reason: string }).reason).toContain('같은 클라이언트가 두 번');
   });
+
+  it('**붙어 되풀이된** 덩어리도 받지 않는다 — 풀면 한 덩어리처럼 보여 인코딩의 덩어리 수로 안다. Yjs는 앞 덩어리를 버려 뒤의 것이 보류된다', () => {
+    const srv = server();
+    const s = screen(srv);
+    const u1 = change(s, (f) => firstText(f).insert(0, '가'));
+    const u2 = change(s, (f) => firstText(f).insert(1, '나'));
+    // 1판 인코딩: [덩어리 수, 덩어리…, 삭제 집합]. 둘 다 덩어리 하나에 빈 삭제 집합(0)이다 — 덩어리 둘로 이어 붙인다
+    for (const u of [u1, u2]) expect([u[0], u[u.length - 1]]).toEqual([1, 0]);
+    const joined = Uint8Array.from([2, ...u1.slice(1, -1), ...u2.slice(1, -1), 0]);
+    const decoded = Y.decodeUpdate(joined);
+    expect(decoded.structs.map((x) => x.id.clock)).toEqual([0, 1]);
+    const copy = new Y.Doc();
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(srv));
+    Y.applyUpdate(copy, joined);
+    expect(copy.store.pendingStructs).not.toBeNull();
+    // 바이트 없이 풀어 낸 조각만으로는 가릴 수 없다 — 게이트웨이는 늘 바이트를 넘긴다
+    expect(inspectUpdate(decoded, srv, U, new Map()).ok).toBe(true);
+    expect(refused(inspectUpdate(decoded, srv, U, new Map(), joined)).reason).toContain('같은 클라이언트가 두 번');
+  });
 });
 
 describe('들이는 순서의 흉내는 클라이언트가 많아도 빠르다 (P9 코드 리뷰 2)', () => {

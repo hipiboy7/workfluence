@@ -323,7 +323,8 @@ export const pageRealtime = pgTable(
     versionNo: integer('version_no').notNull(),
     /**
      * 멘션을 만든 사람의 장부 `{makers, delivered, gone, seq, owners}` — 멘션 자리마다 만든 사람(`null` = 모름), 어느 연결이
-     * 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름과 그 순번, 클라이언트를 만든 사람 (P8_설계서_Mention C.2절).
+     * 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름과 그 순번, 클라이언트 ID의 주인 (P8_설계서_Mention C.2절).
+     * 주인은 그 ID를 처음 알렸거나(사람 표시) 처음 쓴 사람이다 — 관문이 남의 ID로 쓴 변경을 받지 않는 근거다 (P9_설계서_Gate D.4).
      * `state`와 **같은 쓰기에서** 남긴다 — 둘은 수명이 같다
      */
     authors: jsonb('authors').notNull().default({}),
