@@ -57,7 +57,8 @@ workfluence/
 │   │   ├── src/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
 │   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드
-│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts
+│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts /
+│   │   │   │                     [P10] error-text.ts (로그에 적는 오류 한 줄 — drizzle 문장의 매개변수를 싣지 않는다)
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
 │   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드
 │   │   │   ├── users/            [P1] 가입·승인·초기화·역할
@@ -79,7 +80,7 @@ workfluence/
 │   │   │                         LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
-│       └── src/{components,pages,api.ts,auth.tsx}
+│       └── src/{components,pages,api.ts,auth.tsx}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown}.ts
 ├── e2e/                          Playwright
@@ -147,7 +148,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `notifications` | `id`, `user_id`, `kind`, `page_id`, `comment_id`, `actor_id`, `read_at`, `created_at` | P4 | 앱 내 알림함. **`actor_id`는 P8부터 null 가능** — 같이 쓴 문서에서 부른 사람을 확실히 모를 때다 (`P8_설계서_Mention` D절) |
 | `page_realtime` | `page_id` PK, `state` bytea, `version_no`, `authors` jsonb, `updated_by`, `updated_at` | P6 · P8(`authors`) | Yjs 상태. **파생 데이터**라 지워도 정본에서 다시 시작한다 (보류 4). 페이지가 지워지면 CASCADE. `authors`는 멘션을 만든 사람의 장부다 — 멘션 자리마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름 (`P8_설계서_Mention` C.2절). 그 안의 `owners`(클라이언트 ID → 주인)는 P9부터 **누가 그 ID로 쓸 수 있나**도 정한다 (`P9_설계서_Gate` D.4) |
 | `page_templates` | `id`, `name` uq, `content_json`, `created_by`, `updated_at` | P6 | 페이지 시작 틀. 관리자만 만든다 |
-| `llm_providers` | `id`(앱이 만든다), `name` uq, `base_url`, `model`, `api_key_enc`, `created_by` | P10 | 등록한 사내 LLM. 키는 **암호문만**(`v1.…`, AAD = 행 id) — CHECK가 평문을 막는다 |
+| `llm_providers` | `id`(앱이 만든다), `name` uq, `base_url`, `model`, `api_key_enc`, `created_by` | P10 | 등록한 사내 LLM. 키는 **암호문만**(`v1.…`, AAD = 행 id + 주소 — 옮겨 붙여도, 주소만 바꿔도 풀리지 않는다) — CHECK가 평문을 막는다 |
 | `llm_prompts` | `id`, `user_id`, `name`, `content` — (`user_id`,`name`) uq | P10 | 사람마다의 지시문. 보존 기간이 없다 |
 | `llm_conversations` | `id`, `user_id`, `title`, `provider_id`(SET NULL), `prompt_name`, `system_prompt`, `pinned_at`, `retain_from`, `updated_at` | P10 | 보관 규칙은 세 시각이다 — `updated_at`(순서)·`retain_from`(보존 기간의 기준)·`pinned_at`(고정). 지시문은 시작할 때의 복사본 |
 | `llm_messages` | `id`, `seq`(차례), `conversation_id`(CASCADE), `role`, `content`, `model`, `status` | P10 | 질문과 답. 생각 과정은 넣지 않는다. 대화와 수명이 같다 |
