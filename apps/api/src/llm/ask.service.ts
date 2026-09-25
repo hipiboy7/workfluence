@@ -1,11 +1,12 @@
-import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { LLM_LIMITS, type LlmAskDto, type LlmStreamStatus, type Principal } from '@workfluence/shared';
 import { AuditService } from '../audit/audit.service';
+import { errorText } from '../common/error-text';
+import { RevocationBus } from '../common/revocation.bus';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import type { LlmProviderRow } from '../db/schema';
 import { LlmConversationsService, type ExchangeInput, type NewConversation } from './conversations.service';
-import { dbErrorText } from './db-error';
 import { buildChatMessages, conversationTitle } from './domain/conversation';
 import type { ChatMessage } from './domain/openai';
 import { LLM_CLIENT, LlmError, type LlmClient, type LlmTarget } from './llm.provider';
@@ -14,7 +15,7 @@ import { LlmProvidersService } from './providers.service';
 import type { LlmSink } from './stream.sink';
 
 /** 시간 상한을 사람 말로 — 1분 이상은 분, 그 아래는 초 */
-function spell(ms: number): string {
+export function spell(ms: number): string {
   return ms >= 60_000 ? `${Math.round(ms / 60_000)}분` : `${Math.round(ms / 1000)}초`;
 }
 
@@ -30,6 +31,14 @@ export type PreparedAsk = {
   controller: AbortController;
 };
 
+/** 받고 있는 답 하나의 자리 — 누가(세션까지) 쥐었고, 세션이 끊겨 멈췄는가 */
+type ActiveAsk = { controller: AbortController; sid: string | null; revoked: boolean };
+
+/**
+ * 감사 detail에 적는 실패의 종류 — **남의 문장은 싣지 않는다**(로그·감사에는 종류와 HTTP 상태만). 화면에는 문장이 간다
+ */
+type Failure = 'unreachable' | 'rejected' | 'protocol' | 'timeout' | 'aborted' | 'revoked' | 'answer-cap' | 'thinking-cap' | 'length' | 'unknown';
+
 /**
  * 질문 중계 (P10_설계서_Llm D.1·D.2·D.5, FR-1110~1120).
  *
@@ -37,12 +46,16 @@ export type PreparedAsk = {
  * 통과하면 흐름을 열고(`run`) LLM 쪽 실패는 **흐름 안에서** `end`로 말한다. `run`은 던지지 않는다.
  *
  * 질문과 답은 **로그에 남기지 않는다** (FR-1117). 로그에 가는 것은 종류와 크기뿐이다.
+ *
+ * **세션을 끊으면 흐름도 끊긴다** (FR-1121, 검토 반영 — 코드 리뷰 8). 비밀번호 변경·관리자 강제 종료·로그아웃은 세션 파기 버스를
+ * 울리고(`RevocationBus`), 여기서 그 사람(로그아웃이면 그 세션)의 답을 멈춘다 — 실시간 편집(P7 FR-805)과 같은 자리다.
  */
 @Injectable()
-export class LlmAskService {
+export class LlmAskService implements OnModuleDestroy {
   private readonly log = new Logger('Llm');
   /** 한 사람이 **동시에 하나만** 묻는다 (FR-1114, A.1-11). 단일 앱 서버라 메모리 한 곳이면 된다(0.1절) */
-  private readonly active = new Map<string, AbortController>();
+  private readonly active = new Map<string, ActiveAsk>();
+  private readonly unsubscribe: () => void;
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -52,12 +65,27 @@ export class LlmAskService {
     private readonly prompts: LlmPromptsService,
     private readonly conversations: LlmConversationsService,
     @Inject(LLM_CLIENT) private readonly client: LlmClient,
-  ) {}
+    revocation: RevocationBus,
+  ) {
+    this.unsubscribe = revocation.onRevoke((userId, sid) => this.revoke(userId, sid));
+  }
+
+  onModuleDestroy(): void {
+    this.unsubscribe();
+  }
+
+  /** 세션이 끊겼다 — `sid`가 있으면 그 세션이 연 답만, 없으면 그 사람의 답을 멈춘다 */
+  private revoke(userId: string, sid?: string): void {
+    const a = this.active.get(userId);
+    if (!a || (sid !== undefined && a.sid !== sid)) return;
+    a.revoked = true;
+    a.controller.abort();
+  }
 
   /**
    * 흘려보내기 전의 확인. 통과하면 **그 사람의 자리를 잡는다** — 부른 쪽은 반드시 `run`을 부른다(`run`이 자리를 푼다).
    */
-  async prepare(me: Principal, dto: LlmAskDto): Promise<PreparedAsk> {
+  async prepare(me: Principal, dto: LlmAskDto, sid: string | null = null): Promise<PreparedAsk> {
     if (this.active.has(me.id)) throw new ConflictException('이미 답을 받고 있다 — 끝나거나 중지한 뒤에 묻는다');
     const { provider, target } = await this.providers.resolve(dto.providerId);
 
@@ -79,15 +107,15 @@ export class LlmAskService {
     // 확인하는 사이에 같은 사람의 다른 질문이 자리를 잡았을 수 있다 — 여기서 다시 본다
     if (this.active.has(me.id)) throw new ConflictException('이미 답을 받고 있다 — 끝나거나 중지한 뒤에 묻는다');
     const controller = new AbortController();
-    this.active.set(me.id, controller);
+    this.active.set(me.id, { controller, sid, revoked: false });
     return { provider, target, messages, question: dto.question, conversationId: dto.conversationId ?? null, newConversation, controller };
   }
 
   /** 내가 받고 있는 답을 멈춘다 (FR-1113). 흐름은 끊지 않는다 — 서버가 저장한 결과를 `end`로 끝까지 받는다 */
   stop(me: Principal): boolean {
-    const c = this.active.get(me.id);
-    if (!c) return false;
-    c.abort();
+    const a = this.active.get(me.id);
+    if (!a) return false;
+    a.controller.abort();
     return true;
   }
 
@@ -105,6 +133,11 @@ export class LlmAskService {
     let usage: { promptTokens: number; completionTokens: number } | null = null;
     let status: LlmStreamStatus = 'done';
     let message: string | null = null;
+    let failure: Failure | null = null;
+    let httpStatus: number | null = null;
+    let truncated = false;
+    const revoked = () => this.active.get(me.id)?.controller === p.controller && this.active.get(me.id)?.revoked === true;
+    const capText = LLM_LIMITS.answerMaxChars.toLocaleString('ko-KR');
 
     try {
       for await (const chunk of this.client.stream(p.target, p.messages, signal)) {
@@ -115,19 +148,27 @@ export class LlmAskService {
             answer += chunk.text.slice(0, room);
             if (room > 0) sink.write({ type: 'delta', text: chunk.text.slice(0, room) });
             status = 'failed';
-            message = `답이 상한(${LLM_LIMITS.answerMaxChars.toLocaleString('ko-KR')}자)을 넘어 끊었다`;
+            failure = 'answer-cap';
+            message = `답이 상한(${capText}자)을 넘어 끊었다`;
             break;
           }
           answer += chunk.text;
           sink.write({ type: 'delta', text: chunk.text });
-        } else if (chunk.kind === 'thinking') {
-          thinkingChars += chunk.text.length;
+        } else if (chunk.kind === 'thinking' || chunk.kind === 'rethink') {
+          // `rethink` — 지금까지 흘려보낸 답이 생각 과정이었다. 답에서 빼고 생각 과정으로 센다 (FR-1119)
+          const text = chunk.kind === 'thinking' ? chunk.text : answer;
+          if (chunk.kind === 'rethink') answer = '';
+          thinkingChars += text.length;
           if (thinkingChars > LLM_LIMITS.answerMaxChars) {
             status = 'failed';
-            message = `생각 과정이 상한(${LLM_LIMITS.answerMaxChars.toLocaleString('ko-KR')}자)을 넘어 끊었다`;
+            failure = 'thinking-cap';
+            message = `생각 과정이 상한(${capText}자)을 넘어 끊었다`;
             break;
           }
-          sink.write({ type: 'thinking', text: chunk.text });
+          sink.write(chunk.kind === 'thinking' ? { type: 'thinking', text } : { type: 'rethink' });
+        } else if (chunk.kind === 'finish') {
+          // 모델의 길이 상한에서 잘린 답 — 몰래 끝난 것으로 치지 않는다 (FR-1120, 검토 반영 — 코드 리뷰 4)
+          if (chunk.reason === 'length') truncated = true;
         } else {
           usage = { promptTokens: chunk.promptTokens, completionTokens: chunk.completionTokens };
         }
@@ -135,20 +176,37 @@ export class LlmAskService {
     } catch (e) {
       if (p.controller.signal.aborted) {
         status = 'stopped';
+        failure = revoked() ? 'revoked' : 'aborted';
       } else if (e instanceof LlmError) {
         status = 'failed';
-        message = e.kind === 'timeout' ? `시간 상한(${spell(this.env.WF_LLM_TIMEOUT_MS)})을 넘었다` : e.message;
+        failure = e.kind;
+        httpStatus = e.status;
+        // 우리 전체 상한이 걸렸으면 그렇게 말한다. 어댑터가 말한 시간 제한(조각 사이 무응답 등)은 그 문장대로
+        message = e.kind === 'timeout' && timeout.aborted ? `시간 상한(${spell(this.env.WF_LLM_TIMEOUT_MS)})을 넘었다` : e.message;
+        // **로그에는 종류와 HTTP 상태만** — 거절 문장은 남의 응답이다 (D.2). 그래도 운영자가 까닭의 종류를 로그에서 본다
+        this.log.warn(`LLM 답을 받지 못했다: ${e.kind}${e.status !== null ? ` HTTP ${e.status}` : ''} (provider=${p.provider.id})`);
       } else {
         status = 'failed';
+        failure = 'unknown';
         message = 'LLM 응답을 처리하지 못했다';
-        // **내용을 싣지 않는다** — 종류만 (FR-1117)
-        this.log.error(`LLM 응답을 처리하지 못했다: ${e instanceof Error ? e.name : typeof e}`);
+        // **내용을 싣지 않는다** — `errorText`는 drizzle 문장(매개변수)을 버린다 (FR-1117)
+        this.log.error(`LLM 응답을 처리하지 못했다: ${errorText(e)}`);
       }
     }
     // 멈추라는 말을 들은 어댑터가 던지지 않고 흐름을 닫을 수도 있다 — 그래도 끝난 것이 아니라 멈춘 것이다
-    if (status === 'done' && p.controller.signal.aborted) status = 'stopped';
+    if (status === 'done' && p.controller.signal.aborted) {
+      status = 'stopped';
+      failure = revoked() ? 'revoked' : 'aborted';
+    }
+    if (failure === 'revoked') message = '세션이 끝나 답을 멈췄다 — 다시 로그인한다';
+    if (status === 'done' && truncated) {
+      status = 'failed';
+      failure = 'length';
+      message = '답이 모델의 길이 상한에서 잘렸다 — 대화가 길면 새 대화를 시작한다';
+    }
 
-    const content = answer.trim();
+    // **U+0000은 PostgreSQL text가 받지 않는다** — 모델이 내도 저장이 통째로 실패하지 않게 뺀다 (검토 반영 — 코드 리뷰 10)
+    const content = answer.replaceAll('\u0000', '').trim();
     let saved = false;
     let conversationId = p.conversationId;
     let evicted = 0;
@@ -160,8 +218,10 @@ export class LlmAskService {
       newConversation: p.conversationId === null,
       questionChars: p.question.length,
       answerChars: content.length,
-      promptTokens: usage?.promptTokens ?? null,
-      completionTokens: usage?.completionTokens ?? null,
+      // **토큰 수는 `usage` 아래에** — 이름에 `token`이 들어가면 감사 비밀 거르기(`SECRET_KEYS`)가 통째로 버린다(검토 반영 — 셋 다 짚었다)
+      usage: usage ? { prompt: usage.promptTokens, completion: usage.completionTokens } : null,
+      failure,
+      httpStatus,
       durationMs: Date.now() - started,
       ...extra,
     });
@@ -190,7 +250,7 @@ export class LlmAskService {
         if (!saved) message = '그 사이에 대화가 지워져 이 답을 저장하지 않았다';
       } catch (e) {
         message = '답을 저장하지 못했다';
-        this.log.error(`LLM 대화를 저장하지 못했다: ${dbErrorText(e)}`);
+        this.log.error(`LLM 대화를 저장하지 못했다: ${errorText(e)}`);
       }
     }
     if (!saved) {
@@ -204,7 +264,7 @@ export class LlmAskService {
           detail: detail({ saved: false, evicted: 0 }),
           ip,
         })
-        .catch((e: unknown) => this.log.error(`LLM 질문의 감사 기록을 남기지 못했다: ${dbErrorText(e)}`));
+        .catch((e: unknown) => this.log.error(`LLM 질문의 감사 기록을 남기지 못했다: ${errorText(e)}`));
     }
 
     try {
@@ -212,12 +272,12 @@ export class LlmAskService {
       sink.close();
     } finally {
       // 자리를 푼다 — 그 사이 다른 질문이 잡은 자리면 건드리지 않는다
-      if (this.active.get(me.id) === p.controller) this.active.delete(me.id);
+      this.release(me, p);
     }
   }
 
   /** `prepare`는 했는데 `run`을 부르지 못했을 때 자리를 푼다 */
   release(me: Principal, p: PreparedAsk): void {
-    if (this.active.get(me.id) === p.controller) this.active.delete(me.id);
+    if (this.active.get(me.id)?.controller === p.controller) this.active.delete(me.id);
   }
 }

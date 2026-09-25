@@ -1,3 +1,5 @@
+import { LLM_LIMITS } from './constants';
+
 /**
  * 사내 LLM 질문의 **흐름 계약** (A등급, P10_설계서_Llm D.1·FR-1104).
  *
@@ -13,11 +15,14 @@ export type LlmStreamStatus = (typeof LLM_STREAM_STATUSES)[number];
  * 흐름의 줄 (D.1).
  *
  * - `delta` 답의 조각 · `thinking` 생각 과정의 조각(저장하지 않는다, FR-1119) · `ping` 살아 있음(FR-1115)
+ * - `rethink` **지금까지의 답은 생각 과정이었다** — 대화 틀이 `<think>`를 미리 넣는 모델(Qwen3-*-Thinking-2507)은 닫는 태그만 낸다.
+ *   그것을 보고서야 앞의 것이 생각 과정이었음을 안다 (검토 반영 — 코드 리뷰 14)
  * - `end` **마지막 한 줄.** 저장했는가, 어느 대화인가, 상한 때문에 지운 대화 수, 사람이 읽을 까닭
  */
 export type LlmStreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'thinking'; text: string }
+  | { type: 'rethink' }
   | { type: 'ping' }
   | {
       type: 'end';
@@ -73,7 +78,8 @@ export function parseLlmEvent(line: string): LlmStreamEvent | null {
     case 'thinking':
       return typeof v.text === 'string' ? { type: v.type, text: v.text } : null;
     case 'ping':
-      return { type: 'ping' };
+    case 'rethink':
+      return { type: v.type };
     case 'end': {
       const { status, saved, conversationId, evicted, message } = v;
       if (!(LLM_STREAM_STATUSES as readonly unknown[]).includes(status)) return null;
@@ -88,9 +94,6 @@ export function parseLlmEvent(line: string): LlmStreamEvent | null {
   }
 }
 
-/** 주소 길이 상한. 사내 호스트 주소가 이보다 길 까닭이 없다 */
-const BASE_URL_MAX = 500;
-
 /**
  * LLM 주소 판정 (FR-1104). 통과하면 정규화한 주소 — 뒤에 `/chat/completions`·`/models`를 붙인다.
  *
@@ -102,7 +105,7 @@ const BASE_URL_MAX = 500;
  */
 export function normalizeLlmBaseUrl(raw: string): { ok: true; url: string } | { ok: false; reason: string } {
   const value = raw.trim();
-  if (value.length > BASE_URL_MAX) return { ok: false, reason: `주소가 너무 길다 (${BASE_URL_MAX}자까지)` };
+  if (value.length > LLM_LIMITS.baseUrlMaxChars) return { ok: false, reason: `주소가 너무 길다 (${LLM_LIMITS.baseUrlMaxChars}자까지)` };
   let u: URL;
   try {
     u = new URL(value);

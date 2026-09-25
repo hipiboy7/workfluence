@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { POLICY_KEYS, SETTINGS_KEYS, applyPolicy, policyConsistencyProblems, validatePolicyPatch, type Policy, type Principal } from '@workfluence/shared';
+import { POLICY_KEYS, SETTINGS_KEYS, applyPolicy, mergePolicy, policyConsistencyProblems, validatePolicyPatch, type Policy, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
@@ -47,7 +47,9 @@ export class SettingsService {
   }
 
   async get(tx: Db = this.db): Promise<Policy> {
-    if (this.cache) return this.cache;
+    // **트랜잭션 안에서는 캐시를 보지 않는다** — 잠금 뒤에 읽는 값(`update`의 `current`)이 캐시의 옛 값이면 "잠금 뒤에 읽는다"가
+    // 거짓이 된다 (검토 반영 — 짝 규칙이 옛 값을 보고 지나갔다)
+    if (tx === this.db && this.cache) return this.cache;
     const row = await tx.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     const stored = (row?.value as Record<string, unknown> | undefined) ?? {};
     const policy = this.clamp(applyPolicy({ ...this.fromEnv(), ...stored }));
@@ -88,13 +90,14 @@ export class SettingsService {
     // 이전 값이 되어 되짚을 수 없다 (코드 리뷰 9)
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${SETTINGS_KEYS.policy}))`);
     const current = await this.get(tx);
-    // **값 둘에 걸친 규칙은 바꾼 뒤의 전체로 본다** (P10 FR-1134). 한쪽만 바꾸는 요청이 있다 — 고정 수만 올리거나 대화 수만
-    // 내리면 짝이 어긋난다. `applyPolicy`는 읽을 때 조용히 맞추므로(던지지 않는다) **여기서 막지 않으면 저장은 되고 먹지 않는다**
-    const consistency = policyConsistencyProblems({ ...current, ...patch } as Policy);
-    if (consistency.length) throw new BadRequestException(consistency.join('; '));
     const row = await tx.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     const stored = (row?.value as Record<string, unknown> | undefined) ?? {};
     const merged = { ...stored, ...patch };
+    // **값 둘에 걸친 규칙은 바꾼 뒤의 전체로 본다** (P10 FR-1134). 한쪽만 바꾸는 요청이 있다 — 고정 수만 올리거나 대화 수만
+    // 내리면 짝이 어긋난다. **짝을 맞추지 않고 합친 값**(`mergePolicy`)으로 본다 — `applyPolicy`는 읽을 때 조용히 맞추므로 그 값으로
+    // 보면 어긋난 값이 판정을 지나 저장된다(검토 반영)
+    const consistency = policyConsistencyProblems(mergePolicy({ ...this.fromEnv(), ...merged }));
+    if (consistency.length) throw new BadRequestException(consistency.join('; '));
 
     await tx
       .insert(settings)

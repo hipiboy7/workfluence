@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { LlmError, type LlmChunk, type LlmTarget } from './llm.provider';
-import { OpenAiCompatClient } from './openai.client';
+import { OpenAiCompatClient, toLlmError } from './openai.client';
 
 /**
  * B등급 — OpenAI 호환 어댑터를 **가짜 vLLM 서버**(node:http, 이 프로세스 안)로 본다 (P10_설계서_Llm D.2).
@@ -141,6 +141,44 @@ describe('stream — 흘려받기', () => {
     expect([e.kind, e.message]).toEqual(['rejected', 'boom']);
   });
 
+  it('**흘려보내지 않는 200은 받지 않는다** — 완성본 JSON을 "빈 답"으로 끝내지 않게 (검토 반영)', async () => {
+    handler = (_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: '완성본' }, finish_reason: 'stop' }] }));
+    };
+    const e = await thrown(collect(client.stream(target(), [], never())));
+    expect([e.kind, /흘려보내지 않았다/.test(e.message)]).toEqual(['protocol', true]);
+  });
+
+  it('`finish_reason`을 넘긴다 — `length`면 잘린 답이다 (FR-1120)', async () => {
+    handler = (_req, res) => {
+      sse(res);
+      res.end(data(delta({ content: '길게' })) + data(delta({}, 'length')) + data('[DONE]'));
+    };
+    expect(await collect(client.stream(target(), [], never()))).toEqual([
+      { kind: 'answer', text: '길게' },
+      { kind: 'finish', reason: 'length' },
+    ]);
+  });
+
+  it('**닫는 태그만 오는 모델** — 앞에 흘린 답이 생각 과정이었다고 알린다 (`rethink`, FR-1119)', async () => {
+    handler = (_req, res) => {
+      sse(res);
+      res.end(data(delta({ content: '곰곰이…' })) + data(delta({ content: '</think>\n\n42' })) + data('[DONE]'));
+    };
+    expect((await collect(client.stream(target(), [], never()))).map((c) => (c.kind === 'answer' ? c.text : c.kind))).toEqual(['곰곰이…', 'rethink', '42']);
+  });
+
+  it('**끝나지 않는 한 줄은 상한에서 끊는다** — 메모리에 끝없이 쌓지 않는다 (검토 반영)', async () => {
+    handler = (_req, res) => {
+      sse(res);
+      res.write('data: ');
+      res.end('x'.repeat(1_100_000));
+    };
+    const e = await thrown(collect(client.stream(target(), [], never())));
+    expect([e.kind, /너무 길다/.test(e.message)]).toEqual(['protocol', true]);
+  });
+
   it('읽을 수 없는 조각도 실패다 — 모르는 것을 답으로 보여 주지 않는다', async () => {
     handler = (_req, res) => {
       sse(res);
@@ -151,13 +189,31 @@ describe('stream — 흘려받기', () => {
 });
 
 describe('stream — 거절·닿지 않음 (FR-1120)', () => {
-  it('JSON 오류 본문은 그 메시지로', async () => {
+  it('JSON 오류 본문은 그 메시지로 — HTTP 상태를 함께 든다', async () => {
+    handler = (_req, res) => {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ object: 'error', message: 'The model `x` does not exist.' }));
+    };
+    const e = await thrown(collect(client.stream(target(), [], never())));
+    expect([e.kind, e.message, e.status]).toEqual(['rejected', 'The model `x` does not exist.', 404]);
+  });
+
+  it('**대화가 모델의 문맥을 넘으면 "새 대화를 시작한다"를 앞에** — 서버의 문장은 뒤에 (D.3, 검토 반영)', async () => {
     handler = (_req, res) => {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ object: 'error', message: "This model's maximum context length is 32768 tokens." }));
     };
     const e = await thrown(collect(client.stream(target(), [], never())));
-    expect([e.kind, e.message]).toEqual(['rejected', "This model's maximum context length is 32768 tokens."]);
+    expect(e.message).toBe("대화가 모델이 한 번에 읽을 수 있는 길이를 넘었다 — 새 대화를 시작한다 (LLM 서버: This model's maximum context length is 32768 tokens.)");
+  });
+
+  it('**거절 문장이 키를 되읊어도 가린다** — 그 문장은 화면으로 간다', async () => {
+    handler = (_req, res) => {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'invalid api key: sk-abcdef123456' } }));
+    };
+    const e = await thrown(collect(client.stream(target({ apiKey: 'sk-abcdef123456' }), [], never())));
+    expect(e.message).toBe('invalid api key: ***');
   });
 
   it('HTML 오류 쪽은 상태 코드만 — 큰 본문도 끝까지 읽지 않는다', async () => {
@@ -231,6 +287,28 @@ describe('stream — 멈추기 (FR-1113·1115)', () => {
     }
     await sleep(20);
     expect(seen[0].closed).toBe(true);
+  });
+});
+
+describe('toLlmError — `fetch`가 던진 것 (FR-1120)', () => {
+  const fetchFailed = (cause: unknown) => Object.assign(new TypeError('fetch failed'), { cause });
+
+  it('**undici의 5분 무응답은 그렇게 말한다** — 우리 전체 상한(`WF_LLM_TIMEOUT_MS`)과 다른 까닭이다 (검토 반영)', () => {
+    for (const code of ['UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']) {
+      const e = toLlmError(fetchFailed({ code }), never());
+      expect([e.kind, e.message]).toEqual(['timeout', `LLM 서버가 5분 동안 아무것도 보내지 않았다 (${code})`]);
+    }
+  });
+
+  it('그 밖의 코드는 닿지 않음 — 코드만', () => {
+    expect(toLlmError(fetchFailed({ code: 'ECONNRESET' }), never()).message).toBe('LLM 서버에 닿지 않는다 (ECONNRESET)');
+    expect(toLlmError(new Error('x'), never()).message).toBe('LLM 서버에 닿지 않는다');
+  });
+
+  it('멈추라는 말이 먼저다 — 시간 상한이면 timeout, 아니면 aborted', () => {
+    expect(toLlmError(fetchFailed({ code: 'UND_ERR_BODY_TIMEOUT' }), AbortSignal.abort()).kind).toBe('aborted');
+    const timedOut = AbortSignal.abort(new DOMException('t', 'TimeoutError'));
+    expect(toLlmError(new Error('x'), timedOut).kind).toBe('timeout');
   });
 });
 

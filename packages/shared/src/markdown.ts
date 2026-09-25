@@ -1,3 +1,4 @@
+import { MARKDOWN_LIMITS } from './constants';
 import { ALLOWED_LINK_HREF, ALLOWED_MARKS, ALLOWED_NODES, extractText, type DocMark, type DocNode } from './document';
 
 /**
@@ -34,9 +35,19 @@ function escapeLineStarts(s: string): string {
 
 const allowed = (node: DocNode): boolean => Object.hasOwn(ALLOWED_NODES, node.type);
 
+/**
+ * 가장 긴 백틱 덩어리의 길이. **스프레드로 셈하지 않는다** — `Math.max(...덩어리들)`은 덩어리가 13만 개쯤이면 인자 수 한도에
+ * 걸려 던진다 (검토 반영)
+ */
+function longestBacktickRun(text: string): number {
+  let longest = 0;
+  for (const m of text.matchAll(/`+/g)) if (m[0].length > longest) longest = m[0].length;
+  return longest;
+}
+
 /** 코드 조각. 안에 백틱이 있으면 더 긴 백틱으로 감싸고, 백틱으로 시작·끝나면 빈칸을 둔다 (CommonMark) */
 function codeSpan(text: string): string {
-  const longest = Math.max(0, ...Array.from(text.matchAll(/`+/g), (m) => m[0].length));
+  const longest = longestBacktickRun(text);
   const fence = '`'.repeat(longest + 1);
   const pad = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
   return `${fence}${pad}${text}${pad}${fence}`;
@@ -79,8 +90,12 @@ function renderInline(nodes: DocNode[] | undefined, hardBreak: string): string {
   for (const n of nodes ?? []) {
     if (!allowed(n)) continue;
     if (n.type === 'hardBreak') out += hardBreak;
-    else if (n.type === 'text') out += renderText(n);
-    else out += renderInline(n.content, hardBreak);
+    else if (n.type === 'text') {
+      const piece = renderText(n);
+      // **`!` 바로 뒤의 링크는 그림 표기(`![…](…)`)가 된다** — 앞 글자의 `!`를 이스케이프한다 (검토 반영)
+      if (piece.startsWith('[') && out.endsWith('!')) out = `${out.slice(0, -1)}\\!`;
+      out += piece;
+    } else out += renderInline(n.content, hardBreak);
   }
   return out;
 }
@@ -154,19 +169,17 @@ function renderCodeBlock(node: DocNode): string {
     .map((c) => c.text ?? '')
     .join('');
   // 울타리는 안의 가장 긴 백틱보다 길게 — 코드가 울타리를 닫지 않게
-  const longest = Math.max(0, ...Array.from(text.matchAll(/`+/g), (m) => m[0].length));
+  const longest = longestBacktickRun(text);
   const fence = '`'.repeat(Math.max(3, longest + 1));
   const language = node.attrs?.language;
   const lang = typeof language === 'string' && CODE_LANGUAGE.test(language) ? language : '';
   return text ? `${fence}${lang}\n${text}\n${fence}` : `${fence}${lang}\n${fence}`;
 }
 
-/** 칸 합치기의 상한. 조작한 문서의 `colspan` 10만이 배열 10만 개가 되지 않게 (보류 27과 같은 걱정) */
-const MAX_COLSPAN = 100;
-
-function colspanOf(cell: DocNode): number {
-  const v = cell.attrs?.colspan;
-  return typeof v === 'number' && Number.isInteger(v) && v >= 1 ? Math.min(v, MAX_COLSPAN) : 1;
+/** 칸 합치기 값 — 정수 1 이상만, 상한(`MARKDOWN_LIMITS.maxSpan`)까지 */
+function spanOf(cell: DocNode, key: 'colspan' | 'rowspan'): number {
+  const v = cell.attrs?.[key];
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 ? Math.min(v, MARKDOWN_LIMITS.maxSpan) : 1;
 }
 
 function alignMarker(cell: DocNode | undefined): string {
@@ -190,20 +203,35 @@ function cellText(cell: DocNode): string {
 
 /**
  * GFM 표. **첫 줄이 머리다** — GFM 표는 머리 줄이 있어야 표가 된다. 칸 합치기는 표기가 없어 첫 칸에 두고 나머지를 비운다
- * (열 수가 줄마다 같아야 표가 된다). 정렬은 첫 줄의 칸에서 읽는다.
+ * (열 수가 줄마다 같아야 표가 된다). **세로로 합친 칸(`rowspan`)은 아래 줄에서 그 자리를 비운다** — 안 그러면 아래 줄의 값이
+ * 왼쪽으로 밀려 다른 머리 밑에 선다(검토 반영 — 코드 리뷰 11). 정렬은 첫 줄의 칸에서 읽는다.
  */
 function renderTable(node: DocNode): string {
   const rows: string[][] = [];
   const heads: (DocNode | undefined)[] = [];
+  // 열마다 위에서 내려온 합친 칸이 몇 줄 더 차지하나
+  const carry: number[] = [];
   for (const row of node.content ?? []) {
     if (row.type !== 'tableRow') continue;
     const cells: string[] = [];
+    const skipCarried = () => {
+      while ((carry[cells.length] ?? 0) > 0) {
+        carry[cells.length] -= 1;
+        cells.push('');
+      }
+    };
     for (const cell of row.content ?? []) {
       if (cell.type !== 'tableCell' && cell.type !== 'tableHeader') continue;
-      const span = colspanOf(cell);
-      cells.push(cellText(cell), ...Array<string>(span - 1).fill(''));
-      if (rows.length === 0) heads.push(cell, ...Array<undefined>(span - 1).fill(undefined));
+      skipCarried();
+      const cols = spanOf(cell, 'colspan');
+      const down = spanOf(cell, 'rowspan') - 1;
+      for (let i = 0; i < cols; i++) {
+        if (down > 0) carry[cells.length + i] = down;
+      }
+      cells.push(cellText(cell), ...Array<string>(cols - 1).fill(''));
+      if (rows.length === 0) heads.push(cell, ...Array<undefined>(cols - 1).fill(undefined));
     }
+    skipCarried();
     rows.push(cells);
   }
   const width = Math.max(0, ...rows.map((r) => r.length));

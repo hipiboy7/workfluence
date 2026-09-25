@@ -4,10 +4,11 @@ import { eq, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AuditService } from '../audit/audit.service';
+import { RevocationBus } from '../common/revocation.bus';
 import { auditEvents, llmConversations, llmMessages, llmProviders, users } from '../db/schema';
 import { SettingsService } from '../settings/settings.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { LlmAskService } from './ask.service';
+import { LlmAskService, spell } from './ask.service';
 import { LlmConversationsService } from './conversations.service';
 import type { ChatMessage } from './domain/openai';
 import { LlmError, type LlmChunk, type LlmClient, type LlmTarget } from './llm.provider';
@@ -96,15 +97,17 @@ let providers: LlmProvidersService;
 let prompts: LlmPromptsService;
 let conversations: LlmConversationsService;
 let ask: LlmAskService;
+let bus: RevocationBus;
 
 function build(over: Record<string, unknown> = {}) {
+  bus = new RevocationBus();
   fake = new FakeLlm();
   settings = new SettingsService(db, env(over));
   audit = new AuditService(db);
   providers = new LlmProvidersService(db, env(over), fake);
   prompts = new LlmPromptsService(db);
   conversations = new LlmConversationsService(db, settings, audit);
-  ask = new LlmAskService(db, env(over), audit, providers, prompts, conversations, fake);
+  ask = new LlmAskService(db, env(over), audit, providers, prompts, conversations, fake, bus);
 }
 
 async function mkUser(username: string, role: string): Promise<Principal> {
@@ -435,14 +438,8 @@ describe('질문 — 흘려보내고 저장한다 (FR-1110~1120)', () => {
     expect(sink.end.message).toBe('시간 상한(0초)을 넘었다');
   });
 
-  it('시간 상한이 1분 이상이면 분으로 말한다', async () => {
-    build({ WF_LLM_TIMEOUT_MS: 600_000 });
-    const provider = await registerProvider();
-    fake.script = async function* () {
-      yield* [];
-      throw new LlmError('timeout', '시간 상한을 넘었다');
-    };
-    expect((await askOnce(aliceP, { providerId: provider.id, question: 'q' })).end.message).toBe('시간 상한(10분)을 넘었다');
+  it('시간 상한을 사람 말로 — 1분 이상은 분, 그 아래는 초', () => {
+    expect([spell(600_000), spell(90_000), spell(59_000), spell(0)]).toEqual(['10분', '2분', '59초', '0초']);
   });
 
   it('어댑터가 모르는 것을 던지면 "처리하지 못했다" — 내용은 로그에 싣지 않는다', async () => {
@@ -532,20 +529,172 @@ describe('질문 — 흘려보내고 저장한다 (FR-1110~1120)', () => {
     expect(sink.end.message).toMatch(/지워져/);
   });
 
-  it('저장이 실패하면 "저장하지 못했다" — 흐름은 끝을 말하고 자리를 푼다', async () => {
+  it('**답을 받는 사이 LLM이 지워져도 대화는 남는다** — LLM 칸만 빈다 (FR-1101, 검토 반영)', async () => {
     const provider = await registerProvider();
     fake.script = async function* () {
-      // 저장할 때 FK가 깨지도록 LLM을 지운다(대화 행이 없는 LLM을 가리킨다)
-      await db.execute(sql`DELETE FROM llm_providers`);
-      yield { kind: 'answer', text: '답' };
+      await providers.remove(provider.id, rootP);
+      yield { kind: 'answer', text: '끝까지 받은 답' };
     };
     const sink = await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(sink.end).toMatchObject({ status: 'done', saved: true });
+    const view = await conversations.get(aliceP, sink.end.conversationId as string);
+    expect([view.providerId, view.messages.map((m) => m.content)]).toEqual([null, ['q', '끝까지 받은 답']]);
+  });
+
+  it('저장이 실패하면 "저장하지 못했다" — 흐름은 끝을 말하고 자리를 푼다', async () => {
+    const provider = await registerProvider();
+    // DTO를 거치지 않은 U+0000 — PostgreSQL text가 거부한다(22021). 로그에는 코드와 문장만 간다(`errorText`)
+    const sink = await askOnce(aliceP, { providerId: provider.id, question: 'a\u0000b' });
     expect(sink.end).toMatchObject({ saved: false, message: '답을 저장하지 못했다' });
-    const other = await registerProvider({ name: '다시' });
+    expect((await askOnce(aliceP, { providerId: provider.id, question: 'q' })).end.saved).toBe(true);
+  });
+
+  it('**모델이 U+0000을 내도 저장이 실패하지 않는다** — 빼고 남긴다', async () => {
+    const provider = await registerProvider();
+    fake.script = async function* () {
+      yield { kind: 'answer', text: '앞\u0000뒤' };
+    };
+    const sink = await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(sink.end.saved).toBe(true);
+    expect((await conversations.get(aliceP, sink.end.conversationId as string)).messages[1].content).toBe('앞뒤');
+  });
+
+  it('**답을 받는 사이 만료된 대화도 살린다** — 물을 때 보였던 대화다', async () => {
+    const provider = await registerProvider();
+    const first = await askOnce(aliceP, { providerId: provider.id, question: 'q1' });
+    const id = first.end.conversationId as string;
+    const p = await ask.prepare(aliceP, { providerId: provider.id, conversationId: id, question: 'q2' });
+    await db.update(llmConversations).set({ retainFrom: new Date(Date.now() - 8 * 86_400_000) }).where(eq(llmConversations.id, id));
+    const sink = new ArraySink();
+    await ask.run(aliceP, p, sink, null);
+    expect(sink.end).toMatchObject({ saved: true, conversationId: id });
+    expect((await conversations.list(aliceP)).items.map((i) => i.id)).toEqual([id]);
+  });
+
+  it('**토큰 수가 감사로그에 남는다** — 이름에 `token`이 들어가면 비밀 거르기가 버리던 것 (FR-1118, 검토 반영)', async () => {
+    const provider = await registerProvider();
     fake.script = async function* () {
       yield { kind: 'answer', text: '답' };
+      yield { kind: 'usage', promptTokens: 11, completionTokens: 3 };
     };
-    expect((await askOnce(aliceP, { providerId: other.id, question: 'q' })).end.saved).toBe(true);
+    await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    const [ev] = await db.select().from(auditEvents).where(eq(auditEvents.action, 'llm.ask'));
+    expect(ev.detail).toMatchObject({ usage: { prompt: 11, completion: 3 }, failure: null, httpStatus: null });
+  });
+
+  it('**LLM이 거절하면 까닭은 화면에, 종류와 HTTP 상태는 감사로그에**', async () => {
+    const provider = await registerProvider();
+    fake.script = async function* () {
+      yield* [];
+      throw new LlmError('rejected', '대화가 모델이 한 번에 읽을 수 있는 길이를 넘었다 — 새 대화를 시작한다 (LLM 서버: …)', 400);
+    };
+    const sink = await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(sink.end.message).toMatch(/새 대화를 시작한다/);
+    const [ev] = await db.select().from(auditEvents).where(eq(auditEvents.action, 'llm.ask'));
+    expect(ev.detail).toMatchObject({ status: 'failed', failure: 'rejected', httpStatus: 400 });
+    expect(JSON.stringify(ev.detail)).not.toContain('읽을 수 있는 길이');
+  });
+
+  it('**모델의 길이 상한에서 잘린 답은 끝난 것으로 치지 않는다** (`finish_reason: length`, FR-1120)', async () => {
+    const provider = await registerProvider();
+    fake.script = async function* () {
+      yield { kind: 'answer', text: '길게 쓰다가' };
+      yield { kind: 'finish', reason: 'length' };
+    };
+    const sink = await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(sink.end).toMatchObject({ status: 'failed', saved: true });
+    expect(sink.end.message).toMatch(/길이 상한에서 잘렸다/);
+    expect((await conversations.get(aliceP, sink.end.conversationId as string)).messages[1].status).toBe('failed');
+    fake.script = async function* () {
+      yield { kind: 'answer', text: '다 썼다' };
+      yield { kind: 'finish', reason: 'stop' };
+    };
+    expect((await askOnce(aliceP, { providerId: provider.id, question: 'q2' })).end.status).toBe('done');
+  });
+
+  it('**`rethink` — 앞에 흘린 답은 생각 과정이었다**: 화면에 알리고, 저장·이력에서 뺀다 (FR-1119)', async () => {
+    const provider = await registerProvider();
+    fake.script = async function* () {
+      yield { kind: 'answer', text: '곰곰이 생각하면…' };
+      yield { kind: 'rethink' };
+      yield { kind: 'answer', text: '42' };
+    };
+    const sink = await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(sink.events.map((e) => e.type)).toEqual(['delta', 'rethink', 'delta', 'end']);
+    expect((await conversations.get(aliceP, sink.end.conversationId as string)).messages[1].content).toBe('42');
+  });
+
+  it('어댑터가 말한 시간 제한(조각 사이 무응답)은 그 문장대로 — 우리 전체 상한과 섞지 않는다', async () => {
+    const provider = await registerProvider();
+    fake.script = async function* () {
+      yield* [];
+      throw new LlmError('timeout', 'LLM 서버가 5분 동안 아무것도 보내지 않았다 (UND_ERR_BODY_TIMEOUT)');
+    };
+    expect((await askOnce(aliceP, { providerId: provider.id, question: 'q' })).end.message).toBe('LLM 서버가 5분 동안 아무것도 보내지 않았다 (UND_ERR_BODY_TIMEOUT)');
+  });
+});
+
+describe('세션을 끊으면 흐름도 끊긴다 (FR-1121, 검토 반영)', () => {
+  const streamUntilAbort = () =>
+    async function* (_m: ChatMessage[], signal: AbortSignal): AsyncIterable<LlmChunk> {
+      yield { kind: 'answer', text: '앞부분' };
+      await untilAborted(signal);
+      throw new LlmError('aborted', '중지했다');
+    };
+
+  it('**그 사람의 모든 세션을 끊으면**(비밀번호 변경·강제 종료) 답을 멈추고 그렇게 말한다', async () => {
+    const provider = await registerProvider();
+    fake.script = streamUntilAbort();
+    const p = await ask.prepare(aliceP, { providerId: provider.id, question: 'q' }, 'sid-a');
+    const sink = new ArraySink();
+    const running = ask.run(aliceP, p, sink, null);
+    await new Promise((r) => setTimeout(r, 20));
+    bus.revoke(bobP.id);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sink.events.some((e) => e.type === 'end')).toBe(false);
+    bus.revoke(aliceP.id);
+    await running;
+    expect(sink.end).toMatchObject({ status: 'stopped', saved: true, message: '세션이 끝나 답을 멈췄다 — 다시 로그인한다' });
+    const [ev] = await db.select().from(auditEvents).where(eq(auditEvents.action, 'llm.ask'));
+    expect(ev.detail).toMatchObject({ failure: 'revoked' });
+  });
+
+  it('**로그아웃은 그 세션의 답만** — 다른 세션이 연 답은 그대로', async () => {
+    const provider = await registerProvider();
+    fake.script = streamUntilAbort();
+    const p = await ask.prepare(aliceP, { providerId: provider.id, question: 'q' }, 'sid-a');
+    const sink = new ArraySink();
+    const running = ask.run(aliceP, p, sink, null);
+    await new Promise((r) => setTimeout(r, 20));
+    bus.revoke(aliceP.id, 'sid-other');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sink.events.some((e) => e.type === 'end')).toBe(false);
+    bus.revoke(aliceP.id, 'sid-a');
+    await running;
+    expect(sink.end.status).toBe('stopped');
+  });
+
+  it('모듈이 내려가면 구독을 푼다 — 그 뒤의 파기 통지는 이 서비스에 닿지 않는다', async () => {
+    const provider = await registerProvider();
+    fake.script = streamUntilAbort();
+    const p = await ask.prepare(aliceP, { providerId: provider.id, question: 'q' });
+    const sink = new ArraySink();
+    const running = ask.run(aliceP, p, sink, null);
+    ask.onModuleDestroy();
+    bus.revoke(aliceP.id);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sink.events.some((e) => e.type === 'end')).toBe(false);
+    ask.stop(aliceP);
+    await running;
+    expect(sink.end).toMatchObject({ status: 'stopped', message: null });
+  });
+});
+
+describe('질문 — 끝 (보관 규칙은 아래)', () => {
+  it('자리는 끝나면 풀린다', async () => {
+    const provider = await registerProvider();
+    await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(ask.stop(aliceP)).toBe(false);
   });
 });
 

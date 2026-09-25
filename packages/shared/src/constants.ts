@@ -217,6 +217,26 @@ export const LLM_LIMITS = {
   /** 등록하는 모델 이름·API 키의 길이 */
   modelMaxChars: 200,
   apiKeyMaxChars: 4_096,
+  /** LLM 주소의 길이. 사내 호스트 주소가 이보다 길 까닭이 없다 */
+  baseUrlMaxChars: 500,
+  /**
+   * LLM 흐름(SSE)의 **한 줄·한 이벤트**의 상한 (검토 반영 — 보안 검토 1). 줄바꿈 없는 줄이 끝없이 오면 답 상한과 무관하게 앱 메모리가
+   * 는다. 정상 흐름의 한 이벤트는 수백 자다
+   */
+  sseLineMaxChars: 1_000_000,
+  /** 답 맨 앞에서 `<think>`를 기다리며 붙드는 빈칸의 상한. 넘으면 답으로 넘겨 답 상한이 걸리게 한다 */
+  thinkLeadMaxChars: 1_000,
+  /** 화면에 말하는 LLM 쪽 까닭의 길이 (FR-1120) */
+  errorMessageMaxChars: 300,
+  /** 오류 본문은 이만큼만 읽는다 — 까닭 한 줄이면 된다 */
+  errorBodyMaxBytes: 64 * 1024,
+  /** 모델 목록(`/models`) 응답의 상한 */
+  modelsBodyMaxBytes: 1024 * 1024,
+} as const;
+
+/** 문서 → 마크다운 변환의 상한 (P10 D.7). 조작한 문서의 `colspan`·`rowspan` 10만이 배열 10만 개가 되지 않게 (보류 27과 같은 걱정) */
+export const MARKDOWN_LIMITS = {
+  maxSpan: 100,
 } as const;
 
 /** 서버 안의 주기·시간 (P10_설계서_Llm D.1·D.5, FR-1105·1115·1136) */

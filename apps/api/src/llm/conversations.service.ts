@@ -50,8 +50,12 @@ export class LlmConversationsService {
     return or(isNotNull(llmConversations.pinnedAt), gte(llmConversations.retainFrom, cutoff)) as SQL;
   }
 
-  private async limits(): Promise<{ retentionDays: number; conversationMax: number; pinnedMax: number; cutoff: Date }> {
-    const p = await this.settings.get();
+  /**
+   * 지금의 상한. **트랜잭션 안에서는 그 트랜잭션으로 읽는다** — 풀에서 연결을 하나 더 잡으면 풀이 마를 때 서로를 기다린다(T-026의 모양,
+   * 검토 반영)
+   */
+  private async limits(tx?: Db): Promise<{ retentionDays: number; conversationMax: number; pinnedMax: number; cutoff: Date }> {
+    const p = await this.settings.get(tx);
     return {
       retentionDays: p.llmRetentionDays,
       conversationMax: p.llmConversationMax,
@@ -180,18 +184,25 @@ export class LlmConversationsService {
    *
    * 1. 그 사람의 잠금 2. 대화 만들기·고치기(이어 묻는 사이에 지워졌으면 저장하지 않는다) 3. 질문·답을 한 문장으로(차례 = `seq`)
    * 4. 그 사람의 만료된 것을 지우고 5. M개를 넘는 만큼 **고정하지 않은 것 중 `retain_from`이 가장 오래된 것부터** 지운다.
-   * K < M이 늘 성립하므로(FR-1134) 지울 것이 늘 있다.
+   *
+   * - **이어 묻는 대화가 답을 받는 사이 만료됐어도 살린다** — 물을 때 보였던 대화다. 기준을 지금으로 고치므로 4에서 지워지지 않는다.
+   *   정리가 이미 지웠으면(행이 없다) 저장하지 않는다 (검토 반영)
+   * - **답을 받는 사이 LLM이 지워졌으면 LLM 칸을 비운다** — 그대로 넣으면 FK 위반으로 답이 통째로 사라진다(FR-1101, 검토 반영 — 셋 다 짚었다)
+   * - 관리자가 M을 **지금 고정 수보다** 낮추면 고정은 지우지 않으므로 M을 넘은 채로 남는다(사람이 한 고정을 관리 작업이 되돌리지 않는다).
+   *   그때도 새 대화는 저장되고, 고정하지 않은 앞 대화가 지워진다
    */
   async saveExchange(x: ExchangeInput, tx: Db): Promise<ExchangeResult> {
     await this.lockUser(tx, x.userId);
-    const l = await this.limits();
+    const l = await this.limits(tx);
     const now = new Date();
+    // 지워진 LLM이면 NULL — 저장하는 문장이 도는 그 순간의 행을 본다
+    const providerId = sql<string | null>`(SELECT id FROM llm_providers WHERE id = ${x.providerId})`;
     let id: string;
     if (x.conversationId !== null) {
       const [row] = await tx
         .update(llmConversations)
-        .set({ updatedAt: now, retainFrom: now, providerId: x.providerId })
-        .where(and(eq(llmConversations.id, x.conversationId), eq(llmConversations.userId, x.userId), this.visible(l.cutoff)))
+        .set({ updatedAt: now, retainFrom: now, providerId })
+        .where(and(eq(llmConversations.id, x.conversationId), eq(llmConversations.userId, x.userId)))
         .returning({ id: llmConversations.id });
       if (!row) return { saved: false, conversationId: x.conversationId, evicted: 0 };
       id = row.id;
@@ -202,7 +213,7 @@ export class LlmConversationsService {
         .values({
           userId: x.userId,
           title: n.title,
-          providerId: x.providerId,
+          providerId,
           promptName: n.promptName,
           systemPrompt: n.systemPrompt,
           retainFrom: now,

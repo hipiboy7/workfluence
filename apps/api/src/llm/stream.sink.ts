@@ -13,6 +13,8 @@ export interface LlmSink {
 
 /** 이 흐름이 쓰는 만큼의 HTTP 응답 — Express `Response`, 시험은 가짜 */
 export type ResponseLike = {
+  /** 이미 끊긴 응답인가 — 확인(`prepare`)하는 사이에 받는 쪽이 떠났을 수 있다 */
+  readonly destroyed?: boolean;
   statusCode: number;
   setHeader(name: string, value: string): unknown;
   flushHeaders(): void;
@@ -34,12 +36,18 @@ export class NdjsonSink implements LlmSink {
   private finished = false;
   private gone = false;
   private readonly listeners: (() => void)[] = [];
-  private readonly timer: NodeJS.Timeout;
+  private timer: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly res: ResponseLike,
     heartbeatMs: number,
   ) {
+    // **만들 때 이미 끊겨 있을 수 있다** — 확인하는 동안(대화 이력 읽기 등) 받는 쪽이 새로 고침했으면 `close`는 이미 지나갔다. 그러면
+    // 끊김을 영영 모르고 LLM이 끝까지 쓰며 그 사람의 자리를 쥔다 (검토 반영 — 셋 다 짚었다)
+    if (res.destroyed) {
+      this.gone = true;
+      return;
+    }
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -77,6 +85,6 @@ export class NdjsonSink implements LlmSink {
   }
 
   private stop(): void {
-    clearInterval(this.timer);
+    if (this.timer) clearInterval(this.timer);
   }
 }

@@ -38,6 +38,7 @@ import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/live
 import { inspectUpdate, type GateRule } from '../domain/gate';
 import { MAX_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence } from '../domain/presence';
 import { readClientIp, readPageId, readSessionId } from './session-auth';
+import { errorText } from '../../common/error-text';
 
 /**
  * 실시간 편집 중계 (P6_설계서_Collab C.2절, FR-700~712 / P7_설계서_Hardening C.1~C.3).
@@ -233,7 +234,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     this.unsubscribeRevoke?.();
     // **내려가기 전에 남긴다.** 순서를 뒤집으면 마지막 몇 초의 편집이 사라진다
     for (const pageId of [...this.rooms.keys()]) {
-      await this.saveIfNeeded(pageId, 'shutdown').catch((e: unknown) => this.log.error(`종료 중 저장 실패 ${pageId}: ${String(e)}`));
+      await this.saveIfNeeded(pageId, 'shutdown').catch((e: unknown) => this.log.error(`종료 중 저장 실패 ${pageId}: ${errorText(e)}`));
     }
     await this.drain();
     this.wss?.close();
@@ -311,7 +312,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       });
     } catch (e) {
       if (room) room.joining = Math.max(0, room.joining - 1);
-      this.log.error(`업그레이드 실패 ${pageId}: ${String(e)}`);
+      this.log.error(`업그레이드 실패 ${pageId}: ${errorText(e)}`);
       deny();
     }
   }
@@ -460,7 +461,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         this.attribute(room, tr, pageId);
       } catch (e) {
         room.attributionBroken = true;
-        this.log.error(`멘션 장부를 고치지 못했다 — 이 방의 멘션은 이제 "모름"이다 (page=${pageId}): ${String(e)}`);
+        this.log.error(`멘션 장부를 고치지 못했다 — 이 방의 멘션은 이제 "모름"이다 (page=${pageId}): ${errorText(e)}`);
       }
     });
 
@@ -568,7 +569,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
           // **읽을 수 있었던 변경이 던졌으면 이미 적용된 것이다** — Yjs는 관찰자의 예외를 변경을 적용한 **뒤에** 올린다.
           // 예전에는 여기서 돌아가 퍼뜨리지 않았고, 서버 문서만 바뀐 채 모두의 화면이 조용히 갈렸다 (네 번째 코드 리뷰 5).
           // 퍼뜨린다 — 받은 쪽도 같은 변경을 적용한다
-          this.log.error(`변경을 적용하는 중 예외가 났다 — 퍼뜨린다 (page=${pageId}): ${String(e)}`);
+          this.log.error(`변경을 적용하는 중 예외가 났다 — 퍼뜨린다 (page=${pageId}): ${errorText(e)}`);
         } finally {
           // **반드시 비운다.** 남아 있으면 이 연결과 무관한 다음 변경(서버가 직접 고치는 것)에
           // 이 연결이 보낸 ID 목록이 묻어 간다
@@ -590,7 +591,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         // **마지막 사람이 나가면 남기고 정리한다** (FR-710).
         // **`void`로 두면 안 된다** — 저장이 실패하면 처리되지 않은 거부가 되어
         // Node가 프로세스를 죽인다. 창을 닫는 순간 서버가 내려간다 (P6 코드 리뷰 1)
-        this.track(this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(`퇴장 저장 실패 ${pageId}: ${String(e)}`)));
+        this.track(this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(`퇴장 저장 실패 ${pageId}: ${errorText(e)}`)));
       }
     });
     socket.on('error', () => socket.close());
@@ -635,7 +636,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     this.track(
       this.audit
         .record({ action: 'page.collab.reject', actorId: member.principal.id, targetType: 'page', targetId: pageId, detail: { rule, reason }, ip: member.ip ?? undefined })
-        .catch((e: unknown) => this.log.error(`거절을 감사로그에 남기지 못했다 (page=${pageId}): ${String(e)}`)),
+        .catch((e: unknown) => this.log.error(`거절을 감사로그에 남기지 못했다 (page=${pageId}): ${errorText(e)}`)),
     );
     this.revoke(room, member, '받지 않은 변경', COLLAB_CLOSE_REFUSED);
   }
@@ -735,7 +736,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   private async sweep(): Promise<void> {
     const now = Date.now();
     for (const [pageId, room] of [...this.rooms.entries()]) {
-      await this.recheck(room).catch((e: unknown) => this.log.warn(`권한 재판정 실패 ${pageId}: ${String(e)}`));
+      await this.recheck(room).catch((e: unknown) => this.log.warn(`권한 재판정 실패 ${pageId}: ${errorText(e)}`));
 
       // **아무도 없고 남길 것도 없는 방은 치운다.** 업그레이드는 통과했는데 연결이
       // 곧바로 끊겨 `join`에 닿지 못한 방이 여기 남는다 (P6 코드 리뷰 14)
@@ -749,7 +750,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       // 풀을 먹는다 (P6 코드 리뷰 13, T-026과 같은 자리)
       if (!room.lastChangeAt || now - room.lastChangeAt < this.env.WF_COLLAB_IDLE_SAVE_MS) continue;
 
-      await this.saveIfNeeded(pageId, 'idle').catch((e: unknown) => this.log.error(`자동 저장 실패 ${pageId}: ${String(e)}`));
+      await this.saveIfNeeded(pageId, 'idle').catch((e: unknown) => this.log.error(`자동 저장 실패 ${pageId}: ${errorText(e)}`));
       // sweep 자체는 기다렸지만, 그 안에서 띄운 메일 같은 뒷일은 아직 떠 있을 수 있다
     }
   }

@@ -405,13 +405,21 @@ export type SystemInfoView = {
 
 // ---- 사내 LLM (P10_설계서_Llm F절) ----
 
+/**
+ * **U+0000을 받지 않는다** (검토 반영 — 보안 검토 3). PostgreSQL text가 거부해 저장이 실패하고, 그 오류 문장(drizzle)에는 질의의
+ * 매개변수 — 곧 본문 — 이 그대로 있어 로그로 샌다. 받는 자리에서 막는다
+ */
+const noNul = (v: string) => !v.includes('\u0000');
+const NUL_MESSAGE = '글자 U+0000은 넣을 수 없다';
+
 /** 이름 — 줄바꿈을 막는다. 화면 목록과 감사로그에 한 줄로 들어간다 */
 const llmNameSchema = z
   .string()
   .trim()
   .min(1)
   .max(LLM_LIMITS.nameMaxChars)
-  .refine((v) => !/[\r\n]/.test(v), { message: '이름에 줄바꿈을 넣을 수 없다' });
+  .refine((v) => !/[\r\n]/.test(v), { message: '이름에 줄바꿈을 넣을 수 없다' })
+  .refine(noNul, { message: NUL_MESSAGE });
 
 /**
  * LLM 등록 (FR-1100·1104). **주소는 판정한 모양으로 바꿔 받는다** — 화면과 서버가 같은 함수(`normalizeLlmBaseUrl`)를 쓴다.
@@ -427,27 +435,31 @@ export const createLlmProviderDto = z.object({
     }
     return r.url;
   }),
-  model: z.string().trim().min(1).max(LLM_LIMITS.modelMaxChars),
+  model: z.string().trim().min(1).max(LLM_LIMITS.modelMaxChars).refine(noNul, { message: NUL_MESSAGE }),
+  // **보이는 ASCII만** (검토 반영 — 코드 리뷰 15). 요청 머리말(`Authorization`)에 들어가므로 줄바꿈은 머리말 주입이 되고, 폭 없는
+  // 빈칸·한글·NUL이 섞인 키는 요청이 나가기도 전에 막혀 모든 질문이 "닿지 않는다"로 오진된다 — 키는 다시 볼 수 없어 찾을 수도 없다
   apiKey: z
     .string()
     .max(LLM_LIMITS.apiKeyMaxChars)
     .nullish()
     .transform((v) => (v && v.trim() ? v.trim() : null))
-    .refine((v) => v === null || !/[\r\n]/.test(v), { message: 'API 키에 줄바꿈을 넣을 수 없다' }),
+    .refine((v) => v === null || /^[\x21-\x7e]+$/.test(v), { message: 'API 키는 빈칸 없는 영문·숫자·기호(보이는 ASCII)여야 한다' }),
 });
 export type CreateLlmProviderDto = z.infer<typeof createLlmProviderDto>;
 
 /** 지시문 — 시스템 프롬프트 (FR-1125·1129) */
+const promptContentSchema = z.string().trim().min(1).max(LLM_LIMITS.promptMaxChars).refine(noNul, { message: NUL_MESSAGE });
+
 export const createLlmPromptDto = z.object({
   name: llmNameSchema,
-  content: z.string().trim().min(1).max(LLM_LIMITS.promptMaxChars),
+  content: promptContentSchema,
 });
 export type CreateLlmPromptDto = z.infer<typeof createLlmPromptDto>;
 
 export const updateLlmPromptDto = z
   .object({
     name: llmNameSchema.optional(),
-    content: z.string().trim().min(1).max(LLM_LIMITS.promptMaxChars).optional(),
+    content: promptContentSchema.optional(),
   })
   // **빈 몸통을 거부한다** — 템플릿 고치기와 같은 판단
   .refine((v) => v.name !== undefined || v.content !== undefined, { message: '바꿀 것을 하나는 줘야 한다' });
@@ -461,7 +473,7 @@ export const llmAskDto = z
     providerId: z.uuid(),
     conversationId: z.uuid().optional(),
     promptId: z.uuid().optional(),
-    question: z.string().trim().min(1).max(LLM_LIMITS.questionMaxChars),
+    question: z.string().trim().min(1).max(LLM_LIMITS.questionMaxChars).refine(noNul, { message: NUL_MESSAGE }),
   })
   .refine((v) => !(v.conversationId && v.promptId), {
     message: '지시문은 새 대화를 시작할 때만 고른다',

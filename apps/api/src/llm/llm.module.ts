@@ -48,7 +48,7 @@ import { LLM_CLIENT } from './llm.provider';
 import { OpenAiCompatClient } from './openai.client';
 import { LlmPromptsService } from './prompts.service';
 import { LlmProvidersService } from './providers.service';
-import { dbErrorText } from './db-error';
+import { errorText } from '../common/error-text';
 import { NdjsonSink } from './stream.sink';
 
 /**
@@ -129,7 +129,8 @@ export class LlmController {
    */
   @Post('ask')
   async askLlm(@Body(new ZodPipe(llmAskDto)) dto: LlmAskDto, @CurrentUser() me: SessionUser, @Req() req: Request, @Res() res: Response): Promise<void> {
-    const prepared = await this.ask.prepare(me, dto);
+    // 세션까지 적어 둔다 — 로그아웃은 그 세션의 답만 멈춘다 (FR-1121)
+    const prepared = await this.ask.prepare(me, dto, req.sessionID ?? null);
     let sink: NdjsonSink;
     try {
       sink = new NdjsonSink(res, LLM_TIMINGS.heartbeatMs);
@@ -230,7 +231,7 @@ export class LlmSweeper implements OnApplicationBootstrap, OnModuleDestroy {
         .then((n) => {
           if (n) this.log.log(`보존 기간이 지난 LLM 대화 ${n}개를 지웠다`);
         })
-        .catch((e: unknown) => this.log.error(`만료된 LLM 대화를 지우지 못했다: ${dbErrorText(e)}`));
+        .catch((e: unknown) => this.log.error(`만료된 LLM 대화를 지우지 못했다: ${errorText(e)}`));
     run();
     this.timer = setInterval(run, LLM_TIMINGS.sweepMs);
     this.timer.unref();

@@ -13,10 +13,16 @@ export const LLM_CLIENT = Symbol('LLM_CLIENT');
 /** 부를 곳 — 등록한 LLM 하나. 키는 **풀어 둔 것**이고 요청 하나 동안만 메모리에 있다 (D.4) */
 export type LlmTarget = { baseUrl: string; model: string; apiKey: string | null };
 
-/** 흘러나오는 조각 — 답·생각 과정·토큰 수 */
+/**
+ * 흘러나오는 조각 — 답·생각 과정·토큰 수, 그리고 둘:
+ * - `rethink` 지금까지의 답은 생각 과정이었다(닫는 태그만 오는 모델, `domain/think.ts`)
+ * - `finish` 모델이 말한 끝의 까닭(`finish_reason`). `length`면 길이 상한에서 잘린 답이다 (검토 반영 — 코드 리뷰 4)
+ */
 export type LlmChunk =
   | { kind: 'answer'; text: string }
   | { kind: 'thinking'; text: string }
+  | { kind: 'rethink' }
+  | { kind: 'finish'; reason: string }
   | { kind: 'usage'; promptTokens: number; completionTokens: number };
 
 /**
@@ -27,10 +33,15 @@ export type LlmChunk =
  */
 export type LlmErrorKind = 'unreachable' | 'rejected' | 'protocol' | 'timeout' | 'aborted';
 
+/**
+ * `message`는 **화면에 말하는 문장**이다 — `rejected`면 남의 문장(키는 가렸다)이라 로그에 싣지 않는다. 로그·감사에는 `kind`와
+ * `status`(HTTP 상태)만 간다
+ */
 export class LlmError extends Error {
   constructor(
     public readonly kind: LlmErrorKind,
     message: string,
+    public readonly status: number | null = null,
   ) {
     super(message);
     this.name = 'LlmError';

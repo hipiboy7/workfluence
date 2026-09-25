@@ -6,6 +6,7 @@ import { NdjsonSink, type ResponseLike } from './stream.sink';
 /** B등급 — 흐름의 출구 (P10_설계서_Llm D.1). HTTP 응답은 가짜다 — 실제 흐름은 E2E와 컨테이너 확인이 본다 */
 
 class FakeResponse extends EventEmitter implements ResponseLike {
+  destroyed = false;
   statusCode = 0;
   headers: Record<string, string> = {};
   flushed = false;
@@ -72,6 +73,17 @@ describe('NdjsonSink', () => {
     // 끊긴 뒤에 듣기 시작해도 바로 알린다
     sink.onGone(() => gone++);
     expect(gone).toBe(2);
+  });
+
+  it('**만들 때 이미 끊겨 있으면** 곧바로 끊긴 것으로 — 확인하는 사이 새로 고침한 브라우저 (검토 반영)', () => {
+    const res = new FakeResponse();
+    res.destroyed = true;
+    const sink = new NdjsonSink(res, 60_000);
+    let gone = 0;
+    sink.onGone(() => gone++);
+    sink.write({ type: 'delta', text: 'a' });
+    sink.close();
+    expect([gone, res.statusCode, res.flushed, res.chunks, res.ended]).toEqual([1, 0, false, [], 0]);
   });
 
   it('우리가 끝낸 뒤의 닫힘은 끊김이 아니다', () => {

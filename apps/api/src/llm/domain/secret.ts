@@ -5,10 +5,11 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
  *
  * ```
  * v1.{IV}.{태그}.{암호문}      각 base64url
- * AES-256-GCM · IV 12바이트(넣을 때마다 새로) · AAD = "llm_providers:{행 id}"
+ * AES-256-GCM · IV 12바이트(넣을 때마다 새로) · AAD = "llm_providers:{행 id}:{주소}"
  * ```
  *
- * **AAD에 행 id를 묶는다.** DB를 만질 수 있는 사람이 암호문을 다른 행으로 옮겨 붙이면 풀리지 않는다.
+ * **AAD에 행 id와 주소를 묶는다.** DB를 만질 수 있는 사람이 암호문을 다른 행으로 옮겨 붙이거나, **같은 행에서 주소만 바꿔**
+ * 풀린 키를 자기 서버로 보내게 하면 풀리지 않는다(주소는 검토 반영 — 보안 검토 2). 주소를 고치는 화면·API는 없으므로 비용이 없다.
  * 판(`v1`)을 앞에 둔다 — 방식을 바꿀 날이 오면 옛 판을 읽는 길을 남긴 채 새 판을 쓴다.
  */
 
@@ -38,9 +39,9 @@ export function parseMasterKey(raw: string): Buffer | null {
   return key;
 }
 
-/** 이 행에 묶는 부가 데이터 */
-export function providerAad(id: string): string {
-  return `llm_providers:${id}`;
+/** 이 행에 묶는 부가 데이터 — 행 id와 **그 키를 보낼 주소** */
+export function providerAad(id: string, baseUrl: string): string {
+  return `llm_providers:${id}:${baseUrl}`;
 }
 
 /** 넣는다. `iv`는 시험을 위한 문이다 — 운영은 늘 새로 뽑는다 */

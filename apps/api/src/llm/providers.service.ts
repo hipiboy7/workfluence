@@ -71,7 +71,7 @@ export class LlmProvidersService {
     }
     // id를 먼저 만든다 — 암호문의 AAD에 묶는다 (D.4)
     const id = randomUUID();
-    const apiKeyEnc = dto.apiKey && this.masterKey ? sealSecret(dto.apiKey, this.masterKey, providerAad(id)) : null;
+    const apiKeyEnc = dto.apiKey && this.masterKey ? sealSecret(dto.apiKey, this.masterKey, providerAad(id, dto.baseUrl)) : null;
     const [row] = await tx
       .insert(llmProviders)
       .values({ id, name: dto.name, baseUrl: dto.baseUrl, model: dto.model, apiKeyEnc, createdBy: principal.id })
@@ -108,10 +108,11 @@ export class LlmProvidersService {
     if (provider.apiKeyEnc) {
       if (!this.masterKey) throw new ServiceUnavailableException('이 LLM의 API 키를 풀 수 없다 — WF_LLM_MASTER_KEY가 없다. 관리자가 마스터 키를 설정하거나 LLM을 지우고 다시 등록한다');
       try {
-        apiKey = openSecret(provider.apiKeyEnc, this.masterKey, providerAad(provider.id));
+        // 주소도 AAD에 묶였다 — DB에서 주소만 바꾸면 풀리지 않아, 키가 등록하지 않은 곳으로 가지 않는다 (D.4)
+        apiKey = openSecret(provider.apiKeyEnc, this.masterKey, providerAad(provider.id, provider.baseUrl));
       } catch (e) {
         if (!(e instanceof SecretError)) throw e;
-        throw new ServiceUnavailableException('이 LLM의 API 키를 풀 수 없다 — 마스터 키가 바뀌었다. 관리자가 LLM을 지우고 다시 등록한다');
+        throw new ServiceUnavailableException('이 LLM의 API 키를 풀 수 없다 — 마스터 키가 바뀌었거나 저장된 값(주소 포함)이 바뀌었다. 관리자가 LLM을 지우고 다시 등록한다');
       }
     }
     return { baseUrl: provider.baseUrl, model: provider.model, apiKey };
