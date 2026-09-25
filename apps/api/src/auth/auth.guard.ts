@@ -9,10 +9,11 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { CSRF_HEADER, can, type Action, type Role } from '@workfluence/shared';
+import { CSRF_HEADER, can, grantsForRole, type Action, type DelegableAction, type Role } from '@workfluence/shared';
 import type { Request } from 'express';
 // 타입 확장(declare module)을 하려면 그 모듈이 먼저 로드돼야 한다. Request.session도 여기서 붙는다
 import 'express-session';
+import { setRequestUser } from '../common/request-context';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
@@ -24,7 +25,15 @@ import { UsersService } from '../users/users.service';
  * 판정 규칙이 한 곳에 있어야 화면과 서버가 어긋나지 않는다 (CLAUDE.md 7절).
  */
 
-export type SessionUser = { id: string; username: string; displayName: string; role: Role; mustChangePassword: boolean };
+/** 가드가 요청마다 사용자 행에서 만든다. `grants`는 root가 준 행위 — 판정(`can()`)이 함께 본다 (P11 D.1) */
+export type SessionUser = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: Role;
+  mustChangePassword: boolean;
+  grants: DelegableAction[];
+};
 
 declare module 'express-session' {
   interface SessionData {
@@ -94,7 +103,11 @@ export class AuthGuard implements CanActivate {
       displayName: user.displayName,
       role: user.role as Role,
       mustChangePassword: user.mustChangePassword,
+      // **요청마다 사용자 행에서 읽는다** — 위임을 거두면 다음 요청부터 먹는다 (P11 A.1-5)
+      grants: grantsForRole(user.role as Role, user.grants),
     };
+    // 그 뒤의 로그 줄에 사용자가 실린다 (P11 FR-1211)
+    setRequestUser(user.id);
 
     const allowPending = this.reflector.getAllAndOverride<boolean>(ALLOW_PENDING_PW_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (user.mustChangePassword && !allowPending) {

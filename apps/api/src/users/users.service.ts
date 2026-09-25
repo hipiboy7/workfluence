@@ -1,10 +1,13 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  can,
   canAssignRole,
   checkPasswordPolicy,
   canManageUser,
   generateTemporaryPassword,
+  grantsForRole,
   type CreateUserDto,
+  type DelegableAction,
   type Principal,
   type Role,
   type SignupDto,
@@ -38,6 +41,7 @@ export function toUserView(u: UserRow, now: Date = new Date()): UserView {
     // '잠김'은 저장값이 아니라 파생값이다 (FR-230)
     status: u.status === 'pending' ? 'pending' : locked ? 'locked' : 'active',
     mustChangePassword: u.mustChangePassword,
+    grants: grantsForRole(u.role as Role, u.grants),
     createdAt: u.createdAt.toISOString(),
   };
 }
@@ -239,8 +243,11 @@ export class UsersService {
     return { user, temporaryPassword };
   }
 
-  /** 역할 변경 (FR-232, FR-233) */
-  async changeRole(id: string, role: Role, actor: Principal, tx: Db = this.db): Promise<UserRow> {
+  /**
+   * 역할 변경 (FR-232, FR-233). **관리자가 아니게 되면 위임을 같은 문장에서 비운다** (P11 A.1-4) — 비우지 않으면 DB CHECK가 거부한다.
+   * 거둔 위임(`clearedGrants`)은 호출부가 역할 변경의 감사 행에 싣는다 (FR-1205)
+   */
+  async changeRole(id: string, role: Role, actor: Principal, tx: Db = this.db): Promise<{ row: UserRow; clearedGrants: DelegableAction[] }> {
     if (id === actor.id) throw new BadRequestException('자기 자신의 역할은 바꿀 수 없다');
     const target = await this.getManaged(id, actor, tx);
     if (!canAssignRole(actor, role)) throw new ForbiddenException(`'${role}' 역할을 부여할 권한이 없다`);
@@ -252,8 +259,36 @@ export class UsersService {
       const [{ n }] = await tx.select({ n: count() }).from(users).where(and(eq(users.role, 'root'), eq(users.status, 'active')));
       if (n <= 1) throw new BadRequestException('마지막 root는 강등할 수 없다');
     }
-    const [row] = await tx.update(users).set({ role, updatedAt: sql`now()` }).where(eq(users.id, id)).returning();
-    return row;
+    const before = grantsForRole(target.role as Role, target.grants);
+    const grants = grantsForRole(role, before);
+    const [row] = await tx.update(users).set({ role, grants, updatedAt: sql`now()` }).where(eq(users.id, id)).returning();
+    return { row, clearedGrants: before.filter((g) => !grants.includes(g)) };
+  }
+
+  /**
+   * 위임을 주고 거둔다 (P11_설계서_Ops D.1, FR-1201~1203). **root만** — 가드가 먼저 막고 여기서 한 번 더 본다. **관리자에게만** 준다.
+   * 목록 전체를 받는다(멱등). 이전·이후를 돌려준다 — 호출부가 감사 `user.grants.change`에 싣는다 (FR-1205)
+   */
+  async changeGrants(
+    id: string,
+    grants: readonly DelegableAction[],
+    actor: Principal,
+    tx: Db = this.db,
+  ): Promise<{ row: UserRow; before: DelegableAction[]; after: DelegableAction[] }> {
+    if (!can(actor, 'user.grants.change')) throw new ForbiddenException('위임은 시스템 관리자만 주고 거둔다');
+    const target = await tx.query.users.findFirst({ where: eq(users.id, id) });
+    if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
+    if (target.role !== 'admin') throw new BadRequestException('위임은 관리자에게만 준다 — 관리자가 아니다');
+    const before = grantsForRole('admin', target.grants);
+    const after = grantsForRole('admin', grants);
+    // 읽은 뒤 역할이 바뀌었으면(다른 요청이 member로 내렸다) 아무것도 바꾸지 않는다 — 판정한 상태에서만 쓴다
+    const [row] = await tx
+      .update(users)
+      .set({ grants: after, updatedAt: sql`now()` })
+      .where(and(eq(users.id, id), eq(users.role, 'admin')))
+      .returning();
+    if (!row) throw new ConflictException('그 사이 역할이 바뀌었다 — 목록을 다시 본다');
+    return { row, before, after };
   }
 
   /** ID 찾기 (FR-208): email + 이름이 **모두** 일치할 때만 */

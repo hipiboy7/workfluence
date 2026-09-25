@@ -2,7 +2,9 @@ import { BadRequestException, Inject, Injectable, NotFoundException, Unauthorize
 import {
   maskEmail,
   maskUsername,
+  grantsForRole,
   type ChangePasswordDto,
+  type DelegableAction,
   type FindIdDto,
   type LoginDto,
   type MeView,
@@ -31,7 +33,14 @@ export function newPkce(): PkcePair {
 }
 
 export function toMeView(u: UserRow): MeView {
-  return { id: u.id, username: u.username, displayName: u.displayName, role: u.role as Role, mustChangePassword: u.mustChangePassword };
+  return {
+    id: u.id,
+    username: u.username,
+    displayName: u.displayName,
+    role: u.role as Role,
+    mustChangePassword: u.mustChangePassword,
+    grants: grantsForRole(u.role as Role, u.grants),
+  };
 }
 
 @Injectable()
@@ -163,15 +172,22 @@ export class AuthService {
     }
 
     const user = await this.db.transaction(async (tx) => {
-      const u = await this.upsertFromClaims(claims, role, tx);
-      await this.audit.record({ action: 'auth.login.success', actorId: u.id, detail: { method: 'oidc' }, ip }, tx);
+      const { row: u, clearedGrants } = await this.upsertFromClaims(claims, role, tx);
+      // IdP가 역할을 내려 위임이 사라졌으면 로그인 행에 함께 남긴다 (P11 FR-1205)
+      await this.audit.record(
+        { action: 'auth.login.success', actorId: u.id, detail: { method: 'oidc', ...(clearedGrants.length ? { clearedGrants } : {}) }, ip },
+        tx,
+      );
       return u;
     });
     return user;
   }
 
-  /** JIT 동기화 (FR-215, FR-217). **IdP가 정본**이라 있던 계정도 갱신한다 */
-  private async upsertFromClaims(claims: OidcClaims, role: Role, tx: Db): Promise<UserRow> {
+  /**
+   * JIT 동기화 (FR-215, FR-217). **IdP가 정본**이라 있던 계정도 갱신한다. 역할이 관리자가 아니게 되면 위임을 같은 문장에서 비운다
+   * (P11 A.1-4) — 비우지 않으면 DB CHECK가 거부해 **로그인이 통째로 실패한다**
+   */
+  private async upsertFromClaims(claims: OidcClaims, role: Role, tx: Db): Promise<{ row: UserRow; clearedGrants: DelegableAction[] }> {
     // **조회도 `tx`로 한다.** 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면 동시 요청이
     // 풀 크기에 닿는 순간 전원이 서로를 기다린다 (T-026)
     const existing = await this.users.findByOidcSub(claims.sub, tx);
@@ -183,12 +199,14 @@ export class AuthService {
     const email = await this.freeEmail(claims.email, existing?.id, tx);
 
     if (existing) {
+      const before = grantsForRole(existing.role as Role, existing.grants);
+      const grants = grantsForRole(role, before);
       const [row] = await tx
         .update(users)
-        .set({ displayName, email, role, status: 'active', updatedAt: sql`now()` })
+        .set({ displayName, email, role, grants, status: 'active', updatedAt: sql`now()` })
         .where(eq(users.id, existing.id))
         .returning();
-      return row;
+      return { row, clearedGrants: before.filter((g) => !grants.includes(g)) };
     }
 
     const [row] = await tx
@@ -208,7 +226,7 @@ export class AuthService {
     // IdP 계정도 쓸 공간이 필요하다 (FR-309). **운영의 주 로그인 경로가 여기다** —
     // 승인 경로에만 두면 IdP로 들어온 사람은 첫 화면이 비어 있다
     await this.spaces.ensurePersonalSpace(row.id, row.displayName, tx);
-    return row;
+    return { row, clearedGrants: [] };
   }
 
   /**

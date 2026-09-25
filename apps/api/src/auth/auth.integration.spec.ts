@@ -1,14 +1,15 @@
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
-import { users } from '../db/schema';
+import { auditEvents, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { loadEnv } from '../config/config.module';
 import { SettingsService } from '../settings/settings.service';
-import { UsersService } from '../users/users.service';
+import { UsersService, toUserView } from '../users/users.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { AuthService } from './auth.service';
+import { AuthService, toMeView } from './auth.service';
 import { DEV_IDENTITY, encodeMockCode } from './oidc/mock.provider';
 import type { OidcProvider } from './oidc/oidc.provider';
 import { RevocationBus } from '../common/revocation.bus';
@@ -441,3 +442,69 @@ describe('동시 로그인이 연결 풀을 잠그지 않는다 (T-026)', () => 
     expect(settled.every((r) => r.status === 'rejected')).toBe(true);
   });
 });
+
+describe('위임 — root가 관리자에게 LLM 연결 관리를 준다 (P11 D.1, FR-1200~1205)', () => {
+  async function mkAdmin(username = 'boss') {
+    const [u] = await db.insert(users).values({ username, displayName: `${username} 이름`, passwordHash: 'x', role: 'admin', status: 'active' }).returning();
+    return u;
+  }
+
+  it('**root가 주고 거둔다** — 이전·이후를 돌려주고, 같은 목록을 다시 보내도 된다(멱등). 화면·me에 실린다', async () => {
+    const a = await mkAdmin();
+    const given = await usersSvc.changeGrants(a.id, ['llm.manage'], ROOT);
+    expect([given.before, given.after, given.row.grants]).toEqual([[], ['llm.manage'], ['llm.manage']]);
+    expect([toUserView(given.row).grants, toMeView(given.row).grants]).toEqual([['llm.manage'], ['llm.manage']]);
+    const again = await usersSvc.changeGrants(a.id, ['llm.manage'], ROOT);
+    expect([again.before, again.after]).toEqual([['llm.manage'], ['llm.manage']]);
+    const taken = await usersSvc.changeGrants(a.id, [], ROOT);
+    expect([taken.before, taken.after, taken.row.grants]).toEqual([['llm.manage'], [], []]);
+  });
+
+  it('**root만 준다** — 관리자는, 위임받은 관리자라도 403 (A.1-3)', async () => {
+    const a = await mkAdmin();
+    const b = await mkAdmin('other');
+    await usersSvc.changeGrants(b.id, ['llm.manage'], ROOT);
+    for (const actor of [{ id: b.id, role: 'admin', grants: ['llm.manage'] }, { id: b.id, role: 'admin' }] as Principal[]) {
+      await expect(usersSvc.changeGrants(a.id, ['llm.manage'], actor)).rejects.toBeInstanceOf(ForbiddenException);
+    }
+  });
+
+  it('**관리자에게만** — member·root에게 주면 400, 없는 사용자는 404', async () => {
+    const alice = await approvedAlice();
+    await expect(usersSvc.changeGrants(alice.id, ['llm.manage'], ROOT)).rejects.toBeInstanceOf(BadRequestException);
+    const [r] = await db.insert(users).values({ username: 'root2', displayName: 'r', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    await expect(usersSvc.changeGrants(r.id, ['llm.manage'], ROOT)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(usersSvc.changeGrants('00000000-0000-4000-8000-000000000001', ['llm.manage'], ROOT)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('**관리자가 member가 되면 위임이 사라진다** — 다시 관리자가 되어도 돌아오지 않는다 (A.1-4)', async () => {
+    const a = await mkAdmin();
+    await usersSvc.changeGrants(a.id, ['llm.manage'], ROOT);
+    const down = await usersSvc.changeRole(a.id, 'member', ROOT);
+    expect([down.row.grants, down.clearedGrants]).toEqual([[], ['llm.manage']]);
+    const up = await usersSvc.changeRole(a.id, 'admin', ROOT);
+    expect([up.row.grants, up.clearedGrants]).toEqual([[], []]);
+  });
+
+  it('**DB도 막는다** — 위임을 비우지 않고 역할만 내리는 문장, 위임할 수 없는 행위는 거부된다', async () => {
+    const a = await mkAdmin();
+    await usersSvc.changeGrants(a.id, ['llm.manage'], ROOT);
+    await expect(db.update(users).set({ role: 'member' }).where(eq(users.id, a.id))).rejects.toThrow();
+    await expect(db.update(users).set({ grants: ['system.manage'] }).where(eq(users.id, a.id))).rejects.toThrow();
+    expect((await usersSvc.findById(a.id))?.grants).toEqual(['llm.manage']);
+  });
+
+  it('**사내 계정의 역할 동기화도 위임을 비운다** — IdP가 관리자 그룹에서 뺐다. 로그인 감사 행에 남는다 (FR-1203·1205)', async () => {
+    const asAdmin = { ...DEV_IDENTITY, groups: ['wf-admins'] };
+    const s1 = await auth.oidcStart();
+    const first = await auth.oidcCallback({ code: encodeMockCode(asAdmin), state: s1.state }, { state: s1.state, nonce: s1.nonce });
+    expect(first.role).toBe('admin');
+    await usersSvc.changeGrants(first.id, ['llm.manage'], ROOT);
+    const s2 = await auth.oidcStart();
+    const second = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: s2.state }, { state: s2.state, nonce: s2.nonce });
+    expect([second.role, second.grants]).toEqual(['member', []]);
+    const logins = await db.select().from(auditEvents).where(eq(auditEvents.action, 'auth.login.success'));
+    expect(logins.map((e) => (e.detail as { clearedGrants?: string[] }).clearedGrants ?? null)).toEqual([null, ['llm.manage']]);
+  });
+});
+

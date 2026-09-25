@@ -10,6 +10,10 @@ import type { Role, SpaceKind, SpaceMemberRole, SpaceStatus } from './constants'
 export type Principal = {
   id: string;
   role: Role;
+  /**
+   * root가 준 행위 (P11_설계서_Ops D.1). **관리자에게만 먹는다** — 다른 역할이면 보지 않는다. 가드가 요청마다 사용자 행에서 싣는다
+   */
+  grants?: readonly string[];
 };
 
 export type Action =
@@ -23,7 +27,17 @@ export type Action =
   | 'category.create'
   | 'page.read'
   | 'page.write'
-  | 'page.delete';
+  | 'page.delete'
+  | 'llm.manage' // 사내 LLM 연결 관리 — root, 그리고 root가 위임한 admin (P11 D.1)
+  | 'user.grants.change'; // 위임을 주고 거두기 — root 전용 (P11 A.1-3)
+
+/**
+ * **위임할 수 있는 행위** — root가 관리자 한 사람에게 준다 (P11 D.1, A.1-2). 여기 없는 행위는 위임 목록에 적혀 있어도 먹지 않는다.
+ * 더하면 마이그레이션의 CHECK(`users_grants_known_chk`)도 고친다
+ */
+export const DELEGABLE_ACTIONS = ['llm.manage'] as const satisfies readonly Action[];
+export type DelegableAction = (typeof DELEGABLE_ACTIONS)[number];
+const DELEGABLE: ReadonlySet<string> = new Set(DELEGABLE_ACTIONS);
 
 /** 역할별 허용 행위. 기본 거부: 여기 없는 조합은 전부 false. */
 const GRANTS: Record<Role, ReadonlySet<Action>> = {
@@ -39,6 +53,8 @@ const GRANTS: Record<Role, ReadonlySet<Action>> = {
     'page.read',
     'page.write',
     'page.delete',
+    'llm.manage',
+    'user.grants.change',
   ]),
   admin: new Set<Action>([
     'user.manage',
@@ -57,8 +73,20 @@ const GRANTS: Record<Role, ReadonlySet<Action>> = {
 
 export function can(principal: Principal | null | undefined, action: Action): boolean {
   if (!principal) return false;
-  const grants = GRANTS[principal.role];
-  return grants ? grants.has(action) : false;
+  const byRole = GRANTS[principal.role];
+  if (!byRole) return false;
+  if (byRole.has(action)) return true;
+  // 위임 — 관리자이고, 위임할 수 있는 행위이고, root가 준 것일 때만 (P11 D.1)
+  return principal.role === 'admin' && DELEGABLE.has(action) && (principal.grants ?? []).includes(action);
+}
+
+/**
+ * 역할에 맞는 위임 목록 — **관리자가 아니면 비운다**(member가 되면 위임이 사라진다 — A.1-4), 관리자면 위임할 수 있는 것만 겹치지
+ * 않게 남긴다. 역할이 바뀌는 자리(관리 화면·사내 계정 동기화)가 이것으로 새 목록을 정한다
+ */
+export function grantsForRole(role: Role, grants: readonly string[]): DelegableAction[] {
+  if (role !== 'admin') return [];
+  return DELEGABLE_ACTIONS.filter((a) => grants.includes(a));
 }
 
 export function isAdminRole(role: Role): boolean {

@@ -149,7 +149,9 @@ export class LlmController {
   }
 }
 
-/** LLM 등록 관리 (FR-1100~1106). **root만** — `system.manage` (A.1-1) */
+/**
+ * LLM 등록 관리 (FR-1100~1106). **root, 그리고 root가 위임한 관리자** — `llm.manage` (P11_설계서_Ops D.1, 확인 필요 F의 답)
+ */
 @Controller('api/llm/admin/providers')
 @UseGuards(AuthGuard)
 export class LlmAdminController {
@@ -160,13 +162,13 @@ export class LlmAdminController {
   ) {}
 
   @Get()
-  @RequireAction('system.manage')
+  @RequireAction('llm.manage')
   list(@CurrentUser() me: SessionUser): Promise<LlmProviderAdminView[]> {
     return this.providers.listAdmin(me);
   }
 
   @Post()
-  @RequireAction('system.manage')
+  @RequireAction('llm.manage')
   create(
     @Body(new ZodPipe(createLlmProviderDto)) dto: CreateLlmProviderDto,
     @CurrentUser() me: SessionUser,
@@ -191,7 +193,7 @@ export class LlmAdminController {
   }
 
   @Delete(':id')
-  @RequireAction('system.manage')
+  @RequireAction('llm.manage')
   async remove(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
     await this.db.transaction(async (tx) => {
       const gone = await this.providers.remove(id, me, tx);
@@ -203,7 +205,7 @@ export class LlmAdminController {
   /** 연결 확인 (FR-1105). 바꾸는 것이 없어 감사로그에 남기지 않는다 — 다른 조회와 같다 */
   @Post(':id/check')
   @HttpCode(200)
-  @RequireAction('system.manage')
+  @RequireAction('llm.manage')
   check(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser): Promise<LlmCheckView> {
     return this.providers.check(id, me);
   }

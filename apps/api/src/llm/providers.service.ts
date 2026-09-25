@@ -20,7 +20,7 @@ import { LLM_CLIENT, LlmError, type LlmClient, type LlmTarget } from './llm.prov
 /**
  * 등록한 사내 LLM (P10_설계서_Llm C.1, FR-1100~1108).
  *
- * 등록·삭제·연결 확인은 **root만**(`system.manage`, A.1-1). 가드가 먼저 막고 서비스도 한 번 더 본다 — 다른 호출부가 생겨도
+ * 등록·삭제·연결 확인은 **root와 root가 위임한 관리자**(`llm.manage`, P11 D.1). 가드가 먼저 막고 서비스도 한 번 더 본다 — 다른 호출부가 생겨도
  * 권한이 따라가게(템플릿의 `assertAdmin`과 같은 모양).
  *
  * API 키는 `WF_LLM_MASTER_KEY`로 암호화해 넣고 **어디로도 다시 내보내지 않는다**(FR-1102). 푸는 것은 부를 때뿐이다 — 질문을 확인할 때
@@ -39,7 +39,7 @@ export class LlmProvidersService {
   }
 
   private assertSystem(principal: Principal): void {
-    if (!can(principal, 'system.manage')) throw new ForbiddenException('LLM 등록은 시스템 관리자만 한다');
+    if (!can(principal, 'llm.manage')) throw new ForbiddenException('LLM 연결 관리 권한이 없다 — 시스템 관리자가 주고 거둔다');
   }
 
   /** 일반 사용자에게 — 이름과 모델만 (FR-1107). 주소는 사내 호스트 정보다 */

@@ -11,6 +11,7 @@ import {
 } from './constants';
 import { validateDocument, type DocNode } from './document';
 import { normalizeLlmBaseUrl, type LlmStreamStatus } from './llm';
+import { DELEGABLE_ACTIONS, type DelegableAction } from './permissions';
 import { POLICY_FLOOR } from './policy';
 
 /** API 요청·응답 계약. 서버(zod 파이프)와 클라이언트(타입)가 같은 정의를 쓴다. */
@@ -236,6 +237,16 @@ export const attachLabelDto = z.object({
 });
 export type AttachLabelDto = z.infer<typeof attachLabelDto>;
 
+/**
+ * 위임 목록 전체 (P11 F절) — 켜고 끄는 두 상태뿐이라 목록을 통째로 보낸다(멱등). 위임할 수 있는 행위만, 겹치지 않게
+ */
+export const userGrantsDto = z
+  .object({
+    grants: z.array(z.enum(DELEGABLE_ACTIONS)).refine((a) => new Set(a).size === a.length, '같은 위임을 두 번 적었다'),
+  })
+  .strict();
+export type UserGrantsDto = z.infer<typeof userGrantsDto>;
+
 export const searchQueryDto = z.object({
   q: z.string().trim().min(1).max(200),
   spaceId: z.uuid().optional(),
@@ -260,6 +271,8 @@ export type UserView = {
   role: (typeof ROLES)[number];
   status: UserStatusView;
   mustChangePassword: boolean;
+  /** root가 준 행위 — 관리자만 가진다 (P11 D.1) */
+  grants: DelegableAction[];
   createdAt: string;
 };
 
@@ -269,6 +282,8 @@ export type MeView = {
   displayName: string;
   role: (typeof ROLES)[number];
   mustChangePassword: boolean;
+  /** root가 준 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1) */
+  grants: DelegableAction[];
 };
 
 export type CategoryView = { id: string; name: string; createdAt: string };

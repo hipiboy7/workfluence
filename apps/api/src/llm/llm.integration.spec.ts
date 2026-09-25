@@ -149,6 +149,19 @@ beforeEach(async () => {
   build();
 });
 
+describe('LLM 연결 관리의 위임 (P11 D.1, FR-1200·1202)', () => {
+  it('**위임받은 관리자는 root와 같게 관리한다** — 위임이 없으면 403', async () => {
+    const [a] = await db.insert(users).values({ username: 'llm-boss', displayName: 'b', passwordHash: 'x', role: 'admin', status: 'active' }).returning();
+    const plain: Principal = { id: a.id, role: 'admin' };
+    await expect(providers.listAdmin(plain)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(providers.create({ name: 'x', baseUrl: 'http://llm.example.internal/v1', model: 'm', apiKey: null }, plain)).rejects.toBeInstanceOf(ForbiddenException);
+    const granted: Principal = { ...plain, grants: ['llm.manage'] };
+    const view = await providers.create({ name: '위임받아 등록', baseUrl: 'http://llm.example.internal/v1', model: 'm', apiKey: null }, granted);
+    expect((await providers.listAdmin(granted)).map((p) => p.name)).toEqual(['위임받아 등록']);
+    expect(await providers.remove(view.id, granted)).toMatchObject({ name: '위임받아 등록' });
+  });
+});
+
 describe('LLM 등록 (FR-1100~1108)', () => {
   it('**키는 암호문으로만 들어가고 어디로도 다시 나가지 않는다** (FR-1102)', async () => {
     const view = await registerProvider();
