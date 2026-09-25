@@ -105,6 +105,11 @@ export type ChatChunk = {
   usage: { promptTokens: number; completionTokens: number } | null;
   /** 흐름 안에서 온 오류. 있으면 그 흐름은 실패다 */
   error: string | null;
+  /**
+   * 그 오류가 **읽을 수 없는 조각**이다(JSON이 아니거나 객체가 아니다) — LLM 서버의 거절이 아니라 응답의 모양이 틀렸다. 감사·로그의
+   * 실패 종류가 `protocol`이 되게 가른다 (종료 루틴 자체 점검 5)
+   */
+  malformed: boolean;
   /** `[DONE]` */
   done: boolean;
 };
@@ -132,15 +137,16 @@ function shortMessage(message: string): string | null {
 
 /** 조각 하나(`data`의 값)를 읽는다. **JSON이 아니면 오류다** — 모르는 것을 답으로 보여 주지 않는다 */
 export function readChatChunk(data: string): ChatChunk {
-  const empty: ChatChunk = { answer: '', thinking: '', finish: null, usage: null, error: null, done: false };
+  const empty: ChatChunk = { answer: '', thinking: '', finish: null, usage: null, error: null, malformed: false, done: false };
   if (data.trim() === '[DONE]') return { ...empty, done: true };
+  const unreadable: ChatChunk = { ...empty, error: 'LLM 응답을 읽을 수 없다', malformed: true };
   let v: unknown;
   try {
     v = JSON.parse(data);
   } catch {
-    return { ...empty, error: 'LLM 응답을 읽을 수 없다' };
+    return unreadable;
   }
-  if (!isRecord(v)) return { ...empty, error: 'LLM 응답을 읽을 수 없다' };
+  if (!isRecord(v)) return unreadable;
   const err = errorMessageOf(v);
   if (err !== null) return { ...empty, error: shortMessage(err) ?? 'LLM 서버가 도중에 거절했다' };
 

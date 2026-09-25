@@ -214,7 +214,26 @@ export const policyPatchDto = z
   .strict();
 export type PolicyPatchDto = z.infer<typeof policyPatchDto>;
 
-export const attachLabelDto = z.object({ name: z.string().trim().min(1).max(40) });
+/**
+ * **식별자 모양인가** — 서버의 경로 검증(`UuidPipe`)과 화면의 경로 지킴(`RequireUuidParam`)이 같은 판정을 쓴다. 화면은 주소의 id를
+ * API 경로에 넣는데, 라우터가 주소의 `%2F`를 풀어 넘기므로 id 모양이 아닌 것은 경로의 하위 조각이 된다 (P10 종료 루틴 — 경로 조작)
+ */
+export function isUuid(v: unknown): v is string {
+  return z.uuid().safeParse(v).success;
+}
+
+/**
+ * 라벨 이름. **`.`·`..`은 받지 않는다** — 라벨 페이지는 이름을 API 경로에 넣고(`/api/labels/{이름}/pages`), `encodeURIComponent`는
+ * 점을 싸지 않아 URL 해석이 그 조각을 점 조각으로 읽는다(다른 API를 가리킨다). 화면의 `api()`도 그런 경로를 보내지 않는다 (P10 종료 루틴)
+ */
+export const attachLabelDto = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .refine((v) => v !== '.' && v !== '..', '라벨 이름은 "."이나 ".."일 수 없다'),
+});
 export type AttachLabelDto = z.infer<typeof attachLabelDto>;
 
 export const searchQueryDto = z.object({

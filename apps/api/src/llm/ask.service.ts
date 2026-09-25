@@ -160,9 +160,13 @@ export class LlmAskService implements OnModuleDestroy {
           answer += chunk.text;
           sink.write({ type: 'delta', text: chunk.text });
         } else if (chunk.kind === 'thinking' || chunk.kind === 'rethink') {
-          // `rethink` — 지금까지 흘려보낸 답이 생각 과정이었다. 답에서 빼고 생각 과정으로 센다 (FR-1119)
+          // `rethink` — 지금까지 흘려보낸 답이 생각 과정이었다. 답에서 빼고 생각 과정으로 센다 (FR-1119). **표지는 상한을 보기 전에**
+          // 보낸다 — 그 글자는 이미 화면에 갔다. 상한에서 끊어도 서버가 답에서 뺀 것을 화면이 알아야 한다 (종료 루틴 자체 점검 6)
           const text = chunk.kind === 'thinking' ? chunk.text : answer;
-          if (chunk.kind === 'rethink') answer = '';
+          if (chunk.kind === 'rethink') {
+            answer = '';
+            sink.write({ type: 'rethink' });
+          }
           thinkingChars += text.length;
           if (thinkingChars > LLM_LIMITS.answerMaxChars) {
             status = 'failed';
@@ -170,7 +174,7 @@ export class LlmAskService implements OnModuleDestroy {
             message = `생각 과정이 상한(${capText}자)을 넘어 끊었다`;
             break;
           }
-          sink.write(chunk.kind === 'thinking' ? { type: 'thinking', text } : { type: 'rethink' });
+          if (chunk.kind === 'thinking') sink.write({ type: 'thinking', text });
         } else if (chunk.kind === 'finish') {
           // 모델의 길이 상한에서 잘린 답 — 몰래 끝난 것으로 치지 않는다 (FR-1120, 검토 반영 — 코드 리뷰 4)
           if (chunk.reason === 'length') truncated = true;

@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { AuthProvider, RequireAuth } from './auth';
+import { RequireUuidParam } from './components/RequireUuidParam';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { FindAccountPage } from './pages/FindAccountPage';
 import { PageEditorPage } from './pages/PageEditorPage';
@@ -45,12 +46,12 @@ export function App() {
           {/* Phase 10 — 사내 LLM 질문 (P10_설계서_Llm G절). `/llm/prompts`는 고정 경로라 `/llm/:id`보다 먼저 맞는다 */}
           <Route path="/llm" element={<RequireAuth><LlmPage /></RequireAuth>} />
           <Route path="/llm/prompts" element={<RequireAuth><LlmPromptsPage /></RequireAuth>} />
-          <Route path="/llm/:id" element={<RequireAuth><LlmPage /></RequireAuth>} />
+          <Route path="/llm/:id" element={<RequireAuth><RequireUuidParam><LlmPage /></RequireUuidParam></RequireAuth>} />
           <Route path="/admin/llm" element={<RequireAuth><AdminLlmPage /></RequireAuth>} />
-          <Route path="/spaces/:id" element={<RequireAuth><SpacePage /></RequireAuth>} />
-          <Route path="/pages/:id" element={<RequireAuth><PageViewPage /></RequireAuth>} />
-          <Route path="/pages/:id/edit" element={<RequireAuth><PageEditorPage /></RequireAuth>} />
-          <Route path="/pages/:id/history" element={<RequireAuth><PageHistoryPage /></RequireAuth>} />
+          <Route path="/spaces/:id" element={<RequireAuth><RequireUuidParam><SpacePage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/pages/:id" element={<RequireAuth><RequireUuidParam><PageViewPage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/pages/:id/edit" element={<RequireAuth><RequireUuidParam><PageEditorPage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/pages/:id/history" element={<RequireAuth><RequireUuidParam><PageHistoryPage /></RequireUuidParam></RequireAuth>} />
           {/* Phase 2가 홈을 스페이스 목록으로 바꿨다 */}
           <Route path="/" element={<RequireAuth><SpacesPage /></RequireAuth>} />
         </Routes>

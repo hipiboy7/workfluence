@@ -624,6 +624,21 @@ describe('질문 — 흘려보내고 저장한다 (FR-1110~1120)', () => {
     expect((await conversations.get(aliceP, sink.end.conversationId as string)).messages[1].content).toBe('42');
   });
 
+  it('**닫는 태그가 생각 과정을 상한 너머로 밀어도 `rethink`를 먼저 알린다** — 화면이 서버가 버린 답을 답으로 들고 있지 않게 (종료 루틴)', async () => {
+    const provider = await registerProvider();
+    const half = 'x'.repeat(LLM_LIMITS.answerMaxChars / 2 + 1);
+    fake.script = async function* () {
+      yield { kind: 'thinking', text: half };
+      yield { kind: 'answer', text: half };
+      yield { kind: 'rethink' };
+      yield { kind: 'answer', text: '42' };
+    };
+    const sink = await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(sink.events.map((e) => e.type)).toEqual(['thinking', 'delta', 'rethink', 'end']);
+    expect(sink.end).toMatchObject({ status: 'failed', saved: false });
+    expect(sink.end.message).toMatch(/생각 과정이 상한/);
+  });
+
   it('어댑터가 말한 시간 제한(조각 사이 무응답)은 그 문장대로 — 우리 전체 상한과 섞지 않는다', async () => {
     const provider = await registerProvider();
     fake.script = async function* () {

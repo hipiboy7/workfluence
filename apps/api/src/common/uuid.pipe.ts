@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, type PipeTransform } from '@nestjs/common';
-import { z } from 'zod';
+import { isUuid } from '@workfluence/shared';
 
 /**
  * 경로·쿼리의 uuid를 검증한다 (CLAUDE.md 7절 "모든 요청 본문·쿼리는 zod 검증").
@@ -9,9 +9,9 @@ import { z } from 'zod';
  */
 @Injectable()
 export class UuidPipe implements PipeTransform<unknown, string> {
+  /** 판정은 화면의 경로 지킴(`RequireUuidParam`)과 같은 함수다 (`isUuid`) */
   transform(value: unknown): string {
-    const r = z.uuid().safeParse(value);
-    if (!r.success) throw new BadRequestException('올바른 식별자가 아니다');
-    return r.data;
+    if (!isUuid(value)) throw new BadRequestException('올바른 식별자가 아니다');
+    return value;
   }
 }

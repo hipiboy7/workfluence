@@ -48,7 +48,8 @@ export class SettingsService {
 
   async get(tx: Db = this.db): Promise<Policy> {
     // **트랜잭션 안에서는 캐시를 보지 않는다** — 잠금 뒤에 읽는 값(`update`의 `current`)이 캐시의 옛 값이면 "잠금 뒤에 읽는다"가
-    // 거짓이 된다 (검토 반영 — 짝 규칙이 옛 값을 보고 지나갔다)
+    // 거짓이 된다 (검토 반영 — 짝 규칙이 옛 값을 보고 지나갔다). `update`만의 일이 아니다: 트랜잭션을 넘기는 호출자 모두(비밀번호 판정·
+    // 로그인 실패 잠금·업로드·LLM 대화 저장)가 한 번 더 읽는다. 설정은 한 행이라 비용이 작고, 트랜잭션 안에서는 그 순간의 값이 맞다
     if (tx === this.db && this.cache) return this.cache;
     const row = await tx.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     const stored = (row?.value as Record<string, unknown> | undefined) ?? {};

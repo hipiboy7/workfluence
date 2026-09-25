@@ -184,7 +184,9 @@ describe('stream — 흘려받기', () => {
       sse(res);
       res.end(data('<html>'));
     };
-    expect((await thrown(collect(client.stream(target(), [], never())))).message).toMatch(/읽을 수 없다/);
+    const e = await thrown(collect(client.stream(target(), [], never())));
+    // 거절이 아니라 응답의 모양이 틀린 것이다 — 감사의 실패 종류가 그렇게 남는다 (종료 루틴 자체 점검 5)
+    expect([e.kind, /읽을 수 없다/.test(e.message)]).toEqual(['protocol', true]);
   });
 });
 

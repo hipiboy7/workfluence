@@ -70,8 +70,8 @@ export class OpenAiCompatClient implements LlmClient {
         }
         for (const data of events) {
           const c = readChatChunk(data);
-          // 흐름 안의 오류 — 모델 서버가 도중에 거절했거나(그 메시지) 읽을 수 없는 조각이다. 까닭은 메시지가 말한다
-          if (c.error !== null) throw rejected(null, c.error, target);
+          // 흐름 안의 오류 — 읽을 수 없는 조각이면 응답의 모양이 틀린 것(`protocol`), 아니면 모델 서버가 도중에 거절했다(그 메시지)
+          if (c.error !== null) throw c.malformed ? new LlmError('protocol', c.error) : rejected(null, c.error, target);
           if (c.done) {
             yield* think.end();
             return;
