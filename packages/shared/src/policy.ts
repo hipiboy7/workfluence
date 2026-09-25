@@ -21,6 +21,10 @@ export const POLICY_DEFAULTS = {
   lockoutMinutes: PASSWORD_POLICY.lockoutMinutes,
   trashRetentionDays: 30,
   auditRetentionDays: 365,
+  // Phase 10 (P10_설계서_Llm I절) — 사용자 결정 2026-09-25: "7일, 사용자당 100개, … 즐겨찾기나 고정은 최대 20개"
+  llmRetentionDays: 7,
+  llmConversationMax: 100,
+  llmPinnedMax: 20,
 };
 
 /**
@@ -59,6 +63,10 @@ const RANGES: Record<string, { min: number; max: number }> = {
   lockoutMinutes: { min: 1, max: 1440 },
   trashRetentionDays: { min: 1, max: 3650 },
   auditRetentionDays: { min: POLICY_FLOOR.auditRetentionDays, max: 3650 },
+  llmRetentionDays: { min: 1, max: 365 },
+  llmConversationMax: { min: 1, max: 1000 },
+  // 0이면 고정을 쓰지 않는다. **대화 수보다 작아야 한다**는 짝 규칙은 `policyConsistencyProblems`가 본다
+  llmPinnedMax: { min: 0, max: 999 },
 };
 
 const isValidInt = (key: string, v: unknown): v is number => {
@@ -86,7 +94,24 @@ export function applyPolicy(stored: Record<string, unknown>): Policy {
       (out as Record<string, unknown>)[key] = v;
     }
   }
+  // **짝이 어긋나면 고정 수를 낮춰 맞춘다** (P10 FR-1134). 쓰기에서 막으므로 여기 오는 것은 관리 화면 밖에서 손댄 DB다 —
+  // 던지면 기동이 막히고, 그대로 두면 고정만으로 상한이 차서 새 대화를 저장할 때 지울 것이 없다
+  if (out.llmPinnedMax >= out.llmConversationMax) out.llmPinnedMax = out.llmConversationMax - 1;
   return out;
+}
+
+/**
+ * **값 둘 이상에 걸친 규칙** (P10 FR-1134). 통과하면 빈 배열.
+ *
+ * `validatePolicyPatch`는 바꾸려는 값 하나하나의 범위만 본다 — 짝은 **바꾼 뒤의 전체**로 봐야 한다(한쪽만 바꾸는 요청이 있다).
+ * 서버는 합친 값으로, 관리 화면은 지금 값에 입력을 얹은 것으로 같은 함수를 부른다.
+ */
+export function policyConsistencyProblems(policy: Policy): string[] {
+  const problems: string[] = [];
+  if (policy.llmPinnedMax >= policy.llmConversationMax) {
+    problems.push(`고정 수(llmPinnedMax ${policy.llmPinnedMax})는 대화 수(llmConversationMax ${policy.llmConversationMax})보다 작아야 한다 — 같으면 고정만으로 상한이 차서 새 대화를 둘 자리가 없다`);
+  }
+  return problems;
 }
 
 /** 바꾸려는 값 판정. 통과하면 빈 배열, 아니면 사람이 읽을 이유들 */

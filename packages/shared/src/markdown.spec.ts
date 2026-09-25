@@ -247,3 +247,75 @@ describe('pageMarkdown · pageText (FR-1141)', () => {
     expect(pageText('제목', doc(p()))).toBe('제목');
   });
 });
+
+/** 드문 모양 — 검증을 거치지 않은 JSON이 와도 던지지 않고, 글자를 잃지 않는다 (A등급 분기) */
+describe('드문 모양', () => {
+  it('제자리가 아닌 노드도 안의 글자를 잃지 않는다', () => {
+    expect(md(p({ type: 'heading', attrs: { level: 1 }, content: [t('안쪽')] }))).toBe('안쪽');
+    expect(md(t('# 글자만'))).toBe('\\# 글자만');
+    expect(md(br, p(t('a')))).toBe('a');
+    expect(md(li(p(t('항목만'))))).toBe('항목만');
+    expect(md(tr(cell('tableCell', {}, p(t('칸만')))))).toBe('칸만');
+  });
+
+  it('빈 것들은 건너뛴다', () => {
+    expect(md(p(br, br), h(2), bq(p()), ul(li(p())), p(t('끝')))).toBe('-\n\n끝');
+    expect(md(p({ type: 'text', text: '' }), p(t('a')))).toBe('a');
+    expect(md(p(t('a'), br))).toBe('a');
+    expect(md(p(br, t('a')))).toBe('a');
+  });
+
+  it('목록 밖 노드·마크는 어디서든 뺀다', () => {
+    expect(md(ul(li(p(t('a'))), { type: 'widget' }))).toBe('- a');
+    expect(md(ul(li(p(t('a')), { type: 'widget' }, p())))).toBe('- a');
+    expect(md(p(t('a'), { type: 'widget', content: [t('b')] }))).toBe('a');
+    expect(md(p({ type: 'text', text: 'x' }))).toBe('x');
+    expect(md(p(t('x', [{ type: 'link', attrs: { href: 3 } }])))).toBe('x');
+  });
+
+  it('번호 목록의 시작 번호가 이상하면 1부터', () => {
+    expect(md(ol(-1, li(p(t('a')))))).toBe('1. a');
+    expect(md(ol(1.5, li(p(t('a')))))).toBe('1. a');
+    expect(md({ type: 'orderedList', content: [li(p(t('a')))] })).toBe('1. a');
+    expect(md(ol(0, li(p(t('a')))))).toBe('0. a');
+  });
+
+  it('코드 블록은 글자 노드만 모은다', () => {
+    expect(md({ type: 'codeBlock', attrs: {}, content: [t('a'), br, t('b')] })).toBe('```\nab\n```');
+    expect(md({ type: 'codeBlock', attrs: { language: 'c++' }, content: [t('x')] })).toBe('```c++\nx\n```');
+  });
+
+  it('칸 합치기 값이 이상하면 1칸, 너무 크면 상한까지', () => {
+    const one = (colspan: unknown) => md(table(tr(cell('tableCell', { colspan }, p(t('a'))))));
+    expect(one(0)).toBe('| a |\n| --- |');
+    expect(one(1.5)).toBe('| a |\n| --- |');
+    expect(one('2')).toBe('| a |\n| --- |');
+    expect(one(1_000_000).split('\n')[1].split('---').length - 1).toBe(100);
+  });
+
+  it('줄마다 칸 수가 달라도 가장 긴 줄에 맞춘다 — 정렬이 없는 칸은 `---`', () => {
+    const out = md(
+      table(
+        tr(cell('tableHeader', { align: 'center' }, p(t('a')))),
+        tr(cell('tableCell', {}, p(t('b'))), cell('tableCell', {}, p(t('c')))),
+      ),
+    );
+    expect(out).toBe('| a |  |\n| :---: | --- |\n| b | c |');
+  });
+
+  it('칸 안의 목록·빈 블록·목록 밖 노드', () => {
+    const out = md(table(tr(cell('tableCell', {}, ul(li(p(t('x'))), li(p(t('y')))), p(), { type: 'widget' }))));
+    expect(out).toBe('| - x - y |\n| --- |');
+  });
+
+  it('표 줄·칸이 아닌 것은 건너뛰고, 칸이 하나도 없으면 표가 없다', () => {
+    expect(md(table(p(t('줄 아님'))))).toBe('');
+    expect(md(table(tr(p(t('칸 아님')))))).toBe('');
+    expect(md(table())).toBe('');
+  });
+
+  it('marks가 없는 글자, 제목의 단계가 없는 것', () => {
+    expect(md(p({ type: 'text', text: 'plain' }))).toBe('plain');
+    expect(md({ type: 'heading', content: [t('무단계')] })).toBe('# 무단계');
+  });
+});

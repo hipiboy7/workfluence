@@ -88,6 +88,11 @@ export const AUDIT_ACTIONS = [
   'mail.fail',
   // Phase 9 (P9_설계서_Gate D.6) — 실시간 편집의 관문이 받지 않은 변경. 누가·어느 페이지·어느 규칙
   'page.collab.reject',
+  // Phase 10 (P10_설계서_Llm E절) — 사내 LLM. 질문은 **내용 없이** 누가·어느 LLM·얼마만큼·결과만 (FR-1118)
+  'llm.provider.create',
+  'llm.provider.delete',
+  'llm.ask',
+  'llm.conversation.purge',
 ] as const;
 
 /**
@@ -187,4 +192,39 @@ export const DB_POOL = {
   connectionTimeoutMillis: 10_000,
   /** 트랜잭션을 열어 둔 채 놀고 있는 연결을 DB가 끊는다. 새는 곳이 있어도 스스로 낫는다 */
   idleInTransactionTimeoutMillis: 30_000,
+} as const;
+
+/**
+ * 사내 LLM 질문의 설계 고정값 (P10_설계서_Llm I절, FR-1115·1116·1129).
+ *
+ * 운영이 조절하는 보존 기간·대화 수·고정 수는 여기가 아니라 정책값이다(`policy.ts`). 여기 있는 것은 **한 사람의 입력이
+ * 서버 메모리와 저장 공간을 채우지 않게** 하는 선과, 서버 안의 주기다.
+ */
+export const LLM_LIMITS = {
+  /** 질문 하나. 위키 페이지 하나를 통째로 붙여 넣을 수 있는 크기다 — 모델의 문맥보다 길면 LLM 서버가 거절한다(FR-1120) */
+  questionMaxChars: 100_000,
+  /** 답 하나. 넘으면 LLM 요청을 끊고 거기까지를 "끊김"으로 남긴다. 생각 과정도 같은 선에서 끊는다 */
+  answerMaxChars: 200_000,
+  /** 대화 하나의 메시지 수(질문 + 답). 문맥이 큰 모델에서 대화 하나가 끝없이 자라지 않게 (D.3) */
+  messagesPerConversation: 200,
+  /** 지시문 하나의 길이와 사람마다의 개수 */
+  promptMaxChars: 20_000,
+  promptsPerUser: 50,
+  /** LLM·지시문 이름 */
+  nameMaxChars: 80,
+  /** 대화 제목 — 첫 질문의 첫 줄에서 이만큼 */
+  titleChars: 40,
+  /** 등록하는 모델 이름·API 키의 길이 */
+  modelMaxChars: 200,
+  apiKeyMaxChars: 4_096,
+} as const;
+
+/** 서버 안의 주기·시간 (P10_설계서_Llm D.1·D.5, FR-1105·1115·1136) */
+export const LLM_TIMINGS = {
+  /** 이만큼 아무것도 안 보냈으면 살아 있음 줄을 보낸다 — nginx `proxy_read_timeout`(300초)보다 한참 짧게 */
+  heartbeatMs: 15_000,
+  /** 만료된 대화를 지우는 주기 */
+  sweepMs: 3_600_000,
+  /** 연결 확인(`/models`)의 시간 상한 */
+  checkTimeoutMs: 10_000,
 } as const;

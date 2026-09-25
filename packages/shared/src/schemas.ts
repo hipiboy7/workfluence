@@ -2,6 +2,7 @@ import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
+  LLM_LIMITS,
   ROLES,
   SPACE_KINDS,
   SPACE_MEMBER_ROLES,
@@ -9,6 +10,7 @@ import {
   USER_STATUSES,
 } from './constants';
 import { validateDocument, type DocNode } from './document';
+import { normalizeLlmBaseUrl, type LlmStreamStatus } from './llm';
 import { POLICY_FLOOR } from './policy';
 
 /** API 요청·응답 계약. 서버(zod 파이프)와 클라이언트(타입)가 같은 정의를 쓴다. */
@@ -205,6 +207,9 @@ export const policyPatchDto = z
     lockoutMinutes: z.number().int().optional(),
     trashRetentionDays: z.number().int().optional(),
     auditRetentionDays: z.number().int().optional(),
+    llmRetentionDays: z.number().int().optional(),
+    llmConversationMax: z.number().int().optional(),
+    llmPinnedMax: z.number().int().optional(),
   })
   .strict();
 export type PolicyPatchDto = z.infer<typeof policyPatchDto>;
@@ -396,4 +401,116 @@ export type SystemInfoView = {
   postgres: string;
   uptimeSec: number;
   counts: { users: number; pendingUsers: number; spaces: number; pages: number; auditEvents: number };
+};
+
+// ---- 사내 LLM (P10_설계서_Llm F절) ----
+
+/** 이름 — 줄바꿈을 막는다. 화면 목록과 감사로그에 한 줄로 들어간다 */
+const llmNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(LLM_LIMITS.nameMaxChars)
+  .refine((v) => !/[\r\n]/.test(v), { message: '이름에 줄바꿈을 넣을 수 없다' });
+
+/**
+ * LLM 등록 (FR-1100·1104). **주소는 판정한 모양으로 바꿔 받는다** — 화면과 서버가 같은 함수(`normalizeLlmBaseUrl`)를 쓴다.
+ * API 키는 없어도 된다. 빈 키는 없는 키다. **키에 줄바꿈을 막는다** — 요청 머리말(`Authorization`)에 들어간다.
+ */
+export const createLlmProviderDto = z.object({
+  name: llmNameSchema,
+  baseUrl: z.string().transform((v, ctx) => {
+    const r = normalizeLlmBaseUrl(v);
+    if (!r.ok) {
+      ctx.addIssue({ code: 'custom', message: r.reason });
+      return z.NEVER;
+    }
+    return r.url;
+  }),
+  model: z.string().trim().min(1).max(LLM_LIMITS.modelMaxChars),
+  apiKey: z
+    .string()
+    .max(LLM_LIMITS.apiKeyMaxChars)
+    .nullish()
+    .transform((v) => (v && v.trim() ? v.trim() : null))
+    .refine((v) => v === null || !/[\r\n]/.test(v), { message: 'API 키에 줄바꿈을 넣을 수 없다' }),
+});
+export type CreateLlmProviderDto = z.infer<typeof createLlmProviderDto>;
+
+/** 지시문 — 시스템 프롬프트 (FR-1125·1129) */
+export const createLlmPromptDto = z.object({
+  name: llmNameSchema,
+  content: z.string().trim().min(1).max(LLM_LIMITS.promptMaxChars),
+});
+export type CreateLlmPromptDto = z.infer<typeof createLlmPromptDto>;
+
+export const updateLlmPromptDto = z
+  .object({
+    name: llmNameSchema.optional(),
+    content: z.string().trim().min(1).max(LLM_LIMITS.promptMaxChars).optional(),
+  })
+  // **빈 몸통을 거부한다** — 템플릿 고치기와 같은 판단
+  .refine((v) => v.name !== undefined || v.content !== undefined, { message: '바꿀 것을 하나는 줘야 한다' });
+export type UpdateLlmPromptDto = z.infer<typeof updateLlmPromptDto>;
+
+/**
+ * 질문 (FR-1110·1116·1127). `promptId`는 **새 대화에서만** 받는다 — 이어 묻는 대화의 지시문은 시작할 때 복사된 것이다.
+ */
+export const llmAskDto = z
+  .object({
+    providerId: z.uuid(),
+    conversationId: z.uuid().optional(),
+    promptId: z.uuid().optional(),
+    question: z.string().trim().min(1).max(LLM_LIMITS.questionMaxChars),
+  })
+  .refine((v) => !(v.conversationId && v.promptId), {
+    message: '지시문은 새 대화를 시작할 때만 고른다',
+    path: ['promptId'],
+  });
+export type LlmAskDto = z.infer<typeof llmAskDto>;
+
+/** 일반 사용자가 보는 LLM — 이름과 모델만 (FR-1107) */
+export type LlmProviderView = { id: string; name: string; model: string };
+
+/** 관리 화면이 보는 LLM. **키는 있다·없다만** (FR-1102) */
+export type LlmProviderAdminView = LlmProviderView & {
+  baseUrl: string;
+  hasKey: boolean;
+  createdByName: string;
+  createdAt: string;
+};
+
+/** 연결 확인 (FR-1105) */
+export type LlmCheckView = { ok: true; models: string[]; modelFound: boolean } | { ok: false; message: string };
+
+export type LlmPromptView = { id: string; name: string; content: string; updatedAt: string };
+
+export type LlmConversationSummary = {
+  id: string;
+  title: string;
+  /** 지운 LLM이면 null이다 (FR-1101) */
+  providerId: string | null;
+  providerName: string | null;
+  promptName: string | null;
+  pinned: boolean;
+  updatedAt: string;
+  /** 고정한 대화는 null — 풀 때까지 지워지지 않는다 (FR-1133) */
+  expiresAt: string | null;
+};
+
+export type LlmMessageView = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  model: string | null;
+  status: LlmStreamStatus;
+  createdAt: string;
+};
+
+export type LlmConversationView = LlmConversationSummary & { systemPrompt: string | null; messages: LlmMessageView[] };
+
+/** 목록 + 이 사람이 지켜야 할 상한 (G절). 상한은 운영 설정의 값이다 */
+export type LlmConversationList = {
+  items: LlmConversationSummary[];
+  limits: { retentionDays: number; conversationMax: number; pinnedMax: number };
 };
