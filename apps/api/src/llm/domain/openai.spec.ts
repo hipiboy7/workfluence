@@ -226,8 +226,9 @@ describe('문맥 초과 (D.3·FR-1120)', () => {
 
 describe('redactSecret — 남의 응답이 키를 되읊어도 화면에 나가지 않는다', () => {
   it('키가 들어 있으면 가린다', () => {
-    expect(redactSecret('invalid api key: Bearer sk-secret-123', 'sk-secret-123')).toBe('invalid api key: Bearer ***');
-    expect(redactSecret('a sk-1234567 b sk-1234567', 'sk-1234567')).toBe('a *** b ***');
+    // 시험의 키는 실제 키 모양을 흉내 내지 않는다 (12.3절, T-045)
+    expect(redactSecret('invalid api key: Bearer fake-key-bbbb', 'fake-key-bbbb')).toBe('invalid api key: Bearer ***');
+    expect(redactSecret('a fake-1234567 b fake-1234567', 'fake-1234567')).toBe('a *** b ***');
   });
 
   it('키가 없거나 아주 짧으면 그대로 — 짧은 키로 평범한 글자를 지우지 않게', () => {

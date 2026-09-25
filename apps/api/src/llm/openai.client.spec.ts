@@ -212,9 +212,10 @@ describe('stream — 거절·닿지 않음 (FR-1120)', () => {
   it('**거절 문장이 키를 되읊어도 가린다** — 그 문장은 화면으로 간다', async () => {
     handler = (_req, res) => {
       res.writeHead(401, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { message: 'invalid api key: sk-abcdef123456' } }));
+      res.end(JSON.stringify({ error: { message: 'invalid api key: fake-key-aaaa' } }));
     };
-    const e = await thrown(collect(client.stream(target({ apiKey: 'sk-abcdef123456' }), [], never())));
+    // 시험의 키는 **실제 키 모양을 흉내 내지 않는다**(12.3절 — gitleaks가 잡는다, T-045)
+    const e = await thrown(collect(client.stream(target({ apiKey: 'fake-key-aaaa' }), [], never())));
     expect(e.message).toBe('invalid api key: ***');
   });
 

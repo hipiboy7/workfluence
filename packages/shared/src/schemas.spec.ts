@@ -206,7 +206,8 @@ describe('LLM DTO — PostgreSQL이 받지 않는 글자와 키의 모양', () =
   });
 
   it('**API 키는 보이는 ASCII만** — 폭 없는 빈칸·한글·NUL이 섞인 키는 모든 요청을 "닿지 않는다"로 오진하게 만든다', () => {
-    expect(createLlmProviderDto.parse({ ...base, apiKey: 'sk-AbC_123.xyz' }).apiKey).toBe('sk-AbC_123.xyz');
+    // 기호(`-`·`.`·`_`)가 든 키는 받는다. 시험의 키는 실제 키 모양을 흉내 내지 않는다(12.3절, T-045)
+    expect(createLlmProviderDto.parse({ ...base, apiKey: 'aaaa-bbbb.cc_dd' }).apiKey).toBe('aaaa-bbbb.cc_dd');
     for (const bad of ['k\u200b', '키값', 'k\u0000', 'a b', 'k\t1']) {
       expect(createLlmProviderDto.safeParse({ ...base, apiKey: bad }).success).toBe(false);
     }
