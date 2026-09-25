@@ -204,6 +204,8 @@ Authorization: Bearer {API 키}          ← 키가 있을 때만
   키를 다시 넣는 별도 화면은 두지 않았다 — 등록·삭제만 달라는 요청이고, 지우고 다시 등록하면 대화는 남는다(FR-1101).
 - 키는 요청을 보낼 때만 풀어 메모리에 잠깐 둔다. 응답·로그·감사로그 어디에도 싣지 않는다. 감사로그의 비밀 거르기
   (`apps/api/src/audit/audit.service.ts`의 `SECRET_KEYS`)에 `api_key`·`apiKey` 모양을 더한다 — 실수로 실어도 떨어지게.
+- **DB 오류를 로그에 적을 때 drizzle의 오류 문장을 싣지 않는다.** 그 문장에는 질의의 매개변수가 그대로 있어, 대화 저장이 실패한
+  자리라면 질문과 답이 로그로 샌다. PostgreSQL의 코드·문장만 싣는다(`apps/api/src/llm/db-error.ts`) — 컨테이너 확인에서 드러났다.
 
 ### D.5 보관 규칙 (FR-1130 ~ FR-1139)
 
@@ -216,7 +218,8 @@ Authorization: Bearer {API 키}          ← 키가 있을 때만
 | `pinned_at` | 고정한 시각. 있으면 보존 기간을 세지 않는다 |
 
 - **만료** = `pinned_at IS NULL AND retain_from < now() - N일`. 목록·열기·이어 묻기가 이 조건으로 거르고(FR-1137), 한 시간마다
-  앱이 지운다(FR-1136). 지우면 메시지도 함께 지워진다(`ON DELETE CASCADE`).
+  앱이 지운다(FR-1136). 지우면 메시지도 함께 지워진다(`ON DELETE CASCADE`). 정리는 **기동할 때 한 번** 돈다 — 운영에서 표 만들기
+  (`migrate.js`)보다 앱이 먼저 뜨면 그 한 번이 `42P01`을 로그에 남기고, 다음 주기에 다시 한다(반입 절차의 순서를 지키면 없다).
 - **저장**은 한 트랜잭션이다 — 그 사람의 advisory lock → 대화 만들기·고치기 → 질문·답 넣기 → 개수가 M을 넘으면 고정하지 않은 것
   중 `retain_from`이 가장 오래된 것부터 지우기 → 감사 `llm.ask`. **잠금이 없으면** 두 탭에서 동시에 새 대화를 저장할 때 둘 다
   "아직 100개"로 보고 101개가 된다.
@@ -340,16 +343,24 @@ llm_messages(
 
 | 모듈 | 경로 | 등급 | 하는 일 |
 |---|---|---|---|
-| LLM 계약 | packages/shared/src/llm.ts | **A** | 흐름 줄의 타입·줄 나누기·줄 읽기, 주소 판정(FR-1104) |
-| 마크다운 | packages/shared/src/markdown.ts | **A** | 문서 → 마크다운·텍스트 (D.7) |
+| LLM 계약 | `packages/shared/src/llm.ts` | **A** | 흐름 줄의 타입·줄 나누기·줄 읽기, 주소 판정(FR-1104) |
+| 마크다운 | `packages/shared/src/markdown.ts` | **A** | 문서 → 마크다운·텍스트 (D.7) |
 | 정책값 | `packages/shared/src/policy.ts` | **A** | N·M·K와 K < M 판정 (FR-1134) |
-| 암호화 | apps/api/src/llm/domain/secret.ts | **A** | D.4 |
-| 흐름 읽기 | apps/api/src/llm/domain/openai.ts | **A** | SSE 나누기·조각 읽기·오류 본문 읽기 (D.2) |
-| 생각 과정 떼기 | apps/api/src/llm/domain/think.ts | **A** | 답 맨 앞의 `<think>…</think>`를 조각이 갈라져 와도 떼어 낸다 |
-| 대화 규칙 | apps/api/src/llm/domain/conversation.ts | **A** | 제목·보낼 메시지 만들기·만료 시각 |
-| LLM 어댑터 | apps/api/src/llm/openai.client.ts | B | `LLM_CLIENT`의 HTTP 구현. 시험은 가짜 LLM 서버(node:http)로 |
-| 서비스 | apps/api/src/llm/ | B | 등록·지시문·대화·질문 중계·정리 (컨트롤러는 llm.module.ts) |
-| 화면 | apps/web/src/pages/ (LlmPage·LlmPromptsPage·admin/AdminLlmPage), apps/web/src/components/ (복사 버튼·흐름 읽기) | B | G절. 흐름 상태 기계는 React 밖에 두고, 그리기 분기는 컴포넌트 시험(J절) |
+| 암호화 | `apps/api/src/llm/domain/secret.ts` | **A** | D.4 |
+| 흐름 읽기 | `apps/api/src/llm/domain/openai.ts` | **A** | SSE 나누기·조각 읽기·오류 본문 읽기 (D.2) |
+| 생각 과정 떼기 | `apps/api/src/llm/domain/think.ts` | **A** | 답 맨 앞의 `<think>…</think>`를 조각이 갈라져 와도 떼어 낸다 |
+| 대화 규칙 | `apps/api/src/llm/domain/conversation.ts` | **A** | 제목·보낼 메시지 만들기·만료 시각 |
+| LLM 경계 | `apps/api/src/llm/llm.provider.ts` | B | `LLM_CLIENT` 토큰·`LlmClient`·`LlmError`(닿지 않음·거절·읽을 수 없음·시간 상한·중지) |
+| LLM 어댑터 | `apps/api/src/llm/openai.client.ts` | B | `LLM_CLIENT`의 HTTP 구현. 시험은 가짜 LLM 서버(node:http)로 |
+| 등록 | `apps/api/src/llm/providers.service.ts` | B | root만·키 암호화·연결 확인 |
+| 지시문 | `apps/api/src/llm/prompts.service.ts` | B | 사람마다·이름 유일·상한 |
+| 대화 보관 | `apps/api/src/llm/conversations.service.ts` | B | D.5 — 목록·열기·고정·지우기·저장·정리 |
+| 질문 중계 | `apps/api/src/llm/ask.service.ts` | B | D.1 — 흘려보내기 전의 확인(`prepare`), 흘려보내기와 저장(`run`), 중지(`stop`) |
+| 흐름 출구 | `apps/api/src/llm/stream.sink.ts` | B | NDJSON·머리말·살아 있음 줄·받는 쪽 끊김 |
+| DB 오류 로그 | `apps/api/src/llm/db-error.ts` | B | PostgreSQL의 코드·문장만 — drizzle 문장의 매개변수(질문·답)를 싣지 않는다 (FR-1117) |
+| 배선 | `apps/api/src/llm/llm.module.ts` | (측정 밖) | 컨트롤러 둘(`api/llm`, `api/llm/admin/providers`)과 한 시간마다 도는 정리(`LlmSweeper`) |
+| 화면 | `apps/web/src/pages/LlmPage.tsx`·`apps/web/src/pages/LlmPromptsPage.tsx`·`apps/web/src/pages/admin/AdminLlmPage.tsx` | B | G절 |
+| 화면 부품 | `apps/web/src/components/llmStream.ts`(흐름 읽기·상태 기계, Node에서 시험)·`apps/web/src/components/CopyButtons.tsx`·`apps/web/src/components/clipboard.ts` | B | 그리기 분기는 컴포넌트 시험(J절) |
 
 ## I. 설정 항목
 
