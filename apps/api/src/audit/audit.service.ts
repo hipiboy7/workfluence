@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { maskEmail, type AuditAction, type AuditEventView, type AuditQueryDto } from '@workfluence/shared';
 import { and, desc, eq, gte, lt } from 'drizzle-orm';
+import { currentRequest } from '../common/request-context';
 import { DB, type Db } from '../db/db.module';
 import { auditEvents, users } from '../db/schema';
 
@@ -57,6 +58,8 @@ export class AuditService {
       targetId: input.targetId ?? null,
       detail: sanitizeDetail(input.detail),
       ip: input.ip ?? null,
+      // 그 요청의 식별자 — 앱 로그·nginx 로그와 잇는다. 요청 밖(정리·실시간 편집의 자동 저장)이면 비운다 (P11 FR-1212)
+      requestId: currentRequest()?.requestId ?? null,
     });
   }
 
@@ -71,6 +74,8 @@ export class AuditService {
       q.actorId ? eq(auditEvents.actorId, q.actorId) : undefined,
       q.from ? gte(auditEvents.createdAt, q.from) : undefined,
       q.to ? lt(auditEvents.createdAt, q.to) : undefined,
+      // 로그 한 줄의 요청 번호로 그 요청의 감사 행을 찾는다 (P11 FR-1212). 모양은 DTO가 이미 보았다
+      q.requestId ? eq(auditEvents.requestId, q.requestId) : undefined,
     ].filter((c) => c !== undefined);
 
     const rows = await this.db
@@ -83,6 +88,7 @@ export class AuditService {
         targetId: auditEvents.targetId,
         detail: auditEvents.detail,
         ip: auditEvents.ip,
+        requestId: auditEvents.requestId,
         createdAt: auditEvents.createdAt,
       })
       .from(auditEvents)

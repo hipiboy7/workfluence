@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
   LLM_LIMITS,
+  REQUEST_ID_PATTERN,
   ROLES,
   SPACE_KINDS,
   SPACE_MEMBER_ROLES,
@@ -11,6 +12,7 @@ import {
 } from './constants';
 import { validateDocument, type DocNode } from './document';
 import { normalizeLlmBaseUrl, type LlmStreamStatus } from './llm';
+import { DELEGABLE_ACTIONS, type DelegableAction } from './permissions';
 import { POLICY_FLOOR } from './policy';
 
 /** API 요청·응답 계약. 서버(zod 파이프)와 클라이언트(타입)가 같은 정의를 쓴다. */
@@ -155,6 +157,8 @@ export const auditQueryDto = z.object({
   from: z.coerce.date().optional(),
   /** 제외. 날짜만 주면 그날 00:00까지 */
   to: z.coerce.date().optional(),
+  /** 요청 번호 — 로그 한 줄의 `requestId`로 그 요청의 감사 행을 찾는다 (P11 FR-1212). 로그에서 복사해 붙인 앞뒤 공백은 뗀다 */
+  requestId: z.string().trim().regex(REQUEST_ID_PATTERN).optional(),
 });
 export type AuditQueryDto = z.infer<typeof auditQueryDto>;
 
@@ -236,6 +240,16 @@ export const attachLabelDto = z.object({
 });
 export type AttachLabelDto = z.infer<typeof attachLabelDto>;
 
+/**
+ * 위임 목록 전체 (P11 F절) — 켜고 끄는 두 상태뿐이라 목록을 통째로 보낸다(멱등). 위임할 수 있는 행위만, 겹치지 않게
+ */
+export const userGrantsDto = z
+  .object({
+    grants: z.array(z.enum(DELEGABLE_ACTIONS)).refine((a) => new Set(a).size === a.length, '같은 위임을 두 번 적었다'),
+  })
+  .strict();
+export type UserGrantsDto = z.infer<typeof userGrantsDto>;
+
 export const searchQueryDto = z.object({
   q: z.string().trim().min(1).max(200),
   spaceId: z.uuid().optional(),
@@ -260,6 +274,8 @@ export type UserView = {
   role: (typeof ROLES)[number];
   status: UserStatusView;
   mustChangePassword: boolean;
+  /** root가 준 행위 — 관리자만 가진다 (P11 D.1) */
+  grants: DelegableAction[];
   createdAt: string;
 };
 
@@ -269,6 +285,8 @@ export type MeView = {
   displayName: string;
   role: (typeof ROLES)[number];
   mustChangePassword: boolean;
+  /** root가 준 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1) */
+  grants: DelegableAction[];
 };
 
 export type CategoryView = { id: string; name: string; createdAt: string };
@@ -411,6 +429,8 @@ export type AuditEventView = {
   targetId: string | null;
   detail: Record<string, unknown> | null;
   ip: string | null;
+  /** 그 행을 남긴 요청의 번호 (P11 FR-1212). 요청 밖(한 시간마다의 정리·실시간 편집의 자동 저장)과 Phase 11 전의 행은 없다 */
+  requestId: string | null;
   createdAt: string;
 };
 export type ContactInfoView = { message: string; admins: string[] };

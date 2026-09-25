@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import type { LogEvent } from '@workfluence/shared';
 import type { Server } from 'node:http';
 import { CollabGateway } from './pages/collab/collab.gateway';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -10,6 +11,7 @@ import type { Pool } from 'pg';
 import { AppModule } from './app.module';
 import { errorText, isQueryError } from './common/error-text';
 import { PinoNestLogger, createLogger } from './common/logger';
+import { requestMiddleware } from './common/request-log.middleware';
 import { APP_ENV, type AppEnvToken } from './config/config.module';
 import { PG_POOL } from './db/db.module';
 import { runMigrations } from './db/migrate';
@@ -26,8 +28,11 @@ async function bootstrap(): Promise<void> {
   if (env.WF_DB_AUTO_MIGRATE) {
     // 운영에서는 env 스키마가 true를 거부한다 (FR-014)
     const applied = await runMigrations(app.get<Pool>(PG_POOL));
-    logger.info({ applied }, '개발 모드 자동 마이그레이션 완료');
+    logger.info({ event: 'app.migrated' satisfies LogEvent, applied }, '개발 모드 자동 마이그레이션 완료');
   }
+
+  // **첫 미들웨어** — 요청 식별자·요청 문맥·접근 로그 (P11_설계서_Ops D.2·D.3). 뒤의 모든 미들웨어·가드·서비스가 그 문맥 안에서 돈다
+  app.use(requestMiddleware(logger));
 
   if (env.WF_TRUST_PROXY) app.set('trust proxy', 1);
   app.disable('x-powered-by');
@@ -83,7 +88,8 @@ async function bootstrap(): Promise<void> {
   // nginx 설정이 둘이 되고 방화벽 규칙도 둘이 된다 — 폐쇄망에서 늘릴 이유가 없다.
   // `listen` 뒤에 붙이는 것은 그때 서버 객체가 실제로 듣고 있기 때문이다
   app.get(CollabGateway).attach(app.getHttpServer() as Server);
-  logger.info({ port: env.WF_PORT, env: env.WF_ENV, serveWeb: env.WF_SERVE_WEB }, 'workfluence api 기동');
+  // event는 목록(`LOG_EVENTS`)의 코드다 — `satisfies`가 오타를 컴파일에서 막는다(가이드 대조는 목록만 본다, P11 자체 점검 7)
+  logger.info({ event: 'app.started' satisfies LogEvent, port: env.WF_PORT, env: env.WF_ENV, serveWeb: env.WF_SERVE_WEB }, 'workfluence api 기동');
 }
 
 bootstrap().catch((err) => {

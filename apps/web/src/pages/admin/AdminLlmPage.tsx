@@ -9,7 +9,8 @@ const EMPTY = { name: '', baseUrl: '', model: '', apiKey: '' };
 const isPlainHttp = (url: string) => /^\s*http:\/\//i.test(url);
 
 /**
- * LLM 연결 — 시스템 관리자(root)가 사내 LLM을 등록·삭제한다 (P10_설계서_Llm G절, FR-1100~1108).
+ * LLM 연결 — 시스템 관리자(root)와 root가 위임한 관리자가 사내 LLM을 등록·삭제한다 (P10_설계서_Llm G절, FR-1100~1108 ·
+ * P11_설계서_Ops D.1).
  *
  * **API 키는 다시 보이지 않는다** — 목록은 "있음/없음"만(FR-1102). 등록하면 입력칸의 키를 곧바로 비운다. 주소 판정은 서버와
  * **같은 함수**(`normalizeLlmBaseUrl`)를 먼저 돌린다 — 왕복하지 않고 바로 말해 준다. 등록하면 곧바로 연결을 확인한다(FR-1105).

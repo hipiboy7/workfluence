@@ -1,7 +1,8 @@
 import { RELEASE_REQUIRED_FILES, parseChecksums, parseManifest, unlistedRequired, verifyChecksums } from '@workfluence/shared';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { bundleFiles } from './release-files';
 
 /**
  * 반입 묶음 검사 (FR-604).
@@ -13,15 +14,13 @@ function main(): void {
   const dir = resolve(process.argv[2] ?? '');
   if (!process.argv[2]) throw new Error('검사할 묶음 디렉토리를 인자로 준다: pnpm release:verify <디렉토리>');
 
-  const present = readdirSync(dir);
+  // 하위 디렉토리(`ca/`)의 파일까지 본다. **디렉토리 자체는 목록에 없다** — `readFileSync`가 디렉토리에서 `EISDIR`로 터진다
+  // (같은 날짜 디렉토리에 다시 만들거나 누가 폴더를 하나 넣어 두면 검사가 죽던 길)
+  const present = bundleFiles(dir);
   const missing = RELEASE_REQUIRED_FILES.filter((f) => !present.includes(f));
   const expected = parseChecksums(readFileSync(join(dir, 'SHA256SUMS'), 'utf8'));
-  // **디렉토리는 건너뛴다.** `readFileSync`가 디렉토리에서 `EISDIR`로 터진다 —
-  // 같은 날짜 디렉토리에 다시 만들거나 누가 폴더를 하나 넣어 두면 검사가 죽는다
   const actual = Object.fromEntries(
-    present
-      .filter((f) => f !== 'SHA256SUMS' && statSync(join(dir, f)).isFile())
-      .map((f) => [f, createHash('sha256').update(readFileSync(join(dir, f))).digest('hex')]),
+    present.filter((f) => f !== 'SHA256SUMS').map((f) => [f, createHash('sha256').update(readFileSync(join(dir, f))).digest('hex')]),
   );
   // **체크섬 목록 자체를 먼저 본다.** 목록이 비어 있으면 아무것도 검사하지 않고 통과한다 —
   // 옮기다 잘린 `SHA256SUMS`가 그 줄들을 잃은 채 통과하던 길이다

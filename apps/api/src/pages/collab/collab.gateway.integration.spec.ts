@@ -6,6 +6,7 @@ import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, DOCUMENT_SCHEMA_VERSION, MAX_DOCUMENT
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { AuditService } from '../../audit/audit.service';
+import { isLogLine, type LogLine } from '../../common/log-line';
 import { RevocationBus } from '../../common/revocation.bus';
 import { loadEnv, type AppEnvToken } from '../../config/config.module';
 import { InAppChannel, NotificationsService } from '../../notifications/notifications.service';
@@ -203,6 +204,10 @@ async function attach(uid = userId, session = sid): Promise<{ socket: FakeSocket
   inner.join(pageId, room, socket, { id: uid, role: 'admin' }, 'tester', session, spaceId);
   return { socket, room };
 }
+
+
+/** 경고 spy가 받은 event 줄 (P11 D.4) — 문장이 아니라 event 코드와 필드로 가린다 */
+const eventLines = (spy: { mock: { calls: unknown[][] } }): LogLine[] => spy.mock.calls.map((c) => c[0]).filter(isLogLine);
 
 describe('마지막 퇴장 저장 (FR-710)', () => {
   it('고친 뒤 마지막 사람이 나가면 버전이 하나 남는다', async () => {
@@ -493,7 +498,7 @@ describe('바뀌지 않은 문서로 다시 판정하지 않는다 (P8 다섯 �
         await idle();
         await inner.sweep();
       }
-      expect(warn.mock.calls.filter(([m]) => String(m).includes('검증 실패로 저장하지 않았다'))).toHaveLength(1);
+      expect(eventLines(warn).filter((l) => l.event === 'collab.save_invalid')).toHaveLength(1);
       expect(inner.rooms.get(pageId)).toBe(room);
     } finally {
       warn.mockRestore();
@@ -1038,8 +1043,8 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
         expect(text).not.toContain('@collab-c');
         expect(await saveAndCarol()).toEqual([]);
         // 관문을 지난 변경은 늘 믿을 수 있다 — Phase 8의 경고가 나오지 않는다 (D.8)
-        expect(warn.mock.calls.map((c) => String(c[0]))).not.toContainEqual(expect.stringContaining('보낸 것보다 문서를 더 바꿨다'));
-        expect(warn.mock.calls.map((c) => String(c[0]))).toContainEqual(expect.stringContaining('rule=complete'));
+        expect(eventLines(warn).map((l) => l.event)).not.toContain('collab.makers_unsure');
+        expect(eventLines(warn).filter((l) => l.event === 'collab.gate_refused').map((l) => l.fields.rule)).toContain('complete');
       } finally {
         warn.mockRestore();
       }
@@ -1324,7 +1329,9 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
 
   describe('**동시 편집은 위조가 아니다** — Yjs가 스스로 지우는 것 (세 번째 코드 리뷰 4)', () => {
     const forgeryWarnings = (spy: { mock: { calls: unknown[][] } }): string[] =>
-      spy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('보낸 것보다'));
+      eventLines(spy)
+        .filter((l) => l.event === 'collab.makers_unsure')
+        .map((l) => l.msg);
 
     it('X가 치는 동안 U가 그 문단을 지운다 — X의 새 글자가 딸려 지워진다', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn');

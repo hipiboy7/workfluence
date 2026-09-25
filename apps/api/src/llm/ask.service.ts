@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { LLM_LIMITS, type LlmAskDto, type LlmStreamStatus, type Principal } from '@workfluence/shared';
 import { AuditService } from '../audit/audit.service';
-import { errorText } from '../common/error-text';
+import { logLine } from '../common/log-line';
 import { RevocationBus } from '../common/revocation.bus';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
@@ -193,13 +193,13 @@ export class LlmAskService implements OnModuleDestroy {
         // 우리 전체 상한이 걸렸으면 그렇게 말한다. 어댑터가 말한 시간 제한(조각 사이 무응답 등)은 그 문장대로
         message = e.kind === 'timeout' && timeout.aborted ? `시간 상한(${spell(this.env.WF_LLM_TIMEOUT_MS)})을 넘었다` : e.message;
         // **로그에는 종류와 HTTP 상태만** — 거절 문장은 남의 응답이다 (D.2). 그래도 운영자가 까닭의 종류를 로그에서 본다
-        this.log.warn(`LLM 답을 받지 못했다: ${e.kind}${e.status !== null ? ` HTTP ${e.status}` : ''} (provider=${p.provider.id})`);
+        this.log.warn(logLine('llm.ask_failed', 'LLM 답을 받지 못했다', { providerId: p.provider.id, kind: e.kind, httpStatus: e.status }));
       } else {
         status = 'failed';
         failure = 'unknown';
         message = 'LLM 응답을 처리하지 못했다';
         // **내용을 싣지 않는다** — `errorText`는 drizzle 문장(매개변수)을 버린다 (FR-1117)
-        this.log.error(`LLM 응답을 처리하지 못했다: ${errorText(e)}`);
+        this.log.error(logLine('llm.ask_error', 'LLM 응답을 처리하지 못했다', { providerId: p.provider.id }, e));
       }
     }
     // 흐름이 끝났다 — 여기부터의 중지는 멈출 것이 없다
@@ -262,7 +262,7 @@ export class LlmAskService implements OnModuleDestroy {
         if (!saved) message = '그 사이에 대화가 지워져 이 답을 저장하지 않았다';
       } catch (e) {
         message = '답을 저장하지 못했다';
-        this.log.error(`LLM 대화를 저장하지 못했다: ${errorText(e)}`);
+        this.log.error(logLine('llm.save_failed', 'LLM 대화를 저장하지 못했다', { providerId: p.provider.id, conversationId: p.conversationId }, e));
       }
     }
     if (!saved) {
@@ -276,7 +276,7 @@ export class LlmAskService implements OnModuleDestroy {
           detail: detail({ saved: false, evicted: 0 }),
           ip,
         })
-        .catch((e: unknown) => this.log.error(`LLM 질문의 감사 기록을 남기지 못했다: ${errorText(e)}`));
+        .catch((e: unknown) => this.log.error(logLine('llm.audit_failed', 'LLM 질문의 감사 기록을 남기지 못했다', { providerId: p.provider.id }, e)));
     }
 
     try {

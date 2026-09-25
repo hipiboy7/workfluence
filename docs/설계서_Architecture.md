@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 10까지 구현 완료** (2026-09-25). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 11까지 구현 완료** (2026-09-26). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -58,7 +58,9 @@ workfluence/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
 │   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드 / [P10] order.ts (이름 정렬 — `COLLATE "C"`, T-046)
 │   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts /
-│   │   │   │                     [P10] error-text.ts (로그에 적는 오류 한 줄 — drizzle 문장의 매개변수를 싣지 않는다)
+│   │   │   │                     [P10] error-text.ts (로그에 적는 오류 한 줄 — drizzle 문장의 매개변수를 싣지 않는다) /
+│   │   │   │                     [P11] request-context.ts · request-log.middleware.ts · log-line.ts · domain/{request-id,access-log}.ts
+│   │   │   │                     (요청 번호·요청 문맥·접근 로그·event 줄)
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
 │   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드
 │   │   │   ├── users/            [P1] 가입·승인·초기화·역할
@@ -113,7 +115,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `env.ts` | `WF_*` 환경 스키마(strict), 파싱, `.env.example` 키 추출 | 서버가 쓰고, 테스트가 `.env.example`과 대조한다 |
 | `constants.ts` | 역할·상태·Crew 역할·감사 이벤트·문서 스키마 버전·정책 기본값·CSRF 헤더 | 화면 문구와 서버 판정이 같은 목록을 봐야 한다 |
 | `document.ts` | 문서 JSON 허용 목록(노드·속성·마크·자식·노드별 마크), 검증, 속성·마크 판정 함수, 텍스트 추출 | **서버 검증 · 실시간 편집의 관문 · 편집기가 같은 목록을 본다.** 편집기 쪽은 대조 테스트(`apps/web/src/components/extensions.spec.ts`)가 강제한다 — 어긋나면 편집기가 만든 문서를 서버가 받지 않는다 (P9 D.7) |
-| `permissions.ts` | `can()`·`spaceAccess()`·역할 간 우열·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
+| `permissions.ts` | `can()`·`spaceAccess()`·역할과 위임의 우열(`canManageUser` — Phase 11부터 위임도 본다)·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
 | `security.ts` | ID·email 마스킹, 임시 비밀번호·식별자 생성 (난수 소스 주입) | 난수를 주입받아 순수 함수로 두면 테스트가 결정적이다 |
 | `schemas.ts` | API 요청 DTO(zod) + 응답 뷰 타입 | 서버 검증과 클라이언트 타입이 한 정의에서 나온다 |
 | `release.ts` | 반입 묶음의 필수 구성 목록 | 문서가 아니라 코드가 단일 출처다 (`CLAUDE.md` 8.3절) |
@@ -135,14 +137,14 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 테이블 | 핵심 컬럼 | 도입 | 비고 |
 |---|---|---|---|
 | `settings` | `key` PK, `value` jsonb, `updated_by`, `updated_at` | **P0** | 운영 조절값 (`CLAUDE.md` 5절 세 번째 분류) |
-| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by` | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
+| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by`, `grants`(P11 — root가 준 행위) | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
 | `sessions` | (connect-pg-simple 관리) | P1 | 서버측 세션 |
 | `space_categories` | `id`, `name` uq, `created_by` | P2 | |
 | `spaces` | `id`, `key` uq(자동), `name`, `description`, `kind`, `status`, `category_id`, `created_by`, `suspended_at/by`, `deleted_at` | P2 | `kind`: `personal`/`team`, `status`: `active`/`suspended` |
 | `space_members` | (`space_id`,`user_id`) PK, `role`, `added_by` | P2 | Crew. `owner`/`editor`/`viewer` |
 | `pages` | `id`, `space_id`, `parent_id`, `title`, `position`, `current_version_no`, `search_text`, `created_by`, `updated_by`, `deleted_at` | P2 | `search_text`는 파생 데이터 |
 | `page_versions` | `id`, `page_id`, `version_no`, `title`, `content_json`, `content_text`, `created_by` — (`page_id`,`version_no`) uq | P2 | **append-only** |
-| `audit_events` | `id`, `action`, `actor_id`, `target_type`, `target_id`, `detail` jsonb, `ip`, `created_at` | P1 | **append-only** (트리거로 UPDATE/DELETE 차단) |
+| `audit_events` | `id`, `action`, `actor_id`, `target_type`, `target_id`, `detail` jsonb, `ip`, `request_id`(P11), `created_at` | P1 | **append-only** (트리거로 UPDATE/DELETE 차단). `request_id`는 그 요청의 번호 — 앱 로그·nginx 로그와 잇는다 |
 | `attachments` | `id`, `page_id`, `sha256`, `filename`, `mime`, `size`, `uploaded_by`, `deleted_at` | P3 | 내용 해시로 저장, 원본 파일명은 메타데이터 |
 | `comments` | `id`, `page_id`, `parent_id`, `body_json`, `created_by`, `deleted_at` | P3 | |
 | `labels` / `page_labels` | `id`,`name` / (`page_id`,`label_id`) | P3 | |
@@ -281,6 +283,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 8 | 멘션 귀속 — `pages/domain/makers.ts`(멘션을 만든 사람의 장부: 새로 생긴 멘션 자리 · 어느 연결이 어느 글자를 들여왔나 · 옮김을 가리는 사라진 이름), `page_realtime.authors`, `notifications.actor_id` null 허용 (`0008`) |
 | 9 | 실시간 편집의 관문 — `pages/domain/gate.ts`(되풀이 검사·완결·구조·주인 규칙), `pages/domain/presence.ts`(사람 표시 거르기), 허용 목록의 자식·노드별 마크·값 규칙, 편집기 확장 목록 하나(`apps/web/src/components/extensions.ts`)와 대조 테스트, 감사 종류 `page.collab.reject`, 서버만 보내는 저장 상태 알림 `COLLAB_MSG.status`(P9 D.9), 화면의 연결 상태 기계 `apps/web/src/components/collabLink.ts`. 화면의 동기화 라이브러리는 `@tiptap/y-tiptap`이다(P9 B.1). 마이그레이션 없음 |
 | 10 | 사내 LLM 질문 — `llm/` 모듈(등록 root만·키 암호화·NDJSON 중계·보관 규칙·한 시간마다 만료 정리), 표 넷(`0009_llm`), 정책값 셋(`llmRetentionDays`·`llmConversationMax`·`llmPinnedMax`), 환경변수 둘(`WF_LLM_MASTER_KEY`·`WF_LLM_TIMEOUT_MS`), 감사 종류 넷, 공유 계약 `llm.ts`·`markdown.ts`, 교체 축 `LLM_CLIENT`, 화면 셋과 페이지 복사 버튼, web 컴포넌트 시험 틀(`happy-dom`, 보류 28) |
+| 11 | 운영 로그·위임·반입 설정 — 요청 번호(nginx `$request_id` → `X-Request-Id`)·요청 문맥(`AsyncLocalStorage`)·앱 접근 로그·event 코드(`LOG_EVENTS`, 장애대응 가이드와 대조)·감사 `request_id`, `users.grants`와 `can()`의 위임(`llm.manage`), compose 로그 순환·nginx JSON 로그·사내 CA 시작 스크립트(`0010_ops`) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
@@ -316,6 +319,8 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 검색 엔진 교체 | 6절 축 | M | 같음. 색인은 파생 데이터라 재생성 가능하다 |
 | 외부 시스템 알림 (메일·메신저) | ③ + 설정 | M | 폐쇄망에서 닿는 곳인지 먼저 확인 |
 | 사내 LLM의 형식이 다르다 (다른 게이트웨이) | 6절 축 | M | `LLM_CLIENT` 뒤의 어댑터(`apps/api/src/llm/openai.client.ts`)와 형식 읽기(`domain/openai.ts`)만 바꾼다 |
+| root가 관리자에게 **다른 행위도** 위임한다 | 권한 판정 | L | `DELEGABLE_ACTIONS`(`packages/shared/src/permissions.ts`)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`를 고친다 — 잊으면 `apps/api/src/db/constraints.integration.spec.ts`가 둘이 다르다고 막는다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다. 위임받은 관리자는 자기에게 없는 위임을 가진 셈이 되므로 관리의 우열(`canManageUser`)이 저절로 따라간다 |
+| 새 로그 줄을 더한다 | 로그 | S | `LOG_EVENTS`(`packages/shared/src/constants.ts`)에 코드를 더하고 `logLine()`으로 남긴다. 장애대응 가이드 7.28절 표에 한 줄 — 빠뜨리면 `verify:docs`가 막는다 |
 
 ### 11.3 값을 추가할 때 함께 고쳐야 하는 짝
 

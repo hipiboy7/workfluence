@@ -1,5 +1,5 @@
 import { Global, Injectable, Logger, Module } from '@nestjs/common';
-import { errorText } from './error-text';
+import { logLine } from './log-line';
 
 /**
  * 세션을 끊었다는 사실을 **아무것도 import하지 않는 가운데 지점**에 알린다
@@ -44,7 +44,8 @@ export class RevocationBus {
       try {
         fn(userId, sid);
       } catch (e) {
-        this.log.warn(`세션 파기 통지 처리 실패 (user=${userId}): ${errorText(e)}`);
+        // 대상은 `targetUserId` — 로그의 `userId`는 세션을 끊은 요청을 보낸 사람이다(요청 문맥, P11 코드 리뷰 6)
+        this.log.warn(logLine('session.revoke_failed', '세션 파기 통지 처리 실패', { targetUserId: userId }, e));
       }
     }
   }

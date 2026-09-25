@@ -1,3 +1,4 @@
+import { DELEGABLE_ACTIONS } from '@workfluence/shared';
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
@@ -44,6 +45,8 @@ export const users = pgTable(
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     approvedBy: uuid('approved_by'),
+    /** root가 준 행위 (P11 D.1) — 관리자만 가진다. 판정은 shared `can()`, 역할이 바뀌면 `grantsForRole`로 다시 정한다 */
+    grants: text('grants').array().notNull().default(sql`'{}'::text[]`),
     ...timestamps,
   },
   (t) => [
@@ -51,6 +54,10 @@ export const users = pgTable(
     uniqueIndex('users_email_uq').on(t.email),
     uniqueIndex('users_oidc_sub_uq').on(t.oidcSub),
     check('users_login_method_chk', sql`${t.passwordHash} IS NOT NULL OR ${t.oidcSub} IS NOT NULL`),
+    // 목록은 코드의 것(`DELEGABLE_ACTIONS`)이다. 마이그레이션(손으로 쓴 SQL)의 CHECK가 같은 목록인지는 `constraints.integration.spec.ts`가 본다
+    // — 위임할 행위를 더하고 CHECK를 잊으면 root의 위임이 날것의 500이 된다 (P11 코드 리뷰 5)
+    check('users_grants_known_chk', sql`${t.grants} <@ ARRAY[${sql.raw(DELEGABLE_ACTIONS.map((a) => `'${a}'`).join(', '))}]::text[]`),
+    check('users_grants_admin_chk', sql`cardinality(${t.grants}) = 0 OR ${t.role} = 'admin'`),
   ],
 );
 
@@ -82,6 +89,8 @@ export const auditEvents = pgTable(
     targetId: text('target_id'),
     detail: jsonb('detail'),
     ip: text('ip'),
+    /** 그 요청의 식별자 (P11 FR-1212) — 앱 로그·nginx 로그와 잇는다. 요청 밖에서 남긴 행은 비어 있다 */
+    requestId: text('request_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('audit_events_created_idx').on(t.createdAt), index('audit_events_actor_idx').on(t.actorId)],

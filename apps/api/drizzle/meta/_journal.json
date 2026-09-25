@@ -71,6 +71,13 @@
       "when": 1790308800000,
       "tag": "0009_llm",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790395200000,
+      "tag": "0010_ops",
+      "breakpoints": true
     }
   ]
 }

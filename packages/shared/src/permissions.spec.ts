@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PASSWORD_POLICY } from './constants';
-import { can, canAssignRole, canManageUser, checkPasswordPolicy, countCharClasses, isAdminRole, spaceAccess } from './permissions';
+import { DELEGABLE_ACTIONS, can, canAssignRole, canManageUser, checkPasswordPolicy, countCharClasses, grantsForRole, isAdminRole, spaceAccess } from './permissions';
 
 const root = { id: 'r', role: 'root' as const };
 const admin = { id: 'a', role: 'admin' as const };
@@ -54,11 +54,24 @@ describe('canAssignRole / canManageUser', () => {
   });
 
   it('admin은 root 계정을 관리할 수 없고 member는 아무도 관리할 수 없다', () => {
-    expect(canManageUser(admin, 'root')).toBe(false);
-    expect(canManageUser(admin, 'admin')).toBe(true);
-    expect(canManageUser(admin, 'member')).toBe(true);
-    expect(canManageUser(root, 'root')).toBe(true);
-    expect(canManageUser(member, 'member')).toBe(false);
+    expect(canManageUser(admin, { role: 'root' })).toBe(false);
+    expect(canManageUser(admin, { role: 'admin' })).toBe(true);
+    expect(canManageUser(admin, { role: 'member' })).toBe(true);
+    expect(canManageUser(root, { role: 'root' })).toBe(true);
+    expect(canManageUser(member, { role: 'member' })).toBe(false);
+  });
+
+  it('**자기에게 없는 위임을 가진 관리자는 관리하지 못한다** — 그 사람의 비밀번호를 초기화해 로그인하면 위임을 얻는다 (P11 보안 검토 1)', () => {
+    const delegated = { role: 'admin' as const, grants: ['llm.manage'] };
+    expect(canManageUser({ id: 'a2', role: 'admin', grants: [] }, delegated)).toBe(false);
+    expect(canManageUser(admin, delegated)).toBe(false);
+    // 같은 것을 가진 관리자, root는 관리한다
+    expect(canManageUser({ id: 'a3', role: 'admin', grants: ['llm.manage'] }, delegated)).toBe(true);
+    expect(canManageUser(root, delegated)).toBe(true);
+    // 위임은 관리자만 가진다 — member·root 행의 grants는 보지 않는다(DB도 막는다)
+    expect(canManageUser(admin, { role: 'member', grants: ['llm.manage'] })).toBe(true);
+    // 위임이 아닌 것을 grants에 적어도 판정이 달라지지 않는다
+    expect(canManageUser(admin, { role: 'admin', grants: ['system.manage'] })).toBe(true);
   });
 });
 
@@ -119,3 +132,44 @@ describe('checkPasswordPolicy (8자·2종)', () => {
     expect(countCharClasses('aB1!')).toBe(4);
   });
 });
+
+describe('위임 — root가 관리자에게 행위 하나를 준다 (P11 D.1, FR-1200~1206)', () => {
+  const granted = { ...admin, grants: ['llm.manage'] };
+
+  it('**root는 LLM 연결 관리를 늘 한다** — 위임 없이. 위임을 주고 거두는 것도 root다', () => {
+    expect(can(root, 'llm.manage')).toBe(true);
+    expect(can(root, 'user.grants.change')).toBe(true);
+  });
+
+  it('**관리자는 위임받았을 때만** LLM 연결 관리를 한다', () => {
+    expect(can(admin, 'llm.manage')).toBe(false);
+    expect(can({ ...admin, grants: [] }, 'llm.manage')).toBe(false);
+    expect(can(granted, 'llm.manage')).toBe(true);
+  });
+
+  it('**위임은 관리자에게만 먹는다** — member·root가 위임 목록을 들고 와도 역할만 본다', () => {
+    expect(can({ ...member, grants: ['llm.manage'] }, 'llm.manage')).toBe(false);
+    expect(can({ ...root, grants: [] }, 'llm.manage')).toBe(true);
+  });
+
+  it('**위임할 수 있는 행위만 먹는다** — 목록에 시스템 관리·위임 바꾸기를 적어 와도 안 된다', () => {
+    expect(DELEGABLE_ACTIONS).toEqual(['llm.manage']);
+    const forged = { ...admin, grants: ['system.manage', 'user.grants.change', 'llm.manage'] };
+    expect(can(forged, 'system.manage')).toBe(false);
+    expect(can(forged, 'user.grants.change')).toBe(false);
+    expect(can(forged, 'llm.manage')).toBe(true);
+  });
+
+  it('**위임받은 관리자도 다시 주지 못한다** — 주고 거두는 것은 root만 (A.1-3)', () => {
+    expect(can(granted, 'user.grants.change')).toBe(false);
+    expect(can(admin, 'user.grants.change')).toBe(false);
+  });
+
+  it('**grantsForRole — 관리자가 아니게 되면 위임을 비운다**, 관리자면 위임할 수 있는 것만 남긴다 (A.1-4)', () => {
+    expect(grantsForRole('admin', ['llm.manage'])).toEqual(['llm.manage']);
+    expect(grantsForRole('member', ['llm.manage'])).toEqual([]);
+    expect(grantsForRole('root', ['llm.manage'])).toEqual([]);
+    expect(grantsForRole('admin', ['system.manage', 'llm.manage', 'llm.manage'])).toEqual(['llm.manage']);
+  });
+});
+

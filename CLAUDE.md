@@ -38,7 +38,7 @@
 | 인증 | 로컬 ID/PW(argon2id) + 사내 IdP **OIDC** Authorization Code. 세션은 서버측 PG 테이블 |
 | 편집기 | TipTap(ProseMirror). 서버는 **JSON만** 수신·검증. HTML 수신 금지 |
 | 검색 | PostgreSQL 내장. **`ILIKE` + `pg_trgm` GIN 인덱스**로 정했다 (Phase 3 실측, 보류 2 종료). tsvector는 쓰지 않는다 |
-| 로그 | 앱 로그는 pino JSON stdout. **감사로그는 별도 DB 테이블**(append-only) |
+| 로그 | 앱 로그는 pino JSON stdout — 줄마다 event 코드, 요청 안이면 요청 번호. **감사로그는 별도 DB 테이블**(append-only) |
 | 테스트 | Vitest + 실제 PostgreSQL 통합 테스트 + Playwright E2E (3절) |
 | 배포 | 이미지 3종: app(Nest + SPA 정적), nginx(TLS), postgres. `docker save`/`load`로 반입 (8절) |
 
@@ -75,6 +75,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 8 | 멘션 귀속 (보류 21) | 같이 쓰는 문서에서 A가 `@B`를 치고 **B가 마지막으로 고쳐도** B의 알림함이 "A 님이 불렀다"고 말한다. 누가 그 멘션을 만들었는지 확실하지 않으면 이름을 지어내지 않고 비운다 |
 | 9 | 실시간 편집의 관문 (보류 22·23·24) | 조작한 연결이 편집기가 만들지 않는 것을 보내거나 남의 클라이언트 ID로 써도 **문서에 들어가지 않고 그 연결만 끊긴다.** 두 사람의 편집은 계속 오가고 자동 저장이 이어진다. 거절은 감사로그에 남는다. 이메일 주소를 쳐도 저장된다 |
 | 10 | 사내 LLM 질문 (F-002 · 보류 28) | 시스템 관리자가 사내 LLM을 등록하면 누구나 메뉴에서 묻고 **답이 흘러나온다.** 사람마다 지시문을 여럿 저장해 새 대화에서 고른다. 대화는 마지막 사용 뒤 7일·사람마다 100개까지 남고 고정한 것(20개까지)은 풀 때까지 남는다. 위키 페이지를 텍스트·마크다운으로 복사해 질문에 붙인다. API 키는 등록한 뒤 다시 보이지 않는다 |
+| 11 | 운영 로그·LLM 관리 위임·사내 LLM 반입 설정 (F-003 · F-004 · 보류 29) | 오류 한 줄을 **요청 식별자 하나로** nginx 로그·앱 로그·감사로그에서 함께 찾는다. 로그에 검색어가 남지 않고 로그가 디스크를 채우지 않는다. 시스템 관리자가 관리자 한 사람에게 LLM 연결 관리를 주면 그 관리자가 LLM을 등록하고, 거두면 막힌다. 사내 LLM은 반입 가이드만 보고 현장에서 연결한다 |
 
 인수 기준의 단일 출처는 `docs/scope-definition.md` 5절이다.
 
@@ -137,7 +138,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 26 | **서버가 잃은 상태는 되살리지 않는다** — 서버가 저장 전에 죽어 한 사람의 글자를 잃고, 다른 사람의 화면이 같은 Y.Doc으로 다시 붙어 그 글자를 보내면 주인이 다른 조각이라 거절된다(진짜인지 서버가 가릴 수 없다). 그 사람의 글자를 **전부** 잃었으면 반대로 다시 붙은 쪽이 그 클라이언트의 주인이 되어, 원래 사람이 같은 Y.Doc으로 다시 붙어 쓸 때 거절된다(`P8_설계서_Mention` C.2 "남는 것 하나"). 방이 **정본에서** 다시 만들어지면(실시간 상태도 장부도 없다) 같은 Y.Doc의 전체 재전송이 받아들여져 **본문이 두 배**가 된다(Phase 6부터 — 세 번째 자체 점검 2). 이 판단은 **"같은 Y.Doc 재접속은 표시 이름을 바꿀 때뿐이고, 서버가 죽으면 화면은 스스로 다시 붙지 않는다"**(P7 쟁점 5)는 지금 화면의 동작에 기댄다 | 화면이 스스로 다시 붙게 하는 Phase(자동 재접속), 또는 "다시 붙었더니 끊겼다·남의 글자가 사라졌다"가 보고될 때 | 재접속 때 서버보다 앞선 남의 조각을 어떻게 다룰지(버림·주인 확인)를 다시 정하고, 게이트웨이 통합 시험의 재기동 시나리오에 넣는다 | `P9_설계서_Gate` D.8 |
 | 27 | **프레임의 크기와 받는 화면의 부담은 보지 않는다** — 한 프레임은 `ws` 기본 상한(100MiB)까지 받아 읽고 판정한다. 모양이 맞는 큰 값(표 칸 `colspan` 10만 같은)은 관문을 지나 받은 동료의 화면을 무겁게 할 수 있다. 서버를 오래 멈추던 길(들이기 흉내의 제곱 비용 — 서로를 기다리는 클라이언트 2만 개에 45초)은 병합 전에 고쳤다 | 한 사람의 편집으로 서버나 동료의 화면이 멈칫한다는 보고, 또는 부하 측정(보류 14)에 실시간 편집을 더할 때 | `maxPayload`를 가장 큰 정상 붙여 넣기(`P9_검증기록_Gate` 2.4)의 몇 배로 두고, `colspan`·`rowspan` 같은 값의 범위를 편집기가 만드는 범위로 정해 값 규칙에 더한다 | `P9_설계서_Gate` D.8 |
 | ~~28~~ | ~~web에 컴포넌트 시험 틀이 없다~~ → **닫음 2026-09-25 (Phase 10). 들였다 — `happy-dom` + Testing Library.** 판정 방법대로 쟀다: 셋 다 MIT(하위 의존성 `aria-query`는 Apache-2.0), **개발 의존성이라 이미지·반입 목록·SBOM이 바뀌지 않는다**, 설치 +21개·약 24MB. jsdom보다 `happy-dom`을 고른 것은 의존성이 적고 클립보드 API가 있어서다. 시험 파일 첫 줄의 `@vitest-environment happy-dom`으로 **그 파일만** DOM에서 돈다. 상태 기계를 React 밖으로 빼는 방식(`collabLink.ts`·`llmStream.ts`)은 그대로 쓴다 — 둘은 서로를 대신하지 않는다. CI 시간은 검증기록 | 종료 | — | `P10_설계서_Llm` J절 |
-| 29 | **사내 LLM 실연동** — Phase 10은 가짜 vLLM 서버(OpenAI 호환 SSE)로만 확인했다. 흐름·오류 본문·생각 과정 필드(`reasoning_content`·`reasoning`·`<think>`)의 모양은 vLLM의 OpenAI 호환 형식에서 온 가정이다 | 사내 LLM 서버의 주소를 받고, 개발 서버에서 그 서버에 닿는 날 (확인 필요 A와 같은 처지) | 관리 화면에서 등록 → 연결 확인이 모델 목록을 받는지, 질문 하나가 흘러나와 저장되는지 본다. reasoning parser를 켠 서버와 끈 서버 둘 다, 문맥보다 긴 질문의 거절 문장(화면이 "새 대화를 시작한다"를 붙이는지), 키 있음·없음, **붐빌 때 첫 조각까지의 시간**(Node 내장 `fetch`가 5분 무응답이면 끊는다 — 넘으면 `undici`를 들일지 정한다). **주소가 `https`이고 사내 CA면** 앱 컨테이너가 그 CA를 믿게 하는 설정(`NODE_EXTRA_CA_CERTS` + 인증서 마운트)이 `deploy/compose.yml`에 아직 없다 — 그때 더한다(사내 IdP도 같은 처지다). 형식이 다르면 `apps/api/src/llm/domain/openai.ts`와 `apps/api/src/llm/openai.client.ts` 두 파일만 고친다. **모의 통과는 완료가 아니다** (9.1절) | `P10_검증기록_Llm` 갱신 |
+| 29 | **사내 LLM 실연동** — Phase 10은 가짜 vLLM 서버(OpenAI 호환 SSE)로만 확인했다. 흐름·오류 본문·생각 과정 필드(`reasoning_content`·`reasoning`·`<think>`)의 모양은 vLLM의 OpenAI 호환 형식에서 온 가정이다 | **폐쇄망 반입 뒤 현장에서** (사용자 결정 2026-09-26: "사내 LLM은 폐쇄망에 반입해서 설정할거라, 설정 방법만 쉽게 적어놔." — 개발 서버에서 실연동하지 않는다) | 반입 가이드 10절 "사내 LLM 연결하기"를 순서대로 한다 — 등록 → 연결 확인이 모델 목록을 받는지, 질문 하나가 흘러나와 저장되는지 본다. 현장 기록을 받으면 이 행을 닫는다. reasoning parser를 켠 서버와 끈 서버 둘 다, 문맥보다 긴 질문의 거절 문장(화면이 "새 대화를 시작한다"를 붙이는지), 키 있음·없음, **붐빌 때 첫 조각까지의 시간**(Node 내장 `fetch`가 5분 무응답이면 끊는다 — 넘으면 `undici`를 들일지 정한다). **주소가 `https`이고 사내 CA면** compose 옆의 `ca/ca.pem`에 그 기관 인증서를 두고 앱을 **다시 만든다**(`up -d --force-recreate api` — `up -d`만으로는 파일을 알아채지 못한다, T-049) — 시작 스크립트가 믿게 한다(Phase 11, `deploy/entrypoint.sh`. 사내 IdP도 같은 길). 형식이 다르면 `apps/api/src/llm/domain/openai.ts`와 `apps/api/src/llm/openai.client.ts` 두 파일만 고친다. **모의 통과는 완료가 아니다** (9.1절) | `P10_검증기록_Llm` 갱신 |
 | 30 | **LLM 질문의 빈도 제한이 없다** — "한 사람이 동시에 하나만"(FR-1114)은 빈도가 아니다. LLM이 곧바로 거절하는 상태(주소 틀림·문맥 초과)에서 한 사람이 되풀이해 물으면 감사 `llm.ask` 행(append-only, 보존 365일)이 빠르게 쌓인다. 로그인한 사람만 할 수 있고, 페이지 내보내기 같은 기존 요청도 같은 처지다 (Phase 10 병합 전 보안 검토) | 감사로그가 `llm.ask`로 불어나는 것이 보일 때, 또는 부하 측정(보류 14)에 LLM을 더할 때 | `SELECT actor_id, date_trunc('minute', created_at), count(*) FROM audit_events WHERE action = 'llm.ask' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 10`로 한 사람의 분당 최대를 본다. 두면 사람마다의 빈도를 운영 설정(5절 세 번째 분류)으로 둔다 | `P10_설계서_Llm` D.8 |
 
 **확인 필요 (사용자 답변 대기)**
@@ -147,7 +148,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | A | 개발 PC에서 사내 IdP에 접근 가능한가 | 불가로 가정. 개발은 로컬 계정 + 모의 OIDC, 실연동은 Linux 서버에서 |
 | B | 사내 비밀번호·세션·감사로그 보존 정책 문서가 있는가 | 없다고 가정. 7절 기본값 사용 |
 | C | Direct 리뷰어가 있는가 | 없다고 가정. PR은 셀프 머지, 자체 점검을 강화 |
-| F | 사내 LLM의 등록·삭제를 **시스템 관리자(root)만** 하는가, admin도 하는가 (2026-09-25, Phase 10) | root만으로 가정한다(`system.manage` — 요청 원문 "'시스템 관리자'가 '시스템 관리자 화면'에서", P10 설계서 A.1-1). admin도 해야 하면 `packages/shared/src/permissions.ts`에서 행위 하나를 admin에게 준다 |
+| ~~F~~ | ~~사내 LLM의 등록·삭제를 **시스템 관리자(root)만** 하는가, admin도 하는가 (2026-09-25, Phase 10)~~ | **답 2026-09-26**: "시스템 관리자가 메인 권한을 갖고, 관리자에게 권한을 부여할 수 있도록 만들어줘." → Phase 11(F-004): root는 늘 하고, root가 관리자 한 사람씩 **LLM 연결 관리**(`llm.manage`)를 주고 거둔다(`docs/P11_설계서_Ops.md` D.1) |
 | ~~D~~ | ~~Linux 서버의 Docker 버전·디스크 여유~~ | **답 2026-09-21** (Phase 0 첫 빌드 실측): Docker 29.6.1 · Compose v5.3.1 · 여유 20GB. 그 서버는 사내 프록시 뒤라 **빌드 컨테이너에 프록시를 넘겨야 한다** (`deploy/compose.yml`의 `build.args`) |
 | ~~E~~ | ~~**개발 환경을 이 Windows PC에서 Linux 서버로 옮기는가**~~ (사용자 의사 2026-09-21: 리눅스에서 이어서 진행). 옮긴다면 0.3절 환경 3종과 8.1절 데이터 위치 규칙이 더 이상 맞지 않는다 | 옮긴다고 가정. **Linux 세션의 첫 작업으로 0.3절·8.1절을 그 서버의 실제 경로·용량으로 고쳐 쓰고 근거를 `docs/internal/검토서_방법론개정.md`에 남긴다.** 개발과 빌드가 같은 호스트가 되므로 "개발 PC에 Docker가 없다"는 전제와 D 드라이브 `.local/` 규칙을 다시 판정해야 한다. → **답 2026-09-21: 옮겼다.** 0.3절을 환경 2종으로, 8.1절을 Linux 기준으로 고쳐 썼다. 그 서버에서 `pnpm check:env`가 `READY`, `pnpm check` 통과를 실측으로 확인했다 |
 
@@ -239,7 +240,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 - **문서의 모든 실행 명령은 `pnpm <script>` 형태로만 적는다.** 구현은 TypeScript(`tsx`)로 두 OS에서 같게 동작하게 한다. `.sh`는 `deploy/`(Linux 전용)에만 둔다.
 - 편집기에서 복사한 명령을 터미널에 그대로 붙여 실행한다. 오류 메시지는 실제 출력을 복사한다.
-- 기계가 검사한다: `pnpm verify:docs` — pnpm 스크립트 존재, 백틱 경로가 **저장소에 커밋돼 있는지**(대소문자까지), 마크다운 링크, 표 열 수, `deploy/*.sh` 실행 비트, **nginx `client_max_body_size`와 `WF_UPLOAD_MAX_MB`의 대조**. `pnpm check`에 포함된다.
+- 기계가 검사한다: `pnpm verify:docs` — pnpm 스크립트 존재, 백틱 경로가 **저장소에 커밋돼 있는지**(대소문자까지), 마크다운 링크, 표 열 수, `deploy/*.sh` 실행 비트, **nginx `client_max_body_size`와 `WF_UPLOAD_MAX_MB`의 대조**, **로그 event 코드(`LOG_EVENTS`)가 장애대응 가이드에 모두 있는지**. `pnpm check`에 포함된다.
 - 아직 만들지 않은 산출물을 백틱 경로로 쓰지 않는다. 검사가 잡는다.
 
 표준 스크립트 (이름은 여기서 고정한다):
@@ -314,12 +315,12 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | CSRF | SameSite + 상태 변경 요청에 커스텀 헤더 요구. **화면은 경로에 `.`·`..` 조각이 든 API 요청을 보내지 않고**(`apps/web/src/api.ts`), **주소의 id가 식별자 모양일 때만 그 화면을 그린다**(`apps/web/src/components/RequireUuidParam.tsx`) — 주소의 id(`%2F`가 풀려 들어온다)로 다른 API를 부르게 하면 연 사람의 세션과 헤더로 나간다(Phase 10 보안 검토·종료 루틴) |
 | 로컬 계정 | argon2id. 기본 정책 **8자 이상, 영문 대·소문자·숫자·특수 중 2종** (사용자 결정 2026-09-15). 5회 실패 시 15분 잠금. 로그인·가입·계정 복구는 IP별 rate limit |
 | 계정 생명주기 | 가입 요청 → `승인 대기` → 관리자 승인 → `활성`. 임시 비밀번호는 화면에 1회 표시, 다음 로그인에서 변경 강제. ID 찾기는 email과 이름이 일치할 때 **마스킹된 ID만** (계정 열거 방지) |
-| 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여. 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
+| 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여. **root는 관리자 한 사람에게 행위를 위임한다** — 위임할 수 있는 것은 `DELEGABLE_ACTIONS`(지금은 LLM 연결 관리 하나)뿐, 관리자만 받고, 관리자가 아니게 되면 사라진다. 다시 위임하지 못한다. **자기에게 없는 위임을 가진 관리자는 관리하지 못한다**(승인·비밀번호 초기화·역할·잠금 해제·세션 종료 — root와 같은 위임을 가진 관리자만. 초기화로 그 계정을 넘겨받는 길을 막는다)(Phase 11). 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
 | 권한 | 기본 거부. 모든 엔드포인트에 가드. 가드는 판정하지 않고 데이터를 모아 공유 함수에 넘긴다 |
 | 입력 | 모든 요청 본문·쿼리는 zod 검증. 문서는 JSON만. 링크는 `http(s)`·내부 경로만, 이미지 출처는 내부 첨부 URL만. **실시간 편집의 변경도 적용하기 전에 같은 허용 목록으로 본다** — 어긋나면 받지 않고 끊는다(P9 관문). 편집기 스키마와 허용 목록은 대조 테스트로 같게 둔다 |
 | 응답 헤더 | CSP(`default-src 'self'` 기준), `X-Content-Type-Options`, `frame-ancestors 'none'`, HSTS. HTML·API는 `Cache-Control: no-store`, **해시 파일명 정적 자산은 immutable 캐시 허용** |
-| 로그 | 비밀번호·토큰·세션 ID·문서 본문·**LLM 질문과 답·지시문**을 로그에 남기지 않는다. 사용자는 불투명 ID로. **오류는 `errorText`로 적는다**(`apps/api/src/common/error-text.ts`) — DB 오류는 PostgreSQL의 코드·문장만 싣고, 문장이 값을 싣는 데이터 예외(SQLSTATE 22)는 따옴표 안을 가린다(실제 PostgreSQL로 시험). drizzle의 오류 문장에는 질의 매개변수가 들어 있고, 공통 로거가 Nest 기본 처리기로 온 것까지 같은 길로 거른다(Phase 10). LLM 서버의 거절 문장은 남의 응답이라 싣지 않고 종류와 HTTP 상태만 |
-| 사내 LLM | 등록·삭제는 root만. API 키는 `WF_LLM_MASTER_KEY`로 암호화(AES-256-GCM, **행 id와 주소**를 AAD로 — 주소만 바꿔도 풀리지 않는다)해 두고 **응답·로그·감사로그에 다시 내보내지 않는다.** LLM 서버의 문장이 키를 되읊으면 가린다. 브라우저는 LLM에 가지 않고 서버만 부른다. 주소는 `http(s)`만, 사용자 정보·질의를 받지 않고 넘겨주기(redirect)를 따르지 않는다. http 주소면 등록 화면이 무엇이 평문으로 가는지 알린다. **세션을 끊으면 받던 답도 멈춘다**(실시간 편집과 같은 버스). 답은 평문으로 그린다(HTML로 그리지 않는다) |
+| 로그 | 비밀번호·토큰·세션 ID·문서 본문·**LLM 질문과 답·지시문**을 로그에 남기지 않는다. 사용자는 불투명 ID로. **오류는 `errorText`로 적는다**(`apps/api/src/common/error-text.ts`) — DB 오류는 PostgreSQL의 코드·문장만 싣고, 문장이 값을 싣는 데이터 예외(SQLSTATE 22)는 따옴표 안을 가린다(실제 PostgreSQL로 시험). drizzle의 오류 문장에는 질의 매개변수가 들어 있고, 공통 로거가 Nest 기본 처리기로 온 것까지 같은 길로 거른다(Phase 10). LLM 서버의 거절 문장은 남의 응답이라 싣지 않고 종류와 HTTP 상태만. **로그 한 줄에는 `event` 코드**(`LOG_EVENTS`, 장애대응 가이드가 그것으로 찾는다 — `verify:docs`가 대조)와 **식별자 필드**를 싣고 문장에 id를 섞지 않는다. 요청 안의 줄에는 요청 번호(`requestId`)가 실린다 — nginx 로그·감사 행과 같은 값이다. **실패는 구조화해 남긴다** — 바깥·입력 탓(LLM 서버·메일 API·사내 IdP)은 `warn`, 우리 쪽 결함은 `error`. 접근 로그·nginx 로그에 질의 문자열(검색어)을 싣지 않는다. 로그는 compose가 순환한다(Phase 11) |
+| 사내 LLM | 등록·삭제는 root와, root가 위임한 관리자. API 키는 `WF_LLM_MASTER_KEY`로 암호화(AES-256-GCM, **행 id와 주소**를 AAD로 — 주소만 바꿔도 풀리지 않는다)해 두고 **응답·로그·감사로그에 다시 내보내지 않는다.** LLM 서버의 문장이 키를 되읊으면 가린다. 브라우저는 LLM에 가지 않고 서버만 부른다. 주소는 `http(s)`만, 사용자 정보·질의를 받지 않고 넘겨주기(redirect)를 따르지 않는다. http 주소면 등록 화면이 무엇이 평문으로 가는지 알린다. **세션을 끊으면 받던 답도 멈춘다**(실시간 편집과 같은 버스). 답은 평문으로 그린다(HTML로 그리지 않는다) |
 | TLS | 검증을 끄지 않는다. 사내 CA는 `NODE_EXTRA_CA_CERTS`로 신뢰. nginx가 종단 |
 | 의존성 | lockfile 고정(`--frozen-lockfile`). 허용 라이선스 MIT·Apache-2.0·BSD·ISC·0BSD. GPL·AGPL·SSPL·상용은 승인 없이 금지. TipTap은 npm 공개 MIT 확장만. `pnpm audit`·라이선스 검사·gitleaks를 CI 관문으로. 반입 번들에 SBOM과 라이선스 목록 포함 |
 | 컨테이너 | non-root, 불필요 패키지 없음, 헬스체크, `restart: unless-stopped`. 시크릿은 이미지에 넣지 않고 `.env`·파일 마운트로 |
@@ -364,7 +365,8 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 - 반입 묶음의 **구성 목록은 `packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`가 단일 출처다** — 문서가 아니라 코드가 들고, `pnpm release:verify`가 그것으로 판정한다. 이미지는 `docker save`가 만든 **tar 하나**에 세 개가 함께 들어간다(따로 두면 하나만 빠뜨린 채 반입된다). 반입 당일의 절차는 [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md)다.
 - `docker load` → `.env` 작성 → `pnpm db:migrate` → `docker compose up -d` → 사후 검증.
 - 모든 서비스 `restart: unless-stopped` + 헬스체크. 재부팅 후 자동 기동을 실제로 확인한다.
-- nginx는 TLS를 종단하고 `absolute_redirect off`, `X-Forwarded-*` 전달, WebSocket `Upgrade` 프록시를 둔다. `client_max_body_size`는 첨부 상한과 일치시킨다.
+- nginx는 TLS를 종단하고 `absolute_redirect off`, `X-Forwarded-*` 전달, WebSocket `Upgrade` 프록시를 둔다. `client_max_body_size`는 첨부 상한과 일치시킨다. 요청 번호(`X-Request-Id`)를 만들어 넘기고 접근 로그는 JSON 한 줄(질의 문자열 없음)이다.
+- 로그는 compose가 서비스마다 순환한다(`WF_LOG_MAX_SIZE` × `WF_LOG_MAX_FILES`, 기본 20MB × 5). 사내 CA는 compose 옆 `ca/ca.pem` 하나 — 있으면 앱이 믿는다(compose를 고치지 않는다).
 - 볼륨은 `postgres_data`와 `attachments`다. 백업은 `pg_dump` + 첨부 디렉토리. 복원 리허설은 Phase 5 완료 기준.
 
 ## 9. 외부 연동 규칙

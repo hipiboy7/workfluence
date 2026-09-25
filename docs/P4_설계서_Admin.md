@@ -149,7 +149,7 @@
 | `GET /api/pages/:id/labels` | 스페이스 판정 `canRead` | `LabelView[]` |
 | `POST /api/pages/:id/labels` | `canWrite` | `LabelView` |
 | `DELETE /api/pages/:id/labels/:labelId` | `canWrite` | `{ ok }` |
-| `GET /api/audit?limit=&action=&actorId=&from=&to=` | `audit.read` | `AuditEventView[]` |
+| `GET /api/audit?limit=&action=&actorId=&from=&to=` | `audit.read` | `AuditEventView[]` (Phase 11부터 `requestId`로도 거르고 행에 요청 번호 — P11 F절) |
 | `PATCH /api/categories/:id` | `space.manage` | `CategoryView` |
 | `DELETE /api/categories/:id` | `space.manage` | `{ ok }`. 쓰는 스페이스가 있으면 409 |
 | `POST /api/users/:id/terminate-sessions` | `user.manage` | `{ count }` |

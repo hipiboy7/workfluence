@@ -1,8 +1,9 @@
 import { RELEASE_REQUIRED_FILES, formatChecksums, formatManifest } from '@workfluence/shared';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { bundleFiles } from './release-files';
 
 /**
  * 반입 묶음 (P5_설계서_Release B절, FR-600~609).
@@ -50,6 +51,10 @@ function main(): void {
   copyFileSync('deploy/compose.yml', join(out, 'compose.yml'));
   copyFileSync('deploy/nginx.conf', join(out, 'nginx.conf'));
   copyFileSync('docs/운영가이드_반입.md', join(out, '반입절차.md'));
+  // **사내 CA 자리** (P11 D.7) — 안내 파일만 넣어 `ca/`가 풀린 사람의 것으로 생기게 한다. 묶음에 없으면 첫 기동에서 도커가 root 소유로
+  // 만들어, 현장에서 인증서를 넣을 때 일반 계정은 `Permission denied`다. **인증서는 넣지 않는다** — 현장의 것이다(`certs`와 같다)
+  mkdirSync(join(out, 'ca'), { recursive: true });
+  copyFileSync('deploy/ca/README.md', join(out, 'ca', 'README.md'));
 
   // `.env` 템플릿에는 **값이 하나도 없다** (FR-606). 키와 설명만 간다.
   //
@@ -126,19 +131,19 @@ function main(): void {
 
   writeFileSync(join(out, 'MANIFEST.txt'), formatManifest({ version, gitSha, builtAt: new Date().toISOString(), images }));
 
-  // 체크섬은 **마지막에**. SHA256SUMS 자신은 목록에 넣지 않는다
-  // 디렉토리는 건너뛴다. `readFileSync`가 디렉토리에서 `EISDIR`로 터진다
-  const files = readdirSync(out).filter((f) => f !== 'SHA256SUMS' && statSync(join(out, f)).isFile());
+  // 체크섬은 **마지막에**. SHA256SUMS 자신은 목록에 넣지 않는다. 하위 디렉토리(`ca/`)의 파일까지 담는다(`bundleFiles`)
+  const files = bundleFiles(out).filter((f) => f !== 'SHA256SUMS');
   writeFileSync(
     join(out, 'SHA256SUMS'),
-    formatChecksums(files.sort().map((f) => ({ file: f, sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex') }))),
+    formatChecksums(files.map((f) => ({ file: f, sha256: createHash('sha256').update(readFileSync(join(out, f))).digest('hex') }))),
   );
 
-  const missing = RELEASE_REQUIRED_FILES.filter((f) => !readdirSync(out).includes(f));
+  const present = bundleFiles(out);
+  const missing = RELEASE_REQUIRED_FILES.filter((f) => !present.includes(f));
   if (missing.length) throw new Error(`묶음에 빠진 것이 있다: ${missing.join(', ')}`);
 
-  const bytes = readdirSync(out).reduce((n, f) => n + (statSync(join(out, f)).isFile() ? statSync(join(out, f)).size : 0), 0);
-  console.log(`[release] 완료 — ${readdirSync(out).length}개 파일 · ${(bytes / 1024 / 1024).toFixed(0)}MB`);
+  const bytes = present.reduce((n, f) => n + statSync(join(out, f)).size, 0);
+  console.log(`[release] 완료 — ${present.length}개 파일 · ${(bytes / 1024 / 1024).toFixed(0)}MB`);
   console.log(`[release] 반입 직전·직후에 'pnpm release:verify ${out}'를 돌린다`);
 }
 

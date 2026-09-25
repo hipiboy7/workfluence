@@ -18,6 +18,7 @@ const ACTIVE: Partial<UserRow> = {
   role: 'member',
   status: 'active',
   mustChangePassword: false,
+  grants: [],
 };
 
 function ctx(session: Record<string, unknown> | undefined, meta: Record<string, unknown> = {}) {
@@ -105,6 +106,17 @@ describe('AuthGuard', () => {
   it('권한이 있으면 통과한다', async () => {
     const c = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'user.manage' });
     await expect(new AuthGuard(c.reflector, usersOf({ ...ACTIVE, role: 'admin' }), ENV, POLICY_STUB).canActivate(c.exec)).resolves.toBe(true);
+  });
+
+  it('**위임은 요청마다 사용자 행에서 읽는다** — 준 동안은 통과하고, 거두면 다음 요청부터 403 (P11 A.1-5)', async () => {
+    const granted = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'llm.manage' });
+    await expect(
+      new AuthGuard(granted.reflector, usersOf({ ...ACTIVE, role: 'admin', grants: ['llm.manage'] }), ENV, POLICY_STUB).canActivate(granted.exec),
+    ).resolves.toBe(true);
+    const revoked = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'llm.manage' });
+    await expect(new AuthGuard(revoked.reflector, usersOf({ ...ACTIVE, role: 'admin', grants: [] }), ENV, POLICY_STUB).canActivate(revoked.exec)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });
 

@@ -46,6 +46,7 @@ export const AUDIT_ACTIONS = [
   'user.password.reset',
   'user.sessions.terminate',
   'user.role.change',
+  'user.grants.change',
   'category.create',
   'space.create',
   'space.update',
@@ -120,6 +121,69 @@ export const COLLAB_MSG = { update: 0, awareness: 1, status: 2 } as const;
 /** `COLLAB_MSG.status`에 실리는 것(UTF-8 JSON). `saveBlocked`는 자동 저장이 멈춘 까닭이고, 풀리면 `null`이다 */
 export type CollabStatus = { saveBlocked: string | null };
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+/**
+ * 앱 로그 줄의 **event 코드** (P11_설계서_Ops D.4, FR-1214). 문장(`msg`)을 고쳐도 이 코드는 그대로다 — 장애대응 가이드가 이것으로
+ * 찾고, `pnpm verify:docs`가 이 목록의 코드가 가이드에 모두 있는지 대조한다. 모양은 `영역.일`(소문자·밑줄)
+ */
+export const LOG_EVENTS = [
+  // 기동
+  'app.started',
+  'app.migrated',
+  // 요청 — 접근 로그 한 줄, 처리되지 않은 예외
+  'http.request',
+  'http.unhandled',
+  'health.db_failed',
+  // 사내 인증(OIDC) — 사내 IdP와의 처리가 실패했다(닿지 않음·거절·검증 실패). 바깥 탓이라 warn (FR-1215)
+  'auth.oidc_failed',
+  // 세션 파기 버스
+  'session.revoke_failed',
+  // 메일
+  'mail.unconfigured',
+  'mail.rejected',
+  'mail.failed',
+  'mail.mock_sent',
+  'mail.mention_failed',
+  // 사내 LLM
+  'llm.ask_failed',
+  'llm.ask_error',
+  'llm.save_failed',
+  'llm.audit_failed',
+  'llm.sweep_done',
+  'llm.sweep_failed',
+  // 실시간 편집
+  'collab.disabled',
+  'collab.enabled',
+  'collab.save_failed',
+  'collab.save_invalid',
+  'collab.upgrade_failed',
+  'collab.state_stale',
+  'collab.state_discarded',
+  'collab.makers_failed',
+  'collab.makers_unsure',
+  'collab.apply_failed',
+  'collab.gate_refused',
+  'collab.gate_audit_failed',
+  'collab.revoked',
+  'collab.recheck_failed',
+  'collab.closed',
+] as const;
+export type LogEvent = (typeof LOG_EVENTS)[number];
+
+/** 로그의 설계 고정값 (P11 D.2·D.3) */
+export const LOG_LIMITS = {
+  /** 받은 요청 식별자의 모양 — 영문·숫자·`-`, 이 길이 안에서만 쓴다(로그 줄에 그대로 들어간다) */
+  requestIdMinChars: 8,
+  requestIdMaxChars: 64,
+  /** 맞춘 라우트가 없는 요청의 경로를 접근 로그에 이만큼만 싣는다 */
+  accessLogPathMaxChars: 200,
+} as const;
+
+/**
+ * 요청 식별자의 모양 (P11 D.2) — 영문·숫자·`-`, `LOG_LIMITS`의 길이 안. 앱이 받는 `X-Request-Id`의 판정과 감사 조회의 거르기가 **같은
+ * 판정**을 쓴다. 로그 줄에 그대로 들어가는 값이라 줄바꿈·따옴표·공백을 받지 않는다(로그 위조). `g` 깃발이 없어 여럿이 써도 된다
+ */
+export const REQUEST_ID_PATTERN = new RegExp(`^[A-Za-z0-9-]{${LOG_LIMITS.requestIdMinChars},${LOG_LIMITS.requestIdMaxChars}}$`);
 
 /** 페이지 트리 최대 깊이. 무한 중첩은 이동·경로 계산 비용을 키운다. */
 export const PAGE_TREE_MAX_DEPTH = 10;

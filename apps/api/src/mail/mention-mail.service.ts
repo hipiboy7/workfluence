@@ -3,7 +3,7 @@ import { AuditService } from '../audit/audit.service';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import type { MentionOutcome } from '../notifications/notifications.service';
 import { MAIL_SENDER, type MailSender } from './mail.provider';
-import { errorText } from '../common/error-text';
+import { logLine } from '../common/log-line';
 
 /**
  * 멘션을 메일로도 알린다 (P6_설계서_Collab FR-750·753~756).
@@ -67,8 +67,9 @@ export class MentionMailService {
         detail: { recipients: outcome.recipients.length, sent: results.filter(Boolean).length, kind: 'mention' },
       });
     } catch (e) {
-      // 여기까지 오면 감사 기록마저 실패한 것이다. 로그만 남기고 삼킨다
-      this.log.warn(`멘션 메일 처리 실패: ${errorText(e)}`);
+      // 여기까지 오면 감사 기록마저 실패한 것이다(보내는 쪽의 실패는 `mail.failed`로 이미 남고 `false`로 온다). **우리 쪽 결함이라 error** —
+      // 감사 행이 사라지는 것을 error 줄을 보는 사람이 놓치지 않게 (FR-1215, P11 코드 리뷰 8). 로그만 남기고 삼킨다
+      this.log.error(logLine('mail.mention_failed', '멘션 메일 처리 실패', {}, e));
     }
   }
 }

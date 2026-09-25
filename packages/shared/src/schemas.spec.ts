@@ -3,7 +3,9 @@ import { emptyDocument } from './document';
 import {
   addMemberDto,
   attachLabelDto,
+  auditQueryDto,
   isUuid,
+  userGrantsDto,
   changePasswordDto,
   createCategoryDto,
   createPageDto,
@@ -227,3 +229,28 @@ describe('주소에 들어가는 값 (P10 종료 루틴 — 경로 조작)', () 
     for (const name of ['...', 'v1.0', '.net']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(true);
   });
 });
+
+describe('감사 조회 DTO — 요청 번호로 거른다 (P11 FR-1212, 코드 리뷰 10)', () => {
+  it('**로그 한 줄의 `requestId`로** 감사 행을 찾는다 — 로그에서 복사해 붙인 앞뒤 공백은 뗀다', () => {
+    expect(auditQueryDto.parse({ requestId: ' c4f74de7a73ff592ec5ec63e597de58b ' }).requestId).toBe('c4f74de7a73ff592ec5ec63e597de58b');
+    expect(auditQueryDto.parse({}).requestId).toBeUndefined();
+  });
+
+  it('모양이 틀리면 받지 않는다 — 요청 번호가 아니다', () => {
+    for (const bad of ['bad id "x"', 'short', 'x'.repeat(65)]) expect(auditQueryDto.safeParse({ requestId: bad }).success, bad).toBe(false);
+  });
+});
+
+describe('위임 목록 DTO (P11 F절)', () => {
+  it('위임할 수 있는 행위의 목록 전체를 받는다 — 비우면 거둔다', () => {
+    expect(userGrantsDto.parse({ grants: ['llm.manage'] })).toEqual({ grants: ['llm.manage'] });
+    expect(userGrantsDto.parse({ grants: [] })).toEqual({ grants: [] });
+  });
+
+  it('**위임할 수 없는 행위·겹친 것·다른 키는 받지 않는다**', () => {
+    for (const bad of [{ grants: ['system.manage'] }, { grants: ['llm.manage', 'llm.manage'] }, { grants: 'llm.manage' }, {}, { grants: [], role: 'root' }]) {
+      expect(userGrantsDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+

@@ -50,7 +50,12 @@ async function main(): Promise<void> {
 
     // 있으면 빠진 것만 채운다. 비밀번호는 건드리지 않는다
     const fixes: Record<string, unknown> = {};
-    if (existing.role !== 'root') fixes.role = 'root';
+    if (existing.role !== 'root') {
+      fixes.role = 'root';
+      // 위임은 관리자만 가진다 — root로 되돌리며 비우지 않으면 DB CHECK(`users_grants_admin_chk`)가 문장을 거부해 **시드가 실패한다**
+      // (위임받은 관리자로 내려가 있던 계정. P11 코드 리뷰 2)
+      if (existing.grants.length > 0) fixes.grants = [];
+    }
     if (existing.status !== 'active') fixes.status = 'active';
     if (!existing.approvedAt) fixes.approvedAt = sql`now()`;
 

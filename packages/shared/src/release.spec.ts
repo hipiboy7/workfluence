@@ -86,6 +86,10 @@ describe('필수 파일 목록 (FR-601)', () => {
     expect(RELEASE_REQUIRED_FILES).toContain('compose.yml');
     expect(RELEASE_REQUIRED_FILES.length).toBeGreaterThan(5);
   });
+
+  it('**사내 CA 자리(`ca/README.md`)가 묶음에 있다** — 없으면 첫 기동에서 도커가 `ca/`를 root 소유로 만들어, 현장에서 인증서를 넣을 때 `Permission denied`다 (P11 검토)', () => {
+    expect(RELEASE_REQUIRED_FILES).toContain('ca/README.md');
+  });
 });
 
 describe('parseManifest — 모양이 어긋난 줄', () => {
