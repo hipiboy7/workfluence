@@ -351,7 +351,7 @@ process.env + .env 파일 ──▶ WF_로 시작하는 키만 추출 ──▶ 
 ```
 can(principal, action)                                   → boolean   시스템 행위
 spaceAccess(principal, space, membership, memberCount)   → SpaceAccess
-canAssignRole(actor, role) / canManageUser(actor, target) → boolean   역할 간 우열
+canAssignRole(actor, role) / canManageUser(actor, target) → boolean   역할 간 우열 (Phase 11부터 위임의 우열도 — P11 D.1)
 checkPasswordPolicy(password, policy)                    → string[]  위반 사유 목록
 ```
 

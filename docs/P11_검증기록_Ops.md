@@ -3,10 +3,10 @@
 - 작성일: 2026-09-26 / 작성 LLM: Claude Opus 5.5
 - 설계: [`docs/P11_설계서_Ops.md`](P11_설계서_Ops.md) · 검토: [`docs/internal/P11_검토서_Review.md`](internal/P11_검토서_Review.md)
 - 요청 원문과 착수 쟁점의 답: `docs/prompts/phase11/scope.md`
-- 시행착오는 여기 쓰지 않는다 — [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) T-047(A등급 관문이 새 domain 디렉토리를 빠뜨림)·T-048(접근 로그가 라우터와 다르게 가정함)·T-049(반입 뒤 `ca/`가 root 소유, `up -d`가 파일을 알아채지 못함)
-- 시험·커버리지·E2E(3·4절)는 **병합 전 검토를 반영한 뒤** `554a3f8`에서 쟀다. 컨테이너 확인은 두 번 했다 — 처음 `workfluence-app:7a03a36-p11`
-  (2.1~2.4·2.6·2.7), 검토 반영 뒤 `workfluence-app:554a3f8-p11`(2.5를 **가이드의 명령 그대로** 다시, 2.8~2.10). 반영이 닿지 않은 것(요청 번호
-  잇기·로그 순환·마이그레이션)은 처음 것을 둔다
+- 시행착오는 여기 쓰지 않는다 — [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) T-047(A등급 관문이 새 domain 디렉토리를 빠뜨림)·T-048(접근 로그가 라우터와 다르게 가정함)·T-049(반입 뒤 `ca/`가 root 소유, `up -d`가 파일을 알아채지 못함)·T-050(LLM E2E의 정리가 흐르던 답의 저장과 겹침)
+- 시험·커버리지·E2E(3·4절)는 **병합 전 검토와 종료 루틴을 반영한 뒤** `91e0e6a`에서 쟀다. 컨테이너 확인은 세 번 했다 — 처음
+  `workfluence-app:7a03a36-p11`(2.1~2.4·2.6·2.7), 검토 반영 뒤 `554a3f8-p11`(2.5를 **가이드의 명령 그대로** 다시, 2.8~2.10), 종료 루틴 반영 뒤
+  `91e0e6a-p11`(2.11 — 기동과 관리의 우열). 반영이 닿지 않은 것(요청 번호 잇기·로그 순환·마이그레이션)은 처음 것을 둔다
 - 이 세션도 **이 계정 소유의 사본**에서 일했다(T-040·T-042). 새 빌드는 `:3100`에 띄우고 `E2E_BASE_URL`로 E2E를 돌렸다. 개발 DB(`:5433`)는
   앞 계정과 함께 쓴다 — `:3100`이 기동할 때 `0010`이 개발 DB에 적용됐다(옛 빌드 `:3000`은 새 열을 모르지만 기본값이 있어 막히지 않는다)
 
@@ -163,37 +163,50 @@ $ pnpm release:verify .local/release/p11-check
 | 질의 문자열이 앱 로그에 | 0건 |
 | 기동 | `up -d api nginx` → 헬스체크 200까지 2초(postgres는 이미 떠 있었다). 경고·오류 줄 0, 재시작 0 |
 
+### 2.11 최종 이미지 (`91e0e6a-p11`) — 종료 루틴 반영 뒤
+
+| 확인 | 결과 |
+|---|---|
+| 기동 | `up -d api nginx` → 헬스체크 200까지 3초. 경고·오류 줄 0 |
+| 위임 없는 관리자 → 위임받은 관리자의 비밀번호 초기화 | **403** |
+| root → 위임받은 관리자의 비밀번호 초기화 | 201 |
+| 위임 없는 관리자 → root의 역할 변경 | **403** `이 사용자를 관리할 권한이 없다` |
+
+마지막 root의 줄 세우기(두 root를 동시에 내리기)와 관리 대상의 행 잠금은 통합 시험과 변이(3절)로 봤다 — 컨테이너에서 두 요청의 시각을 맞추지는
+않았다.
+
 ## 3. 자동 검사
 
 | 항목 | 값 | 비고 |
 |---|---|---|
 | shared 테스트 | **326건** (Phase 10 종료 306) | 위임 규칙·관리의 우열, `LOG_EVENTS` 모양, 요청 번호의 모양, 위임 DTO·감사 조회 DTO, 묶음의 사내 CA 자리 |
-| api 테스트 | **901건** (Phase 10 종료 859) | 요청 식별자 모양·접근 로그 판정(A — 전체 잡기 라우트·대소문자 포함), 미들웨어, 로거 문맥·event 줄, 감사 `request_id`와 거르기, 위임 API·DB CHECK·CHECK와 코드의 목록·사내 계정 동기화, 관리의 우열, **동시성 셋**(행 잠금), 사내 IdP 실패 셋, 위임받은 관리자의 LLM 관리 |
-| web 테스트 | **95건** (Phase 10 종료 91) | 사용자 관리의 위임 체크·관리할 수 없는 행(컴포넌트 시험 4) |
-| E2E | **30건 전부 통과** (1.8분) | +2 (`e2e/ops.spec.ts`). 검토 반영 뒤 첫 전체 실행에서 `admin.spec.ts`의 감사로그 거르기가 한 번 실패했다 — 시험이 거른 응답을 기다리지 않고 첫 목록을 읽었다(다시 돌리면 통과). 기다리게 고친 뒤(`554a3f8`) 30건 |
+| api 테스트 | **907건** (Phase 10 종료 859) | 요청 식별자 모양·접근 로그 판정(A — 전체 잡기 라우트·대소문자 포함), 사내 IdP 실패의 부류(A), 미들웨어, 로거 문맥·event 줄, 감사 `request_id`와 거르기, 위임 API·DB CHECK·CHECK와 코드의 목록·사내 계정 동기화, 관리의 우열, **동시성 다섯**(행 잠금 셋·판정과 쓰기 사이의 위임·마지막 root), 사내 IdP 실패 넷(닿지 않음·jose의 거절·우리가 판정한 거절·state 불일치 — 콜백의 실패는 감사), 위임받은 관리자의 LLM 관리 |
+| web 테스트 | **98건** (Phase 10 종료 91) | 사용자 관리의 위임 체크·관리할 수 없는 행(컴포넌트 시험 4), 감사로그의 요청 번호 거르기(3) |
+| E2E | **30건 전부 통과** (1.9분) | +2 (`e2e/ops.spec.ts`). **간헐 실패 둘을 고쳤다** — ① `admin.spec.ts`의 감사로그 거르기가 거른 응답을 기다리지 않고 첫 목록을 읽었다(`554a3f8`) ② `llm.spec.ts`의 마지막 시험이 답이 흐르는 중에 끝나, 서버가 받은 데까지 저장한 새 대화가 뒤의 정리와 겹쳤다(T-050, `91e0e6a`) — 실패한 실행마다 개발 DB에 그 사용자가 남아 있었다. 고친 뒤 그 파일만 네 번 되풀이해 20건, 전체 30건 |
 | skip | **0건** | |
-| `pnpm check` | 종료 코드 0 (157초) | lint + typecheck + test + `verify:docs`(문서 58개, 위반 없음 — 7번 검사: `LOG_EVENTS` 33개가 장애대응 가이드에 모두 있다) |
-| CI (GitHub Actions) | 8절 뒤에 적는다 | |
+| `pnpm check` | 종료 코드 0 (158초) | lint + typecheck + test + `verify:docs`(문서 58개, 위반 없음 — 7번 검사: `LOG_EVENTS` 33개가 장애대응 가이드에 모두 있다) |
+| CI (GitHub Actions) | **`check`·`gitleaks` 통과** — `91e0e6a`(코드의 마지막 커밋, push·pull_request 두 실행) | `check`는 `test:cov`·`verify:docs`·취약점·라이선스·빌드·외부 URL 검사까지. 실패한 것은 **Red 셋**(`4c18ad3`·`015ddce`·`043f72e` — 의도)과, event 코드를 더하고 가이드를 고치기 전의 둘(`fec440a`·`554a3f8` — `verify:docs`만: `auth.oidc_failed — LOG_EVENTS에 있는데 장애대응 가이드가 모른다`). 이 문서를 담은 마지막 커밋의 결과는 PR에 적는다 |
 
 ### 커버리지 (`pnpm test:cov`, 관문 통과 — 종료 코드 0)
 
 | 범위 | 줄 | 분기 | 기준 |
 |---|---|---|---|
-| shared 전체 | 99.85% | 96.59% | A ≥ 90 |
+| shared 전체 | 99.85% (701/702) | 96.59% (625/647) | A ≥ 90 |
 | └ `permissions.ts`·`constants.ts`·`schemas.ts`·`release.ts` | 100% | 100% | |
 | api `common/domain` (A) — `request-id.ts`·`access-log.ts` | 100% | 100% | A ≥ 90 (T-047 — 이제 관문 안) |
+| api `auth/domain/idp-failure.ts` (A) | 100% | 100% | A ≥ 90 |
 | api `common` (B) | 99.28% | 92.17% | B ≥ 70 |
 | └ `logger.ts` | 100% | 97.05% | |
 | └ `request-context.ts`·`log-line.ts`·`revocation.bus.ts` | 100% | 100% | |
 | └ `request-log.middleware.ts` | 94.11% | 73.33% | 빠진 것은 기본 시계 인자 — 시험은 시계를 넘긴다 |
 | api `audit/audit.service.ts` | 100% | 96.96% | |
 | api `auth/auth.guard.ts` | 93.18% | 89.28% | |
-| api `auth/auth.service.ts` | 97.46% | 81.25% | |
-| api `users/users.service.ts` | 92.45% | 89.69% | 검토 반영 전 86.53%·81.52% — 관리의 우열 시험이 초기화·잠금 해제·세션 종료를 지난다 |
+| api `auth/auth.service.ts` | 97.59% | 83.92% | |
+| api `users/users.service.ts` | 93.10% | 90.52% | 검토 반영 전 86.53%·81.52% — 관리의 우열·동시성 시험이 초기화·잠금 해제·세션 종료·마지막 root를 지난다 |
 | api `mail/mention-mail.service.ts`·`mail/mock.sender.ts` | 100% | 100% | |
 | api `llm/providers.service.ts` | 97.77% | 88.23% | |
-| api 전체 | 95.40% | 90.00% | B ≥ 70 |
-| web 전체 | 90.73% | 84.13% | 기록만 (3절). Phase 10의 95.02%에서 내려간 것은 컴포넌트 시험이 처음 들인 `AdminUsersPage.tsx`(66.66%)·`auth.tsx`가 측정에 들어서다 |
+| api 전체 | 95.43% (2488/2607) | 90.10% (1939/2152) | B ≥ 70. 분기는 실행마다 0.1%p 안에서 갈린다(종료 루틴 자체 점검 7 — 다른 실행은 89.9%) |
+| web 전체 | 90.52% | 83.25% | 기록만 (3절). Phase 10의 95.02%에서 내려간 것은 컴포넌트 시험이 처음 들인 `AdminUsersPage.tsx`(66.66%)·`AdminAuditPage.tsx`(87.5%)·`auth.tsx`가 측정에 들어서다 |
 
 `users.module.ts`(위임 API의 배선)는 측정 밖이다(`*.module.ts` 제외) — 배선은 E2E와 2.6·2.10이 본다.
 
@@ -210,12 +223,15 @@ $ pnpm release:verify .local/release/p11-check
 | `af3010e` | 위임 규칙(`can`·`grantsForRole`·`DELEGABLE_ACTIONS`)·`LOG_EVENTS`·위임 DTO·요청 식별자 모양·접근 로그 판정 | shared **12 실패** / 307 통과, api `common/domain` 시험 파일 2개 **적재 실패**(`Cannot find module './access-log'`·`'./request-id'`) | `f8b3077` |
 | `4c18ad3` | 검토 반영 — 묶음의 사내 CA 자리·`auth.oidc_failed`·요청 번호 모양 공유·감사 조회 거르기·전체 잡기 라우트 | shared **7 실패** / 318 통과, api `common/domain` **1 실패** / 11 통과 | `e2ffff6` |
 | `015ddce` | 보안 검토 반영 — 자기에게 없는 위임을 가진 관리자는 관리하지 못한다·접근 로그는 대소문자를 가리지 않는다 | shared **2 실패** / 324 통과, api `common/domain` **1 실패** / 12 통과 | `fec440a` |
+| `043f72e` | 종료 루틴 반영 — 사내 IdP 실패를 거절·닿지 않음으로 가른다(`idpFailureKind`) | api `auth/domain/idp-failure.spec.ts` **적재 실패**(`Cannot find module './idp-failure'`) | `d315a49` |
 
 ### 시험이 정말 잡는가 — 변이와 재현
 
 | 지운 것·되돌린 것 | 결과 |
 |---|---|
 | 행 잠금(`lockForUpdate`의 `.for('update')`) | 동시성 시험 **셋 모두 실패**(역할 변경·위임끼리·사내 계정 동기화가 그 사이의 위임을 덮는다). 되돌리자 통과 |
+| 마지막 root를 줄 세우는 이름 잠금(`pg_advisory_xact_lock`) | "root 둘을 동시에 내려도 root가 남는다"가 **실패**(root가 0명). 되돌리자 통과 |
+| 관리 대상의 행 잠금(`getManaged`가 잠그지 않고 읽게) | "판정과 쓰기 사이에 위임을 받아도 위임 없는 관리자는 초기화하지 못한다"가 **실패**(초기화가 된다). 되돌리자 통과 |
 | 시드의 위임 비우기(시험 DB, `WF_ROOT_USERNAME`을 위임받은 관리자로) | 지우면 `[seed] 실패: … users_grants_admin_chk`, 계정은 `admin \| {llm.manage}` 그대로. 되돌리면 `[seed] root 계정 보정: … role, grants, approvedAt` → `root \| {}` |
 
 ## 4. 브라우저 — E2E (`e2e/ops.spec.ts`)
@@ -230,16 +246,17 @@ $ pnpm release:verify .local/release/p11-check
 ## 5. 이미지와 기동
 
 ```
-$ docker compose -f deploy/compose.yml --env-file deploy/.env build api     # 46초
-workfluence-app:554a3f8-p11  380MB
+$ docker compose -f deploy/compose.yml --env-file deploy/.env build api
+workfluence-app:554a3f8-p11  380MB     # 46초
+workfluence-app:91e0e6a-p11  380MB     # 최종
 ```
 
 | 항목 | 값 |
 |---|---|
 | app 이미지 | **380MB** (Phase 10은 379MB. 예산 400MB 대비 여유 20MB) — 새 운영 의존성이 없다. 시작 스크립트는 한 파일 |
-| 기동 | `up -d api nginx` → 헬스체크 200까지 2~3초(postgres는 이미 떠 있었다). `restart api`는 11초 |
+| 기동 | `up -d api nginx` → 헬스체크 200까지 2~3초(postgres는 이미 떠 있었다, 세 번 모두). `restart api`는 11초 |
 | 기동 로그 | `app.started` event 한 줄과 Nest의 적재 줄 — 경고·오류 0. 운영은 기동 때 마이그레이션하지 않아 `app.migrated`가 없다(개발 `:3100`에는 있다) |
-| 재시작 | 세 컨테이너 모두 0회 (두 번 모두) |
+| 재시작 | 세 컨테이너 모두 0회 (세 번 모두) |
 
 ## 6. 개발 서버(`:3100`)의 로그
 
@@ -260,7 +277,7 @@ workfluence-app:554a3f8-p11  380MB
 |---|---|
 | 29 | **트리거를 "폐쇄망 반입 뒤 현장에서"로 바꿨다**(사용자 결정). 현장 절차는 반입 가이드 10절, https의 사내 CA는 파일 하나(2.5·2.9) |
 | 30 | 그대로 — 사용자가 뜻을 물었고 정하지 않았다 |
-| 확인 필요 F | **닫았다** — root가 메인, 관리자 한 사람씩 위임(2.6·4절). 위임받은 관리자의 계정 일은 root만(2.10) |
+| 확인 필요 F | **닫았다** — root가 메인, 관리자 한 사람씩 위임(2.6·4절). 위임받은 관리자의 계정 일은 root와 같은 위임을 가진 관리자만(2.10 — 위임 없는 관리자는 403, 같은 것을 가진 관리자·root는 통합 시험) |
 | 8 | 닫힌 그대로 — 수집기를 붙일 모양(JSON 한 줄·`requestId`·`event`)을 갖췄다 |
 
 ## 8. 검토
@@ -272,7 +289,7 @@ workfluence-app:554a3f8-p11  380MB
 | `self-reviewer` | 11건 (높음 1 · 보통 3 · 낮음 7) | 10건 반영, 1건(인덱스) 실측으로 두지 않음 |
 | 코드 리뷰 (`/code-review high`, PR #10) | 10건 | 10건 반영(둘은 일부 — 인덱스와 위임 대상의 상태는 까닭을 적고 두지 않음) |
 | 보안 검토 (`general-purpose`) | MEDIUM 1 · LOW 1 + 문턱 아래 4 | 둘 다 반영, 문턱 아래는 1건 반영·1건 MEDIUM으로 막힘·2건 까닭을 적고 두지 않음 |
-| 종료 루틴 — `doc-consistency` · `self-reviewer` (반영분에) | 검토서 §5 | |
+| 종료 루틴 — `doc-consistency` · `self-reviewer` (반영분에) | 14건 + 변경 밖 4건 · 9건(보통 1) | 문서 정합성 13건 반영·1건 두었다, 자체 점검 9건 반영 — 검토서 §5 |
 
 ## 9. 확인하지 못한 것
 

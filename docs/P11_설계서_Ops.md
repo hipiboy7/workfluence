@@ -5,7 +5,8 @@ Phase 11은 Phase 10이 남긴 네 가지에 대한 사용자의 답(2026-09-26)
 
 > **개정 2026-09-26 — 병합 전 검토 반영** (자체 점검·코드 리뷰·보안 검토, `docs/internal/P11_검토서_Review.md`). A.1-14~18, FR-1207, D.1(관리의
 > 우열·행 잠금·바뀌지 않은 위임), D.3(전체 잡기 라우트·대소문자), D.4(`auth` 영역·대상 필드), D.7(`--force-recreate`·묶음의 `ca/`), E(인덱스를
-> 두지 않는 까닭), F·G(감사로그의 요청 번호), H.
+> 두지 않는 까닭), F·G(감사로그의 요청 번호), H. **종료 루틴 반영**(같은 날): A.1-17(id_token 검증 실패는 401·콜백 실패의 감사), D.1(모든 관리
+> 조치의 행 잠금·`inTx`·마지막 root의 줄 세우기), F(역할 변경의 요구 행위).
 
 - **기능백로그 F-003** — 운영 로그를 디버깅·유지보수할 수 있게(요청 식별자·접근 로그·event 코드·로그 순환·nginx 로그 형식·규칙)
 - **기능백로그 F-004**(확인 필요 F의 답) — 시스템 관리자(root)가 관리자(admin)에게 LLM 연결 관리를 위임한다
@@ -48,7 +49,7 @@ Phase 10과 같이, 사용자의 답 안에서 Claude가 정했다. **다르게 
 | 14 | **자기에게 없는 위임을 가진 관리자는 관리하지 못한다**(승인·비밀번호 초기화·역할 변경·잠금 해제·세션 종료) — root와 같은 위임을 가진 관리자만 | 병합 전 보안 검토 1: 위임 없는 관리자가 위임받은 관리자의 비밀번호를 초기화하면 임시 비밀번호로 그 계정에 들어가 위임을 얻는다. 역할을 내렸다 올리면 root가 준 것을 거둔다. 위임이 관리자 사이에 차이를 만들었으므로 역할의 우열(admin은 root를 관리하지 못한다)과 같이 **가진 것의 우열**을 본다 | — |
 | 15 | 같은 목록을 다시 보내면 **쓰지도 남기지도 않는다** | 감사 행은 1년 남는다. 바뀌지 않은 것은 권한 변경이 아니다 (코드 리뷰 9) | — |
 | 16 | 역할·위임을 읽고 다시 쓰는 곳(역할 변경·위임·사내 계정 동기화)은 **행을 잠그고 읽는다**(`SELECT … FOR UPDATE`) | 역할을 그대로 두는 변경도 읽은 위임을 다시 쓴다 — 잠그지 않으면 그 사이 끝난 위임 변경을 옛 값으로 덮고, 감사 행의 이전 값도 틀린다 (코드 리뷰 4) | — |
-| 17 | 사내 IdP의 실패는 **warn 한 줄**(`auth.oidc_failed`) — 닿지 않으면(Discovery·TLS·JWKS·서명 검증) 502, 우리가 판정한 거절(토큰 교환 실패 등)은 그대로 | FR-1215가 사내 IdP를 바깥 탓으로 적었는데 그 줄이 없었다 — 닿지 않으면 처리되지 않은 예외(500)였다 (코드 리뷰 8). 현장에서 사내 CA를 두는 날(보류 29·11) 보는 줄이다 | — |
+| 17 | 사내 IdP의 실패는 **warn 한 줄**(`auth.oidc_failed`) — **거절**(우리가 판정한 것·id_token 검증 실패 — 서명·iss·aud·exp)은 401, **닿지 않음**(Discovery·TLS·키 목록 시간 초과)은 502. 콜백의 실패는 감사 `auth.login.failure`(`reason: idp_rejected`·`idp_unreachable`) | FR-1215가 사내 IdP를 바깥 탓으로 적었는데 그 줄이 없었다 — 닿지 않으면 처리되지 않은 예외(500)였다 (코드 리뷰 8). 처음 판은 서명 검증도 502로 보내 "잠시 뒤 다시"를 되풀이하게 했고, 콜백의 실패가 감사에 없었다(6절 "인증 성공·실패") — 종료 루틴 자체 점검 1. 가르는 판정은 순수 함수(`apps/api/src/auth/domain/idp-failure.ts`). 현장에서 사내 CA를 두는 날(보류 29·11) 보는 줄이다 | — |
 | 18 | 감사로그 화면이 **요청 번호로 거른다**. `request_id`에 인덱스를 두지 않는다 | 남기기만 하면 DB를 여는 사람만 쓴다 (코드 리뷰 10). 인덱스: 100만 행(198MB)에서 거르기가 66~133ms(병렬 순차 탐색, 검증기록 2.8) — 목표 1초 안이다 | 감사 행이 1,000만 건에 가까워지거나 거르기가 1초를 넘으면 부분 인덱스(`WHERE request_id IS NOT NULL`) |
 
 ## B. Confluence 대조 (`CLAUDE.md` 4절)
@@ -132,8 +133,12 @@ user.grants.change ✓      ✗                ✗        위임을 주고 거�
   "LLM 연결" 메뉴는 `can(me, 'llm.manage')`(`/api/auth/me`가 `grants`를 준다).
 - **관리의 우열** (A.1-14, FR-1207) — `canManageUser(actor, target)`가 역할과 함께 **위임**을 본다: root가 아니면 target이 가진 위임을
   actor도 가져야 한다. 승인·초기화·역할 변경·잠금 해제·세션 종료가 모두 이 판정(`getManaged`)을 지난다. 화면도 같은 함수로 그 행의 조치를 막는다.
-- **행 잠금** (A.1-16) — 역할 변경·위임·사내 계정 동기화는 대상 행을 `SELECT … FOR UPDATE`로 읽는다(`UsersService.lockForUpdate`).
-  동시에 오는 다른 변경은 커밋을 기다렸다가 새 값을 읽는다. 위임은 같은 목록이면 쓰지 않고 감사 행도 남기지 않는다(A.1-15).
+- **행 잠금** (A.1-16) — 역할 변경·위임·사내 계정 동기화, 그리고 관리의 우열을 보는 모든 조치(승인·초기화·잠금 해제·세션 종료)는 대상 행을
+  `SELECT … FOR UPDATE`로 읽는다(`UsersService.lockForUpdate`) — 판정한 뒤 쓰기 전에 root가 위임을 주는 틈을 닫는다(종료 루틴 자체 점검 2).
+  동시에 오는 다른 변경은 커밋을 기다렸다가 새 값을 읽는다. 잠금은 트랜잭션이 끝날 때 풀리므로 **트랜잭션 없이 부르면 서비스가 연다**(`inTx` —
+  자체 점검 5). 위임은 같은 목록이면 쓰지 않고 감사 행도 남기지 않는다(A.1-15).
+- **마지막 root** (FR-233) — root를 내리는 변경은 이름 붙인 잠금(`pg_advisory_xact_lock`)으로 줄 세운 뒤 root 수를 센다. 두 root를 동시에
+  내리면 둘 다 2명을 세고 root가 0명이 되던 길이다(Phase 1부터, 종료 루틴 자체 점검 6).
 
 ### D.2 요청 식별자와 요청 문맥 (FR-1210 ~ FR-1212)
 
@@ -251,7 +256,8 @@ ALTER TABLE audit_events ADD COLUMN request_id text;
 | `GET` | `/api/users` | `user.manage` | `UserView`에 `grants`가 더해진다 |
 | `GET` | `/api/auth/me` | 로그인 | `MeView`에 `grants`가 더해진다 |
 | `GET`·`POST`·`DELETE` | `/api/llm/admin/providers…` | **`llm.manage`**(root, 위임받은 admin) | 그대로 (P10 F절) |
-| `POST`·`PATCH` | `/api/users/:id/{approve,reset-password,unlock,role,terminate-sessions}` | `user.manage` + **관리의 우열**(D.1) | 대상이 자기에게 없는 위임을 가졌으면 403 |
+| `POST` | `/api/users/:id/{approve,reset-password,unlock,terminate-sessions}` | `user.manage` + **관리의 우열**(D.1) | 대상이 자기에게 없는 위임을 가졌으면 403 |
+| `PATCH` | `/api/users/:id/role` | `user.role.change` + **관리의 우열**(D.1) | 같다 |
 | `GET` | `/api/audit` | `audit.read` | 질의 `requestId`(요청 번호의 모양 — `REQUEST_ID_PATTERN`)로 거른다. `AuditEventView`에 `requestId` |
 | (모든 응답) | — | — | 머리말 `X-Request-Id` |
 
@@ -277,7 +283,8 @@ ALTER TABLE audit_events ADD COLUMN request_id text;
 | 로거 | `apps/api/src/common/logger.ts` | B | mixin(문맥) · event 줄 · `http.unhandled` |
 | 로그 한 줄 | `apps/api/src/common/log-line.ts` | B | event + 필드 + 문장을 로거에 넘기는 모양 |
 | 감사 | `apps/api/src/audit/audit.service.ts` | B | `request_id` — 남기고 거른다 |
-| 사내 IdP 실패 | `apps/api/src/auth/auth.service.ts` | B | `auth.oidc_failed`·502 (A.1-17) |
+| 사내 IdP 실패 | `apps/api/src/auth/auth.service.ts` | B | `auth.oidc_failed`·401/502·감사 (A.1-17) |
+| 사내 IdP 실패의 부류 | `apps/api/src/auth/domain/idp-failure.ts` | **A** | 거절·닿지 않음 (A.1-17) |
 | 반입 묶음의 파일 목록 | `scripts/release-files.ts` | (묶음 확인) | 하위 디렉토리(`ca/`)까지 — 묶기·검사가 같이 쓴다 |
 | 위임 | `apps/api/src/users/users.service.ts` · `users.module.ts` | B | D.1 |
 | 사내 계정 동기화 | `apps/api/src/auth/auth.service.ts` | B | 역할이 바뀌면 위임을 비운다 |
