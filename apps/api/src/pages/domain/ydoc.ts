@@ -1,4 +1,4 @@
-import { BLOCK_NODES, DOCUMENT_SCHEMA_VERSION, type DocMark, type DocNode } from '@workfluence/shared';
+import { BLOCK_NODES, DOCUMENT_SCHEMA_VERSION, childOrderProblem, type DocMark, type DocNode } from '@workfluence/shared';
 import * as Y from 'yjs';
 
 /**
@@ -131,6 +131,9 @@ function fromYNode(node: unknown): DocNode[] {
   // **단계가 없는 제목은 1단계로 읽는다** (P9 FR-1010). 편집기(ProseMirror)는 없는 속성을 기본값으로 채워 1단계를 보인다.
   // 관문은 속성을 하나씩 보므로 "있어야 한다"를 문 앞에서 볼 수 없다 — 누가 `level`만 지우면 저장이 멈췄다
   if (el.nodeName === 'heading' && attrs.level === undefined) attrs.level = 1;
+  // **순서·개수를 어긴 요소는 떨어뜨린다** (P12 FR-1313, 보류 25). 편집기(y-tiptap)는 그런 요소를 노드로 만들지 못해 공유 문서에서 지우고
+  // 이웃은 남긴다(설계서 C.2 실측) — 자식을 먼저 읽으므로 비게 된 부모도 같은 판정으로 떨어진다. 정본은 편집기가 보는 모양을 적는다
+  if (childOrderProblem(el.nodeName, content.map((c) => c.type))) return [];
   const out: DocNode = { type: el.nodeName };
   if (Object.keys(attrs).length) out.attrs = attrs;
   if (content.length) out.content = content;
@@ -147,6 +150,8 @@ export function docFromYDoc(ydoc: Y.Doc): DocNode {
   const fragment = ydoc.getXmlFragment(COLLAB_FIELD);
   const content: DocNode[] = [];
   for (const child of fragment.toArray()) content.push(...fromYNode(child));
+  // 맨 위가 비면 **빈 문단 하나** — 편집기가 그렇게 그리고(설계서 C.2), 문서는 비어 있을 수 없다 (P12 FR-1313)
+  if (!content.length) content.push({ type: 'paragraph' });
   return { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content };
 }
 

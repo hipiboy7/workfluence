@@ -1,4 +1,4 @@
-import { DOCUMENT_SCHEMA_VERSION, MAX_NAME_IN_REASON } from './constants';
+import { DOCUMENT_SCHEMA_VERSION, MAX_NAME_IN_REASON, TABLE_LIMITS } from './constants';
 
 /**
  * 페이지 본문(ProseMirror/TipTap JSON) 검증·텍스트 추출 (CLAUDE.md 6절·7절).
@@ -87,6 +87,28 @@ export const ALLOWED_CHILDREN: Record<string, readonly string[]> = {
 };
 
 /**
+ * **순서와 개수** (P12_설계서_Limits D.2, FR-1310, 보류 25) — 편집기 스키마의 내용 식에서 자식 **종류**(`ALLOWED_CHILDREN`) 밖에 남는 규칙이다.
+ * `NON_EMPTY_NODES`는 `+`(하나 이상), `FIRST_CHILD`는 첫 자식의 종류(`listItem = paragraph block*`). 편집기의 내용 식이 정확히
+ * "첫 자식 · 그 뒤 허용 자식의 되풀이 · 비어도 되는가"임은 대조 시험(`apps/web/src/components/extensions.spec.ts`)이 증명한다.
+ *
+ * 받는 편집기는 이것을 어긴 요소를 노드로 만들지 못해 **스스로 지우고 이웃은 남긴다**(설계서 C.2 실측) — 관문이 아니라 정본이 지킨다:
+ * 정본 검증이 받지 않고, 실시간 상태의 변환(`docFromYDoc`)이 편집기처럼 떨어뜨린다
+ */
+export const NON_EMPTY_NODES: readonly string[] = ['doc', 'blockquote', 'bulletList', 'orderedList', 'listItem', 'table', 'tableCell', 'tableHeader'];
+export const FIRST_CHILD: Record<string, readonly string[]> = { listItem: ['paragraph'] };
+
+/**
+ * 자식 종류의 차례가 규칙을 어기는가 — 어기면 그 까닭(정본 검증이 경로를 붙인다), 아니면 `null`. 변환이 같은 판정으로 떨어뜨린다.
+ * 자식 **종류**가 그 자리에 맞는지는 여기서 보지 않는다(`ALLOWED_CHILDREN`) — 빈 것과 첫 자식만
+ */
+export function childOrderProblem(type: string, childTypes: readonly string[]): string | null {
+  if (childTypes.length === 0) return NON_EMPTY_NODES.includes(type) ? `'${type}'는 비어 있을 수 없다` : null;
+  const firsts = Object.hasOwn(FIRST_CHILD, type) ? FIRST_CHILD[type] : null;
+  if (firsts && !firsts.includes(childTypes[0])) return `첫 자식은 ${firsts.join('·')}여야 한다 — '${cutName(childTypes[0])}'`;
+  return null;
+}
+
+/**
  * **글자를 담는 노드가 받는 마크** (P9 D.2). `codeBlock`은 아무 마크도 받지 않는다 — 코드 블록 안의 굵은 글자를 받은
  * 편집기는 **그 블록을 통째로 지웠다**(P9 B.1 실측).
  */
@@ -145,16 +167,18 @@ export function validateDocument(input: unknown): DocumentValidation {
       }
     }
 
-    if (node.content !== undefined) {
-      if (!Array.isArray(node.content)) {
-        errors.push(`${path}: content는 배열`);
-      } else {
-        node.content.forEach((child, i) => {
-          const childPath = `${path}.content[${i}]`;
-          placementProblems(type, child, childPath, errors);
-          visit(child, childPath, depth + 1);
-        });
-      }
+    if (node.content !== undefined && !Array.isArray(node.content)) {
+      errors.push(`${path}: content는 배열`);
+    } else if (type !== 'text') {
+      const kids = (node.content ?? []) as unknown[];
+      // 순서·개수 (P12 FR-1312) — 종류를 모르는 자식은 방문할 때 짚는다
+      const order = childOrderProblem(type, kids.map((k) => (isRecord(k) && typeof k.type === 'string' ? k.type : '')));
+      if (order) errors.push(type === 'doc' && order.endsWith('비어 있을 수 없다') ? `${path}: ${order}` : `${path}(${type}): ${order}`);
+      kids.forEach((child, i) => {
+        const childPath = `${path}.content[${i}]`;
+        placementProblems(type, child, childPath, errors);
+        visit(child, childPath, depth + 1);
+      });
     }
   };
 
@@ -211,13 +235,21 @@ export function nodeAttrProblems(type: string, attrs: unknown, opts: { partial?:
     // **화면이 style에 그대로 넣는 값**이다 — `align`은 `text-align: …`에, `colwidth`는 표 `colgroup`의 `width: …px`에
     // (TipTap 3.31.3). "원시값이면 된다"로는 `left; position:fixed; inset:0`이 지나가 보는 사람 모두의 화면을 덮는다
     // (P9 보안 검토 1). 편집기는 붙여 넣은 HTML에서도 `align`을 이 셋으로, `colwidth`를 `parseInt`한 숫자로 만든다
-    const { align, colwidth } = attrs;
+    const { align, colwidth, colspan, rowspan } = attrs;
     if (align !== undefined && align !== null && !TABLE_ALIGN.has(align as string)) out.push("속성 'align' 값은 left·center·right");
-    if (colwidth !== undefined && colwidth !== null && !(Array.isArray(colwidth) && colwidth.every((w) => w === null || typeof w === 'number'))) {
-      out.push("속성 'colwidth' 값은 숫자 배열");
+    // **범위도 본다** (P12 FR-1322, 보류 27) — 모양이 맞는 큰 값(`colspan` 10만)은 받은 동료의 화면을 무겁게 한다
+    for (const [key, v] of [['colspan', colspan], ['rowspan', rowspan]] as const) {
+      if (v !== undefined && v !== null && !inRange(v, TABLE_LIMITS.maxSpan)) out.push(`속성 '${key}' 값은 1~${TABLE_LIMITS.maxSpan}의 정수`);
     }
+    const widthsOk = Array.isArray(colwidth) && colwidth.length <= TABLE_LIMITS.maxSpan && colwidth.every((w) => w === null || inRange(w, TABLE_LIMITS.maxColWidthPx));
+    if (colwidth !== undefined && colwidth !== null && !widthsOk) out.push(`속성 'colwidth' 값은 1~${TABLE_LIMITS.maxColWidthPx}의 정수 배열`);
   }
   return out;
+}
+
+/** 1 이상 `max` 이하의 정수인가 */
+function inRange(v: unknown, max: number): boolean {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= max;
 }
 
 /** 표 칸 정렬 — TipTap `normalizeTableCellAlign`이 받는 값과 같다 */
