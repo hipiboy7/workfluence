@@ -45,6 +45,15 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   return body as T;
 }
 
+/**
+ * 흐름을 열지 못한 응답을 `ApiError`로 (P10 LLM 질문). 흘려받는 요청은 `api()`를 쓰지 않으므로 오류 읽기만 여기서 같이 쓴다 —
+ * 화면이 같은 모양의 오류 문장을 보이게
+ */
+export async function readApiError(res: Response): Promise<ApiError> {
+  const text = await res.text().catch(() => '');
+  return new ApiError(res.status, text ? safeJson(text) : undefined);
+}
+
 function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);

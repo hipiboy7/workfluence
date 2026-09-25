@@ -65,3 +65,20 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   border-radius: 3px 3px 3px 0; color: #fff; font-size: .72rem; font-weight: 600;
   left: -1px; line-height: 1; padding: .1rem .3rem; position: absolute; top: -1.3em; user-select: none; white-space: nowrap;
 }
+
+/* --- Phase 10: 사내 LLM 질문 (P10_설계서_Llm G절) --- */
+.shell.wide { max-width: 1100px; }
+.llm-layout { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 1.2rem; align-items: start; }
+@media (max-width: 800px) { .llm-layout { grid-template-columns: 1fr; } }
+.llm-list ul { list-style: none; padding: 0; margin: 0 0 1rem; }
+.llm-list li { padding: .3rem 0; border-bottom: 1px solid var(--line); }
+.llm-list li.current { font-weight: 600; }
+.llm-messages { list-style: none; padding: 0; margin: 0 0 1rem; }
+.llm-msg { padding: .6rem .8rem; border-radius: 6px; margin: .5rem 0; }
+.llm-msg p { margin: 0 0 .3rem; }
+.llm-user { background: #eef3ff; }
+.llm-assistant { background: #fafafa; border: 1px solid var(--line); }
+/* **답은 평문이다** — 줄바꿈을 지키고 HTML로 그리지 않는다 (A.1-4) */
+.llm-text { white-space: pre-wrap; word-break: break-word; }
+.llm-thinking { color: var(--muted); font-size: .9rem; margin: 0 0 .4rem; }
+.llm-chat textarea, .card textarea { width: 100%; font: inherit; padding: .5rem; border: 1px solid var(--line); border-radius: 6px; }

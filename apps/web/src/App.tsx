@@ -6,6 +6,8 @@ import { PageEditorPage } from './pages/PageEditorPage';
 import { PageHistoryPage } from './pages/PageHistoryPage';
 import { PageViewPage } from './pages/PageViewPage';
 import { LabelPage } from './pages/LabelPage';
+import { LlmPage } from './pages/LlmPage';
+import { LlmPromptsPage } from './pages/LlmPromptsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { SearchPage } from './pages/SearchPage';
 import { TrashPage } from './pages/TrashPage';
@@ -14,6 +16,7 @@ import { SpacesPage } from './pages/SpacesPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
+import { AdminLlmPage } from './pages/admin/AdminLlmPage';
 import { AdminPolicyPage } from './pages/admin/AdminPolicyPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 
@@ -39,6 +42,11 @@ export function App() {
           <Route path="/trash" element={<RequireAuth><TrashPage /></RequireAuth>} />
           <Route path="/labels/:name" element={<RequireAuth><LabelPage /></RequireAuth>} />
           <Route path="/admin/policy" element={<RequireAuth><AdminPolicyPage /></RequireAuth>} />
+          {/* Phase 10 — 사내 LLM 질문 (P10_설계서_Llm G절). `/llm/prompts`는 고정 경로라 `/llm/:id`보다 먼저 맞는다 */}
+          <Route path="/llm" element={<RequireAuth><LlmPage /></RequireAuth>} />
+          <Route path="/llm/prompts" element={<RequireAuth><LlmPromptsPage /></RequireAuth>} />
+          <Route path="/llm/:id" element={<RequireAuth><LlmPage /></RequireAuth>} />
+          <Route path="/admin/llm" element={<RequireAuth><AdminLlmPage /></RequireAuth>} />
           <Route path="/spaces/:id" element={<RequireAuth><SpacePage /></RequireAuth>} />
           <Route path="/pages/:id" element={<RequireAuth><PageViewPage /></RequireAuth>} />
           <Route path="/pages/:id/edit" element={<RequireAuth><PageEditorPage /></RequireAuth>} />

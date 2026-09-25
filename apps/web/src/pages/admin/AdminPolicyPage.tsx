@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { ALLOWED_UPLOAD_EXTENSIONS, validatePolicyPatch, type Policy } from '@workfluence/shared';
+import { ALLOWED_UPLOAD_EXTENSIONS, policyConsistencyProblems, validatePolicyPatch, type Policy } from '@workfluence/shared';
 import { api } from '../../api';
 
 type PolicyView = Policy & { uploadCeilingMb: number };
@@ -37,7 +37,9 @@ export function AdminPolicyPage() {
     const patch: Record<string, unknown> = { ...draft };
     if (exts.join(',') !== policy.allowedExtensions.join(',')) patch.allowedExtensions = exts;
     // 서버와 같은 판정을 먼저 돌린다. 왕복하지 않고 바로 말해 준다
+    // 값 하나하나의 범위와, **바꾼 뒤의 전체**로 보는 짝 규칙(LLM 고정 수 < 대화 수, P10 FR-1134)
     const problems = validatePolicyPatch(patch);
+    if (!problems.length) problems.push(...policyConsistencyProblems({ ...policy, ...patch } as Policy));
     if (problems.length) {
       setError(problems.join('; '));
       return;
