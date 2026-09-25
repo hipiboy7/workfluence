@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { POLICY_DEFAULTS, POLICY_KEYS, applyPolicy, validatePolicyPatch } from './policy';
+import { POLICY_DEFAULTS, POLICY_KEYS, applyPolicy, policyConsistencyProblems, validatePolicyPatch } from './policy';
 
 /** A등급 (P4_설계서_Admin E절, FR-524). 테스트를 먼저 썼다. */
 
@@ -72,5 +72,37 @@ describe('validatePolicyPatch — 바꾸려는 값 판정 (FR-524)', () => {
 describe('POLICY_KEYS', () => {
   it('기본값과 키 집합이 같다 — 한쪽만 늘리면 조용히 빠진다', () => {
     expect([...POLICY_KEYS].sort()).toEqual(Object.keys(POLICY_DEFAULTS).sort());
+  });
+});
+
+/** Phase 10 (P10_설계서_Llm I절, FR-1131~1134) — 테스트를 먼저 썼다 */
+describe('LLM 대화 보관 정책값', () => {
+  it('기본값은 사용자 답 그대로다 — 7일 · 100개 · 고정 20개 (쟁점 5)', () => {
+    expect(POLICY_DEFAULTS.llmRetentionDays).toBe(7);
+    expect(POLICY_DEFAULTS.llmConversationMax).toBe(100);
+    expect(POLICY_DEFAULTS.llmPinnedMax).toBe(20);
+  });
+
+  it('범위 밖은 막는다', () => {
+    expect(validatePolicyPatch({ llmRetentionDays: 0 })).toHaveLength(1);
+    expect(validatePolicyPatch({ llmRetentionDays: 366 })).toHaveLength(1);
+    expect(validatePolicyPatch({ llmConversationMax: 0 })).toHaveLength(1);
+    expect(validatePolicyPatch({ llmConversationMax: 1001 })).toHaveLength(1);
+    expect(validatePolicyPatch({ llmPinnedMax: -1 })).toHaveLength(1);
+    expect(validatePolicyPatch({ llmRetentionDays: 30, llmConversationMax: 300, llmPinnedMax: 0 })).toEqual([]);
+  });
+
+  it('**고정 수는 대화 수보다 작아야 한다** (FR-1134) — 같으면 고정만으로 상한이 차서 새 대화를 둘 자리가 없다', () => {
+    expect(policyConsistencyProblems({ ...POLICY_DEFAULTS, llmPinnedMax: 100, llmConversationMax: 100 })).toHaveLength(1);
+    expect(policyConsistencyProblems({ ...POLICY_DEFAULTS, llmPinnedMax: 150, llmConversationMax: 100 })).toHaveLength(1);
+    expect(policyConsistencyProblems({ ...POLICY_DEFAULTS, llmPinnedMax: 99, llmConversationMax: 100 })).toEqual([]);
+    expect(policyConsistencyProblems(POLICY_DEFAULTS)).toEqual([]);
+  });
+
+  it('**읽을 때 어긋난 짝은 고정 수를 낮춰 맞춘다** — 읽기는 던지지 않는다 (FR-522와 같은 판단)', () => {
+    const p = applyPolicy({ llmConversationMax: 10, llmPinnedMax: 50 });
+    expect(p.llmConversationMax).toBe(10);
+    expect(p.llmPinnedMax).toBe(9);
+    expect(policyConsistencyProblems(p)).toEqual([]);
   });
 });

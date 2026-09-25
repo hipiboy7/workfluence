@@ -8,7 +8,10 @@ import {
   createSpaceDto,
   createTemplateDto,
   createUserDto,
+  createLlmPromptDto,
+  createLlmProviderDto,
   findIdDto,
+  llmAskDto,
   loginDto,
   movePageDto,
   updateTemplateDto,
@@ -17,9 +20,11 @@ import {
   signupDto,
   spaceListQueryDto,
   spaceStatusDto,
+  updateLlmPromptDto,
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
+import { LLM_LIMITS } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -135,5 +140,52 @@ describe('템플릿 DTO (P6 FR-740~745)', () => {
     const r = updateTemplateDto.safeParse({});
     expect(r.success).toBe(false);
     if (!r.success) expect(JSON.stringify(r.error.issues)).toContain('바꿀 것을');
+  });
+});
+
+/** Phase 10 (P10_설계서_Llm F절). 테스트를 먼저 썼다 */
+describe('LLM DTO', () => {
+  it('등록은 주소를 **판정한 모양으로** 받는다 — 화면과 서버가 같은 함수를 쓴다 (FR-1104)', () => {
+    const r = createLlmProviderDto.parse({ name: ' 사내 Qwen ', baseUrl: 'http://llm.example.internal:8000/v1/', model: 'Qwen/Qwen3-32B' });
+    expect(r).toEqual({ name: '사내 Qwen', baseUrl: 'http://llm.example.internal:8000/v1', model: 'Qwen/Qwen3-32B', apiKey: null });
+    expect(createLlmProviderDto.safeParse({ name: 'a', baseUrl: 'http://u:p@llm.example.internal/v1', model: 'm' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ name: 'a', baseUrl: 'ftp://llm.example.internal/v1', model: 'm' }).success).toBe(false);
+  });
+
+  it('키는 없어도 되고, **빈 키는 없는 키다**', () => {
+    const base = { name: 'a', baseUrl: 'http://llm.example.internal/v1', model: 'm' };
+    expect(createLlmProviderDto.parse({ ...base, apiKey: '  ' }).apiKey).toBeNull();
+    expect(createLlmProviderDto.parse({ ...base, apiKey: 'k-123' }).apiKey).toBe('k-123');
+    expect(createLlmProviderDto.safeParse({ ...base, apiKey: 'k\nX-Evil: 1' }).success).toBe(false);
+  });
+
+  it('이름·모델이 비면 거부한다', () => {
+    expect(createLlmProviderDto.safeParse({ name: ' ', baseUrl: 'http://llm.example.internal/v1', model: 'm' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ name: 'a', baseUrl: 'http://llm.example.internal/v1', model: '' }).success).toBe(false);
+  });
+
+  it('지시문: 이름과 본문 — 본문 상한', () => {
+    expect(createLlmPromptDto.parse({ name: ' 요약 ', content: '세 줄로 요약한다' })).toEqual({ name: '요약', content: '세 줄로 요약한다' });
+    expect(createLlmPromptDto.safeParse({ name: '요약', content: '   ' }).success).toBe(false);
+    expect(createLlmPromptDto.safeParse({ name: '요약', content: 'x'.repeat(LLM_LIMITS.promptMaxChars + 1) }).success).toBe(false);
+  });
+
+  it('지시문 고치기는 하나만 줘도 되고 **빈 몸통은 거부한다**', () => {
+    expect(updateLlmPromptDto.safeParse({ name: '새 이름' }).success).toBe(true);
+    expect(updateLlmPromptDto.safeParse({ content: '새 본문' }).success).toBe(true);
+    expect(updateLlmPromptDto.safeParse({}).success).toBe(false);
+  });
+
+  it('질문: 앞뒤 공백을 벗기고, 비었거나 너무 길면 거부한다 (FR-1116)', () => {
+    expect(llmAskDto.parse({ providerId: uuid, question: '  안녕  ' })).toEqual({ providerId: uuid, question: '안녕' });
+    expect(llmAskDto.safeParse({ providerId: uuid, question: '  ' }).success).toBe(false);
+    expect(llmAskDto.safeParse({ providerId: uuid, question: 'x'.repeat(LLM_LIMITS.questionMaxChars + 1) }).success).toBe(false);
+    expect(llmAskDto.safeParse({ providerId: 'nope', question: 'a' }).success).toBe(false);
+  });
+
+  it('**지시문은 새 대화에서만 고른다** (FR-1127) — 이어 묻는 대화에 주면 거부한다', () => {
+    expect(llmAskDto.safeParse({ providerId: uuid, promptId: uuid, question: 'a' }).success).toBe(true);
+    expect(llmAskDto.safeParse({ providerId: uuid, conversationId: uuid, question: 'a' }).success).toBe(true);
+    expect(llmAskDto.safeParse({ providerId: uuid, conversationId: uuid, promptId: uuid, question: 'a' }).success).toBe(false);
   });
 });
