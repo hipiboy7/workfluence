@@ -16,3 +16,5 @@ npm-debug.log*
 
 # TLS 인증서는 저장소에 넣지 않는다 (CLAUDE.md 12.3절). 확인용 자체 서명본은 로컬에만 둔다
 deploy/certs/
+# 사내 CA 인증서는 현장의 것이다 (P11 D.7) — 자리 안내(README.md)만 넣는다
+deploy/ca/*.pem

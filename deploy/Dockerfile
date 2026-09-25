@@ -47,9 +47,12 @@ COPY --from=build /out/web /app/web
 # 이름 있는 볼륨은 마운트 지점이 이미지에 없으면 root 소유로 새로 만들어지고, 그러면
 # non-root로 도는 앱이 첫 업로드에서 EACCES로 막힌다. 미리 있으면 도커가 그 소유·권한을 옮긴다
 RUN mkdir -p /data/attachments && chown -R node:node /data
+# 시작 스크립트 — 사내 CA 파일(/etc/workfluence/ca/ca.pem)이 있으면 믿고 띄운다 (P11_설계서_Ops D.7)
+COPY --chmod=0755 deploy/entrypoint.sh /usr/local/bin/workfluence-entrypoint
 # non-root (CLAUDE.md 7절)
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["/usr/local/bin/workfluence-entrypoint"]
 CMD ["node", "--enable-source-maps", "dist/main.js"]
