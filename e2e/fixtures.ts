@@ -21,15 +21,17 @@ function url(): string {
   return raw;
 }
 
-/** 주어진 관리자 계정을 만든다 */
-export async function createAdmin(admin: { username: string; password: string }): Promise<void> {
+/**
+ * 주어진 관리자 계정을 만든다. `root`는 시스템 관리자다 — LLM 등록처럼 root만 하는 일을 볼 때 쓴다(P10 A.1-1)
+ */
+export async function createAdmin(admin: { username: string; password: string }, role: 'admin' | 'root' = 'admin'): Promise<void> {
   const c = new Client(url());
   await c.connect();
   try {
     await c.query(
       `INSERT INTO users (username, display_name, password_hash, role, status, must_change_password, approved_at)
-       VALUES ($1, 'E2E 관리자', $2, 'admin', 'active', false, now())`,
-      [admin.username, await argon2.hash(admin.password, { type: argon2.argon2id })],
+       VALUES ($1, $3, $2, $4, 'active', false, now())`,
+      [admin.username, await argon2.hash(admin.password, { type: argon2.argon2id }), role === 'root' ? 'E2E 시스템 관리자' : 'E2E 관리자', role],
     );
   } finally {
     await c.end();
@@ -79,6 +81,11 @@ export async function cleanup(usernames: string[]): Promise<void> {
   try {
     const ids = (await c.query('SELECT id FROM users WHERE username = ANY($1)', [usernames])).rows.map((r: { id: string }) => r.id);
     if (!ids.length) return;
+    // Phase 10의 LLM 표도 users를 참조한다. 대화를 지우면 메시지는 함께 지워진다(CASCADE). LLM을 지우면 남의 대화는
+    // LLM 칸만 빈다(SET NULL) — 그래서 순서는 대화 · 지시문 · LLM이다
+    await c.query('DELETE FROM llm_conversations WHERE user_id = ANY($1)', [ids]);
+    await c.query('DELETE FROM llm_prompts WHERE user_id = ANY($1)', [ids]);
+    await c.query('DELETE FROM llm_providers WHERE created_by = ANY($1)', [ids]);
     // Phase 3에서 첨부·댓글이 pages를 참조한다. 자식부터 거꾸로 지우는 순서를 지킨다
     const pagesOfMine = 'SELECT id FROM pages WHERE created_by = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))';
     // 알림은 **댓글·페이지를 참조한다.** 그것들보다 먼저 지워야 한다. 내가 만든 알림뿐 아니라
