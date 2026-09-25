@@ -48,8 +48,8 @@ describe('왕복 — 넣은 것이 그대로 나온다', () => {
     expect(roundTrip(doc(p()))).toEqual(doc(p()));
   });
 
-  it('빈 문서', () => {
-    expect(roundTrip(doc())).toEqual(doc());
+  it('빈 문서는 빈 문단 하나로 읽는다 — 편집기가 그렇게 그린다 (P12 FR-1313)', () => {
+    expect(roundTrip(doc())).toEqual(doc(p()));
   });
 
   it('**한글과 이모지가 깨지지 않는다** — 문자 단위 오프셋이 틀리면 여기서 드러난다', () => {
@@ -93,8 +93,40 @@ describe('실시간 상태로서 동작한다', () => {
 });
 
 describe('빈 상태에서 읽기', () => {
-  it('아무것도 없는 Y.Doc은 빈 문서다 — `null`이나 예외가 아니다', () => {
-    expect(docFromYDoc(new Y.Doc())).toEqual(doc());
+  it('아무것도 없는 Y.Doc은 빈 문단 하나다 — `null`이나 예외가 아니다. 편집기가 그리는 모양이고 정본 검증을 지난다', () => {
+    expect(docFromYDoc(new Y.Doc())).toEqual(doc(p()));
+    expect(validateDocument(docFromYDoc(new Y.Doc()))).toEqual({ ok: true });
+  });
+});
+
+/**
+ * **편집기처럼 읽는다** (P12 FR-1313, 보류 25). 열린 편집기(y-tiptap)는 순서·개수를 어긴 요소를 노드로 만들지 못해 공유 문서에서 지우고,
+ * 이웃은 남긴다(설계서 C.2 실측). 정본은 편집기가 보는 모양을 적는다 — 어긴 요소는 떨어뜨리고, 비게 된 부모도 떨어뜨린다
+ */
+describe('편집기처럼 읽는다 — 순서·개수를 어긴 요소 (P12 FR-1313)', () => {
+  const li = (...c: DocNode[]): DocNode => ({ type: 'listItem', content: c });
+  const list = (...c: DocNode[]): DocNode => ({ type: 'bulletList', content: c });
+  const quote = (...c: DocNode[]): DocNode => ({ type: 'blockquote', content: c });
+  const cell = (...c: DocNode[]): DocNode => ({ type: 'tableCell', attrs: { colspan: 1, rowspan: 1 }, content: c });
+  const table = (...cells: DocNode[]): DocNode => ({ type: 'table', content: [{ type: 'tableRow', content: cells }] });
+
+  it('**인용으로 시작하는 목록 항목은 떨어뜨린다** — 같은 목록의 다른 항목은 남는다', () => {
+    const read = roundTrip(doc(list(li(p(t('남의 글 1'))), li(quote(p(t('조작')))), li(p(t('남의 글 2'))))));
+    expect(read).toEqual(doc(list(li(p(t('남의 글 1'))), li(p(t('남의 글 2'))))));
+  });
+
+  it('빈 인용·빈 목록 항목·빈 표 칸은 떨어뜨린다 — **비게 된 부모도** (목록 → 떨어뜨림, 줄은 칸이 없어도 된다)', () => {
+    expect(roundTrip(doc(quote(), p(t('끝'))))).toEqual(doc(p(t('끝'))));
+    expect(roundTrip(doc(list(li()), p(t('끝'))))).toEqual(doc(p(t('끝'))));
+    expect(roundTrip(doc(quote(p(t('남의 인용')), quote())))).toEqual(doc(quote(p(t('남의 인용')))));
+    expect(roundTrip(doc(table(cell(p(t('남의 칸'))), cell()), p(t('끝'))))).toEqual(doc(table(cell(p(t('남의 칸')))), p(t('끝'))));
+    expect(roundTrip(doc(table(cell()), p(t('끝'))))).toEqual(doc({ type: 'table', content: [{ type: 'tableRow' }] }, p(t('끝'))));
+  });
+
+  it('**모두 떨어뜨려 비면 빈 문단 하나** — 읽은 문서는 늘 정본 검증을 지난다', () => {
+    const read = roundTrip(doc(list(li(quote(p(t('조작')))))));
+    expect(read).toEqual(doc(p()));
+    for (const d of [read, roundTrip(doc(table(cell()))), roundTrip(doc(quote(quote())))]) expect(validateDocument(d)).toEqual({ ok: true });
   });
 });
 

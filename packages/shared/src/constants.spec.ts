@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, LOG_EVENTS, REQUEST_ID_PATTERN } from './constants';
+import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, REQUEST_ID_PATTERN, TABLE_LIMITS } from './constants';
 
 /** 설계 고정값 중 **이름의 모양**이 규칙인 것 (P11 D.4, FR-1214·1218) */
 
@@ -42,3 +42,19 @@ describe('AUDIT_ACTIONS — P11', () => {
     expect(AUDIT_ACTIONS).toContain('user.grants.change');
   });
 });
+
+describe('상한 (P12 A.1-2·4·5)', () => {
+  it('**늦어진다고 알리는 때는 5초** — 사용자가 정한 값이다', () => {
+    expect(LLM_TIMINGS.slowAnswerMs).toBe(5_000);
+  });
+
+  it('실시간 편집 한 프레임은 16MiB — REST 저장 상한(2MB)의 문서가 Yjs로 약 2MB라 8배를 둔다', () => {
+    expect(COLLAB_LIMITS.maxFrameBytes).toBe(16 * 1024 * 1024);
+    expect(COLLAB_LIMITS.maxFrameBytes).toBeGreaterThanOrEqual(8 * 2 * 1024 * 1024);
+  });
+
+  it('표 칸의 합치는 수는 HTML 표준이 읽는 상한(1000)까지, 열 너비는 10000px까지', () => {
+    expect(TABLE_LIMITS).toEqual({ maxSpan: 1000, maxColWidthPx: 10_000 });
+  });
+});
+

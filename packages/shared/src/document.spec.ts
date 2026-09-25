@@ -4,7 +4,9 @@ import {
   ALLOWED_CHILDREN,
   ALLOWED_MARKS,
   ALLOWED_NODES,
+  FIRST_CHILD,
   MARKS_IN,
+  NON_EMPTY_NODES,
   MAX_DOCUMENT_NODES,
   documentSchemaVersion,
   emptyDocument,
@@ -314,11 +316,10 @@ describe('값 규칙 — style에 들어가는 값 (P9 보안 검토 1)', () => 
     expect(nodeAttrProblems('tableHeader', { align: 1 })).toEqual(["속성 'align' 값은 left·center·right"]);
   });
 
-  it('`colwidth`는 숫자 배열(빈 칸은 null)만 받는다 — 붙여 넣기의 `parseInt`가 만드는 NaN은 숫자다', () => {
+  it('`colwidth`는 숫자 배열(빈 칸은 null)만 받는다', () => {
     expect(nodeAttrProblems('tableCell', { colwidth: [120, null, 80] })).toEqual([]);
-    expect(nodeAttrProblems('tableCell', { colwidth: [Number.NaN] })).toEqual([]);
-    expect(nodeAttrProblems('tableCell', { colwidth: ['1px; position:fixed'] })).toEqual(["속성 'colwidth' 값은 숫자 배열"]);
-    expect(nodeAttrProblems('tableHeader', { colwidth: 120 })).toEqual(["속성 'colwidth' 값은 숫자 배열"]);
+    expect(nodeAttrProblems('tableCell', { colwidth: ['1px; position:fixed'] })).toEqual(["속성 'colwidth' 값은 1~10000의 정수 배열"]);
+    expect(nodeAttrProblems('tableHeader', { colwidth: 120 })).toEqual(["속성 'colwidth' 값은 1~10000의 정수 배열"]);
   });
 
   it('정본 검증도 같은 값 규칙을 본다 — REST로 저장해도 막힌다', () => {
@@ -357,3 +358,79 @@ describe('까닭의 이름·키는 40자까지 — 이 글이 경고 로그와 �
     expect(markProblems('link', { href: '/a', ['k'.repeat(5000)]: 'x' })[0].length).toBeLessThan(80);
   });
 });
+
+/**
+ * **표 칸 값의 범위** (P12 FR-1322, 보류 27). 모양이 맞는 큰 값(`colspan` 10만)은 받은 동료의 화면을 무겁게 한다. `colspan`·`rowspan`은
+ * HTML 표준이 읽는 상한(1000)까지의 정수 — 브라우저는 넘는 값을 1000으로 그린다. 편집기도 붙여 넣은 값을 이 범위로 줄인다(`extensions.ts`).
+ * 붙여 넣기의 `parseInt`가 만들던 `NaN`도 편집기가 빈 칸(null)으로 바꾼다 — 서버는 받지 않는다
+ */
+describe('표 칸 값의 범위 (P12 FR-1322, 보류 27)', () => {
+  it('`colspan`·`rowspan`은 1~1000의 정수', () => {
+    for (const ok of [1, 2, 1000]) {
+      expect(nodeAttrProblems('tableCell', { colspan: ok, rowspan: ok }), String(ok)).toEqual([]);
+    }
+    for (const bad of [0, -1, 1001, 100_000, 1.5, Number.NaN, '2']) {
+      expect(nodeAttrProblems('tableHeader', { colspan: bad }), String(bad)).toEqual(["속성 'colspan' 값은 1~1000의 정수"]);
+      expect(nodeAttrProblems('tableCell', { rowspan: bad }), String(bad)).toEqual(["속성 'rowspan' 값은 1~1000의 정수"]);
+    }
+  });
+
+  it('`colwidth`는 1000칸 이하, 값은 비었거나 1~10000의 정수', () => {
+    expect(nodeAttrProblems('tableCell', { colwidth: [null, 1, 10_000] })).toEqual([]);
+    for (const bad of [[0], [10_001], [Number.NaN], [1.5], Array.from({ length: 1001 }, () => 10)]) {
+      expect(nodeAttrProblems('tableCell', { colwidth: bad }), JSON.stringify(bad).slice(0, 30)).toEqual(["속성 'colwidth' 값은 1~10000의 정수 배열"]);
+    }
+  });
+
+  it('관문의 부분 판정(속성 하나씩)에서도 있는 값은 본다', () => {
+    expect(nodeAttrProblems('tableCell', { colspan: 100_000 }, { partial: true })).toEqual(["속성 'colspan' 값은 1~1000의 정수"]);
+  });
+});
+
+/**
+ * **순서와 개수 — 편집기가 그리는 모양만** (P12 FR-1310·1312, 보류 25). 편집기의 내용 식에서 나온다 — `listItem = paragraph block*`,
+ * `doc`·`blockquote`·`bulletList`·`orderedList`·`table`·`tableCell`·`tableHeader`는 `+`(하나 이상). 대조 시험(`extensions.spec.ts`)이 둘이 같음을 본다
+ */
+describe('순서와 개수 (P12 FR-1310·1312, 보류 25)', () => {
+  const li = (...c: DocNode[]): DocNode => ({ type: 'listItem', content: c });
+  const list = (...c: DocNode[]): DocNode => ({ type: 'bulletList', content: c });
+  const quote = (...c: DocNode[]): DocNode => ({ type: 'blockquote', content: c });
+  const table = (...rows: DocNode[]): DocNode => ({ type: 'table', content: rows });
+  const row = (...cells: DocNode[]): DocNode => ({ type: 'tableRow', content: cells });
+  const cell = (...c: DocNode[]): DocNode => ({ type: 'tableCell', content: c });
+  const errorsOf = (d: DocNode) => (validateDocument(d) as { errors?: string[] }).errors ?? [];
+
+  it('**목록 항목은 문단으로 시작한다** — 인용·표로 시작하는 항목은 받지 않는다. 문단 뒤에는 어느 블록이든 온다', () => {
+    expect(validateDocument(doc(list(li(para(text('a')), quote(para(text('b')))))))).toEqual({ ok: true });
+    expect(errorsOf(doc(list(li(quote(para(text('b')))))))).toEqual(["doc.content[0].content[0](listItem): 첫 자식은 paragraph여야 한다 — 'blockquote'"]);
+    expect(errorsOf(doc(list(li(table(row(cell(para()))))))).join()).toContain('첫 자식은 paragraph');
+  });
+
+  it('**비어 있을 수 없는 노드** — 문서·인용·목록·목록 항목·표·표 칸', () => {
+    expect(errorsOf(doc())).toEqual(["doc: 'doc'는 비어 있을 수 없다"]);
+    for (const [d, name] of [
+      [doc(quote()), 'blockquote'],
+      [doc(list()), 'bulletList'],
+      [doc({ type: 'orderedList', content: [] }), 'orderedList'],
+      [doc(list(li())), 'listItem'],
+      [doc(table()), 'table'],
+      [doc(table(row(cell()))), 'tableCell'],
+      [doc(table(row({ type: 'tableHeader', content: [] }))), 'tableHeader'],
+    ] as const) {
+      expect(errorsOf(d).join(), name).toContain(`'${name}'는 비어 있을 수 없다`);
+    }
+  });
+
+  it('빈 문단·빈 제목·빈 코드 블록·칸 없는 줄은 된다 — 편집기의 내용 식이 허락한다', () => {
+    expect(validateDocument(doc(para(), { type: 'heading', attrs: { level: 1 } }, { type: 'codeBlock' }, table(row())))).toEqual({ ok: true });
+    expect(validateDocument(emptyDocument())).toEqual({ ok: true });
+  });
+
+  it('규칙이 가리키는 이름은 허용 목록 안에 있다', () => {
+    for (const n of NON_EMPTY_NODES) expect(Object.hasOwn(ALLOWED_NODES, n), n).toBe(true);
+    for (const [n, firsts] of Object.entries(FIRST_CHILD)) {
+      for (const f of firsts) expect(ALLOWED_CHILDREN[n], `${n}→${f}`).toContain(f);
+    }
+  });
+});
+
