@@ -4,6 +4,7 @@ import {
   addMemberDto,
   attachLabelDto,
   isUuid,
+  userGrantsDto,
   changePasswordDto,
   createCategoryDto,
   createPageDto,
@@ -227,3 +228,17 @@ describe('주소에 들어가는 값 (P10 종료 루틴 — 경로 조작)', () 
     for (const name of ['...', 'v1.0', '.net']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(true);
   });
 });
+
+describe('위임 목록 DTO (P11 F절)', () => {
+  it('위임할 수 있는 행위의 목록 전체를 받는다 — 비우면 거둔다', () => {
+    expect(userGrantsDto.parse({ grants: ['llm.manage'] })).toEqual({ grants: ['llm.manage'] });
+    expect(userGrantsDto.parse({ grants: [] })).toEqual({ grants: [] });
+  });
+
+  it('**위임할 수 없는 행위·겹친 것·다른 키는 받지 않는다**', () => {
+    for (const bad of [{ grants: ['system.manage'] }, { grants: ['llm.manage', 'llm.manage'] }, { grants: 'llm.manage' }, {}, { grants: [], role: 'root' }]) {
+      expect(userGrantsDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
