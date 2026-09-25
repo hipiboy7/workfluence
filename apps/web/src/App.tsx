@@ -44,7 +44,7 @@ export function App() {
           <Route path="/labels/:name" element={<RequireAuth><LabelPage /></RequireAuth>} />
           <Route path="/admin/policy" element={<RequireAuth><AdminPolicyPage /></RequireAuth>} />
           {/* Phase 10 — 사내 LLM 질문 (P10_설계서_Llm G절). `/llm/prompts`는 고정 경로라 `/llm/:id`보다 먼저 맞는다 */}
-          <Route path="/llm" element={<RequireAuth><LlmPage /></RequireAuth>} />
+          <Route path="/llm" element={<RequireAuth><RequireUuidParam><LlmPage /></RequireUuidParam></RequireAuth>} />
           <Route path="/llm/prompts" element={<RequireAuth><LlmPromptsPage /></RequireAuth>} />
           <Route path="/llm/:id" element={<RequireAuth><RequireUuidParam><LlmPage /></RequireUuidParam></RequireAuth>} />
           <Route path="/admin/llm" element={<RequireAuth><AdminLlmPage /></RequireAuth>} />
