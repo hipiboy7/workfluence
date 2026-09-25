@@ -1,7 +1,8 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { can, type LabelView, type Principal, type SearchHit } from '@workfluence/shared';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
+import { byName } from '../db/order';
 import { labels, pageLabels, pages } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 
@@ -48,7 +49,7 @@ export class LabelsService {
       .from(pageLabels)
       .innerJoin(labels, eq(labels.id, pageLabels.labelId))
       .where(eq(pageLabels.pageId, pageId))
-      .orderBy(asc(labels.name));
+      .orderBy(byName(labels.name));
     return rows;
   }
 
@@ -99,6 +100,6 @@ export class LabelsService {
 
   /** 자동완성용 전체 목록. 라벨 이름 자체는 비밀이 아니다 — 어느 페이지에 붙었는지가 비밀이다 */
   async all(limit: number, tx: Db = this.db): Promise<LabelView[]> {
-    return tx.select({ id: labels.id, name: labels.name }).from(labels).orderBy(asc(labels.name)).limit(limit);
+    return tx.select({ id: labels.id, name: labels.name }).from(labels).orderBy(byName(labels.name)).limit(limit);
   }
 }

@@ -15,6 +15,7 @@ import {
 import { and, count, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import { DB, type Db } from '../db/db.module';
+import { byName } from '../db/order';
 import { spaceCategories, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
 
 /**
@@ -118,7 +119,7 @@ export class SpacesService {
               : and(eq(spaces.kind, 'team'), ids.length ? or(inArray(spaces.id, ids), eq(spaces.createdBy, principal.id)) : eq(spaces.createdBy, principal.id)),
           );
 
-    const rows = await this.db.select().from(spaces).where(visible).orderBy(spaces.name);
+    const rows = await this.db.select().from(spaces).where(visible).orderBy(byName(spaces.name));
     const views = await Promise.all(rows.map((r) => this.toView(r, principal)));
     // 볼 수 없는 것을 먼저 빼고 자른다. 자르고 거르면 결과가 조용히 비는 수가 있다
     return views.filter((v) => v.access.canRead).slice(0, limit);
@@ -229,7 +230,7 @@ export class SpacesService {
       .from(spaceMembers)
       .innerJoin(users, eq(users.id, spaceMembers.userId))
       .where(eq(spaceMembers.spaceId, spaceId))
-      .orderBy(users.displayName);
+      .orderBy(byName(users.displayName));
     return rows.map((r) => ({ ...r, role: r.role as SpaceMemberRole, createdAt: r.createdAt.toISOString() }));
   }
 

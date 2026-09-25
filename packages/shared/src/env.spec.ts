@@ -109,6 +109,34 @@ describe('Phase 1 — 세션·OIDC 규칙 (P1_설계서_Auth 9절)', () => {
   });
 });
 
+describe('Phase 10 — LLM (P10_설계서_Llm I절)', () => {
+  // 32바이트를 base64url(43자)과 base64(44자, `=` 하나)로 적은 것. **합성 값이다** — 모두 0인 바이트
+  const url43 = 'A'.repeat(43);
+  const std44 = `${'A'.repeat(43)}=`;
+
+  it('마스터 키는 없어도 기동한다 — 비면 키 없는 LLM만 등록된다 (FR-1103)', () => {
+    expect(parseEnv(valid).WF_LLM_MASTER_KEY).toBe('');
+  });
+
+  it('32바이트를 base64(url)로 적은 것만 받는다 — `openssl rand -base64 32`의 모양도', () => {
+    expect(parseEnv({ ...valid, WF_LLM_MASTER_KEY: url43 }).WF_LLM_MASTER_KEY).toBe(url43);
+    expect(parseEnv({ ...valid, WF_LLM_MASTER_KEY: std44 }).WF_LLM_MASTER_KEY).toBe(std44);
+  });
+
+  it('**모양이 틀리면 기동 실패** — 짧은 키로 암호화한 뒤에야 알면 되돌릴 수 없다', () => {
+    expect(() => parseEnv({ ...valid, WF_LLM_MASTER_KEY: 'short' })).toThrow(/WF_LLM_MASTER_KEY/);
+    expect(() => parseEnv({ ...valid, WF_LLM_MASTER_KEY: 'A'.repeat(44) })).toThrow(/WF_LLM_MASTER_KEY/);
+    expect(() => parseEnv({ ...valid, WF_LLM_MASTER_KEY: `${'A'.repeat(42)}!` })).toThrow(/WF_LLM_MASTER_KEY/);
+  });
+
+  it('답 하나의 시간 상한은 기본 10분, 10초~1시간', () => {
+    expect(parseEnv(valid).WF_LLM_TIMEOUT_MS).toBe(600_000);
+    expect(parseEnv({ ...valid, WF_LLM_TIMEOUT_MS: '60000' }).WF_LLM_TIMEOUT_MS).toBe(60_000);
+    expect(() => parseEnv({ ...valid, WF_LLM_TIMEOUT_MS: '5000' })).toThrow(/WF_LLM_TIMEOUT_MS/);
+    expect(() => parseEnv({ ...valid, WF_LLM_TIMEOUT_MS: '3600001' })).toThrow(/WF_LLM_TIMEOUT_MS/);
+  });
+});
+
 describe('.env.example ↔ 스키마 키 집합 (FR-015)', () => {
   it('키 집합이 정확히 같다', () => {
     const content = readFileSync(resolve(__dirname, '../../../.env.example'), 'utf8');

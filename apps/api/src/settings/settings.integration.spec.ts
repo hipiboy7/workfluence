@@ -120,6 +120,31 @@ describe('변경 (FR-523~526)', () => {
     const row = await db.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     expect(row?.updatedBy).toBe(me.id);
   });
+
+  it('**LLM 대화의 짝 규칙은 바꾼 뒤의 전체로 본다** (P10 FR-1134) — 한쪽만 바꿔 어긋나게 하면 400', async () => {
+    const me = await admin();
+    const svc = svcWith();
+    // 고정 수만 올려 대화 수(기본 100)와 같게
+    await expect(applyPatch(svc, { llmPinnedMax: 100 }, me)).rejects.toThrow(/llmPinnedMax/);
+    // 대화 수만 내려 고정 수(기본 20)보다 작게
+    await expect(applyPatch(svc, { llmConversationMax: 20 }, me)).rejects.toThrow(/llmConversationMax/);
+    // 둘을 함께 옮기면 된다
+    await applyPatch(svc, { llmConversationMax: 20, llmPinnedMax: 5 }, me);
+    const p = await svc.get();
+    expect([p.llmConversationMax, p.llmPinnedMax, p.llmRetentionDays]).toEqual([20, 5, 7]);
+  });
+
+  it('**캐시가 옛 값이어도 잠금 뒤의 값으로 본다** — 짝 규칙과 감사로그의 "이전 값" (검토 반영)', async () => {
+    const me = await admin();
+    const stale = svcWith();
+    // 기본값(대화 100·고정 20)을 캐시에 굳힌다. 그 사이 다른 요청이 대화 수를 30으로 내리고 커밋한다
+    await stale.get();
+    await applyPatch(svcWith(), { llmConversationMax: 30 }, me);
+    // 옛 캐시(100)로 보면 고정 50이 지나간다 — DB의 30으로 보면 어긋난다
+    await expect(db.transaction((tx) => stale.update({ llmPinnedMax: 50 }, me, tx))).rejects.toThrow(/llmPinnedMax/);
+    const r = await db.transaction((tx) => stale.update({ llmConversationMax: 40 }, me, tx));
+    expect(r.before).toEqual({ llmConversationMax: 30 });
+  });
 });
 
 describe('캐시·천장 (자체 점검 3·5)', () => {

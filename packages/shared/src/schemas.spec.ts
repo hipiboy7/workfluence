@@ -2,13 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { emptyDocument } from './document';
 import {
   addMemberDto,
+  attachLabelDto,
+  isUuid,
   changePasswordDto,
   createCategoryDto,
   createPageDto,
   createSpaceDto,
   createTemplateDto,
   createUserDto,
+  createLlmPromptDto,
+  createLlmProviderDto,
   findIdDto,
+  llmAskDto,
   loginDto,
   movePageDto,
   updateTemplateDto,
@@ -17,9 +22,11 @@ import {
   signupDto,
   spaceListQueryDto,
   spaceStatusDto,
+  updateLlmPromptDto,
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
+import { LLM_LIMITS } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -135,5 +142,88 @@ describe('템플릿 DTO (P6 FR-740~745)', () => {
     const r = updateTemplateDto.safeParse({});
     expect(r.success).toBe(false);
     if (!r.success) expect(JSON.stringify(r.error.issues)).toContain('바꿀 것을');
+  });
+});
+
+/** Phase 10 (P10_설계서_Llm F절). 테스트를 먼저 썼다 */
+describe('LLM DTO', () => {
+  it('등록은 주소를 **판정한 모양으로** 받는다 — 화면과 서버가 같은 함수를 쓴다 (FR-1104)', () => {
+    const r = createLlmProviderDto.parse({ name: ' 사내 Qwen ', baseUrl: 'http://llm.example.internal:8000/v1/', model: 'Qwen/Qwen3-32B' });
+    expect(r).toEqual({ name: '사내 Qwen', baseUrl: 'http://llm.example.internal:8000/v1', model: 'Qwen/Qwen3-32B', apiKey: null });
+    expect(createLlmProviderDto.safeParse({ name: 'a', baseUrl: 'http://u:p@llm.example.internal/v1', model: 'm' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ name: 'a', baseUrl: 'ftp://llm.example.internal/v1', model: 'm' }).success).toBe(false);
+  });
+
+  it('키는 없어도 되고, **빈 키는 없는 키다**', () => {
+    const base = { name: 'a', baseUrl: 'http://llm.example.internal/v1', model: 'm' };
+    expect(createLlmProviderDto.parse({ ...base, apiKey: '  ' }).apiKey).toBeNull();
+    expect(createLlmProviderDto.parse({ ...base, apiKey: 'k-123' }).apiKey).toBe('k-123');
+    expect(createLlmProviderDto.safeParse({ ...base, apiKey: 'k\nX-Evil: 1' }).success).toBe(false);
+  });
+
+  it('이름·모델이 비면 거부한다', () => {
+    expect(createLlmProviderDto.safeParse({ name: ' ', baseUrl: 'http://llm.example.internal/v1', model: 'm' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ name: 'a', baseUrl: 'http://llm.example.internal/v1', model: '' }).success).toBe(false);
+  });
+
+  it('지시문: 이름과 본문 — 본문 상한', () => {
+    expect(createLlmPromptDto.parse({ name: ' 요약 ', content: '세 줄로 요약한다' })).toEqual({ name: '요약', content: '세 줄로 요약한다' });
+    expect(createLlmPromptDto.safeParse({ name: '요약', content: '   ' }).success).toBe(false);
+    expect(createLlmPromptDto.safeParse({ name: '요약', content: 'x'.repeat(LLM_LIMITS.promptMaxChars + 1) }).success).toBe(false);
+  });
+
+  it('지시문 고치기는 하나만 줘도 되고 **빈 몸통은 거부한다**', () => {
+    expect(updateLlmPromptDto.safeParse({ name: '새 이름' }).success).toBe(true);
+    expect(updateLlmPromptDto.safeParse({ content: '새 본문' }).success).toBe(true);
+    expect(updateLlmPromptDto.safeParse({}).success).toBe(false);
+  });
+
+  it('질문: 앞뒤 공백을 벗기고, 비었거나 너무 길면 거부한다 (FR-1116)', () => {
+    expect(llmAskDto.parse({ providerId: uuid, question: '  안녕  ' })).toEqual({ providerId: uuid, question: '안녕' });
+    expect(llmAskDto.safeParse({ providerId: uuid, question: '  ' }).success).toBe(false);
+    expect(llmAskDto.safeParse({ providerId: uuid, question: 'x'.repeat(LLM_LIMITS.questionMaxChars + 1) }).success).toBe(false);
+    expect(llmAskDto.safeParse({ providerId: 'nope', question: 'a' }).success).toBe(false);
+  });
+
+  it('**지시문은 새 대화에서만 고른다** (FR-1127) — 이어 묻는 대화에 주면 거부한다', () => {
+    expect(llmAskDto.safeParse({ providerId: uuid, promptId: uuid, question: 'a' }).success).toBe(true);
+    expect(llmAskDto.safeParse({ providerId: uuid, conversationId: uuid, question: 'a' }).success).toBe(true);
+    expect(llmAskDto.safeParse({ providerId: uuid, conversationId: uuid, promptId: uuid, question: 'a' }).success).toBe(false);
+  });
+});
+
+/** 검토 반영 (P10 보안 검토 3 · 코드 리뷰 10·15). 테스트를 먼저 썼다 */
+describe('LLM DTO — PostgreSQL이 받지 않는 글자와 키의 모양', () => {
+  const base = { name: 'a', baseUrl: 'http://llm.example.internal/v1', model: 'm' };
+
+  it('**U+0000을 받지 않는다** — PostgreSQL text가 거부해 저장이 실패하고, 그 오류 문장에 본문이 실린다', () => {
+    expect(llmAskDto.safeParse({ providerId: uuid, question: 'a\u0000b' }).success).toBe(false);
+    expect(createLlmPromptDto.safeParse({ name: '요약', content: '지시\u0000' }).success).toBe(false);
+    expect(createLlmPromptDto.safeParse({ name: '요\u0000약', content: '지시' }).success).toBe(false);
+    expect(updateLlmPromptDto.safeParse({ content: 'x\u0000' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ ...base, name: 'a\u0000' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ ...base, model: 'm\u0000' }).success).toBe(false);
+  });
+
+  it('**API 키는 보이는 ASCII만** — 폭 없는 빈칸·한글·NUL이 섞인 키는 모든 요청을 "닿지 않는다"로 오진하게 만든다', () => {
+    // 기호(`-`·`.`·`_`)가 든 키는 받는다. 시험의 키는 실제 키 모양을 흉내 내지 않는다(12.3절, T-045)
+    expect(createLlmProviderDto.parse({ ...base, apiKey: 'aaaa-bbbb.cc_dd' }).apiKey).toBe('aaaa-bbbb.cc_dd');
+    for (const bad of ['k\u200b', '키값', 'k\u0000', 'a b', 'k\t1']) {
+      expect(createLlmProviderDto.safeParse({ ...base, apiKey: bad }).success).toBe(false);
+    }
+  });
+});
+
+describe('주소에 들어가는 값 (P10 종료 루틴 — 경로 조작)', () => {
+  it('**식별자 모양** — 서버의 `UuidPipe`와 화면의 경로 지킴이 같은 판정을 쓴다', () => {
+    expect([isUuid('3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b'), isUuid('00000000-0000-4000-8000-000000000000')]).toEqual([true, true]);
+    for (const bad of ['', 'x', '3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b/labels/x', '../../api/users', undefined, null, 7]) {
+      expect(isUuid(bad), String(bad)).toBe(false);
+    }
+  });
+
+  it('**라벨 이름은 `.`·`..`일 수 없다** — 라벨 페이지의 API 경로에서 URL 해석이 점 조각으로 읽어 다른 API를 가리킨다', () => {
+    for (const name of ['.', '..', ' .. ']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(false);
+    for (const name of ['...', 'v1.0', '.net']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(true);
   });
 });

@@ -132,6 +132,18 @@ export const envSchema = z
      * 요청 헤더로 조립하지 않는다 (9.1절 `redirect_uri`와 같은 판단: 헤더는 위조된다)
      */
     WF_PUBLIC_URL: z.string().default(''),
+
+    // --- Phase 10: 사내 LLM (P10_설계서_Llm I절) ---
+    /**
+     * 관리자가 등록한 API 키를 암호화하는 마스터 키 (D.4). **32바이트를 base64(url)로** 적는다 — `openssl rand -base64 32`.
+     * 모양이 틀리면 기동 실패다: 짧은 키로 암호화한 뒤에야 알면 되돌릴 수 없다. 비면 키 없는 LLM만 등록된다 (FR-1103)
+     */
+    WF_LLM_MASTER_KEY: z
+      .string()
+      .regex(/^(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9+/]{43}=)$/, '32바이트를 base64(url)로 적은 것이어야 한다 (openssl rand -base64 32)')
+      .default(''),
+    /** 답 하나의 시간 상한 (FR-1115). 끝없이 매달리지 않는다 */
+    WF_LLM_TIMEOUT_MS: intString(10_000, 3_600_000, 600_000),
   })
   .strict();
 

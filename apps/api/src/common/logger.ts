@@ -1,5 +1,6 @@
 import { Injectable, type LoggerService } from '@nestjs/common';
 import pino, { type Logger } from 'pino';
+import { errorStack, errorText, scrubMessage, scrubStack } from './error-text';
 
 /**
  * JSON 한 줄 stdout 로거 (CLAUDE.md 0.2절). 비밀번호·토큰·세션 ID·문서 본문은 로그에 넣지 않는다 (7절).
@@ -47,22 +48,37 @@ export function createLogger(level: string, destination?: pino.DestinationStream
   );
 }
 
+/**
+ * 받은 것을 로그 문장으로. **오류 객체는 `errorText`로** — 처리되지 않은 예외를 Nest가 오류 객체째 넘긴다(`ExceptionsHandler`).
+ * 문자열은 우리가 쓴 문장이지만, Nest 안쪽이 `e.message`를 넘기는 자리가 있어 drizzle 문장만은 걸러 낸다
+ */
+function text(message: unknown): string {
+  if (message instanceof Error) return errorText(message);
+  return typeof message === 'string' ? scrubMessage(message) : String(message);
+}
+
 @Injectable()
 export class PinoNestLogger implements LoggerService {
   constructor(private readonly logger: Logger) {}
   log(message: unknown, context?: string): void {
-    this.logger.info({ context }, String(message));
+    this.logger.info({ context }, text(message));
   }
+  /**
+   * 스택은 `trace`로 남긴다 — 예전에는 오류 객체가 오면 `String(err)`라 **스택이 버려졌다**(디버깅할 것이 없었다). 문자열로 온 스택도
+   * 문장 줄을 걷어 낸다 — 스택의 첫 줄이 곧 오류 문장이다
+   */
   error(message: unknown, trace?: string, context?: string): void {
-    this.logger.error({ context, trace }, String(message));
+    // 문자열 스택은 **drizzle 문장이 들어 있을 때만** 걸러 낸다 — 평범한 스택은 그대로가 디버깅에 낫다
+    const stack = typeof trace === 'string' ? (trace.includes('Failed query:') ? scrubStack(trace, text(message)) : trace) : errorStack(message);
+    this.logger.error({ context, trace: stack }, text(message));
   }
   warn(message: unknown, context?: string): void {
-    this.logger.warn({ context }, String(message));
+    this.logger.warn({ context }, text(message));
   }
   debug(message: unknown, context?: string): void {
-    this.logger.debug({ context }, String(message));
+    this.logger.debug({ context }, text(message));
   }
   verbose(message: unknown, context?: string): void {
-    this.logger.trace({ context }, String(message));
+    this.logger.trace({ context }, text(message));
   }
 }

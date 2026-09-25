@@ -21,6 +21,10 @@ export const POLICY_DEFAULTS = {
   lockoutMinutes: PASSWORD_POLICY.lockoutMinutes,
   trashRetentionDays: 30,
   auditRetentionDays: 365,
+  // Phase 10 (P10_설계서_Llm I절) — 사용자 결정 2026-09-25: "7일, 사용자당 100개, … 즐겨찾기나 고정은 최대 20개"
+  llmRetentionDays: 7,
+  llmConversationMax: 100,
+  llmPinnedMax: 20,
 };
 
 /**
@@ -59,6 +63,10 @@ const RANGES: Record<string, { min: number; max: number }> = {
   lockoutMinutes: { min: 1, max: 1440 },
   trashRetentionDays: { min: 1, max: 3650 },
   auditRetentionDays: { min: POLICY_FLOOR.auditRetentionDays, max: 3650 },
+  llmRetentionDays: { min: 1, max: 365 },
+  llmConversationMax: { min: 1, max: 1000 },
+  // 0이면 고정을 쓰지 않는다. **대화 수보다 작아야 한다**는 짝 규칙은 `policyConsistencyProblems`가 본다
+  llmPinnedMax: { min: 0, max: 999 },
 };
 
 const isValidInt = (key: string, v: unknown): v is number => {
@@ -70,12 +78,12 @@ const isValidExtensions = (v: unknown): v is string[] =>
   Array.isArray(v) && v.length > 0 && v.every((e) => typeof e === 'string' && (ALLOWED_UPLOAD_EXTENSIONS as readonly string[]).includes(e));
 
 /**
- * DB에서 읽은 값을 기본값 위에 얹는다.
+ * DB에서 읽은 값을 기본값 위에 얹는다 — **값 둘에 걸친 짝은 맞추지 않는다.**
  *
- * **모르는 키와 틀린 값은 조용히 버린다.** 여기서 던지면 DB 한 줄이 잘못됐을 때 앱이 아예
- * 뜨지 않는다 — 고치러 들어갈 화면도 같이 죽는다. 막는 자리는 `validatePolicyPatch`(쓰기)다.
+ * 쓰기 판정(`policyConsistencyProblems`)은 이것을 본다. 읽기용 `applyPolicy`는 어긋난 짝을 조용히 맞추므로, 그 결과로 판정하면
+ * 어긋난 값이 판정을 지나 저장된다 (검토 반영 — 코드 리뷰).
  */
-export function applyPolicy(stored: Record<string, unknown>): Policy {
+export function mergePolicy(stored: Record<string, unknown>): Policy {
   const out = { ...POLICY_DEFAULTS, allowedExtensions: [...POLICY_DEFAULTS.allowedExtensions] };
   for (const key of POLICY_KEYS) {
     const v = stored[key];
@@ -87,6 +95,34 @@ export function applyPolicy(stored: Record<string, unknown>): Policy {
     }
   }
   return out;
+}
+
+/**
+ * DB에서 읽은 값을 기본값 위에 얹는다 — 읽기용.
+ *
+ * **모르는 키와 틀린 값은 조용히 버린다.** 여기서 던지면 DB 한 줄이 잘못됐을 때 앱이 아예
+ * 뜨지 않는다 — 고치러 들어갈 화면도 같이 죽는다. 막는 자리는 `validatePolicyPatch`(쓰기)다.
+ */
+export function applyPolicy(stored: Record<string, unknown>): Policy {
+  const out = mergePolicy(stored);
+  // **짝이 어긋나면 고정 수를 낮춰 맞춘다** (P10 FR-1134). 쓰기에서 막으므로 여기 오는 것은 관리 화면 밖에서 손댄 DB다 —
+  // 던지면 기동이 막히고, 그대로 두면 고정만으로 상한이 차서 새 대화를 저장할 때 지울 것이 없다
+  if (out.llmPinnedMax >= out.llmConversationMax) out.llmPinnedMax = out.llmConversationMax - 1;
+  return out;
+}
+
+/**
+ * **값 둘 이상에 걸친 규칙** (P10 FR-1134). 통과하면 빈 배열.
+ *
+ * `validatePolicyPatch`는 바꾸려는 값 하나하나의 범위만 본다 — 짝은 **바꾼 뒤의 전체**로 봐야 한다(한쪽만 바꾸는 요청이 있다).
+ * 서버는 합친 값으로, 관리 화면은 지금 값에 입력을 얹은 것으로 같은 함수를 부른다.
+ */
+export function policyConsistencyProblems(policy: Policy): string[] {
+  const problems: string[] = [];
+  if (policy.llmPinnedMax >= policy.llmConversationMax) {
+    problems.push(`고정 수(llmPinnedMax ${policy.llmPinnedMax})는 대화 수(llmConversationMax ${policy.llmConversationMax})보다 작아야 한다 — 같으면 고정만으로 상한이 차서 새 대화를 둘 자리가 없다`);
+  }
+  return problems;
 }
 
 /** 바꾸려는 값 판정. 통과하면 빈 배열, 아니면 사람이 읽을 이유들 */

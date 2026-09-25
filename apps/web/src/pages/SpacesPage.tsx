@@ -50,7 +50,10 @@ export function SpacesPage() {
         {' · '}<Link to="/search">검색</Link>
         {' · '}<Link to="/notifications">알림{unread > 0 ? ` (${unread})` : ''}</Link>
         {' · '}<Link to="/trash">휴지통</Link>
+        {' · '}<Link to="/llm">LLM 질문</Link>
         {can(principal, 'settings.manage') && <> · <Link to="/admin/policy">운영 설정</Link></>}
+        {/* LLM 등록은 시스템 관리자(root)만 (P10_설계서_Llm A.1-1) */}
+        {can(principal, 'system.manage') && <> · <Link to="/admin/llm">LLM 연결</Link></>}
         {' · '}<Link to="/change-password">비밀번호 변경</Link>
         {' · '}<button type="button" className="linklike" onClick={() => void logout()}>로그아웃</button>
       </p>

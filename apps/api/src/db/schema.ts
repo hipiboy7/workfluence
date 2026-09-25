@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * 데이터 모델. 전체 그림은 docs/설계서_Architecture.md 3.1절이 단일 출처이고,
@@ -350,6 +350,77 @@ export const pageTemplates = pgTable('page_templates', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * 등록한 사내 LLM (P10_설계서_Llm E절, FR-1100~1108). **id는 앱이 만든다** — API 키 암호문의 AAD에 묶는다 (D.4).
+ * `apiKeyEnc`는 암호문(`v1.…`)이고 **응답·로그·감사로그에 싣지 않는다** (FR-1102)
+ */
+export const llmProviders = pgTable('llm_providers', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  baseUrl: text('base_url').notNull(),
+  model: text('model').notNull(),
+  apiKeyEnc: text('api_key_enc'),
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 사람마다의 지시문 — 시스템 프롬프트 (FR-1125~1129). 보존 기간이 없다 */
+export const llmPrompts = pgTable(
+  'llm_prompts',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    name: text('name').notNull(),
+    content: text('content').notNull(),
+    ...timestamps,
+  },
+  (t) => [unique('llm_prompts_user_name_uq').on(t.userId, t.name)],
+);
+
+/**
+ * 대화 (FR-1130~1139). 보관 규칙은 `updatedAt`(순서)·`retainFrom`(보존 기간의 기준)·`pinnedAt`(고정) 세 시각이다 (D.5).
+ * 지시문은 시작할 때의 **복사본**이다 (FR-1127)
+ */
+export const llmConversations = pgTable(
+  'llm_conversations',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    title: text('title').notNull(),
+    providerId: uuid('provider_id').references(() => llmProviders.id, { onDelete: 'set null' }),
+    promptName: text('prompt_name'),
+    systemPrompt: text('system_prompt'),
+    pinnedAt: timestamp('pinned_at', { withTimezone: true }),
+    retainFrom: timestamp('retain_from', { withTimezone: true }).notNull().defaultNow(),
+    ...timestamps,
+  },
+  (t) => [index('llm_conversations_user_idx').on(t.userId, t.updatedAt)],
+);
+
+/** 메시지. 대화와 수명이 같다(CASCADE). **차례는 `seq`**다 — 질문과 답을 한 문장으로 넣어 시각이 같을 수 있다 */
+export const llmMessages = pgTable(
+  'llm_messages',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    seq: bigint('seq', { mode: 'number' }).generatedAlwaysAsIdentity(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => llmConversations.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    content: text('content').notNull(),
+    model: text('model'),
+    status: text('status').notNull().default('done'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('llm_messages_conversation_idx').on(t.conversationId, t.seq)],
+);
+
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type CommentRow = typeof comments.$inferSelect;
 export type SpaceRow = typeof spaces.$inferSelect;
@@ -364,3 +435,7 @@ export type SettingRow = typeof settings.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
 export type PageRealtimeRow = typeof pageRealtime.$inferSelect;
 export type PageTemplateRow = typeof pageTemplates.$inferSelect;
+export type LlmProviderRow = typeof llmProviders.$inferSelect;
+export type LlmPromptRow = typeof llmPrompts.$inferSelect;
+export type LlmConversationRow = typeof llmConversations.$inferSelect;
+export type LlmMessageRow = typeof llmMessages.$inferSelect;

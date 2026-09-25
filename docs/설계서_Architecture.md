@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 9까지 구현 완료** (2026-09-24). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 10까지 구현 완료** (2026-09-25). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -23,14 +23,16 @@
     │ HTTPS
     ▼
 [nginx]  TLS 종단 · X-Forwarded-* 전달 · WebSocket 프록시(실시간 편집) · 업로드 상한
+         흐름 응답(LLM 질문)은 앱이 `X-Accel-Buffering: no`로 버퍼링을 끈다
     │ HTTP (컨테이너 네트워크)
     ▼
 [api]    NestJS. REST API + 빌드된 SPA 정적 서빙 (한 프로세스)
     │                                   │
-    │ SQL                               │ OIDC · 메일 발송 (HTTP)
+    │ SQL                               │ OIDC · 메일 발송 · LLM 질문 (HTTP)
     ▼                                   ▼
 [postgres]  문서·사용자·감사로그       [사내 IdP]  외부. Discovery·JWKS
                                        [사내 메일 API]  외부. 멘션 알림 (보류 18)
+                                       [사내 LLM (vLLM)]  외부. OpenAI 호환. 관리자가 등록한 주소 (보류 29)
     │
     ▼
 [볼륨]  postgres_data · attachments(Phase 3)
@@ -54,8 +56,9 @@ workfluence/
 │   ├── api/                      NestJS
 │   │   ├── src/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
-│   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드
-│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts
+│   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드 / [P10] order.ts (이름 정렬 — `COLLATE "C"`, T-046)
+│   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts /
+│   │   │   │                     [P10] error-text.ts (로그에 적는 오류 한 줄 — drizzle 문장의 매개변수를 싣지 않는다)
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
 │   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드
 │   │   │   ├── users/            [P1] 가입·승인·초기화·역할
@@ -72,12 +75,15 @@ workfluence/
 │   │   │   ├── trash/            [P4] 휴지통·되살리기
 │   │   │   ├── labels/           [P4] 라벨
 │   │   │   ├── templates/        [P6] 페이지 템플릿
-│   │   │   └── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http)
+│   │   │   ├── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http)
+│   │   │   └── llm/              [P10] 사내 LLM 질문 — domain/{secret,openai,think,conversation}.ts ·
+│   │   │                         LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
-│       └── src/{components,pages,api.ts,auth.tsx}
+│       └── src/{components,pages,api.ts,auth.tsx}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기) ·
+│                                 [P10] components/RequireUuidParam.tsx (주소의 id가 식별자 모양일 때만 화면을 그린다)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
-│   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html}.ts
+│   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown}.ts
 ├── e2e/                          Playwright
 ├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · check-licenses
 │                                 reindex · trash-purge · audit-purge · backup-create · backup-restore
@@ -86,7 +92,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P9]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P10]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -113,6 +119,8 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `release.ts` | 반입 묶음의 필수 구성 목록 | 문서가 아니라 코드가 단일 출처다 (`CLAUDE.md` 8.3절) |
 | `diff.ts` | 두 문서 JSON의 블록·단어 비교 (LCS) | 화면이 그리고 서버가 같은 결과를 내야 한다 |
 | `html.ts` | 문서 JSON → HTML 렌더링·이스케이프·인쇄 CSS | 허용 노드 목록이 `document.ts`와 한 곳에서 나와야 한다 |
+| `llm.ts` | LLM 질문의 흐름 줄(NDJSON) 모양·줄 나누기·줄 읽기, LLM 주소 판정 | 서버가 쓰고 화면이 읽는다. 주소 판정은 관리 화면과 서버가 같아야 한다 |
+| `markdown.ts` | 문서 JSON → 마크다운·텍스트(페이지 복사) | 허용 목록이 `document.ts`와 한 곳에서 나와야 한다. 평문 추출은 검색 인덱스와 같은 함수다 |
 
 전부 **A등급**(테스트 먼저, ≥90%)이다. 입출력이 결정적이고 외부 의존이 없다.
 
@@ -141,6 +149,10 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `notifications` | `id`, `user_id`, `kind`, `page_id`, `comment_id`, `actor_id`, `read_at`, `created_at` | P4 | 앱 내 알림함. **`actor_id`는 P8부터 null 가능** — 같이 쓴 문서에서 부른 사람을 확실히 모를 때다 (`P8_설계서_Mention` D절) |
 | `page_realtime` | `page_id` PK, `state` bytea, `version_no`, `authors` jsonb, `updated_by`, `updated_at` | P6 · P8(`authors`) | Yjs 상태. **파생 데이터**라 지워도 정본에서 다시 시작한다 (보류 4). 페이지가 지워지면 CASCADE. `authors`는 멘션을 만든 사람의 장부다 — 멘션 자리마다 만든 사람, 어느 연결이 어느 글자를 들여왔나, 옮김을 가리는 사라진 이름 (`P8_설계서_Mention` C.2절). 그 안의 `owners`(클라이언트 ID → 주인)는 P9부터 **누가 그 ID로 쓸 수 있나**도 정한다 (`P9_설계서_Gate` D.4) |
 | `page_templates` | `id`, `name` uq, `content_json`, `created_by`, `updated_at` | P6 | 페이지 시작 틀. 관리자만 만든다 |
+| `llm_providers` | `id`(앱이 만든다), `name` uq, `base_url`, `model`, `api_key_enc`, `created_by` | P10 | 등록한 사내 LLM. 키는 **암호문만**(`v1.…`, AAD = 행 id + 주소 — 옮겨 붙여도, 주소만 바꿔도 풀리지 않는다) — CHECK가 평문을 막는다 |
+| `llm_prompts` | `id`, `user_id`, `name`, `content` — (`user_id`,`name`) uq | P10 | 사람마다의 지시문. 보존 기간이 없다 |
+| `llm_conversations` | `id`, `user_id`, `title`, `provider_id`(SET NULL), `prompt_name`, `system_prompt`, `pinned_at`, `retain_from`, `updated_at` | P10 | 보관 규칙은 세 시각이다 — `updated_at`(순서)·`retain_from`(보존 기간의 기준)·`pinned_at`(고정). 지시문은 시작할 때의 복사본 |
+| `llm_messages` | `id`, `seq`(차례), `conversation_id`(CASCADE), `role`, `content`, `model`, `status` | P10 | 질문과 답. 생각 과정은 넣지 않는다. 대화와 수명이 같다 |
 
 ### 3.2 규약
 
@@ -194,6 +206,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 검색 | PostgreSQL ILIKE + pg_trgm | `SearchProvider` | pg_bigm·외부 엔진 |
 | 실시간 상태 | Yjs (`page_realtime`). **JSON이 정본이고 이것은 파생** | 게이트웨이가 상태를 읽고 쓰는 지점 | 다른 CRDT, 또는 실시간 편집을 끄는 것(`WF_COLLAB_ENABLED=false`) |
 | 알림 발송 | 앱 안 알림함 + 사내 메일 API | `MAIL_SENDER` 토큰 (`mock`/`http`) | 사내 메신저, 다른 메일 게이트웨이 |
+| LLM 질문 | 사내 LLM의 OpenAI 호환 API (vLLM) | `LLM_CLIENT` 토큰 (`openai.client.ts`) | 다른 형식의 사내 LLM 게이트웨이. 형식 읽기는 `domain/openai.ts` |
 
 테스트에서는 이 인터페이스의 대역(fake)을 쓴다. 단 **PostgreSQL은 대역을 쓰지 않는다** — SQL·제약·트랜잭션이 곧 로직이라 대역으로 검증하면 실패를 놓친다.
 
@@ -267,6 +280,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 7 | 반입 전 강화 — 살아 있는 연결의 권한 재판정·하트비트, 이미지 군살 제거 |
 | 8 | 멘션 귀속 — `pages/domain/makers.ts`(멘션을 만든 사람의 장부: 새로 생긴 멘션 자리 · 어느 연결이 어느 글자를 들여왔나 · 옮김을 가리는 사라진 이름), `page_realtime.authors`, `notifications.actor_id` null 허용 (`0008`) |
 | 9 | 실시간 편집의 관문 — `pages/domain/gate.ts`(되풀이 검사·완결·구조·주인 규칙), `pages/domain/presence.ts`(사람 표시 거르기), 허용 목록의 자식·노드별 마크·값 규칙, 편집기 확장 목록 하나(`apps/web/src/components/extensions.ts`)와 대조 테스트, 감사 종류 `page.collab.reject`, 서버만 보내는 저장 상태 알림 `COLLAB_MSG.status`(P9 D.9), 화면의 연결 상태 기계 `apps/web/src/components/collabLink.ts`. 화면의 동기화 라이브러리는 `@tiptap/y-tiptap`이다(P9 B.1). 마이그레이션 없음 |
+| 10 | 사내 LLM 질문 — `llm/` 모듈(등록 root만·키 암호화·NDJSON 중계·보관 규칙·한 시간마다 만료 정리), 표 넷(`0009_llm`), 정책값 셋(`llmRetentionDays`·`llmConversationMax`·`llmPinnedMax`), 환경변수 둘(`WF_LLM_MASTER_KEY`·`WF_LLM_TIMEOUT_MS`), 감사 종류 넷, 공유 계약 `llm.ts`·`markdown.ts`, 교체 축 `LLM_CLIENT`, 화면 셋과 페이지 복사 버튼, web 컴포넌트 시험 틀(`happy-dom`, 보류 28) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
@@ -301,6 +315,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 첨부 저장 위치 변경 (NAS·S3) | 6절 축 | M | 같음 |
 | 검색 엔진 교체 | 6절 축 | M | 같음. 색인은 파생 데이터라 재생성 가능하다 |
 | 외부 시스템 알림 (메일·메신저) | ③ + 설정 | M | 폐쇄망에서 닿는 곳인지 먼저 확인 |
+| 사내 LLM의 형식이 다르다 (다른 게이트웨이) | 6절 축 | M | `LLM_CLIENT` 뒤의 어댑터(`apps/api/src/llm/openai.client.ts`)와 형식 읽기(`domain/openai.ts`)만 바꾼다 |
 
 ### 11.3 값을 추가할 때 함께 고쳐야 하는 짝
 
@@ -318,7 +333,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 ### 11.4 확장을 싸게 유지하는 규칙
 
 - **판정은 한 곳에서.** 권한·정책 판정을 화면에서 다시 구현하지 않는다. 서버가 응답에 판정 결과를 실어 보내고 화면은 그대로 쓴다.
-- **교체 가능한 축은 인터페이스 뒤에.** 6절의 다섯 축은 구현을 갈아도 상위 로직이 안 바뀐다. 새 기능이 그 축에 걸리면 축을 늘리지 말고 구현을 더한다.
+- **교체 가능한 축은 인터페이스 뒤에.** 6절의 여섯 축은 구현을 갈아도 상위 로직이 안 바뀐다. 새 기능이 그 축에 걸리면 축을 늘리지 말고 구현을 더한다.
 - **파생 데이터는 재생성 가능하게.** 검색 색인처럼 원본에서 다시 만들 수 있는 것은 정본으로 취급하지 않는다.
 - **새 문서 종류를 만들기 전에 기존 문서에 절을 더할 수 없는지 본다** (`CLAUDE.md` 10절).
 - **순환 참조를 만들지 않는다.** 두 모듈이 함께 쓰는 변환 함수는 제3의 파일로 뺀다. CommonJS에서 순환이 생기면 타입 검사는 통과하고 기동만 실패한다 (2.1절).

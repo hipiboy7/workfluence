@@ -62,6 +62,7 @@ export default defineConfig({
         'src/pages/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/attachments/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/notifications/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/llm/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

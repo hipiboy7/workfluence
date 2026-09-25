@@ -7,6 +7,7 @@ import { useAuth } from '../auth';
 import { TemplateFromPage } from '../components/TemplateFromPage';
 import { Attachments } from '../components/Attachments';
 import { Comments } from '../components/Comments';
+import { CopyButtons } from '../components/CopyButtons';
 import { Labels } from '../components/Labels';
 import { Editor } from '../components/Editor';
 
@@ -44,6 +45,9 @@ export function PageViewPage() {
         <a href={`/api/pages/${id}/export`} download>
           HTML로 내보내기
         </a>
+        {/* LLM 질문에 붙여 넣으려고 복사한다 (P10 FR-1140). 서버가 페이지를 LLM에 보내는 길은 없다 */}
+        {' · '}
+        <CopyButtons title={page.title} content={page.content} />
         {space?.access.canWrite && <> · <Link to={`/pages/${id}/edit`}>편집</Link></>}
         {space?.access.canWrite && (
           <>

@@ -1,11 +1,14 @@
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { AuthProvider, RequireAuth } from './auth';
+import { RequireUuidParam } from './components/RequireUuidParam';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { FindAccountPage } from './pages/FindAccountPage';
 import { PageEditorPage } from './pages/PageEditorPage';
 import { PageHistoryPage } from './pages/PageHistoryPage';
 import { PageViewPage } from './pages/PageViewPage';
 import { LabelPage } from './pages/LabelPage';
+import { LlmPage } from './pages/LlmPage';
+import { LlmPromptsPage } from './pages/LlmPromptsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { SearchPage } from './pages/SearchPage';
 import { TrashPage } from './pages/TrashPage';
@@ -14,6 +17,7 @@ import { SpacesPage } from './pages/SpacesPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
+import { AdminLlmPage } from './pages/admin/AdminLlmPage';
 import { AdminPolicyPage } from './pages/admin/AdminPolicyPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 
@@ -39,10 +43,15 @@ export function App() {
           <Route path="/trash" element={<RequireAuth><TrashPage /></RequireAuth>} />
           <Route path="/labels/:name" element={<RequireAuth><LabelPage /></RequireAuth>} />
           <Route path="/admin/policy" element={<RequireAuth><AdminPolicyPage /></RequireAuth>} />
-          <Route path="/spaces/:id" element={<RequireAuth><SpacePage /></RequireAuth>} />
-          <Route path="/pages/:id" element={<RequireAuth><PageViewPage /></RequireAuth>} />
-          <Route path="/pages/:id/edit" element={<RequireAuth><PageEditorPage /></RequireAuth>} />
-          <Route path="/pages/:id/history" element={<RequireAuth><PageHistoryPage /></RequireAuth>} />
+          {/* Phase 10 — 사내 LLM 질문 (P10_설계서_Llm G절). `/llm/prompts`는 고정 경로라 `/llm/:id`보다 먼저 맞는다 */}
+          <Route path="/llm" element={<RequireAuth><RequireUuidParam><LlmPage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/llm/prompts" element={<RequireAuth><LlmPromptsPage /></RequireAuth>} />
+          <Route path="/llm/:id" element={<RequireAuth><RequireUuidParam><LlmPage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/admin/llm" element={<RequireAuth><AdminLlmPage /></RequireAuth>} />
+          <Route path="/spaces/:id" element={<RequireAuth><RequireUuidParam><SpacePage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/pages/:id" element={<RequireAuth><RequireUuidParam><PageViewPage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/pages/:id/edit" element={<RequireAuth><RequireUuidParam><PageEditorPage /></RequireUuidParam></RequireAuth>} />
+          <Route path="/pages/:id/history" element={<RequireAuth><RequireUuidParam><PageHistoryPage /></RequireUuidParam></RequireAuth>} />
           {/* Phase 2가 홈을 스페이스 목록으로 바꿨다 */}
           <Route path="/" element={<RequireAuth><SpacesPage /></RequireAuth>} />
         </Routes>

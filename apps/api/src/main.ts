@@ -8,6 +8,7 @@ import type { NextFunction, Request, Response } from 'express';
 import session from 'express-session';
 import type { Pool } from 'pg';
 import { AppModule } from './app.module';
+import { errorText, isQueryError } from './common/error-text';
 import { PinoNestLogger, createLogger } from './common/logger';
 import { APP_ENV, type AppEnvToken } from './config/config.module';
 import { PG_POOL } from './db/db.module';
@@ -87,6 +88,7 @@ async function bootstrap(): Promise<void> {
 
 bootstrap().catch((err) => {
   // 기동 실패(환경변수 검증 실패 등)는 즉시 종료한다. 조용히 뜬 채로 두지 않는다.
-  console.error(err instanceof Error ? err.message : err);
+  // 환경변수 오류는 여러 줄 문장 그대로 — 무엇을 고칠지 다 보여야 한다. DB 질의 오류는 매개변수를 싣지 않는다(7절, `errorText`)
+  console.error(isQueryError(err) ? errorText(err) : err instanceof Error ? err.message : err);
   process.exit(1);
 });

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import type { MailMessage, MailSender } from './mail.provider';
+import { errorText } from '../common/error-text';
 
 /**
  * 사내 메일 API 어댑터 (FR-751).
@@ -47,7 +48,7 @@ export class HttpMailSender implements MailSender {
       }
       return true;
     } catch (e) {
-      this.log.warn(`메일 API 호출 실패: ${e instanceof Error ? e.message : String(e)}`);
+      this.log.warn(`메일 API 호출 실패: ${errorText(e)}`);
       return false;
     }
   }
