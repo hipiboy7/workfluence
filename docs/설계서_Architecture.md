@@ -56,7 +56,7 @@ workfluence/
 │   ├── api/                      NestJS
 │   │   ├── src/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
-│   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드
+│   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드 / [P10] order.ts (이름 정렬 — `COLLATE "C"`, T-046)
 │   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts /
 │   │   │   │                     [P10] error-text.ts (로그에 적는 오류 한 줄 — drizzle 문장의 매개변수를 싣지 않는다)
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
