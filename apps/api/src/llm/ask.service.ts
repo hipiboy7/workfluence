@@ -5,6 +5,7 @@ import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import type { LlmProviderRow } from '../db/schema';
 import { LlmConversationsService, type ExchangeInput, type NewConversation } from './conversations.service';
+import { dbErrorText } from './db-error';
 import { buildChatMessages, conversationTitle } from './domain/conversation';
 import type { ChatMessage } from './domain/openai';
 import { LLM_CLIENT, LlmError, type LlmClient, type LlmTarget } from './llm.provider';
@@ -189,7 +190,7 @@ export class LlmAskService {
         if (!saved) message = '그 사이에 대화가 지워져 이 답을 저장하지 않았다';
       } catch (e) {
         message = '답을 저장하지 못했다';
-        this.log.error(`LLM 대화를 저장하지 못했다: ${e instanceof Error ? e.name : typeof e}`);
+        this.log.error(`LLM 대화를 저장하지 못했다: ${dbErrorText(e)}`);
       }
     }
     if (!saved) {
@@ -203,7 +204,7 @@ export class LlmAskService {
           detail: detail({ saved: false, evicted: 0 }),
           ip,
         })
-        .catch((e: unknown) => this.log.error(`LLM 질문의 감사 기록을 남기지 못했다: ${e instanceof Error ? e.name : typeof e}`));
+        .catch((e: unknown) => this.log.error(`LLM 질문의 감사 기록을 남기지 못했다: ${dbErrorText(e)}`));
     }
 
     try {
