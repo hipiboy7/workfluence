@@ -284,6 +284,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 9 | 실시간 편집의 관문 — `pages/domain/gate.ts`(되풀이 검사·완결·구조·주인 규칙), `pages/domain/presence.ts`(사람 표시 거르기), 허용 목록의 자식·노드별 마크·값 규칙, 편집기 확장 목록 하나(`apps/web/src/components/extensions.ts`)와 대조 테스트, 감사 종류 `page.collab.reject`, 서버만 보내는 저장 상태 알림 `COLLAB_MSG.status`(P9 D.9), 화면의 연결 상태 기계 `apps/web/src/components/collabLink.ts`. 화면의 동기화 라이브러리는 `@tiptap/y-tiptap`이다(P9 B.1). 마이그레이션 없음 |
 | 10 | 사내 LLM 질문 — `llm/` 모듈(등록 root만·키 암호화·NDJSON 중계·보관 규칙·한 시간마다 만료 정리), 표 넷(`0009_llm`), 정책값 셋(`llmRetentionDays`·`llmConversationMax`·`llmPinnedMax`), 환경변수 둘(`WF_LLM_MASTER_KEY`·`WF_LLM_TIMEOUT_MS`), 감사 종류 넷, 공유 계약 `llm.ts`·`markdown.ts`, 교체 축 `LLM_CLIENT`, 화면 셋과 페이지 복사 버튼, web 컴포넌트 시험 틀(`happy-dom`, 보류 28) |
 | 11 | 운영 로그·위임·반입 설정 — 요청 번호(nginx `$request_id` → `X-Request-Id`)·요청 문맥(`AsyncLocalStorage`)·앱 접근 로그·event 코드(`LOG_EVENTS`, 장애대응 가이드와 대조)·감사 `request_id`, `users.grants`와 `can()`의 위임(`llm.manage`), compose 로그 순환·nginx JSON 로그·사내 CA 시작 스크립트(`0010_ops`) |
+| 12 | 답을 기다리는 표시·문서 모양의 한계 — LLM 질문 화면의 기다린 초와 "답변이 늦어지고 있습니다."(흐름 상태 기계 `waitingSince`), 편집기 스키마의 순서·개수 규칙(`NON_EMPTY_NODES`·`FIRST_CHILD` — 정본 검증과 실시간 상태의 변환, 대조 시험이 증명), 실시간 편집 프레임 16MiB(`COLLAB_LIMITS`, 넘으면 1009)·표 칸 값의 범위(`TABLE_LIMITS`, 편집기가 붙여 넣은 값을 줄인다) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
