@@ -696,6 +696,19 @@ describe('질문 — 끝 (보관 규칙은 아래)', () => {
     await askOnce(aliceP, { providerId: provider.id, question: 'q' });
     expect(ask.stop(aliceP)).toBe(false);
   });
+
+  it('**답이 끝나 저장하는 사이의 중지는 멈춘 것이 없다고 답한다** — 끝난 답은 끝난 것으로 남는다 (검토 반영)', async () => {
+    const provider = await registerProvider();
+    const save = conversations.saveExchange.bind(conversations);
+    let during: boolean | null = null;
+    conversations.saveExchange = (x, tx) => {
+      during = ask.stop(aliceP);
+      return save(x, tx);
+    };
+    const sink = await askOnce(aliceP, { providerId: provider.id, question: 'q' });
+    expect(during).toBe(false);
+    expect(sink.end).toMatchObject({ status: 'done', saved: true });
+  });
 });
 
 describe('보관 규칙 (FR-1130~1139)', () => {

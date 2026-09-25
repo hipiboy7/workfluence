@@ -153,9 +153,9 @@ test('지시문을 고르고 물으면 답이 흘러나오고, 고정하고 이�
   ]);
   expect(chats().at(-1)?.auth).toBe(`Bearer ${KEY}`);
 
-  // 고정한다 — 상한 표시가 바뀐다 (FR-1133)
+  // 고정한다 — 상한 표시가 바뀐다 (FR-1133). 상한 값은 정책이다 — 기본값(20)을 전제하지 않는다 (3절 "사람이 바꿀 수 있는 것을 전제하지 않는다")
   await page.getByRole('button', { name: '첫 질문입니다 고정', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: '대화 목록' })).toContainText('고정 1/20');
+  await expect(page.getByRole('complementary', { name: '대화 목록' })).toContainText(/고정 1\/\d+/);
 
   // 이어 묻는다 — 앞 이력(생각 과정을 뺀 답)과 시작할 때의 지시문이 간다
   await page.getByLabel('질문', { exact: true }).fill('둘째 질문');
@@ -177,6 +177,8 @@ test('지시문을 고르고 물으면 답이 흘러나오고, 고정하고 이�
     );
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.detail.status)).toEqual(['done', 'done']);
+    // 토큰 수가 남는다 — 가짜 vLLM이 알린 그대로 (FR-1118, 검토 반영: 이름에 token이 들어가면 비밀 거르기가 버렸다)
+    expect(rows[0].detail.usage).toEqual({ prompt: 12, completion: 4 });
     expect(JSON.stringify(rows)).not.toContain('첫 질문입니다');
     expect(JSON.stringify(rows)).not.toContain(KEY);
   } finally {
@@ -197,6 +199,30 @@ test('중지하면 LLM 요청을 끊고 거기까지 남긴다', async ({ page }
   await expect(page.getByRole('list', { name: '메시지' })).toContainText('중지됨');
   // 서버가 LLM 요청을 끊었다 — GPU를 놀리지 않는다 (FR-1113)
   await expect.poll(() => chats().at(-1)?.closedEarly).toBe(true);
+});
+
+test('**페이지를 떠나면 받던 답을 멈춘다** — 받은 데까지 남고, 돌아와 곧바로 다시 묻는다 (검토 반영)', async ({ page }) => {
+  await login(page, MEMBER.username, MEMBER.password);
+  await page.goto('/llm');
+  await chooseProvider(page);
+  await page.getByLabel('질문', { exact: true }).fill('[천천히] 떠나기 전의 답');
+  await page.getByRole('button', { name: '보내기' }).click();
+  await expect(page.getByLabel('흘러나오는 답')).toContainText('조각1');
+  const before = chats().length;
+  await page.getByRole('link', { name: '내 지시문' }).click();
+  await expect(page.getByRole('heading', { name: '내 지시문' })).toBeVisible();
+  // 브라우저가 요청을 끊었고, 서버가 그것을 알아채 LLM 요청도 끊었다 — GPU를 놀리지 않는다
+  await expect.poll(() => chats().at(-1)?.closedEarly).toBe(true);
+
+  // 자리가 풀렸다 — "이미 답을 받고 있다"(409)가 아니다
+  await page.getByRole('link', { name: '← LLM 질문' }).click();
+  await chooseProvider(page);
+  await page.getByLabel('질문', { exact: true }).fill('돌아와서 묻는다');
+  await page.getByRole('button', { name: '보내기' }).click();
+  await expect(page.getByRole('list', { name: '메시지' })).toContainText('받은 질문: 돌아와서 묻는다 — 끝');
+  expect(chats().length).toBe(before + 1);
+  // 떠나기 전의 답은 받은 데까지 남았다 (FR-1115)
+  await expect(page.getByRole('complementary', { name: '대화 목록' })).toContainText('[천천히] 떠나기 전의 답');
 });
 
 test('위키 페이지를 마크다운으로 복사해 질문에 붙인다', async ({ page }) => {

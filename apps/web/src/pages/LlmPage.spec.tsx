@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { encodeLlmEvent, type LlmConversationList, type LlmConversationView, type LlmStreamEvent } from '@workfluence/shared';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LlmPage } from './LlmPage';
 
@@ -10,8 +10,8 @@ import { LlmPage } from './LlmPage';
  * E2E가 본다. 여기는 **무엇이 그려지고 무엇을 부르나**를 본다.
  */
 
-type Call = { method: string; url: string; body: unknown };
-type Route_ = (body: unknown) => Response | Promise<Response>;
+type Call = { method: string; url: string; body: unknown; signal: AbortSignal | null };
+type Route_ = (body: unknown, init?: RequestInit) => Response | Promise<Response>;
 
 let calls: Call[] = [];
 let routes: Record<string, Route_> = {};
@@ -19,10 +19,14 @@ let routes: Record<string, Route_> = {};
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
 
-/** 줄을 차례로 내는 흐름. `gate`가 풀릴 때까지 `hold`번째 줄에서 멈춘다 — "받는 중"을 보려고 */
-function stream(events: LlmStreamEvent[], hold = -1): { res: Response; release: () => void } {
+/**
+ * 줄을 차례로 내는 흐름. `gate`가 풀릴 때까지 `hold`번째 줄에서 멈춘다 — "받는 중"을 보려고. `signal`이 끊기면 `fetch`처럼 읽기가
+ * `AbortError`로 끝난다 — 페이지를 떠나는 시험
+ */
+function stream(events: LlmStreamEvent[], hold = -1, signal?: AbortSignal | null): { res: Response; release: () => void } {
   let release = () => undefined as void;
   const gate = new Promise<void>((r) => (release = r));
+  const aborted = new Promise<void>((r) => signal?.addEventListener('abort', () => r(), { once: true }));
   const bytes = events.map((e) => new TextEncoder().encode(encodeLlmEvent(e)));
   let i = 0;
   const res = {
@@ -32,7 +36,8 @@ function stream(events: LlmStreamEvent[], hold = -1): { res: Response; release: 
     body: {
       getReader: () => ({
         read: async () => {
-          if (i === hold) await gate;
+          if (i === hold) await Promise.race([gate, aborted]);
+          if (signal?.aborted) throw new DOMException('중지', 'AbortError');
           return i < bytes.length ? { done: false, value: bytes[i++] } : { done: true, value: undefined };
         },
       }),
@@ -66,12 +71,24 @@ const conversation = (id: string, over: Partial<LlmConversationView> = {}): LlmC
   ...over,
 });
 
-function renderAt(path: string) {
+/** 시험이 주소를 바꾼다 — 뒤로 가기·주소 입력과 같다 */
+function GoTo({ to }: { to: string }) {
+  const nav = useNavigate();
+  return (
+    <button type="button" onClick={() => void nav(to)}>
+      시험: {to}로
+    </button>
+  );
+}
+
+function renderAt(path: string, goTo = '/llm/other') {
   return render(
     <MemoryRouter initialEntries={[path]}>
+      <GoTo to={goTo} />
       <Routes>
         <Route path="/llm" element={<LlmPage />} />
         <Route path="/llm/:id" element={<LlmPage />} />
+        <Route path="/llm/prompts" element={<p>지시문 화면</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -88,10 +105,10 @@ beforeEach(() => {
     const method = init?.method ?? 'GET';
     const url = String(input);
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined;
-    calls.push({ method, url, body });
+    calls.push({ method, url, body, signal: init?.signal ?? null });
     const r = routes[`${method} ${url}`];
     if (!r) return Promise.reject(new Error(`시험에 없는 요청: ${method} ${url}`));
-    return Promise.resolve(r(body));
+    return Promise.resolve(r(body, init));
   }) as unknown as typeof fetch;
 });
 
@@ -206,6 +223,85 @@ describe('묻기 (FR-1110~1120)', () => {
     fireEvent.click(screen.getByRole('button', { name: '보내기' }));
     expect((await screen.findByRole('alert')).textContent).toMatch(/이미 답을 받고 있다/);
     await waitFor(() => expect(screen.getByLabelText('질문')).toHaveProperty('value', 'q'));
+  });
+
+  it('**흐름이 열리기 전에는 중지를 누르지 못한다** — 서버가 자리를 잡기 전이라 닿지 않는다. 보내기와 다른 단추다 (검토 반영)', async () => {
+    let open = () => undefined as void;
+    const opened = new Promise<void>((r) => (open = r));
+    const s = stream([{ type: 'delta', text: '앞' }, { type: 'end', status: 'done', saved: false, conversationId: null, evicted: 0, message: 'x' }], 1);
+    routes['POST /api/llm/ask'] = () => opened.then(() => s.res);
+    renderAt('/llm');
+    fireEvent.change(await screen.findByLabelText('질문'), { target: { value: 'q' } });
+    await screen.findByRole('option', { name: '사내 Qwen · mock-qwen3' });
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+    expect(await screen.findByText(/보내는 중…/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '중지' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: '보내기' })).toHaveProperty('disabled', true);
+    await act(async () => open());
+    await waitFor(() => expect(screen.getByRole('button', { name: '중지' })).toHaveProperty('disabled', false));
+    await act(async () => s.release());
+  });
+
+  it('**멈출 것이 없었다는 답이면 다시 누를 수 있다**', async () => {
+    const s = stream([{ type: 'delta', text: '앞부분' }, { type: 'end', status: 'done', saved: false, conversationId: null, evicted: 0, message: 'x' }], 1);
+    routes['POST /api/llm/ask'] = () => s.res;
+    routes['POST /api/llm/stop'] = () => json(200, { stopped: false });
+    renderAt('/llm');
+    fireEvent.change(await screen.findByLabelText('질문'), { target: { value: 'q' } });
+    await screen.findByRole('option', { name: '사내 Qwen · mock-qwen3' });
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+    await screen.findByText('앞부분');
+    fireEvent.click(screen.getByRole('button', { name: '중지' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '중지' })).toHaveProperty('disabled', false));
+    await act(async () => s.release());
+  });
+
+  it('**페이지를 떠나면 받던 답을 멈춘다** — 요청을 끊고, 떠난 흐름의 결과로 화면을 옮기지 않는다 (검토 반영)', async () => {
+    let s: ReturnType<typeof stream> | null = null;
+    routes['POST /api/llm/ask'] = (_b, init) => {
+      s = stream([{ type: 'delta', text: '앞부분' }, { type: 'end', status: 'done', saved: true, conversationId: 'c1', evicted: 0, message: null }], 1, init?.signal);
+      return s.res;
+    };
+    renderAt('/llm');
+    fireEvent.change(await screen.findByLabelText('질문'), { target: { value: 'q' } });
+    await screen.findByRole('option', { name: '사내 Qwen · mock-qwen3' });
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+    await screen.findByText('앞부분');
+    fireEvent.click(screen.getByRole('link', { name: '내 지시문' }));
+    expect(await screen.findByText('지시문 화면')).toBeTruthy();
+    expect(ask()[0].signal?.aborted).toBe(true);
+    await act(async () => (s as unknown as { release: () => void }).release());
+    // 끝난 흐름이 `/llm/c1`로 끌고 가지 않는다
+    expect(screen.getByText('지시문 화면')).toBeTruthy();
+    expect(calls.some((c) => c.url === '/api/llm/conversations/c1')).toBe(false);
+  });
+
+  it('**받는 중에 주소로 다른 대화를 열면**(뒤로 가기) 받던 답을 멈추고 그 대화를 연다 — 옛 흐름이 되돌리지 않는다', async () => {
+    routes['GET /api/llm/conversations/c1'] = () => json(200, conversation('c1'));
+    routes['GET /api/llm/conversations/other'] = () => json(200, conversation('other', { title: '다른 대화', messages: [] }));
+    routes['POST /api/llm/ask'] = (_b, init) =>
+      stream([{ type: 'delta', text: '앞부분' }, { type: 'end', status: 'done', saved: true, conversationId: 'c1', evicted: 0, message: null }], 1, init?.signal).res;
+    renderAt('/llm/c1');
+    await screen.findByText('세 줄 요약');
+    fireEvent.change(screen.getByLabelText('질문'), { target: { value: 'q' } });
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+    await screen.findByText('앞부분');
+    fireEvent.click(screen.getByRole('button', { name: '시험: /llm/other로' }));
+    expect(await screen.findByRole('heading', { name: '다른 대화' })).toBeTruthy();
+    expect(ask()[0].signal?.aborted).toBe(true);
+    expect(screen.queryByLabelText('흘러나오는 답')).toBeNull();
+    expect(screen.getByRole('button', { name: '보내기' })).toHaveProperty('disabled', true);
+    fireEvent.change(screen.getByLabelText('질문'), { target: { value: '다음' } });
+    expect(screen.getByRole('button', { name: '보내기' })).toHaveProperty('disabled', false);
+    // 옛 흐름은 c1을 다시 읽지 않는다 — 처음 연 한 번뿐
+    expect(calls.filter((c) => c.url === '/api/llm/conversations/c1')).toHaveLength(1);
+  });
+
+  it('**주소의 id는 경로로 넣을 때 다시 싼다** — `%2F`로 다른 API를 부르지 못한다 (보안 검토)', async () => {
+    routes['GET /api/llm/conversations/..%2F..%2Fpages%2Fp1%2Fexport'] = () => json(400, { message: '대화 id가 아니다' });
+    renderAt('/llm/..%2F..%2Fpages%2Fp1%2Fexport');
+    expect((await screen.findByRole('alert')).textContent).toBe('대화 id가 아니다');
+    expect(calls.some((c) => c.url.includes('/api/pages'))).toBe(false);
   });
 
   it('**중지는 서버에 멈추라고 하고 끝 줄을 기다린다** (FR-1113)', async () => {

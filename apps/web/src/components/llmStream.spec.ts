@@ -1,7 +1,7 @@
 import { CSRF_HEADER, encodeLlmEvent, type LlmStreamEvent } from '@workfluence/shared';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api';
-import { LOST_END, askLlm, chatReducer, daysLeft, initialChat, readLlmStream, statusLabel, type ChatState } from './llmStream';
+import { LOST_END, askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, readLlmStream, statusLabel, type ChatState } from './llmStream';
 
 /**
  * LLM 질문의 흐름 하나와 화면 상태 기계 — **브라우저 없이** 본다 (P10_설계서_Llm D.1·D.5·G절, 3절).
@@ -12,6 +12,8 @@ type End = Extract<LlmStreamEvent, { type: 'end' }>;
 const end = (over: Partial<End> = {}): End => ({ type: 'end', status: 'done', saved: true, conversationId: 'c1', evicted: 0, message: null, ...over });
 const run = (actions: Parameters<typeof chatReducer>[1][], from: ChatState = initialChat) => actions.reduce(chatReducer, from);
 const sending = run([{ type: 'send', question: '질문' }]);
+/** 흐름이 열렸다 — 서버가 자리를 잡았다 */
+const streaming = run([{ type: 'opened' }], sending);
 
 /** 바이트 조각을 차례로 내는 흐름 — 조각 경계는 시험이 정한다 */
 function bodyOf(chunks: Uint8Array[], failAt = -1): ReadableStream<Uint8Array> {
@@ -28,9 +30,12 @@ function bodyOf(chunks: Uint8Array[], failAt = -1): ReadableStream<Uint8Array> {
 const enc = new TextEncoder();
 
 describe('chatReducer — 받는 동안', () => {
-  it('보내면 받는 중이 되고 앞의 알림·오류를 지운다', () => {
+  it('보내면 보내는 중이 되고 앞의 알림·오류를 지운다 — 흐름이 열리면 받는 중', () => {
     const s = run([{ type: 'failed', message: '앞 오류' }, { type: 'send', question: '질문' }]);
-    expect(s).toEqual({ phase: 'streaming', live: { question: '질문', answer: '', thinking: '' }, error: null, notice: null, restore: null, lastEnd: null });
+    expect(s).toEqual({ phase: 'sending', live: { question: '질문', answer: '', thinking: '' }, error: null, notice: null, restore: null, lastEnd: null });
+    expect(run([{ type: 'opened' }], s).phase).toBe('streaming');
+    // 열리는 것은 보내는 중에만 — 끝난 뒤 늦게 온 것은 버린다
+    expect(run([{ type: 'opened' }]).phase).toBe('idle');
   });
 
   it('답과 생각 과정을 따로 이어 붙이고, 살아 있음 줄은 아무것도 바꾸지 않는다', () => {
@@ -50,9 +55,29 @@ describe('chatReducer — 받는 동안', () => {
     expect(run([{ type: 'event', event: { type: 'delta', text: 'x' } }])).toEqual(initialChat);
   });
 
-  it('중지는 받는 중에만 — 멈추는 중이 된다', () => {
-    expect(run([{ type: 'stop' }], sending).phase).toBe('stopping');
+  it('**`rethink` — 지금까지의 답을 생각 과정으로 옮긴다** (FR-1119)', () => {
+    const s = run(
+      [
+        { type: 'event', event: { type: 'delta', text: '곰곰이…' } },
+        { type: 'event', event: { type: 'rethink' } },
+        { type: 'event', event: { type: 'delta', text: '42' } },
+      ],
+      streaming,
+    );
+    expect(s.live).toEqual({ question: '질문', answer: '42', thinking: '곰곰이…' });
+  });
+
+  it('**중지는 흐름이 열린 뒤에만** — 그 전에는 서버가 자리를 잡지 않아 멈출 것이 없다 (검토 반영)', () => {
+    expect(run([{ type: 'stop' }], sending).phase).toBe('sending');
+    expect(run([{ type: 'stop' }], streaming).phase).toBe('stopping');
     expect(run([{ type: 'stop' }]).phase).toBe('idle');
+  });
+
+  it('**멈출 것이 없었다는 답이면 다시 누를 수 있게** 받는 중으로 돌린다 — 끝난 뒤면 그대로', () => {
+    const stopping = run([{ type: 'stop' }], streaming);
+    expect(run([{ type: 'stop-missed' }], stopping).phase).toBe('streaming');
+    expect(run([{ type: 'stop-missed' }], streaming).phase).toBe('streaming');
+    expect(run([{ type: 'event', event: end() }, { type: 'stop-missed' }], stopping).phase).toBe('idle');
   });
 });
 
@@ -71,6 +96,8 @@ describe('chatReducer — 끝 줄 (D.1·D.5)', () => {
   it('저장됐지만 끊긴 답은 까닭을 말한다', () => {
     expect(run([{ type: 'event', event: end({ status: 'failed', message: 'boom' }) }], sending).error).toBe('boom');
     expect(run([{ type: 'event', event: end({ status: 'failed' }) }], sending).error).toBe('답이 중간에 끊겼다');
+    // 빈 문장도 까닭이 없는 것이다
+    expect(run([{ type: 'event', event: end({ status: 'failed', message: '' }) }], sending).error).toBe('답이 중간에 끊겼다');
   });
 
   it('**저장되지 않으면 까닭을 말하고 질문을 되돌린다**', () => {
@@ -78,6 +105,7 @@ describe('chatReducer — 끝 줄 (D.1·D.5)', () => {
     expect(s).toMatchObject({ phase: 'idle', error: 'LLM 서버에 닿지 않는다', restore: '질문' });
     expect(run([{ type: 'event', event: end({ status: 'stopped', saved: false }) }], sending).error).toMatch(/글자가 없어/);
     expect(run([{ type: 'event', event: end({ status: 'failed', saved: false }) }], sending).error).toBe('답을 받지 못했다');
+    expect(run([{ type: 'event', event: end({ status: 'failed', saved: false, message: '' }) }], sending).error).toBe('답을 받지 못했다');
   });
 
   it('흐름을 열기 전의 실패도 질문을 되돌리고 흐르던 것을 내린다', () => {
@@ -129,30 +157,85 @@ describe('readLlmStream — 흐름을 끝까지 읽는다', () => {
 });
 
 describe('askLlm — 질문을 보낸다', () => {
-  it('같은 출처 쿠키·CSRF 머리말·JSON 몸통으로 보내고 흐름을 읽는다', async () => {
+  it('같은 출처 쿠키·CSRF 머리말·JSON 몸통으로 보내고 흐름을 읽는다 — **흐름이 열렸다고 먼저 알린다**', async () => {
     const fetchImpl = vi.fn(() =>
       Promise.resolve({ ok: true, status: 200, body: bodyOf([enc.encode(encodeLlmEvent({ type: 'delta', text: 'a' }) + encodeLlmEvent(end()))]) } as unknown as Response),
     );
-    const events: LlmStreamEvent[] = [];
-    await askLlm({ providerId: 'p', question: 'q' }, (e) => events.push(e), fetchImpl as unknown as typeof fetch);
-    expect(events.map((e) => e.type)).toEqual(['delta', 'end']);
+    const seen: string[] = [];
+    const ac = new AbortController();
+    await askLlm({ providerId: 'p', question: 'q' }, (e) => seen.push(e.type), {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      signal: ac.signal,
+      onOpen: () => seen.push('opened'),
+    });
+    expect(seen).toEqual(['opened', 'delta', 'end']);
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/llm/ask');
-    expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', body: JSON.stringify({ providerId: 'p', question: 'q' }) });
+    expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', body: JSON.stringify({ providerId: 'p', question: 'q' }), signal: ac.signal });
     expect((init.headers as Record<string, string>)[CSRF_HEADER]).toBe('1');
+    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
   });
 
-  it('**흐름을 열기 전의 실패는 `ApiError`로 던진다** — 서버의 문장 그대로', async () => {
+  it('**흐름을 열기 전의 실패는 `ApiError`로 던진다** — 서버의 문장 그대로. 열렸다고 알리지 않는다', async () => {
     const fetchImpl = () => Promise.resolve({ ok: false, status: 409, body: null, text: () => Promise.resolve(JSON.stringify({ message: '이미 답을 받고 있다' })) } as unknown as Response);
-    const e = await askLlm({ providerId: 'p', question: 'q' }, () => undefined, fetchImpl as unknown as typeof fetch).catch((x: unknown) => x);
+    const onOpen = vi.fn();
+    const e = await askLlm({ providerId: 'p', question: 'q' }, () => undefined, { fetchImpl: fetchImpl as unknown as typeof fetch, onOpen }).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(ApiError);
     expect((e as ApiError).status).toBe(409);
     expect((e as ApiError).message).toBe('이미 답을 받고 있다');
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it('성공인데 흐름이 없으면 그것도 오류다', async () => {
     const fetchImpl = () => Promise.resolve({ ok: true, status: 200, body: null, text: () => Promise.resolve('') } as unknown as Response);
-    await expect(askLlm({ providerId: 'p', question: 'q' }, () => undefined, fetchImpl as unknown as typeof fetch)).rejects.toBeInstanceOf(ApiError);
+    await expect(askLlm({ providerId: 'p', question: 'q' }, () => undefined, { fetchImpl: fetchImpl as unknown as typeof fetch })).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('batchLlmEvents — 글자를 모아 그린다', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('**같은 종류의 글자는 간격마다 한 번에**, 종류가 바뀌면 앞의 것을 먼저', () => {
+    vi.useFakeTimers();
+    const out: LlmStreamEvent[] = [];
+    const b = batchLlmEvents((e) => out.push(e), 50);
+    b.push({ type: 'thinking', text: '음' });
+    b.push({ type: 'thinking', text: '…' });
+    b.push({ type: 'delta', text: '안' });
+    b.push({ type: 'delta', text: '녕' });
+    expect(out).toEqual([{ type: 'thinking', text: '음…' }]);
+    vi.advanceTimersByTime(50);
+    expect(out).toEqual([
+      { type: 'thinking', text: '음…' },
+      { type: 'delta', text: '안녕' },
+    ]);
+  });
+
+  it('**글자가 아닌 줄은 모아 둔 것을 먼저 넘긴 뒤 곧바로** — 차례가 바뀌지 않는다', () => {
+    vi.useFakeTimers();
+    const out: LlmStreamEvent[] = [];
+    const b = batchLlmEvents((e) => out.push(e), 50);
+    b.push({ type: 'delta', text: '곰곰이' });
+    b.push({ type: 'rethink' });
+    b.push({ type: 'delta', text: '42' });
+    b.push(end());
+    expect(out).toEqual([{ type: 'delta', text: '곰곰이' }, { type: 'rethink' }, { type: 'delta', text: '42' }, end()]);
+    // 넘긴 뒤 남은 타이머가 같은 것을 두 번 넘기지 않는다
+    vi.advanceTimersByTime(100);
+    expect(out).toHaveLength(4);
+  });
+
+  it('그만두면(`cancel`) 모아 둔 것을 버린다 — 떠난 화면에 그리지 않는다', () => {
+    vi.useFakeTimers();
+    const out: LlmStreamEvent[] = [];
+    const b = batchLlmEvents((e) => out.push(e), 50);
+    b.push({ type: 'delta', text: 'x' });
+    b.cancel();
+    vi.advanceTimersByTime(100);
+    b.flush();
+    expect(out).toEqual([]);
   });
 });
 

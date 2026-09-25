@@ -102,6 +102,19 @@ describe('AdminLlmPage', () => {
     expect(document.body.textContent).toContain('모델 2개: mock-qwen3, other');
   });
 
+  it('**http 주소면 무엇이 평문으로 가는지 알린다** — 막지는 않는다, https면 알리지 않는다 (보안 검토)', async () => {
+    renderPage();
+    await screen.findByText('키 없는 것');
+    // 목록에서도 표시한다
+    expect(screen.getAllByText('(암호화 안 됨)')).toHaveLength(2);
+    fireEvent.change(screen.getByLabelText(/^주소/), { target: { value: 'http://llm.example.internal/v1' } });
+    expect(screen.getByRole('note').textContent).toMatch(/질문과 답이 암호화되지 않고/);
+    fireEvent.change(screen.getByLabelText(/^API 키/), { target: { value: 'k' } });
+    expect(screen.getByRole('note').textContent).toMatch(/그리고 API 키가 암호화되지 않고/);
+    fireEvent.change(screen.getByLabelText(/^주소/), { target: { value: 'https://llm.example.internal/v1' } });
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
   it('키를 비우면 키 없이 등록한다', async () => {
     renderPage();
     await screen.findByText('키 없는 것');

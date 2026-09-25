@@ -5,12 +5,15 @@ import { api } from '../../api';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const EMPTY = { name: '', baseUrl: '', model: '', apiKey: '' };
+/** 암호화하지 않는 주소 — 질문·답(과 키)이 사내망을 평문으로 지난다 (보안 검토) */
+const isPlainHttp = (url: string) => /^\s*http:\/\//i.test(url);
 
 /**
  * LLM 연결 — 시스템 관리자(root)가 사내 LLM을 등록·삭제한다 (P10_설계서_Llm G절, FR-1100~1108).
  *
  * **API 키는 다시 보이지 않는다** — 목록은 "있음/없음"만(FR-1102). 등록하면 입력칸의 키를 곧바로 비운다. 주소 판정은 서버와
  * **같은 함수**(`normalizeLlmBaseUrl`)를 먼저 돌린다 — 왕복하지 않고 바로 말해 준다. 등록하면 곧바로 연결을 확인한다(FR-1105).
+ * **http 주소는 막지 않고 알린다** — 사내 LLM이 https를 받지 않을 수 있다. 그 대신 무엇이 평문으로 가는지 말한다 (보안 검토).
  */
 export function AdminLlmPage() {
   const [rows, setRows] = useState<LlmProviderAdminView[]>([]);
@@ -131,6 +134,7 @@ export function AdminLlmPage() {
               <td>{r.model}</td>
               <td>
                 <code>{r.baseUrl}</code>
+                {isPlainHttp(r.baseUrl) && <span className="muted small"> (암호화 안 됨)</span>}
               </td>
               <td>{r.hasKey ? '있음' : '없음'}</td>
               <td>{r.createdByName}</td>
@@ -185,6 +189,11 @@ export function AdminLlmPage() {
           maxLength={LLM_LIMITS.apiKeyMaxChars}
           onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
         />
+        {isPlainHttp(form.baseUrl) && (
+          <p className="badge fail" role="note">
+            http 주소다 — {form.apiKey ? '질문과 답, 그리고 API 키가' : '질문과 답이'} 암호화되지 않고 사내망을 지난다. LLM 서버가 https를 받으면 https 주소로 등록한다
+          </p>
+        )}
         <button type="submit">등록</button>
       </form>
     </main>

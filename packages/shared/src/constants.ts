@@ -239,7 +239,7 @@ export const MARKDOWN_LIMITS = {
   maxSpan: 100,
 } as const;
 
-/** 서버 안의 주기·시간 (P10_설계서_Llm D.1·D.5, FR-1105·1115·1136) */
+/** 주기·시간 (P10_설계서_Llm D.1·D.5·G절, FR-1105·1115·1136) */
 export const LLM_TIMINGS = {
   /** 이만큼 아무것도 안 보냈으면 살아 있음 줄을 보낸다 — nginx `proxy_read_timeout`(300초)보다 한참 짧게 */
   heartbeatMs: 15_000,
@@ -247,4 +247,6 @@ export const LLM_TIMINGS = {
   sweepMs: 3_600_000,
   /** 연결 확인(`/models`)의 시간 상한 */
   checkTimeoutMs: 10_000,
+  /** 화면이 흘러오는 글자를 모아 그리는 간격 — 조각마다 그리면 답이 길어질수록 느려진다(그릴 때마다 답 전체를 다시 그린다) */
+  renderBatchMs: 50,
 } as const;

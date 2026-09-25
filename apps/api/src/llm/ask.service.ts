@@ -31,8 +31,10 @@ export type PreparedAsk = {
   controller: AbortController;
 };
 
-/** 받고 있는 답 하나의 자리 — 누가(세션까지) 쥐었고, 세션이 끊겨 멈췄는가 */
-type ActiveAsk = { controller: AbortController; sid: string | null; revoked: boolean };
+/**
+ * 받고 있는 답 하나의 자리 — 누가(세션까지) 쥐었고, 세션이 끊겨 멈췄는가, **아직 흘러오는 중인가**(끝나 저장하는 중이면 멈출 것이 없다)
+ */
+type ActiveAsk = { controller: AbortController; sid: string | null; revoked: boolean; streaming: boolean };
 
 /**
  * 감사 detail에 적는 실패의 종류 — **남의 문장은 싣지 않는다**(로그·감사에는 종류와 HTTP 상태만). 화면에는 문장이 간다
@@ -107,14 +109,17 @@ export class LlmAskService implements OnModuleDestroy {
     // 확인하는 사이에 같은 사람의 다른 질문이 자리를 잡았을 수 있다 — 여기서 다시 본다
     if (this.active.has(me.id)) throw new ConflictException('이미 답을 받고 있다 — 끝나거나 중지한 뒤에 묻는다');
     const controller = new AbortController();
-    this.active.set(me.id, { controller, sid, revoked: false });
+    this.active.set(me.id, { controller, sid, revoked: false, streaming: true });
     return { provider, target, messages, question: dto.question, conversationId: dto.conversationId ?? null, newConversation, controller };
   }
 
-  /** 내가 받고 있는 답을 멈춘다 (FR-1113). 흐름은 끊지 않는다 — 서버가 저장한 결과를 `end`로 끝까지 받는다 */
+  /**
+   * 내가 받고 있는 답을 멈춘다 (FR-1113). 흐름은 끊지 않는다 — 서버가 저장한 결과를 `end`로 끝까지 받는다.
+   * **답이 이미 끝나 저장하는 중이면 멈춘 것이 없다**고 답한다 — 화면은 그 답을 보고 중지 단추를 되살린다 (검토 반영 — 자체 점검 10)
+   */
   stop(me: Principal): boolean {
     const a = this.active.get(me.id);
-    if (!a) return false;
+    if (!a?.streaming) return false;
     a.controller.abort();
     return true;
   }
@@ -193,6 +198,9 @@ export class LlmAskService implements OnModuleDestroy {
         this.log.error(`LLM 응답을 처리하지 못했다: ${errorText(e)}`);
       }
     }
+    // 흐름이 끝났다 — 여기부터의 중지는 멈출 것이 없다
+    const slot = this.active.get(me.id);
+    if (slot?.controller === p.controller) slot.streaming = false;
     // 멈추라는 말을 들은 어댑터가 던지지 않고 흐름을 닫을 수도 있다 — 그래도 끝난 것이 아니라 멈춘 것이다
     if (status === 'done' && p.controller.signal.aborted) {
       status = 'stopped';

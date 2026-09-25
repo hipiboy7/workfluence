@@ -1,5 +1,6 @@
 import {
   LLM_LIMITS,
+  LLM_TIMINGS,
   type LlmConversationList,
   type LlmConversationSummary,
   type LlmConversationView,
@@ -7,15 +8,18 @@ import {
   type LlmProviderView,
   type LlmStreamEvent,
 } from '@workfluence/shared';
-import { useCallback, useEffect, useReducer, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { writeClipboard } from '../components/clipboard';
-import { askLlm, chatReducer, daysLeft, initialChat, statusLabel } from '../components/llmStream';
+import { askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, statusLabel } from '../components/llmStream';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type EndEvent = Extract<LlmStreamEvent, { type: 'end' }>;
+
+/** 받고 있는 답 하나 — 어느 대화에서 시작했고 무엇으로 끊나 */
+type RunningAsk = { controller: AbortController; conversationId: string | null };
 
 /**
  * LLM 질문 (P10_설계서_Llm G절, FR-1110~1139).
@@ -23,7 +27,9 @@ type EndEvent = Extract<LlmStreamEvent, { type: 'end' }>;
  * 왼쪽은 내 대화(고정·최근)와 지켜야 할 상한, 오른쪽은 대화와 흘러나오는 답이다. 흐름을 읽고 상태를 바꾸는 규칙은
  * `components/llmStream.ts`에 있고(브라우저 없이 시험한다), 여기는 그리기와 서버 부르기다.
  *
- * **답을 받는 동안 다른 대화로 옮기지 못한다** — 흘러나오는 답은 시작한 대화의 것이다. 멈추고 옮긴다.
+ * **답을 받는 동안 다른 대화로 옮기지 못한다** — 흘러나오는 답은 시작한 대화의 것이다. 멈추고 옮긴다. 그래도 **페이지를 떠나거나
+ * 뒤로 가기·주소로 다른 대화를 열면 받던 답을 멈춘다**(요청을 끊는다 — 서버는 창을 닫은 것처럼 받은 데까지 저장한다, FR-1115).
+ * 떠난 흐름의 결과로 화면을 옮기지 않는다 (검토 반영 — 코드 리뷰 1·자체 점검 6).
  */
 export function LlmPage() {
   const { id } = useParams();
@@ -38,7 +44,17 @@ export function LlmPage() {
   const [pageError, setPageError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
+  const running = useRef<RunningAsk | null>(null);
   const busy = chat.phase !== 'idle';
+
+  // 페이지를 떠나면 받던 답을 멈춘다
+  useEffect(
+    () => () => {
+      running.current?.controller.abort();
+      running.current = null;
+    },
+    [],
+  );
 
   const loadList = useCallback(
     () =>
@@ -49,7 +65,7 @@ export function LlmPage() {
   );
 
   const loadConversation = useCallback(async (cid: string) => {
-    const c = await api<LlmConversationView>(`/api/llm/conversations/${cid}`);
+    const c = await api<LlmConversationView>(`/api/llm/conversations/${encodeURIComponent(cid)}`);
     setConversation(c);
     // 저장된 대화를 다시 읽었다 — 흘러나오던 것을 내린다
     dispatch({ type: 'settled' });
@@ -65,14 +81,21 @@ export function LlmPage() {
       .catch(() => undefined);
   }, [loadList]);
 
-  // 주소가 바뀌면 그 대화를 연다
+  // 주소가 바뀌면 그 대화를 연다. **받는 중에 다른 대화로 옮겼으면**(뒤로 가기·주소 입력) 받던 답을 멈춘다
   useEffect(() => {
+    const r = running.current;
+    if (r && r.conversationId !== (id ?? null)) {
+      r.controller.abort();
+      running.current = null;
+      dispatch({ type: 'reset' });
+    }
     if (!id) {
       setConversation(null);
       return;
     }
     let cancelled = false;
-    api<LlmConversationView>(`/api/llm/conversations/${id}`)
+    // 주소의 id는 **풀어서** 온다(`%2F` → `/`) — 경로로 넣을 때 다시 싼다 (보안 검토 — `api()`도 `.`·`..` 조각을 막는다)
+    api<LlmConversationView>(`/api/llm/conversations/${encodeURIComponent(id)}`)
       .then((c) => {
         if (cancelled) return;
         setConversation(c);
@@ -107,17 +130,38 @@ export function LlmPage() {
     setPageError(null);
     setCopied(null);
     dispatch({ type: 'send', question: q });
+    const me: RunningAsk = { controller: new AbortController(), conversationId: conversation?.id ?? null };
+    running.current = me;
+    // 떠났거나 다른 대화로 옮겼으면(`running`이 비었다) 이 흐름은 화면을 바꾸지 않는다
+    const mine = () => running.current === me;
+    const batch = batchLlmEvents((e) => {
+      if (mine()) dispatch({ type: 'event', event: e });
+    }, LLM_TIMINGS.renderBatchMs);
     // 콜백 안에서 받은 끝 줄 — 흐름이 끝난 뒤에 읽는다
     const box: { end: EndEvent | null } = { end: null };
     try {
-      await askLlm({ providerId, question: q, ...(conversation ? { conversationId: conversation.id } : promptId ? { promptId } : {}) }, (e) => {
-        if (e.type === 'end') box.end = e;
-        dispatch({ type: 'event', event: e });
-      });
+      await askLlm(
+        { providerId, question: q, ...(conversation ? { conversationId: conversation.id } : promptId ? { promptId } : {}) },
+        (e) => {
+          if (e.type === 'end') box.end = e;
+          batch.push(e);
+        },
+        {
+          signal: me.controller.signal,
+          onOpen: () => {
+            if (mine()) dispatch({ type: 'opened' });
+          },
+        },
+      );
+      batch.flush();
     } catch (e) {
-      dispatch({ type: 'failed', message: errText(e) });
+      batch.cancel();
+      if (mine()) dispatch({ type: 'failed', message: errText(e) });
       return;
+    } finally {
+      if (mine()) running.current = null;
     }
+    if (me.controller.signal.aborted) return;
     void loadList();
     const end = box.end;
     if (!end?.saved || !end.conversationId) return;
@@ -140,8 +184,12 @@ export function LlmPage() {
 
   const stop = () => {
     dispatch({ type: 'stop' });
-    // 흐름은 끊지 않는다 — 서버가 저장한 결과를 끝 줄로 받는다 (D.1)
-    void api('/api/llm/stop', { method: 'POST' }).catch(() => undefined);
+    // 흐름은 끊지 않는다 — 서버가 저장한 결과를 끝 줄로 받는다 (D.1). 멈출 것이 없었다고 하거나(끝나 가던 중) 닿지 않았으면 다시 누를 수 있게
+    api<{ stopped: boolean }>('/api/llm/stop', { method: 'POST' })
+      .then((r) => {
+        if (!r.stopped) dispatch({ type: 'stop-missed' });
+      })
+      .catch(() => dispatch({ type: 'stop-missed' }));
   };
 
   const startNew = () => {
@@ -154,7 +202,7 @@ export function LlmPage() {
   const togglePin = async (c: LlmConversationSummary) => {
     setPageError(null);
     try {
-      await api(`/api/llm/conversations/${c.id}/pin`, { method: c.pinned ? 'DELETE' : 'PUT' });
+      await api(`/api/llm/conversations/${encodeURIComponent(c.id)}/pin`, { method: c.pinned ? 'DELETE' : 'PUT' });
       await loadList();
       if (conversation?.id === c.id) await loadConversation(c.id);
     } catch (e) {
@@ -166,7 +214,7 @@ export function LlmPage() {
     if (!window.confirm(`"${c.title}" 대화를 지운다. 되살릴 수 없다.`)) return;
     setPageError(null);
     try {
-      await api(`/api/llm/conversations/${c.id}`, { method: 'DELETE' });
+      await api(`/api/llm/conversations/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
       await loadList();
       if (conversation?.id === c.id) startNew();
     } catch (e) {
@@ -279,7 +327,7 @@ export function LlmPage() {
                 <li className="llm-msg llm-assistant" aria-live="polite" aria-label="흘러나오는 답">
                   <p className="muted small">
                     {provider?.model ?? 'LLM'}
-                    {busy && ` — ${chat.phase === 'stopping' ? '멈추는 중…' : '답을 받는 중…'}`}
+                    {busy && ` — ${chat.phase === 'stopping' ? '멈추는 중…' : chat.phase === 'sending' ? '보내는 중…' : '답을 받는 중…'}`}
                   </p>
                   {chat.live.thinking && (
                     <details className="llm-thinking" open={!chat.live.answer}>
@@ -292,6 +340,16 @@ export function LlmPage() {
               </>
             )}
           </ol>
+
+          {/* 중지는 보내기와 **다른 자리의 다른 단추**다 — 보내기를 두 번 누른 둘째 번이 중지에 닿지 않게. 흐름이 열려야(서버가 자리를 잡아야) 누른다 */}
+          {busy && (
+            <p>
+              <button type="button" onClick={stop} disabled={chat.phase !== 'streaming'}>
+                {chat.phase === 'stopping' ? '멈추는 중…' : '중지'}
+              </button>{' '}
+              <span className="muted small">페이지를 떠나도 멈춘다 — 받은 데까지 저장한다</span>
+            </p>
+          )}
 
           {chat.error && (
             <p className="badge fail" role="alert">
@@ -347,15 +405,9 @@ export function LlmPage() {
               placeholder="위키 페이지의 '텍스트 복사'·'마크다운 복사'로 가져온 내용을 붙여 넣어도 된다. Ctrl+Enter로 보낸다"
             />
             <p>
-              {busy ? (
-                <button type="button" onClick={stop} disabled={chat.phase === 'stopping'}>
-                  {chat.phase === 'stopping' ? '멈추는 중…' : '중지'}
-                </button>
-              ) : (
-                <button type="submit" disabled={!providerId || !question.trim()}>
-                  보내기
-                </button>
-              )}
+              <button type="submit" disabled={busy || !providerId || !question.trim()}>
+                보내기
+              </button>
             </p>
           </form>
         </section>

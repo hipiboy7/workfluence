@@ -22,13 +22,15 @@ function extractMessage(body: unknown): string | undefined {
   return undefined;
 }
 
+export type ApiInit = RequestInit & { json?: unknown };
+
 /**
- * 같은 출처 세션 쿠키 + CSRF 헤더로 API를 호출한다 (CLAUDE.md 7절).
- * 헤더를 여기 한 곳에서 붙인다 — 화면마다 붙이면 새 화면에서 빠뜨리고 403만 본다.
+ * 같은 출처 세션 쿠키 + CSRF 헤더를 붙인 요청 모양 (CLAUDE.md 7절).
+ * 헤더를 여기 한 곳에서 붙인다 — 화면마다 붙이면 새 화면에서 빠뜨리고 403만 본다. 흘려받는 요청(`askLlm`)도 이것을 쓴다.
  */
-export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+export function requestInit(init: ApiInit = {}): RequestInit {
   const { json, headers, ...rest } = init;
-  const res = await fetch(path, {
+  return {
     credentials: 'same-origin',
     ...rest,
     headers: {
@@ -37,7 +39,25 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
       ...(headers as Record<string, string> | undefined),
     },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
-  });
+  };
+}
+
+/**
+ * 경로에 `.`·`..` 조각이 있는가 (P10 보안 검토 — client-side path traversal).
+ *
+ * 화면은 주소의 id를 API 경로에 넣는다(`/api/pages/${id}`). 라우터는 주소의 `%2F`를 풀어 넘기므로, 누군가 페이지에 심은
+ * `/pages/..%2F..%2Fapi%2F…` 링크를 열면 **연 사람의 세션과 CSRF 머리말로** 다른 API를 부른다 — CSRF 방어(7절)를 옆으로
+ * 돌아간다. URL 해석은 `%2e`도 점으로, `\`도 `/`로 읽고 탭·줄바꿈은 지운다 — 그 모두를 본다. 정상 경로에는 그런 조각이 없다
+ */
+export function hasDotSegment(path: string): boolean {
+  const p = path.replace(/[\t\n\r]/g, '').split(/[?#]/, 1)[0];
+  return p.split(/[/\\]/).some((s) => /^(?:\.|%2e){1,2}$/i.test(s));
+}
+
+/** API를 부른다. **`.`·`..` 조각이 든 경로는 보내지 않는다** (`hasDotSegment`) */
+export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
+  if (hasDotSegment(path)) throw new ApiError(400, { message: '주소에 "."이나 ".." 조각이 있어 요청을 보내지 않았다' });
+  const res = await fetch(path, requestInit(init));
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   const body = text ? safeJson(text) : undefined;
