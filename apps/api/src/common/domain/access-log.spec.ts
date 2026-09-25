@@ -32,6 +32,14 @@ describe('accessLogEntry', () => {
     }
   });
 
+  it('**대소문자를 가리지 않는다** — 라우터가 `/API/…`도 같은 처리기·가드로 보내므로 접근 로그도 같게 본다 (P11 보안 검토 2)', () => {
+    expect(accessLogEntry({ ...base, url: '/API/pages/p1', route: '/api/pages/:id' })?.fields.route).toBe('/api/pages/:id');
+    expect(accessLogEntry({ ...base, url: '/Api/nope?q=비밀', route: null, status: 404 })?.fields).toMatchObject({ route: null, path: '/Api/nope' });
+    expect(accessLogEntry({ ...base, url: '/API', route: null, status: 404 })).not.toBeNull();
+    // 헬스체크도 같다 — 대문자로 불러도 헬스체크다
+    expect(accessLogEntry({ ...base, url: '/API/Health', route: '/api/health' })).toBeNull();
+  });
+
   it('맞춘 라우트가 없으면 경로를 200자까지', () => {
     const long = `/api/${'x'.repeat(300)}`;
     expect((accessLogEntry({ ...base, url: long, route: null, status: 404 })?.fields.path as string).length).toBe(200);

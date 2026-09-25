@@ -54,11 +54,24 @@ describe('canAssignRole / canManageUser', () => {
   });
 
   it('admin은 root 계정을 관리할 수 없고 member는 아무도 관리할 수 없다', () => {
-    expect(canManageUser(admin, 'root')).toBe(false);
-    expect(canManageUser(admin, 'admin')).toBe(true);
-    expect(canManageUser(admin, 'member')).toBe(true);
-    expect(canManageUser(root, 'root')).toBe(true);
-    expect(canManageUser(member, 'member')).toBe(false);
+    expect(canManageUser(admin, { role: 'root' })).toBe(false);
+    expect(canManageUser(admin, { role: 'admin' })).toBe(true);
+    expect(canManageUser(admin, { role: 'member' })).toBe(true);
+    expect(canManageUser(root, { role: 'root' })).toBe(true);
+    expect(canManageUser(member, { role: 'member' })).toBe(false);
+  });
+
+  it('**자기에게 없는 위임을 가진 관리자는 관리하지 못한다** — 그 사람의 비밀번호를 초기화해 로그인하면 위임을 얻는다 (P11 보안 검토 1)', () => {
+    const delegated = { role: 'admin' as const, grants: ['llm.manage'] };
+    expect(canManageUser({ id: 'a2', role: 'admin', grants: [] }, delegated)).toBe(false);
+    expect(canManageUser(admin, delegated)).toBe(false);
+    // 같은 것을 가진 관리자, root는 관리한다
+    expect(canManageUser({ id: 'a3', role: 'admin', grants: ['llm.manage'] }, delegated)).toBe(true);
+    expect(canManageUser(root, delegated)).toBe(true);
+    // 위임은 관리자만 가진다 — member·root 행의 grants는 보지 않는다(DB도 막는다)
+    expect(canManageUser(admin, { role: 'member', grants: ['llm.manage'] })).toBe(true);
+    // 위임이 아닌 것을 grants에 적어도 판정이 달라지지 않는다
+    expect(canManageUser(admin, { role: 'admin', grants: ['system.manage'] })).toBe(true);
   });
 });
 
