@@ -3,7 +3,7 @@ import { AuditService } from '../audit/audit.service';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import type { MentionOutcome } from '../notifications/notifications.service';
 import { MAIL_SENDER, type MailSender } from './mail.provider';
-import { errorText } from '../common/error-text';
+import { logLine } from '../common/log-line';
 
 /**
  * 멘션을 메일로도 알린다 (P6_설계서_Collab FR-750·753~756).
@@ -68,7 +68,7 @@ export class MentionMailService {
       });
     } catch (e) {
       // 여기까지 오면 감사 기록마저 실패한 것이다. 로그만 남기고 삼킨다
-      this.log.warn(`멘션 메일 처리 실패: ${errorText(e)}`);
+      this.log.warn(logLine('mail.mention_failed', '멘션 메일 처리 실패', {}, e));
     }
   }
 }

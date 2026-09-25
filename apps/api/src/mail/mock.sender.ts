@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { MailMessage, MailSender } from './mail.provider';
+import { logLine } from '../common/log-line';
 
 /**
  * 모의 발송 (FR-752). 보낸 내용을 로그로 남기고 **실제로 보내지 않는다.**
@@ -14,7 +15,7 @@ export class MockMailSender implements MailSender {
   send(message: MailMessage): Promise<boolean> {
     // 받는 사람 주소는 개인정보다. **도메인만 남기고 가린다** (7절 로그 규칙)
     const masked = message.to.map((a) => a.replace(/^[^@]+/, '***'));
-    this.log.log(`모의 발송 — 받는이 ${masked.join(', ')} · 제목 "${message.subject}"`);
+    this.log.log(logLine('mail.mock_sent', '모의 발송', { to: masked, subject: message.subject }));
     return Promise.resolve(true);
   }
 }

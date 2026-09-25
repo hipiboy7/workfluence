@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import type { MailMessage, MailSender } from './mail.provider';
-import { errorText } from '../common/error-text';
+import { logLine } from '../common/log-line';
 
 /**
  * 사내 메일 API 어댑터 (FR-751).
@@ -27,7 +27,7 @@ export class HttpMailSender implements MailSender {
   async send(message: MailMessage): Promise<boolean> {
     if (!this.env.WF_MAIL_API_URL || !this.env.WF_MAIL_FROM) {
       // 켜 놓고 주소를 안 적은 상태다. **조용히 성공으로 치지 않는다**
-      this.log.warn('메일이 켜져 있는데 WF_MAIL_API_URL·WF_MAIL_FROM이 비었다');
+      this.log.warn(logLine('mail.unconfigured', '메일이 켜져 있는데 WF_MAIL_API_URL·WF_MAIL_FROM이 비었다'));
       return false;
     }
     try {
@@ -43,12 +43,12 @@ export class HttpMailSender implements MailSender {
       });
       if (!res.ok) {
         // **응답 본문을 로그에 담지 않는다.** 무엇이 들었는지 모르는 남의 응답이다
-        this.log.warn(`메일 API가 ${res.status}로 답했다`);
+        this.log.warn(logLine('mail.rejected', '메일 API가 받지 않았다', { status: res.status }));
         return false;
       }
       return true;
     } catch (e) {
-      this.log.warn(`메일 API 호출 실패: ${errorText(e)}`);
+      this.log.warn(logLine('mail.failed', '메일 API 호출 실패', {}, e));
       return false;
     }
   }

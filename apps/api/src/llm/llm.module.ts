@@ -48,7 +48,7 @@ import { LLM_CLIENT } from './llm.provider';
 import { OpenAiCompatClient } from './openai.client';
 import { LlmPromptsService } from './prompts.service';
 import { LlmProvidersService } from './providers.service';
-import { errorText } from '../common/error-text';
+import { logLine } from '../common/log-line';
 import { NdjsonSink } from './stream.sink';
 
 /**
@@ -231,9 +231,9 @@ export class LlmSweeper implements OnApplicationBootstrap, OnModuleDestroy {
       void this.conversations
         .sweepExpired()
         .then((n) => {
-          if (n) this.log.log(`보존 기간이 지난 LLM 대화 ${n}개를 지웠다`);
+          if (n) this.log.log(logLine('llm.sweep_done', '보존 기간이 지난 LLM 대화를 지웠다', { count: n }));
         })
-        .catch((e: unknown) => this.log.error(`만료된 LLM 대화를 지우지 못했다: ${errorText(e)}`));
+        .catch((e: unknown) => this.log.error(logLine('llm.sweep_failed', '만료된 LLM 대화를 지우지 못했다', {}, e)));
     run();
     this.timer = setInterval(run, LLM_TIMINGS.sweepMs);
     this.timer.unref();

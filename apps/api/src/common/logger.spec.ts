@@ -1,6 +1,8 @@
 import type { Logger } from 'pino';
 import { describe, expect, it } from 'vitest';
+import { logLine } from './log-line';
 import { PinoNestLogger, createLogger } from './logger';
+import { runInRequestContext, setRequestUser } from './request-context';
 
 describe('createLogger (FR-050, FR-051)', () => {
   it('설정한 레벨을 쓰고 서비스 이름을 붙인다', () => {
@@ -113,3 +115,72 @@ describe('PinoNestLogger (FR-052)', () => {
     expect(calls.map((c) => c.msg)).toEqual(['Error (DB 질의 실패 — 문장은 싣지 않는다)', 'TypeError: t']);
   });
 });
+
+describe('요청 문맥과 event 줄 (P11 D.2·D.4, FR-1211·1214)', () => {
+  const capture = () => {
+    const lines: string[] = [];
+    return { lines, stream: { write: (chunk: string) => void lines.push(chunk) } };
+  };
+  const parse = (line: string) => JSON.parse(line.trim()) as Record<string, unknown>;
+
+  it('**요청 안의 모든 줄에 요청 식별자와 사용자** — 요청 밖에는 없다', () => {
+    const { lines, stream } = capture();
+    const logger = createLogger('info', stream);
+    runInRequestContext({ requestId: 'req-00000001' }, () => {
+      logger.info('가드 앞');
+      setRequestUser('u1');
+      logger.info('가드 뒤');
+    });
+    logger.info('요청 밖');
+    expect(lines.map(parse).map((l) => [l.requestId ?? null, l.userId ?? null])).toEqual([
+      ['req-00000001', null],
+      ['req-00000001', 'u1'],
+      [null, null],
+    ]);
+  });
+
+  it('**줄이 직접 준 필드가 이긴다** — 실시간 편집은 그 연결의 사용자를 준다', () => {
+    const { lines, stream } = capture();
+    const logger = createLogger('info', stream);
+    runInRequestContext({ requestId: 'req-00000002', userId: 'u1' }, () => logger.info({ userId: 'u2' }, 'x'));
+    expect(parse(lines[0])).toMatchObject({ requestId: 'req-00000002', userId: 'u2' });
+  });
+
+  it('**event 줄은 필드로 펼친다** — event·식별자·문장, 오류는 `error`(error 수준이면 `trace`까지)', () => {
+    const { lines, stream } = capture();
+    const nest = new PinoNestLogger(createLogger('info', stream));
+    nest.warn(logLine('llm.ask_failed', 'LLM 답을 받지 못했다', { providerId: 'p1', kind: 'rejected', httpStatus: 400 }), 'Llm');
+    const pg = Object.assign(new Error('deadlock detected'), { code: '40P01' });
+    nest.error(logLine('collab.save_failed', '자동 저장 실패', { pageId: 'pg1', trigger: 'idle' }, new Error('Failed query: … params: 비밀 본문', { cause: pg })), undefined, 'Collab');
+    const [warn, error] = lines.map(parse);
+    expect(warn).toMatchObject({ level: 40, context: 'Llm', event: 'llm.ask_failed', providerId: 'p1', kind: 'rejected', httpStatus: 400, msg: 'LLM 답을 받지 못했다' });
+    expect(warn).not.toHaveProperty('error');
+    expect(error).toMatchObject({ level: 50, context: 'Collab', event: 'collab.save_failed', pageId: 'pg1', trigger: 'idle', error: '40P01 deadlock detected', msg: '자동 저장 실패' });
+    expect(error.trace).toMatch(/\n\s+at /);
+    expect(lines.join('')).not.toContain('비밀');
+  });
+
+  it('**처리되지 않은 예외는 `http.unhandled`** — 같은 요청 식별자의 접근 로그 줄과 잇는다', () => {
+    const { lines, stream } = capture();
+    const nest = new PinoNestLogger(createLogger('info', stream));
+    runInRequestContext({ requestId: 'req-00000003' }, () => nest.error(new Error('뜻밖'), undefined, 'ExceptionsHandler'));
+    nest.error('다른 실패', 'stack', 'Ctx');
+    const [unhandled, other] = lines.map(parse);
+    expect(unhandled).toMatchObject({ event: 'http.unhandled', requestId: 'req-00000003', msg: 'Error: 뜻밖' });
+    expect(other).not.toHaveProperty('event');
+  });
+
+  it('event 줄은 info·debug·verbose에서도 같다', () => {
+    const { lines, stream } = capture();
+    const nest = new PinoNestLogger(createLogger('trace', stream));
+    nest.log(logLine('collab.enabled', '켜짐', { idleSaveMs: 5000 }), 'Collab');
+    nest.debug(logLine('mail.mock_sent', '모의 발송'), 'Mail');
+    nest.verbose(logLine('collab.closed', '끊었다', { userId: 'u9' }), 'Collab');
+    expect(lines.map(parse).map((l) => [l.level, l.event])).toEqual([
+      [30, 'collab.enabled'],
+      [20, 'mail.mock_sent'],
+      [10, 'collab.closed'],
+    ]);
+  });
+});
+
