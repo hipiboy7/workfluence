@@ -3,6 +3,7 @@ import { emptyDocument } from './document';
 import {
   addMemberDto,
   attachLabelDto,
+  auditQueryDto,
   isUuid,
   userGrantsDto,
   changePasswordDto,
@@ -226,6 +227,17 @@ describe('주소에 들어가는 값 (P10 종료 루틴 — 경로 조작)', () 
   it('**라벨 이름은 `.`·`..`일 수 없다** — 라벨 페이지의 API 경로에서 URL 해석이 점 조각으로 읽어 다른 API를 가리킨다', () => {
     for (const name of ['.', '..', ' .. ']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(false);
     for (const name of ['...', 'v1.0', '.net']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(true);
+  });
+});
+
+describe('감사 조회 DTO — 요청 번호로 거른다 (P11 FR-1212, 코드 리뷰 10)', () => {
+  it('**로그 한 줄의 `requestId`로** 감사 행을 찾는다 — 로그에서 복사해 붙인 앞뒤 공백은 뗀다', () => {
+    expect(auditQueryDto.parse({ requestId: ' c4f74de7a73ff592ec5ec63e597de58b ' }).requestId).toBe('c4f74de7a73ff592ec5ec63e597de58b');
+    expect(auditQueryDto.parse({}).requestId).toBeUndefined();
+  });
+
+  it('모양이 틀리면 받지 않는다 — 요청 번호가 아니다', () => {
+    for (const bad of ['bad id "x"', 'short', 'x'.repeat(65)]) expect(auditQueryDto.safeParse({ requestId: bad }).success, bad).toBe(false);
   });
 });
 

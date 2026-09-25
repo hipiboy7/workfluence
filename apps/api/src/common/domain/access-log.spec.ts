@@ -23,6 +23,15 @@ describe('accessLogEntry', () => {
     expect(JSON.stringify(miss)).not.toContain('비밀');
   });
 
+  it('**전체 잡기 라우트(`{*any}`·`*`)는 맞춘 라우트가 아니다** — SPA 정적 자산의 틀이 API 404에 씌워진다(Nest 12·Express 5). 경로를 싣는다 (P11 자체 점검 2)', () => {
+    for (const route of ['{*any}', '*', '/*splat']) {
+      const e = accessLogEntry({ ...base, url: '/api/definitely-not-a-route/x?q=비밀', route, status: 404 });
+      expect(e?.fields, route).toMatchObject({ route: null, path: '/api/definitely-not-a-route/x', status: 404 });
+      expect(e?.msg, route).toBe('GET /api/definitely-not-a-route/x 404');
+      expect(JSON.stringify(e), route).not.toContain('비밀');
+    }
+  });
+
   it('맞춘 라우트가 없으면 경로를 200자까지', () => {
     const long = `/api/${'x'.repeat(300)}`;
     expect((accessLogEntry({ ...base, url: long, route: null, status: 404 })?.fields.path as string).length).toBe(200);
