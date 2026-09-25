@@ -3,6 +3,10 @@
 Phase 11은 Phase 10이 남긴 네 가지에 대한 사용자의 답(2026-09-26)을 만든다. 요청 원문은 `docs/prompts/phase11/scope.md`,
 요구사항 번호는 **FR-1200**, 비기능은 **NFR-110**부터다.
 
+> **개정 2026-09-26 — 병합 전 검토 반영** (자체 점검·코드 리뷰·보안 검토, `docs/internal/P11_검토서_Review.md`). A.1-14~18, FR-1207, D.1(관리의
+> 우열·행 잠금·바뀌지 않은 위임), D.3(전체 잡기 라우트·대소문자), D.4(`auth` 영역·대상 필드), D.7(`--force-recreate`·묶음의 `ca/`), E(인덱스를
+> 두지 않는 까닭), F·G(감사로그의 요청 번호), H.
+
 - **기능백로그 F-003** — 운영 로그를 디버깅·유지보수할 수 있게(요청 식별자·접근 로그·event 코드·로그 순환·nginx 로그 형식·규칙)
 - **기능백로그 F-004**(확인 필요 F의 답) — 시스템 관리자(root)가 관리자(admin)에게 LLM 연결 관리를 위임한다
 - **보류 29**의 방향 — 사내 LLM은 폐쇄망 반입 뒤 현장에서 설정한다. 그 절차를 쉽게 적는다
@@ -41,6 +45,11 @@ Phase 10과 같이, 사용자의 답 안에서 Claude가 정했다. **다르게 
 | 11 | nginx 접근 로그는 **JSON 한 줄**, 질의 문자열과 referer를 싣지 않는다 | 앱과 같은 모양이면 수집기(보류 8) 하나로 읽는다. referer는 질의 문자열(검색어)이 든 앞 주소다 | — |
 | 12 | 사내 CA는 **`ca/ca.pem` 파일이 있으면** 앱이 믿는다(`NODE_EXTRA_CA_CERTS`). 없으면 아무 일도 없다 | 현장에서 compose를 고치게 하면 쉽지 않다. 사내 IdP(OIDC)도 같은 길이다 — 7절 "사내 CA는 `NODE_EXTRA_CA_CERTS`" | — |
 | 13 | 감사로그 행에 `request_id` **열**을 둔다(`detail`에 넣지 않는다) | `detail`은 행위마다 모양이 다르다. 열이면 거르고 잇기 쉽다 | — |
+| 14 | **자기에게 없는 위임을 가진 관리자는 관리하지 못한다**(승인·비밀번호 초기화·역할 변경·잠금 해제·세션 종료) — root와 같은 위임을 가진 관리자만 | 병합 전 보안 검토 1: 위임 없는 관리자가 위임받은 관리자의 비밀번호를 초기화하면 임시 비밀번호로 그 계정에 들어가 위임을 얻는다. 역할을 내렸다 올리면 root가 준 것을 거둔다. 위임이 관리자 사이에 차이를 만들었으므로 역할의 우열(admin은 root를 관리하지 못한다)과 같이 **가진 것의 우열**을 본다 | — |
+| 15 | 같은 목록을 다시 보내면 **쓰지도 남기지도 않는다** | 감사 행은 1년 남는다. 바뀌지 않은 것은 권한 변경이 아니다 (코드 리뷰 9) | — |
+| 16 | 역할·위임을 읽고 다시 쓰는 곳(역할 변경·위임·사내 계정 동기화)은 **행을 잠그고 읽는다**(`SELECT … FOR UPDATE`) | 역할을 그대로 두는 변경도 읽은 위임을 다시 쓴다 — 잠그지 않으면 그 사이 끝난 위임 변경을 옛 값으로 덮고, 감사 행의 이전 값도 틀린다 (코드 리뷰 4) | — |
+| 17 | 사내 IdP의 실패는 **warn 한 줄**(`auth.oidc_failed`) — 닿지 않으면(Discovery·TLS·JWKS·서명 검증) 502, 우리가 판정한 거절(토큰 교환 실패 등)은 그대로 | FR-1215가 사내 IdP를 바깥 탓으로 적었는데 그 줄이 없었다 — 닿지 않으면 처리되지 않은 예외(500)였다 (코드 리뷰 8). 현장에서 사내 CA를 두는 날(보류 29·11) 보는 줄이다 | — |
+| 18 | 감사로그 화면이 **요청 번호로 거른다**. `request_id`에 인덱스를 두지 않는다 | 남기기만 하면 DB를 여는 사람만 쓴다 (코드 리뷰 10). 인덱스: 100만 행(198MB)에서 거르기가 66~133ms(병렬 순차 탐색, 검증기록 2.8) — 목표 1초 안이다 | 감사 행이 1,000만 건에 가까워지거나 거르기가 1초를 넘으면 부분 인덱스(`WHERE request_id IS NOT NULL`) |
 
 ## B. Confluence 대조 (`CLAUDE.md` 4절)
 
@@ -64,6 +73,7 @@ Phase 10과 같이, 사용자의 답 안에서 Claude가 정했다. **다르게 
 | FR-1204 | 위임을 바꾸면 **다음 요청부터** 먹는다 — 거두면 그 관리자의 LLM 연결 화면이 403 | A.1-5 |
 | FR-1205 | 위임을 바꾸면 감사로그 `user.grants.change` — 누구에게·이전·이후. 역할이 바뀌어 위임이 사라지면 역할 변경의 감사 행에 함께 남는다 | 6절 "권한 변경" |
 | FR-1206 | 판정은 `packages/shared/src/permissions.ts`의 `can()` 한 곳 — 홈 머리말의 "LLM 연결" 메뉴와 서버의 가드가 같은 함수다 | 7절 |
+| FR-1207 | 위임 없는 관리자는 **위임받은 관리자를 관리하지 못한다**(승인·비밀번호 초기화·역할 변경·잠금 해제·세션 종료) — root와 같은 위임을 가진 관리자만. 화면은 그 행의 조치를 누르지 못하게 한다(`canManageUser`) | A.1-14 (보안 검토) |
 
 ### C.2 운영 로그 (FR-1210 ~ FR-1219)
 
@@ -71,7 +81,7 @@ Phase 10과 같이, 사용자의 답 안에서 Claude가 정했다. **다르게 
 |---|---|---|
 | FR-1210 | 요청마다 **식별자** — nginx가 만들어 앱에 넘기고(`X-Request-Id`), 앱은 모양이 맞으면 쓰고 아니면 만든다. 응답 머리말 `X-Request-Id`로 돌려준다 | F-003 ①, A.1-6 |
 | FR-1211 | 요청 안의 **모든 앱 로그 줄**에 `requestId`가, 로그인했으면 `userId`(불투명 id)가 실린다 | F-003 ① |
-| FR-1212 | 감사로그 행에 그 요청의 `requestId`가 남는다(`audit_events.request_id`). 요청 밖(한 시간마다의 정리·실시간 편집의 자동 저장)은 비운다 | F-003 ①, A.1-13 |
+| FR-1212 | 감사로그 행에 그 요청의 `requestId`가 남는다(`audit_events.request_id`). 요청 밖(한 시간마다의 정리·실시간 편집의 자동 저장)은 비운다. **관리 화면의 감사로그가 요청 번호로 거르고 목록에 보인다** | F-003 ①, A.1-13·18 |
 | FR-1213 | **앱 접근 로그** — 요청마다 한 줄, event `http.request`: 메서드·경로 틀(`/api/pages/:id`)·상태·걸린 시간·사용자. **질의 문자열을 싣지 않는다.** 헬스체크·정적 자산은 남기지 않는다. 받는 쪽이 끊은 요청은 그렇다고 적는다 | F-003 ②, A.1-7·8 |
 | FR-1214 | 로그 줄마다 **안정된 `event` 코드**(`LOG_EVENTS`에 있는 것만)와 식별자 필드(`pageId`·`providerId` …). 문장(`msg`)은 사람을 위한 설명이다 | F-003 ③, A.1-9 |
 | FR-1215 | **실패는 구조화해 남긴다** — 바깥·입력 탓(LLM 서버의 거절·메일 API·사내 IdP)은 `warn`, 우리 쪽 결함(처리되지 않은 예외·저장 실패)은 `error`. 오류는 `errorText`·`errorStack`으로(7절) | F-003 ⑤ |
@@ -120,6 +130,10 @@ user.grants.change ✓      ✗                ✗        위임을 주고 거�
   역할 변경의 감사 행에 거둔 목록을 싣는다. 비우지 않으면 DB CHECK가 문장을 거부한다(E절) — 조용히 남지 않는다.
 - 화면 — 사용자 관리의 관리자 행마다 "LLM 연결 관리" 체크. root에게만 눌리고, 다른 관리자에게는 보이기만 한다. 홈 머리말의
   "LLM 연결" 메뉴는 `can(me, 'llm.manage')`(`/api/auth/me`가 `grants`를 준다).
+- **관리의 우열** (A.1-14, FR-1207) — `canManageUser(actor, target)`가 역할과 함께 **위임**을 본다: root가 아니면 target이 가진 위임을
+  actor도 가져야 한다. 승인·초기화·역할 변경·잠금 해제·세션 종료가 모두 이 판정(`getManaged`)을 지난다. 화면도 같은 함수로 그 행의 조치를 막는다.
+- **행 잠금** (A.1-16) — 역할 변경·위임·사내 계정 동기화는 대상 행을 `SELECT … FOR UPDATE`로 읽는다(`UsersService.lockForUpdate`).
+  동시에 오는 다른 변경은 커밋을 기다렸다가 새 값을 읽는다. 위임은 같은 목록이면 쓰지 않고 감사 행도 남기지 않는다(A.1-15).
 
 ### D.2 요청 식별자와 요청 문맥 (FR-1210 ~ FR-1212)
 
@@ -152,11 +166,18 @@ nginx ── X-Request-Id: $request_id ──▶ api 첫 미들웨어
   `route`가 비고 경로를 200자까지 싣는다. **질의 문자열은 어디에도 싣지 않는다**(검색어).
 - 남기지 않는 것: `/api/health`(헬스체크), `/api` 밖(SPA 정적 자산 — nginx 로그에 있다). WebSocket(실시간 편집)은 HTTP 요청이 아니라
   업그레이드라 여기 오지 않는다 — 게이트웨이의 event가 따로 있다.
+- **전체 잡기 라우트는 맞춘 라우트가 아니다** — SPA 정적 자산을 내주는 틀(`{*any}`)이 맞춘 것이 없는 API 요청에도 `req.route`를 채운다
+  (Nest 12·Express 5, 자체 점검 2). 틀에 `*`가 있으면 맞춘 것이 없는 것으로 보고 경로를 싣는다.
+- **대소문자를 가리지 않는다** — 라우터는 `/API/…`도 같은 처리기·가드로 보낸다. 접근 로그만 가리면 대문자로 부른 요청이 빠진다(보안 검토 2).
+  싣는 경로는 받은 그대로다.
 - 판정(무엇을 남기나·어느 수준인가·어떤 필드인가)은 순수 함수, 미들웨어는 시각과 이벤트만 다룬다.
 
 ### D.4 event 코드 (FR-1214·1215·1218)
 
-- 코드는 `영역.일`이다. 영역: `app`(기동) · `http`(요청) · `health` · `session` · `mail` · `llm` · `collab`. 일은 소문자와 밑줄.
+- 코드는 `영역.일`이다. 영역: `app`(기동) · `http`(요청) · `health` · `auth`(사내 IdP) · `session` · `mail` · `llm` · `collab`. 일은 소문자와 밑줄.
+- **`userId`는 그 요청을 보낸 사람이다**(요청 문맥). 요청 안에서 **다른 사람에 대해** 남기는 줄(세션을 끊은 요청의 `collab.revoked`·
+  `session.revoke_failed`)은 그 사람을 `targetUserId`로 적는다 — 같은 이름을 쓰면 줄이 준 값이 이겨 부른 사람이 지워진다(코드 리뷰 6).
+  기동의 두 줄(`app.started`·`app.migrated`)도 `LogEvent` 타입으로 묶는다 — 목록 밖의 코드는 컴파일이 막는다(자체 점검 7).
 - 로그 한 줄 = `event` + 식별자 필드 + `msg`(사람을 위한 문장). 오류가 있으면 `error`(`errorText`)와, `error` 수준이면 `trace`(`errorStack`).
 - **문장에 id를 섞지 않는다** — `(page=…, user=…)`로 적던 것은 필드(`pageId`·`userId`)로 옮긴다. 문장은 그대로 두어 가이드의 검색어가
   깨지지 않게 한다.
@@ -192,7 +213,10 @@ x-logging: &logging
 - 이미지의 시작 스크립트가 **`ca.pem`이 있고 비어 있지 않으면** `NODE_EXTRA_CA_CERTS`를 그 파일로 두고 앱을 띄운다. 없으면 그대로 띄운다 —
   빈 값을 넘기면 Node가 기동할 때마다 경고를 남긴다.
 - **TLS 검증은 그대로다**(7절). 믿을 기관을 하나 더할 뿐이다. 사내 LLM(https)과 사내 IdP가 같은 길을 쓴다.
-- 반입 묶음에는 디렉토리의 안내만 들어간다 — 인증서는 현장의 것이다(TLS 인증서 `certs`와 같다).
+- 반입 묶음에는 디렉토리의 안내(`ca/README.md`)만 들어간다 — 인증서는 현장의 것이다(TLS 인증서 `certs`와 같다). **안내가 묶음에 있어야
+  한다**(`RELEASE_REQUIRED_FILES`) — 없으면 첫 기동에서 도커가 `ca/`를 root 소유로 만들어, 현장의 일반 계정이 인증서를 넣지 못한다(실측, 코드 리뷰 3).
+- 파일을 둔 뒤에는 **컨테이너를 다시 만든다**(`up -d --force-recreate api`). 파일은 설정이 아니라 `up -d`가 알아채지 못하고, `restart`는
+  `.env`(마스터 키)의 변경을 읽지 않는다(코드 리뷰 1·자체 점검 1).
 
 ### D.8 남는 것
 
@@ -215,6 +239,9 @@ ALTER TABLE audit_events ADD COLUMN request_id text;
 
 - 둘째 CHECK가 A.1-4를 DB에서 지킨다 — 관리자가 아닌데 위임이 남은 행은 만들어지지 않는다(역할을 바꾸면서 비우지 않으면 문장이 실패한다).
 - `audit_events`는 append-only다(트리거가 UPDATE·DELETE를 막는다). 열을 더하는 것은 DDL이라 트리거와 무관하고, 옛 행은 `request_id`가 비어 있다.
+- `request_id`에 **인덱스를 두지 않는다**(A.1-18) — 100만 행에서 요청 번호로 거르는 데 66~133ms다(검증기록 2.8).
+- 위임할 수 있는 행위의 목록은 코드(`DELEGABLE_ACTIONS`)와 이 CHECK 두 곳에 있다(마이그레이션은 손으로 쓴 SQL이라 코드를 읽을 수 없다 — 보류 17).
+  둘이 같은지는 시험(`apps/api/src/db/constraints.integration.spec.ts`)이 본다. drizzle 스키마의 CHECK는 코드의 목록에서 만든다.
 
 ## F. API 계약
 
@@ -224,13 +251,16 @@ ALTER TABLE audit_events ADD COLUMN request_id text;
 | `GET` | `/api/users` | `user.manage` | `UserView`에 `grants`가 더해진다 |
 | `GET` | `/api/auth/me` | 로그인 | `MeView`에 `grants`가 더해진다 |
 | `GET`·`POST`·`DELETE` | `/api/llm/admin/providers…` | **`llm.manage`**(root, 위임받은 admin) | 그대로 (P10 F절) |
+| `POST`·`PATCH` | `/api/users/:id/{approve,reset-password,unlock,role,terminate-sessions}` | `user.manage` + **관리의 우열**(D.1) | 대상이 자기에게 없는 위임을 가졌으면 403 |
+| `GET` | `/api/audit` | `audit.read` | 질의 `requestId`(요청 번호의 모양 — `REQUEST_ID_PATTERN`)로 거른다. `AuditEventView`에 `requestId` |
 | (모든 응답) | — | — | 머리말 `X-Request-Id` |
 
 ## G. 화면
 
 | 화면 | 무엇 |
 |---|---|
-| 사용자 관리 | 관리자 행마다 **"LLM 연결 관리"** 체크 — root만 켜고 끈다. 관리자가 아닌 행은 비어 있다 |
+| 사용자 관리 | 관리자 행마다 **"LLM 연결 관리"** 체크 — root만 켜고 끈다. 관리자가 아닌 행은 비어 있다. **관리할 수 없는 행**(root, 자기에게 없는 위임을 가진 관리자)의 조치는 누르지 못한다 |
+| 감사로그 | **"요청 번호"** 칸 — 거르기를 누를 때 보낸다(치는 도중에는 보내지 않는다). 목록 끝 칸에 번호 |
 | 홈 머리말 | "LLM 연결" 메뉴 — root, 그리고 위임받은 관리자 |
 | LLM 연결 | 그대로 (P10 G절). 위임받은 관리자도 쓴다 |
 
@@ -246,12 +276,14 @@ ALTER TABLE audit_events ADD COLUMN request_id text;
 | 요청 문맥 | `apps/api/src/common/request-context.ts` | B | `AsyncLocalStorage` — 식별자·사용자 |
 | 로거 | `apps/api/src/common/logger.ts` | B | mixin(문맥) · event 줄 · `http.unhandled` |
 | 로그 한 줄 | `apps/api/src/common/log-line.ts` | B | event + 필드 + 문장을 로거에 넘기는 모양 |
-| 감사 | `apps/api/src/audit/audit.service.ts` | B | `request_id` |
+| 감사 | `apps/api/src/audit/audit.service.ts` | B | `request_id` — 남기고 거른다 |
+| 사내 IdP 실패 | `apps/api/src/auth/auth.service.ts` | B | `auth.oidc_failed`·502 (A.1-17) |
+| 반입 묶음의 파일 목록 | `scripts/release-files.ts` | (묶음 확인) | 하위 디렉토리(`ca/`)까지 — 묶기·검사가 같이 쓴다 |
 | 위임 | `apps/api/src/users/users.service.ts` · `users.module.ts` | B | D.1 |
 | 사내 계정 동기화 | `apps/api/src/auth/auth.service.ts` | B | 역할이 바뀌면 위임을 비운다 |
 | 배선 | `apps/api/src/main.ts` | (측정 밖) | 첫 미들웨어(식별자·문맥)·접근 로그 |
 | 시작 스크립트 | `deploy/entrypoint.sh` | (컨테이너 확인) | D.7 |
-| 화면 | `apps/web/src/pages/admin/AdminUsersPage.tsx` · `apps/web/src/pages/SpacesPage.tsx` | B | G절 |
+| 화면 | `apps/web/src/pages/admin/AdminUsersPage.tsx` · `apps/web/src/pages/SpacesPage.tsx` · `apps/web/src/pages/admin/AdminAuditPage.tsx` | B | G절 |
 
 ## I. 설정 항목
 

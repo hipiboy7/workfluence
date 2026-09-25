@@ -319,7 +319,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 검색 엔진 교체 | 6절 축 | M | 같음. 색인은 파생 데이터라 재생성 가능하다 |
 | 외부 시스템 알림 (메일·메신저) | ③ + 설정 | M | 폐쇄망에서 닿는 곳인지 먼저 확인 |
 | 사내 LLM의 형식이 다르다 (다른 게이트웨이) | 6절 축 | M | `LLM_CLIENT` 뒤의 어댑터(`apps/api/src/llm/openai.client.ts`)와 형식 읽기(`domain/openai.ts`)만 바꾼다 |
-| root가 관리자에게 **다른 행위도** 위임한다 | 권한 판정 | L | `DELEGABLE_ACTIONS`(`packages/shared/src/permissions.ts`)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`를 고친다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다 |
+| root가 관리자에게 **다른 행위도** 위임한다 | 권한 판정 | L | `DELEGABLE_ACTIONS`(`packages/shared/src/permissions.ts`)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`를 고친다 — 잊으면 `apps/api/src/db/constraints.integration.spec.ts`가 둘이 다르다고 막는다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다. 위임받은 관리자는 자기에게 없는 위임을 가진 셈이 되므로 관리의 우열(`canManageUser`)이 저절로 따라간다 |
 | 새 로그 줄을 더한다 | 로그 | S | `LOG_EVENTS`(`packages/shared/src/constants.ts`)에 코드를 더하고 `logLine()`으로 남긴다. 장애대응 가이드 7.28절 표에 한 줄 — 빠뜨리면 `verify:docs`가 막는다 |
 
 ### 11.3 값을 추가할 때 함께 고쳐야 하는 짝

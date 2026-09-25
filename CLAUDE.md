@@ -240,7 +240,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 - **문서의 모든 실행 명령은 `pnpm <script>` 형태로만 적는다.** 구현은 TypeScript(`tsx`)로 두 OS에서 같게 동작하게 한다. `.sh`는 `deploy/`(Linux 전용)에만 둔다.
 - 편집기에서 복사한 명령을 터미널에 그대로 붙여 실행한다. 오류 메시지는 실제 출력을 복사한다.
-- 기계가 검사한다: `pnpm verify:docs` — pnpm 스크립트 존재, 백틱 경로가 **저장소에 커밋돼 있는지**(대소문자까지), 마크다운 링크, 표 열 수, `deploy/*.sh` 실행 비트, **nginx `client_max_body_size`와 `WF_UPLOAD_MAX_MB`의 대조**. `pnpm check`에 포함된다.
+- 기계가 검사한다: `pnpm verify:docs` — pnpm 스크립트 존재, 백틱 경로가 **저장소에 커밋돼 있는지**(대소문자까지), 마크다운 링크, 표 열 수, `deploy/*.sh` 실행 비트, **nginx `client_max_body_size`와 `WF_UPLOAD_MAX_MB`의 대조**, **로그 event 코드(`LOG_EVENTS`)가 장애대응 가이드에 모두 있는지**. `pnpm check`에 포함된다.
 - 아직 만들지 않은 산출물을 백틱 경로로 쓰지 않는다. 검사가 잡는다.
 
 표준 스크립트 (이름은 여기서 고정한다):
@@ -315,7 +315,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | CSRF | SameSite + 상태 변경 요청에 커스텀 헤더 요구. **화면은 경로에 `.`·`..` 조각이 든 API 요청을 보내지 않고**(`apps/web/src/api.ts`), **주소의 id가 식별자 모양일 때만 그 화면을 그린다**(`apps/web/src/components/RequireUuidParam.tsx`) — 주소의 id(`%2F`가 풀려 들어온다)로 다른 API를 부르게 하면 연 사람의 세션과 헤더로 나간다(Phase 10 보안 검토·종료 루틴) |
 | 로컬 계정 | argon2id. 기본 정책 **8자 이상, 영문 대·소문자·숫자·특수 중 2종** (사용자 결정 2026-09-15). 5회 실패 시 15분 잠금. 로그인·가입·계정 복구는 IP별 rate limit |
 | 계정 생명주기 | 가입 요청 → `승인 대기` → 관리자 승인 → `활성`. 임시 비밀번호는 화면에 1회 표시, 다음 로그인에서 변경 강제. ID 찾기는 email과 이름이 일치할 때 **마스킹된 ID만** (계정 열거 방지) |
-| 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여. **root는 관리자 한 사람에게 행위를 위임한다** — 위임할 수 있는 것은 `DELEGABLE_ACTIONS`(지금은 LLM 연결 관리 하나)뿐, 관리자만 받고, 관리자가 아니게 되면 사라진다. 다시 위임하지 못한다(Phase 11). 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
+| 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여. **root는 관리자 한 사람에게 행위를 위임한다** — 위임할 수 있는 것은 `DELEGABLE_ACTIONS`(지금은 LLM 연결 관리 하나)뿐, 관리자만 받고, 관리자가 아니게 되면 사라진다. 다시 위임하지 못한다. **자기에게 없는 위임을 가진 관리자는 관리하지 못한다**(비밀번호 초기화·역할·잠금 해제·세션 종료 — root와 같은 위임을 가진 관리자만. 초기화로 그 계정을 넘겨받는 길을 막는다)(Phase 11). 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
 | 권한 | 기본 거부. 모든 엔드포인트에 가드. 가드는 판정하지 않고 데이터를 모아 공유 함수에 넘긴다 |
 | 입력 | 모든 요청 본문·쿼리는 zod 검증. 문서는 JSON만. 링크는 `http(s)`·내부 경로만, 이미지 출처는 내부 첨부 URL만. **실시간 편집의 변경도 적용하기 전에 같은 허용 목록으로 본다** — 어긋나면 받지 않고 끊는다(P9 관문). 편집기 스키마와 허용 목록은 대조 테스트로 같게 둔다 |
 | 응답 헤더 | CSP(`default-src 'self'` 기준), `X-Content-Type-Options`, `frame-ancestors 'none'`, HSTS. HTML·API는 `Cache-Control: no-store`, **해시 파일명 정적 자산은 immutable 캐시 허용** |
