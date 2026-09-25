@@ -15,6 +15,7 @@ import { RevocationModule } from './common/revocation.bus';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { LabelsModule } from './labels/labels.module';
+import { LlmModule } from './llm/llm.module';
 import { TemplatesModule } from './templates/templates.module';
 import { PagesModule } from './pages/pages.module';
 import { SearchModule } from './search/search.module';
@@ -70,6 +71,8 @@ function resolveWebDist(): string {
     TrashModule,
     LabelsModule,
     TemplatesModule,
+    // Phase 10 — 사내 LLM 질문 (P10_설계서_Llm)
+    LlmModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

@@ -120,6 +120,19 @@ describe('변경 (FR-523~526)', () => {
     const row = await db.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     expect(row?.updatedBy).toBe(me.id);
   });
+
+  it('**LLM 대화의 짝 규칙은 바꾼 뒤의 전체로 본다** (P10 FR-1134) — 한쪽만 바꿔 어긋나게 하면 400', async () => {
+    const me = await admin();
+    const svc = svcWith();
+    // 고정 수만 올려 대화 수(기본 100)와 같게
+    await expect(applyPatch(svc, { llmPinnedMax: 100 }, me)).rejects.toThrow(/llmPinnedMax/);
+    // 대화 수만 내려 고정 수(기본 20)보다 작게
+    await expect(applyPatch(svc, { llmConversationMax: 20 }, me)).rejects.toThrow(/llmConversationMax/);
+    // 둘을 함께 옮기면 된다
+    await applyPatch(svc, { llmConversationMax: 20, llmPinnedMax: 5 }, me);
+    const p = await svc.get();
+    expect([p.llmConversationMax, p.llmPinnedMax, p.llmRetentionDays]).toEqual([20, 5, 7]);
+  });
 });
 
 describe('캐시·천장 (자체 점검 3·5)', () => {

@@ -35,4 +35,8 @@ describe('sanitizeDetail', () => {
   it('그 밖의 값은 그대로', () => {
     expect(sanitizeDetail({ role: 'admin', count: 3, ok: true })).toEqual({ role: 'admin', count: 3, ok: true });
   });
+
+  it('**LLM API 키도 버린다** (P10 D.4) — 키가 있다는 사실(`hasKey`)은 남는다', () => {
+    expect(sanitizeDetail({ name: '사내 Qwen', apiKey: 'k', api_key: 'k', APIKEY: 'k', hasKey: true })).toEqual({ name: '사내 Qwen', hasKey: true });
+  });
 });

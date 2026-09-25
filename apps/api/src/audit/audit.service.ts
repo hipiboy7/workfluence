@@ -24,8 +24,9 @@ export type AuditInput = {
  *
  * 패턴은 **넓게** 잡는다. 좁게 잡으면 새는 쪽으로 틀리고, 넓게 잡으면 기록이 조금 부실해질 뿐이다.
  * (`sid`만 넣었다가 `sessionId`가 통과한 적이 있다 — 테스트가 잡았다.)
+ * `api_key`·`apiKey`는 P10에서 더했다 — LLM API 키를 실수로 실어도 떨어지게 (P10_설계서_Llm D.4)
  */
-const SECRET_KEYS = /pass|secret|token|hash|session|sid|cookie|authorization|credential/i;
+const SECRET_KEYS = /pass|secret|token|hash|session|sid|cookie|authorization|credential|api_?key/i;
 
 export function sanitizeDetail(detail: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!detail) return null;

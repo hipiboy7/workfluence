@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { POLICY_KEYS, SETTINGS_KEYS, applyPolicy, validatePolicyPatch, type Policy, type Principal } from '@workfluence/shared';
+import { POLICY_KEYS, SETTINGS_KEYS, applyPolicy, policyConsistencyProblems, validatePolicyPatch, type Policy, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
@@ -88,6 +88,10 @@ export class SettingsService {
     // 이전 값이 되어 되짚을 수 없다 (코드 리뷰 9)
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${SETTINGS_KEYS.policy}))`);
     const current = await this.get(tx);
+    // **값 둘에 걸친 규칙은 바꾼 뒤의 전체로 본다** (P10 FR-1134). 한쪽만 바꾸는 요청이 있다 — 고정 수만 올리거나 대화 수만
+    // 내리면 짝이 어긋난다. `applyPolicy`는 읽을 때 조용히 맞추므로(던지지 않는다) **여기서 막지 않으면 저장은 되고 먹지 않는다**
+    const consistency = policyConsistencyProblems({ ...current, ...patch } as Policy);
+    if (consistency.length) throw new BadRequestException(consistency.join('; '));
     const row = await tx.query.settings.findFirst({ where: eq(settings.key, SETTINGS_KEYS.policy) });
     const stored = (row?.value as Record<string, unknown> | undefined) ?? {};
     const merged = { ...stored, ...patch };
