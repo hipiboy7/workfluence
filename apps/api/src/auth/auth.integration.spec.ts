@@ -2,6 +2,7 @@ import { BadGatewayException, BadRequestException, ForbiddenException, Logger, N
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
+import { errors as jose } from 'jose';
 import { AuditService } from '../audit/audit.service';
 import { auditEvents, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
@@ -559,6 +560,31 @@ describe('위임 — root가 관리자에게 LLM 연결 관리를 준다 (P11 D.
     expect([second.before, second.after, second.changed]).toEqual([['llm.manage'], [], true]);
   });
 
+  it('**root 둘을 동시에 내려도 root가 남는다** — 강등을 줄 세운다. 먼저 내린 것이 커밋되기 전에 센 뒤의 요청은 "마지막 root"로 거절된다 (FR-233, 종료 루틴 자체 점검 6)', async () => {
+    const [r1] = await db.insert(users).values({ username: 'root-a', displayName: 'a', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    const [r2] = await db.insert(users).values({ username: 'root-b', displayName: 'b', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    let second: Promise<unknown> | undefined;
+    await db.transaction(async (tx) => {
+      await usersSvc.changeRole(r1.id, 'admin', ROOT, tx);
+      // 앞의 강등이 커밋되기 전에 다른 root를 내린다 — 잠그지 않으면 이 요청도 root 2명을 센다
+      second = usersSvc.changeRole(r2.id, 'admin', ROOT).catch((e: unknown) => e);
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    expect(await second).toBeInstanceOf(BadRequestException);
+    const roots = await db.select().from(users).where(eq(users.role, 'root'));
+    expect(roots.map((u) => u.username)).toEqual(['root-b']);
+  });
+
+  it('**판정과 쓰기 사이에 위임을 받아도 위임 없는 관리자는 초기화하지 못한다** — 관리 대상의 행을 잠그고 판정한다 (종료 루틴 자체 점검 2)', async () => {
+    const plain = await mkAdmin('plain3');
+    const target = await mkAdmin('soon-boss');
+    // root가 위임을 주는 트랜잭션이 커밋되기 전에 초기화가 온다 — 잠그지 않으면 옛 값(위임 없음)으로 판정하고 쓴다
+    const reset = await whileGrantPending(target.id, ['llm.manage'], () =>
+      usersSvc.resetPassword(target.id, { id: plain.id, role: 'admin', grants: [] }).catch((e: unknown) => e),
+    );
+    expect(reset).toBeInstanceOf(ForbiddenException);
+  });
+
   it('**사내 계정 동기화도 그 사이의 위임을 덮지 않는다** — 관리자로 다시 로그인하는 사이 root가 준 것 (보안 검토 후보 1)', async () => {
     const asAdmin = { ...DEV_IDENTITY, groups: ['wf-admins'] };
     const s1 = await auth.oidcStart();
@@ -582,6 +608,9 @@ describe('사내 IdP가 실패하면 (P11 FR-1215, 코드 리뷰 8)', () => {
     }
   }
   const eventLines = (spy: { mock: { calls: unknown[][] } }): LogLine[] => spy.mock.calls.map((c) => c[0]).filter(isLogLine);
+  /** 콜백의 실패가 남긴 로그인 실패 감사 행의 까닭 */
+  const loginFailures = async () =>
+    (await db.select().from(auditEvents).where(eq(auditEvents.action, 'auth.login.failure'))).map((e) => e.detail as Record<string, unknown>);
 
   it('**닿지 않으면 502와 warn 한 줄** — `auth.oidc_failed`에 단계와 오류(사내 CA를 믿지 못하면 그 코드). 처리되지 않은 예외(500)가 아니다', async () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -596,6 +625,26 @@ describe('사내 IdP가 실패하면 (P11 FR-1215, 코드 리뷰 8)', () => {
         ['auth.oidc_failed', 'callback'],
       ]);
       expect(lines[0].err).toBe(tls);
+      // **콜백의 실패는 로그인 실패로 남는다** — 시작의 실패는 IdP에 가 보지도 못해 남기지 않는다 (종료 루틴 자체 점검 1)
+      expect(await loginFailures()).toEqual([{ method: 'oidc', reason: 'idp_unreachable' }]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('**id_token을 받아들이지 않으면 401** — 서명·aud·exp(jose)는 다시 해도 같다. "잠시 뒤 다시"(502)가 아니다. 키 목록을 제때 못 받은 것만 502', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      for (const err of [
+        new jose.JWTClaimValidationFailed('unexpected "aud" claim value', {}, 'aud', 'check_failed'),
+        new jose.JWTExpired('"exp" claim timestamp check failed', {}, 'exp', 'check_failed'),
+        new jose.JWSSignatureVerificationFailed(),
+      ]) {
+        await expect(makeAuth(new FailingProvider(err)).oidcCallback({ code: 'c', state: 's' }, { state: 's', nonce: 'n' })).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+      await expect(makeAuth(new FailingProvider(new jose.JWKSTimeout())).oidcCallback({ code: 'c', state: 's' }, { state: 's', nonce: 'n' })).rejects.toBeInstanceOf(BadGatewayException);
+      expect(eventLines(warn).map((l) => l.event)).toEqual(['auth.oidc_failed', 'auth.oidc_failed', 'auth.oidc_failed', 'auth.oidc_failed']);
+      expect((await loginFailures()).map((d) => d.reason)).toEqual(['idp_rejected', 'idp_rejected', 'idp_rejected', 'idp_unreachable']);
     } finally {
       warn.mockRestore();
     }
@@ -607,6 +656,7 @@ describe('사내 IdP가 실패하면 (P11 FR-1215, 코드 리뷰 8)', () => {
       const failing = makeAuth(new FailingProvider(new UnauthorizedException('토큰 교환 실패: HTTP 400')));
       await expect(failing.oidcCallback({ code: 'c', state: 's' }, { state: 's', nonce: 'n' })).rejects.toBeInstanceOf(UnauthorizedException);
       expect(eventLines(warn).map((l) => [l.event, l.fields.step])).toEqual([['auth.oidc_failed', 'callback']]);
+      expect(await loginFailures()).toEqual([{ method: 'oidc', reason: 'idp_rejected' }]);
     } finally {
       warn.mockRestore();
     }
@@ -617,6 +667,7 @@ describe('사내 IdP가 실패하면 (P11 FR-1215, 코드 리뷰 8)', () => {
     try {
       await expect(auth.oidcCallback({ code: 'c', state: 'tampered' }, { state: 's', nonce: 'n' })).rejects.toBeInstanceOf(UnauthorizedException);
       expect(eventLines(warn)).toEqual([]);
+      expect(await loginFailures()).toEqual([]);
     } finally {
       warn.mockRestore();
     }

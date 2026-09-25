@@ -24,6 +24,12 @@ import { SettingsService } from '../settings/settings.service';
 import { users, type UserRow } from '../db/schema';
 
 /**
+ * 마지막 root 강등을 줄 세우는 잠금의 이름 (FR-233). 잠그지 않으면 root 둘을 두 요청이 동시에 내릴 때 둘 다 "root 2명"을 세고
+ * root가 0명이 된다 (P11 종료 루틴 자체 점검 6). 다른 잠금과 같이 이름을 `hashtext`로 번호로 바꾼다
+ */
+const LAST_ROOT_LOCK = 'users:last-root';
+
+/**
  * 사용자 (P1_설계서_Auth 5절). B등급 — 실제 PostgreSQL로 통합 테스트한다.
  *
  * 잠금 판정은 여기서 하지 않고 `auth/domain/lockout.ts`(A등급)에 넘긴다.
@@ -197,45 +203,64 @@ export class UsersService {
     return row;
   }
 
-  /** 관리할 대상 — 역할과 **위임까지** 보고 판정한다(`canManageUser`, P11 보안 검토 1). `lock`이면 행을 잠그고 읽는다(`lockForUpdate`) */
-  private async getManaged(id: string, actor: Principal, tx: Db = this.db, lock = false): Promise<UserRow> {
-    const target = lock ? await this.lockForUpdate({ id }, tx) : await this.findById(id, tx);
+  /**
+   * 트랜잭션 안에서 돈다 — 받은 `tx`가 풀(`this.db`)이면 트랜잭션을 연다. 행 잠금(`lockForUpdate`)은 트랜잭션이 끝날 때 풀리므로, 풀로
+   * 부르면 읽은 직후 풀려 **판정이 쓰기까지 이어지지 않는다** (P11 종료 루틴 자체 점검 5). 컨트롤러는 늘 트랜잭션을 넘긴다 — 시험과
+   * 다른 호출부도 같은 모양으로 돈다
+   */
+  private inTx<T>(tx: Db, run: (t: Db) => Promise<T>): Promise<T> {
+    return tx === this.db ? this.db.transaction((t) => run(t)) : run(tx);
+  }
+
+  /**
+   * 관리할 대상 — 역할과 **위임까지** 보고 판정한다(`canManageUser`, P11 보안 검토 1). **행을 잠그고 읽는다**(`lockForUpdate`) — 판정한
+   * 뒤 쓰기 전에 root가 그 사람에게 위임을 주면, 위임 없는 관리자가 방금 위임받은 관리자를 초기화하는 틈이 생긴다 (종료 루틴 자체 점검 2).
+   * 부르는 쪽은 `inTx` 안이다
+   */
+  private async getManaged(id: string, actor: Principal, tx: Db): Promise<UserRow> {
+    const target = await this.lockForUpdate({ id }, tx);
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
     if (!canManageUser(actor, { role: target.role as Role, grants: target.grants })) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
     return target;
   }
 
   async approve(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
-    const target = await this.getManaged(id, actor, tx);
-    if (target.status !== 'pending') throw new BadRequestException('승인 대기 상태가 아니다');
-    const [row] = await tx
-      .update(users)
-      .set({ status: 'active', approvedAt: sql`now()`, approvedBy: actor.id, updatedAt: sql`now()` })
-      .where(eq(users.id, id))
-      .returning();
-    return row;
+    return this.inTx(tx, async (t) => {
+      const target = await this.getManaged(id, actor, t);
+      if (target.status !== 'pending') throw new BadRequestException('승인 대기 상태가 아니다');
+      const [row] = await t
+        .update(users)
+        .set({ status: 'active', approvedAt: sql`now()`, approvedBy: actor.id, updatedAt: sql`now()` })
+        .where(eq(users.id, id))
+        .returning();
+      return row;
+    });
   }
 
   async unlock(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
-    await this.getManaged(id, actor, tx);
-    const cleared = afterSuccess();
-    const [row] = await tx
-      .update(users)
-      .set({ failedAttempts: cleared.failedAttempts, lockedUntil: cleared.lockedUntil, updatedAt: sql`now()` })
-      .where(eq(users.id, id))
-      .returning();
-    return row;
+    return this.inTx(tx, async (t) => {
+      await this.getManaged(id, actor, t);
+      const cleared = afterSuccess();
+      const [row] = await t
+        .update(users)
+        .set({ failedAttempts: cleared.failedAttempts, lockedUntil: cleared.lockedUntil, updatedAt: sql`now()` })
+        .where(eq(users.id, id))
+        .returning();
+      return row;
+    });
   }
 
   /** 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다 */
   async resetPassword(id: string, actor: Principal, tx: Db = this.db): Promise<{ user: UserRow; temporaryPassword: string }> {
-    const target = await this.getManaged(id, actor, tx);
-    // IdP 계정에 비밀번호를 붙이면 IdP가 강제하던 인증(사내 MFA·정책)을 건너뛰는 옆문이 생긴다.
-    // FR-217이 "IdP 계정은 비밀번호로 로그인할 수 없다"고 한 것을 초기화가 뚫으면 안 된다.
-    if (target.oidcSub !== null) {
-      throw new BadRequestException('사내 IdP 계정이다. 비밀번호를 부여하지 않는다 — IdP로 로그인한다');
-    }
-    return this.applyTemporaryPassword(id, tx);
+    return this.inTx(tx, async (t) => {
+      const target = await this.getManaged(id, actor, t);
+      // IdP 계정에 비밀번호를 붙이면 IdP가 강제하던 인증(사내 MFA·정책)을 건너뛰는 옆문이 생긴다.
+      // FR-217이 "IdP 계정은 비밀번호로 로그인할 수 없다"고 한 것을 초기화가 뚫으면 안 된다.
+      if (target.oidcSub !== null) {
+        throw new BadRequestException('사내 IdP 계정이다. 비밀번호를 부여하지 않는다 — IdP로 로그인한다');
+      }
+      return this.applyTemporaryPassword(id, t);
+    });
   }
 
   private async applyTemporaryPassword(id: string, tx: Db = this.db): Promise<{ user: UserRow; temporaryPassword: string }> {
@@ -263,21 +288,25 @@ export class UsersService {
    */
   async changeRole(id: string, role: Role, actor: Principal, tx: Db = this.db): Promise<{ row: UserRow; clearedGrants: DelegableAction[] }> {
     if (id === actor.id) throw new BadRequestException('자기 자신의 역할은 바꿀 수 없다');
-    // **잠그고 읽는다** — 읽은 위임으로 다시 쓰므로, 그 사이의 위임 변경을 덮지 않게 (`lockForUpdate`)
-    const target = await this.getManaged(id, actor, tx, true);
-    if (!canAssignRole(actor, role)) throw new ForbiddenException(`'${role}' 역할을 부여할 권한이 없다`);
-    // 마지막 root를 강등하면 아무도 root 권한을 되돌릴 수 없다 (FR-233). 순수 함수로 두기 어려워 여기서 센다
-    if (target.role === 'root' && role !== 'root') {
-      // **`tx`로 센다.** `this.db`는 풀이라, 트랜잭션 안에서 부르면 연결을 하나 쥔 채
-      // 두 번째를 달라고 한다 — 동시 요청이 풀 크기에 닿으면 서로를 기다린다 (T-026).
-      // 지금은 10초 뒤 500으로 끝나지만 그것은 증상을 시끄럽게 만든 것이고 원인은 이 줄이다
-      const [{ n }] = await tx.select({ n: count() }).from(users).where(and(eq(users.role, 'root'), eq(users.status, 'active')));
-      if (n <= 1) throw new BadRequestException('마지막 root는 강등할 수 없다');
-    }
-    const before = grantsForRole(target.role as Role, target.grants);
-    const grants = grantsForRole(role, before);
-    const [row] = await tx.update(users).set({ role, grants, updatedAt: sql`now()` }).where(eq(users.id, id)).returning();
-    return { row, clearedGrants: before.filter((g) => !grants.includes(g)) };
+    return this.inTx(tx, async (t) => {
+      // **잠그고 읽는다** — 읽은 위임으로 다시 쓰므로, 그 사이의 위임 변경을 덮지 않게 (`getManaged` → `lockForUpdate`)
+      const target = await this.getManaged(id, actor, t);
+      if (!canAssignRole(actor, role)) throw new ForbiddenException(`'${role}' 역할을 부여할 권한이 없다`);
+      // 마지막 root를 강등하면 아무도 root 권한을 되돌릴 수 없다 (FR-233). 순수 함수로 두기 어려워 여기서 센다
+      if (target.role === 'root' && role !== 'root') {
+        // **root 강등을 줄 세운 뒤 센다** — 잠금을 쥔 다음 문장은 앞선 강등이 커밋한 것을 본다 (`LAST_ROOT_LOCK`)
+        await t.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${LAST_ROOT_LOCK}))`);
+        // **`t`로 센다.** `this.db`는 풀이라, 트랜잭션 안에서 부르면 연결을 하나 쥔 채
+        // 두 번째를 달라고 한다 — 동시 요청이 풀 크기에 닿으면 서로를 기다린다 (T-026).
+        // 지금은 10초 뒤 500으로 끝나지만 그것은 증상을 시끄럽게 만든 것이고 원인은 이 줄이다
+        const [{ n }] = await t.select({ n: count() }).from(users).where(and(eq(users.role, 'root'), eq(users.status, 'active')));
+        if (n <= 1) throw new BadRequestException('마지막 root는 강등할 수 없다');
+      }
+      const before = grantsForRole(target.role as Role, target.grants);
+      const grants = grantsForRole(role, before);
+      const [row] = await t.update(users).set({ role, grants, updatedAt: sql`now()` }).where(eq(users.id, id)).returning();
+      return { row, clearedGrants: before.filter((g) => !grants.includes(g)) };
+    });
   }
 
   /**
@@ -291,6 +320,14 @@ export class UsersService {
     tx: Db = this.db,
   ): Promise<{ row: UserRow; before: DelegableAction[]; after: DelegableAction[]; changed: boolean }> {
     if (!can(actor, 'user.grants.change')) throw new ForbiddenException('위임은 시스템 관리자만 주고 거둔다');
+    return this.inTx(tx, (t) => this.changeGrantsIn(id, grants, t));
+  }
+
+  private async changeGrantsIn(
+    id: string,
+    grants: readonly DelegableAction[],
+    tx: Db,
+  ): Promise<{ row: UserRow; before: DelegableAction[]; after: DelegableAction[]; changed: boolean }> {
     // **잠그고 읽는다** — 이전 값이 감사 행에 가고, 동시에 바꾸는 두 요청이 서로를 덮지 않게 (`lockForUpdate`)
     const target = await this.lockForUpdate({ id }, tx);
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
@@ -337,10 +374,14 @@ export class UsersService {
    * 변경과 같은 판단이다 (FR-224). `sess`는 connect-pg-simple가 넣은 세션 객체 전체다.
    */
   async terminateSessions(id: string, actor: Principal, tx: Db = this.db): Promise<number> {
-    await this.getManaged(id, actor, tx);
-    const r = await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
+    const n = await this.inTx(tx, async (t) => {
+      await this.getManaged(id, actor, t);
+      const r = await t.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
+      return r.rowCount ?? 0;
+    });
+    // 끊는 알림은 지운 뒤에 — 트랜잭션을 여기서 열었으면 커밋된 뒤다
     this.revocation.revoke(id);
-    return r.rowCount ?? 0;
+    return n;
   }
 
   async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db): Promise<void> {

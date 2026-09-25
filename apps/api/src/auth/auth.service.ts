@@ -23,6 +23,7 @@ import { SpacesService } from '../spaces/spaces.service';
 import { UsersService } from '../users/users.service';
 import { safeDisplayName } from './domain/display-name';
 import { mapGroupsToRole } from './domain/claims';
+import { idpFailureKind } from './domain/idp-failure';
 import { OIDC_PROVIDER, type OidcClaims, type OidcProvider, type PkcePair } from './oidc/oidc.provider';
 
 /** 로그인 실패는 **사유를 구분하지 않는다** (FR-206). 이 문구 하나만 나간다. */
@@ -158,15 +159,23 @@ export class AuthService {
   /**
    * 사내 IdP와의 처리 (P11 FR-1215, 코드 리뷰 8). **실패는 바깥 탓이라 warn 한 줄**(`auth.oidc_failed` — 단계·오류). 예전에는 IdP에 닿지
    * 않으면(Discovery·TLS·JWKS) 처리되지 않은 예외(500, `http.unhandled` error)였고, 토큰 교환의 거절은 로그에 아무것도 없었다.
-   * 우리가 판정한 거절(`HttpException` — 토큰 교환 실패·nonce 불일치 등)은 그대로 던지고, 그 밖(닿지 않음·TLS·서명 검증)은 502로 바꾼다.
-   * 사내 CA를 믿지 못하는 것(반입 가이드 10절 ②)이 여기서 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`로 보인다
+   *
+   * - **거절**은 401 — 우리가 판정한 것(`HttpException` — 토큰 교환 실패·nonce 불일치 등)은 그대로, id_token을 받아들이지 않은 것(jose의
+   *   서명·iss·aud·exp — `idpFailureKind`)은 401로. 다시 해도 같으니 "잠시 뒤 다시"라고 하지 않는다 (종료 루틴 자체 점검 1)
+   * - **닿지 않음**은 502 — 망·TLS·Discovery. 사내 CA를 믿지 못하는 것(반입 가이드 10절 ②)이 여기서 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`로 보인다
+   * - **콜백의 실패는 로그인 실패다** — 감사 `auth.login.failure`(6절 "인증 성공·실패"). 시작의 실패는 IdP에 가 보지도 못한 것이라 남기지 않는다
    */
-  private async idp<T>(step: 'start' | 'callback', run: () => Promise<T>): Promise<T> {
+  private async idp<T>(step: 'start' | 'callback', run: () => Promise<T>, ip?: string): Promise<T> {
     try {
       return await run();
     } catch (e) {
       this.log.warn(logLine('auth.oidc_failed', '사내 인증 서버와의 처리가 실패했다', { step }, e));
+      const kind = e instanceof HttpException ? 'rejected' : idpFailureKind((e as { code?: unknown } | null)?.code);
+      if (step === 'callback') {
+        await this.audit.record({ action: 'auth.login.failure', detail: { method: 'oidc', reason: kind === 'rejected' ? 'idp_rejected' : 'idp_unreachable' }, ip });
+      }
       if (e instanceof HttpException) throw e;
+      if (kind === 'rejected') throw new UnauthorizedException('사내 인증이 보낸 토큰을 받아들이지 못했다 — 관리자에게 알린다');
       throw new BadGatewayException('사내 인증 서버와 처리하지 못했다 — 잠시 뒤 다시 로그인한다. 계속되면 관리자에게 알린다');
     }
   }
@@ -183,7 +192,7 @@ export class AuthService {
     const p = this.provider();
     if (!saved.state || saved.state !== args.state) throw new UnauthorizedException('state가 일치하지 않는다');
 
-    const claims = await this.idp('callback', () => p.exchange(args.code, saved.nonce ?? '', saved.verifier));
+    const claims = await this.idp('callback', () => p.exchange(args.code, saved.nonce ?? '', saved.verifier), ip);
     const role = mapGroupsToRole(claims.groups, this.env.WF_OIDC_ROLE_MAP);
     if (!role) {
       await this.audit.record({ action: 'auth.login.failure', targetType: 'oidc_sub', targetId: claims.sub, detail: { reason: 'no_role_mapped' }, ip });
