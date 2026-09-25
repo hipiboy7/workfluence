@@ -1,7 +1,8 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { LLM_LIMITS, type CreateLlmPromptDto, type LlmPromptView, type Principal, type UpdateLlmPromptDto } from '@workfluence/shared';
-import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
+import { and, count, eq, ne, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
+import { byName } from '../db/order';
 import { llmPrompts, type LlmPromptRow } from '../db/schema';
 
 /**
@@ -17,7 +18,7 @@ export class LlmPromptsService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async list(me: Principal): Promise<LlmPromptView[]> {
-    const rows = await this.db.select().from(llmPrompts).where(eq(llmPrompts.userId, me.id)).orderBy(asc(llmPrompts.name));
+    const rows = await this.db.select().from(llmPrompts).where(eq(llmPrompts.userId, me.id)).orderBy(byName(llmPrompts.name));
     return rows.map(toView);
   }
 

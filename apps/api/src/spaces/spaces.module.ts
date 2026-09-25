@@ -18,6 +18,7 @@ import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth
 import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
+import { byName } from '../db/order';
 import { spaceCategories, spaces } from '../db/schema';
 import { SpacesService } from './spaces.service';
 
@@ -164,7 +165,7 @@ export class CategoriesController {
 
   @Get()
   async list(): Promise<CategoryView[]> {
-    const rows = await this.db.select().from(spaceCategories).orderBy(spaceCategories.name);
+    const rows = await this.db.select().from(spaceCategories).orderBy(byName(spaceCategories.name));
     return rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.createdAt.toISOString() }));
   }
 

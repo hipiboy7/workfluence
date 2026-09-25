@@ -8,10 +8,11 @@ import {
   type LlmProviderView,
   type Principal,
 } from '@workfluence/shared';
-import { asc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
+import { byName } from '../db/order';
 import { llmProviders, users, type LlmProviderRow } from '../db/schema';
 import { SecretError, openSecret, parseMasterKey, providerAad, sealSecret } from './domain/secret';
 import { LLM_CLIENT, LlmError, type LlmClient, type LlmTarget } from './llm.provider';
@@ -46,7 +47,7 @@ export class LlmProvidersService {
     const rows = await this.db
       .select({ id: llmProviders.id, name: llmProviders.name, model: llmProviders.model })
       .from(llmProviders)
-      .orderBy(asc(llmProviders.name));
+      .orderBy(byName(llmProviders.name));
     return rows;
   }
 
@@ -57,7 +58,7 @@ export class LlmProvidersService {
       .select({ p: llmProviders, createdByName: users.displayName })
       .from(llmProviders)
       .leftJoin(users, eq(users.id, llmProviders.createdBy))
-      .orderBy(asc(llmProviders.name));
+      .orderBy(byName(llmProviders.name));
     return rows.map((r) => toAdminView(r.p, r.createdByName ?? ''));
   }
 

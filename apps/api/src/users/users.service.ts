@@ -16,6 +16,7 @@ import { randomInt } from 'node:crypto';
 import { afterFailure, afterSuccess, isLocked } from '../auth/domain/lockout';
 import { RevocationBus } from '../common/revocation.bus';
 import { DB, type Db } from '../db/db.module';
+import { byName } from '../db/order';
 import { SettingsService } from '../settings/settings.service';
 import { users, type UserRow } from '../db/schema';
 
@@ -94,7 +95,7 @@ export class UsersService {
       .select({ name: users.displayName })
       .from(users)
       .where(and(inArray(users.role, ['root', 'admin']), eq(users.status, 'active')))
-      .orderBy(users.displayName);
+      .orderBy(byName(users.displayName));
     return rows.map((r) => r.name);
   }
 
