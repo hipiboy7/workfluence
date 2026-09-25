@@ -26,7 +26,8 @@ export function SpacesPage() {
   }, []);
 
   if (!me) return null;
-  const principal = { id: me.id, role: me.role };
+  // 위임까지 함께 넘긴다 — "LLM 연결"은 root, 그리고 root가 위임한 관리자 (P11 D.1)
+  const principal = { id: me.id, role: me.role, grants: me.grants };
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -52,8 +53,8 @@ export function SpacesPage() {
         {' · '}<Link to="/trash">휴지통</Link>
         {' · '}<Link to="/llm">LLM 질문</Link>
         {can(principal, 'settings.manage') && <> · <Link to="/admin/policy">운영 설정</Link></>}
-        {/* LLM 등록은 시스템 관리자(root)만 (P10_설계서_Llm A.1-1) */}
-        {can(principal, 'system.manage') && <> · <Link to="/admin/llm">LLM 연결</Link></>}
+        {/* LLM 연결 관리 — root, 그리고 root가 위임한 관리자 (P11_설계서_Ops D.1). 판정은 서버의 가드와 같은 `can()` */}
+        {can(principal, 'llm.manage') && <> · <Link to="/admin/llm">LLM 연결</Link></>}
         {' · '}<Link to="/change-password">비밀번호 변경</Link>
         {' · '}<button type="button" className="linklike" onClick={() => void logout()}>로그아웃</button>
       </p>

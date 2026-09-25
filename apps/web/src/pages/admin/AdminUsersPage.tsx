@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { ROLES, type Role, type UserView } from '@workfluence/shared';
+import { DELEGABLE_ACTIONS, ROLES, can, type DelegableAction, type Role, type UserView } from '@workfluence/shared';
 import { api } from '../../api';
+import { useAuth } from '../../auth';
 
-/** 사용자 관리 (FR-230~234, FR-243) */
+/** 위임할 수 있는 행위의 이름 — 목록이 늘면 타입이 여기를 채우라고 한다 (P11 D.1) */
+const GRANT_LABELS: Record<DelegableAction, string> = { 'llm.manage': 'LLM 연결 관리' };
+
+/**
+ * 사용자 관리 (FR-230~234, FR-243). **위임** — 관리자 행마다 root가 주고 거두는 체크(P11_설계서_Ops D.1·G절). 다른 관리자에게는
+ * 보이기만 한다. 판정은 서버의 가드와 같은 `can()`이다
+ */
 export function AdminUsersPage() {
+  const { me } = useAuth();
+  const canGrant = can(me ? { id: me.id, role: me.role, grants: me.grants } : null, 'user.grants.change');
   const [rows, setRows] = useState<UserView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [temporary, setTemporary] = useState<{ username: string; password: string } | null>(null);
@@ -43,7 +52,7 @@ export function AdminUsersPage() {
       )}
       <table className="card">
         <thead>
-          <tr><th>아이디</th><th>이름</th><th>역할</th><th>상태</th><th>조치</th></tr>
+          <tr><th>아이디</th><th>이름</th><th>역할</th><th>상태</th><th>위임</th><th>조치</th></tr>
         </thead>
         <tbody>
           {rows.map((u) => (
@@ -60,6 +69,27 @@ export function AdminUsersPage() {
                 </select>
               </td>
               <td><span className={`badge ${u.status === 'active' ? 'ok' : 'fail'}`}>{u.status}</span></td>
+              <td>
+                {/* 위임은 관리자만 받는다 — 관리자가 아니게 되면 서버가 비운다 (P11 A.1-4) */}
+                {u.role === 'admin'
+                  ? DELEGABLE_ACTIONS.map((a) => (
+                      <label key={a} className="small">
+                        <input
+                          type="checkbox"
+                          aria-label={`${u.username} ${GRANT_LABELS[a]}`}
+                          checked={u.grants.includes(a)}
+                          disabled={!canGrant}
+                          title={canGrant ? undefined : '시스템 관리자만 주고 거둔다'}
+                          onChange={(e) => {
+                            const grants = e.target.checked ? [...u.grants, a] : u.grants.filter((g) => g !== a);
+                            void act(() => api(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants } }));
+                          }}
+                        />{' '}
+                        {GRANT_LABELS[a]}
+                      </label>
+                    ))
+                  : <span className="muted small">—</span>}
+              </td>
               <td>
                 {u.status === 'pending' && (
                   <button type="button" onClick={() => void act(() => api(`/api/users/${u.id}/approve`, { method: 'POST' }))}>승인</button>
@@ -95,6 +125,7 @@ export function AdminUsersPage() {
           ))}
         </tbody>
       </table>
+      <p className="muted small">위임은 시스템 관리자가 관리자 한 사람씩 주고 거둔다. 관리자가 아니게 되면 사라진다.</p>
     </main>
   );
 }
