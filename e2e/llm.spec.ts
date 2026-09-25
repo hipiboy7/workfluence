@@ -255,4 +255,8 @@ test('위키 페이지를 마크다운으로 복사해 질문에 붙인다', asy
   await page.getByRole('button', { name: '보내기' }).click();
   await expect(page.getByRole('list', { name: '메시지' })).toContainText(`받은 질문: # ${title}`);
   expect(chats().at(-1)?.messages.at(-1)?.content).toBe(copied);
+  // **답이 끝나 저장될 때까지 기다린다** — 흐르는 중에 시험이 끝나면 화면이 닫히며 서버가 받은 데까지 저장하는데(FR-1122), 그 저장이 **새 대화를
+  // 만들어** 뒤의 정리(`afterAll`)가 대화를 지운 다음에 끼어들었다 — 사용자를 지우는 문장이 그 대화의 참조로 실패했다 (T-050)
+  await expect(page.getByRole('list', { name: '메시지' })).toContainText('— 끝');
+  await expect(page).toHaveURL(/\/llm\/[0-9a-f-]{36}$/);
 });
