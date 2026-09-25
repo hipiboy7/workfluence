@@ -22,7 +22,8 @@ import { LLM_CLIENT, LlmError, type LlmClient, type LlmTarget } from './llm.prov
  * 등록·삭제·연결 확인은 **root만**(`system.manage`, A.1-1). 가드가 먼저 막고 서비스도 한 번 더 본다 — 다른 호출부가 생겨도
  * 권한이 따라가게(템플릿의 `assertAdmin`과 같은 모양).
  *
- * API 키는 `WF_LLM_MASTER_KEY`로 암호화해 넣고 **어디로도 다시 내보내지 않는다**(FR-1102). 푸는 것은 요청을 보낼 때뿐이다.
+ * API 키는 `WF_LLM_MASTER_KEY`로 암호화해 넣고 **어디로도 다시 내보내지 않는다**(FR-1102). 푸는 것은 부를 때뿐이다 — 질문을 확인할 때
+ * 풀어 그 답이 끝날 때까지, 연결 확인은 그 요청 동안 메모리에 둔다 (D.4).
  */
 @Injectable()
 export class LlmProvidersService {
@@ -94,7 +95,7 @@ export class LlmProvidersService {
   }
 
   /**
-   * 부를 곳을 만든다 — 키를 여기서 **푼다**(요청 하나 동안만). 없으면 404, 풀 수 없으면 503.
+   * 부를 곳을 만든다 — 키를 여기서 **푼다**(질문이면 그 답이 끝날 때까지, D.4). 없으면 404, 풀 수 없으면 503.
    * 풀 수 없는 것은 마스터 키가 바뀌었거나 저장된 값이 망가진 것이다 — 지우고 다시 등록하는 길을 말한다 (D.4).
    */
   async resolve(id: string): Promise<{ provider: LlmProviderRow; target: LlmTarget }> {

@@ -80,7 +80,8 @@ workfluence/
 │   │   │                         LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
-│       └── src/{components,pages,api.ts,auth.tsx}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기)
+│       └── src/{components,pages,api.ts,auth.tsx}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기) ·
+│                                 [P10] components/RequireUuidParam.tsx (주소의 id가 식별자 모양일 때만 화면을 그린다)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown}.ts
 ├── e2e/                          Playwright
@@ -91,7 +92,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P9]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P10]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -332,7 +333,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 ### 11.4 확장을 싸게 유지하는 규칙
 
 - **판정은 한 곳에서.** 권한·정책 판정을 화면에서 다시 구현하지 않는다. 서버가 응답에 판정 결과를 실어 보내고 화면은 그대로 쓴다.
-- **교체 가능한 축은 인터페이스 뒤에.** 6절의 다섯 축은 구현을 갈아도 상위 로직이 안 바뀐다. 새 기능이 그 축에 걸리면 축을 늘리지 말고 구현을 더한다.
+- **교체 가능한 축은 인터페이스 뒤에.** 6절의 여섯 축은 구현을 갈아도 상위 로직이 안 바뀐다. 새 기능이 그 축에 걸리면 축을 늘리지 말고 구현을 더한다.
 - **파생 데이터는 재생성 가능하게.** 검색 색인처럼 원본에서 다시 만들 수 있는 것은 정본으로 취급하지 않는다.
 - **새 문서 종류를 만들기 전에 기존 문서에 절을 더할 수 없는지 본다** (`CLAUDE.md` 10절).
 - **순환 참조를 만들지 않는다.** 두 모듈이 함께 쓰는 변환 함수는 제3의 파일로 뺀다. CommonJS에서 순환이 생기면 타입 검사는 통과하고 기동만 실패한다 (2.1절).

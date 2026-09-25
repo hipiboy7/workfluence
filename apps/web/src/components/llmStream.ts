@@ -49,7 +49,7 @@ export async function readLlmStream(body: ReadableStream<Uint8Array>, onEvent: (
 }
 
 export type AskOptions = {
-  /** 끊으면 요청을 끊는다 — 서버는 창을 닫은 것처럼 받은 데까지 저장한다 (FR-1115). 페이지를 떠날 때 쓴다 */
+  /** 끊으면 요청을 끊는다 — 서버는 창을 닫은 것처럼 받은 데까지 저장한다 (FR-1122). 페이지를 떠날 때 쓴다 */
   signal?: AbortSignal;
   /** 흐름이 열렸다 — 서버가 확인을 마치고 그 사람의 자리를 잡았다. **이때부터 중지가 닿는다** */
   onOpen?: () => void;

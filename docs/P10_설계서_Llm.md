@@ -17,6 +17,9 @@ Phase 10은 **기능백로그 F-002**를 만든다 — 사내에 따로 선 LLM 
 > 태그만 오는 모델, 한 줄의 상한, 키 가리기, 5분 무응답) · D.3(문맥 초과 안내) · D.4(AAD에 주소, 키를 쥐는 동안, 입력 글자) ·
 > D.5(M을 고정 수 아래로 내린 때, 답을 받는 사이의 만료·LLM 삭제) · D.7(세로 합친 칸, `!` 뒤의 링크) · D.8 · E(실제 표) · G(LLM
 > 고르기는 늘 보인다, 중지 단추, http 경고) · H(공통 오류 문장) · I(설계 고정값) · J(보류 30)
+>
+> **같은 날 종료 루틴 반영.** 종료 루틴의 자체 점검·문서 정합성이 찾은 것으로 다시 고쳤다: D.1(세션 만료는 요청 하나의 수명으로) ·
+> D.4(PostgreSQL 문장 속 값 — 데이터 예외) · D.5(트랜잭션 안의 읽기) · G(경로 지킴 `RequireUuidParam`, 라벨의 점 이름) · H(오류 문장·경로 지킴)
 
 ---
 
@@ -82,7 +85,7 @@ Phase 10은 **기능백로그 F-002**를 만든다 — 사내에 따로 선 LLM 
 | FR-1107 | 일반 사용자에게는 **이름과 모델만** 보인다 | 주소는 사내 호스트 정보다 |
 | FR-1108 | 이름은 유일하다. 같은 이름이면 409 | 같은 이름에 다른 주소가 조용히 무시되면 관리자가 틀린 것을 믿는다(템플릿의 멱등과 다른 판단) |
 
-### C.2 질문 (FR-1110 ~ FR-1120)
+### C.2 질문 (FR-1110 ~ FR-1122)
 
 | # | 요구 | 근거 |
 |---|---|---|
@@ -181,6 +184,8 @@ Phase 10은 **기능백로그 F-002**를 만든다 — 사내에 따로 선 LLM 
   요청을 끊는다). 확인하는 동안(머리말을 보내기 전) 끊긴 것도 알아본다 — 출구를 만들 때 응답이 이미 닫혔는지 본다(`res.destroyed`).
 - **세션을 끊으면**(FR-1121) — 세션 파기 버스(`RevocationBus`, P7 C.1.1)를 듣는다. 버스는 비밀번호 변경·관리자 강제 종료에는
   사용자 id만, 로그아웃에는 세션 id까지 알린다. 받던 답을 멈추고 거기까지 저장한 뒤 까닭을 `end`로 말한다.
+  **세션 만료(유휴·절대)는 답 하나 동안 다시 보지 않는다** — 답은 시작할 때 인증한 요청 하나이고 길어야 `WF_LLM_TIMEOUT_MS`(기본 10분,
+  최대 1시간)다. 오래 걸리는 내려받기와 같다. 실시간 편집의 주기 재판정(P7)은 끝이 없는 연결이라 둔 것이다(종료 루틴 자체 점검 8).
 
 ### D.2 LLM에 보내는 것 — OpenAI 호환 형식
 
@@ -247,7 +252,9 @@ Authorization: Bearer {API 키}          ← 키가 있을 때만
   보내기 전에 실패해 "닿지 않는다"로 보이고, 키는 다시 볼 수 없어 관리자가 네트워크를 뒤진다(코드 리뷰). 이름·모델·지시문·질문은
   **U+0000을 받지 않는다** — PostgreSQL `text`가 받지 않아 저장이 통째로 실패한다. 모델이 낸 U+0000은 빼고 저장한다.
 - **오류를 로그에 적을 때 drizzle의 오류 문장을 싣지 않는다.** 그 문장에는 질의의 매개변수가 그대로 있어, 대화·지시문 저장이
-  실패한 자리라면 질문·답·지시문이 로그로 샌다. PostgreSQL의 코드·문장만 싣는다 — **공통 로거 한 곳에서**
+  실패한 자리라면 질문·답·지시문이 로그로 샌다. PostgreSQL의 코드·문장만 싣는다 — **PostgreSQL의 문장에도 값이 드는 부류가 있다**:
+  데이터 예외(SQLSTATE 22)는 받은 값을 따옴표로 싣는다(`22P02 invalid input syntax for type uuid: "…"`). 그 부류는 따옴표 안을
+  가린다 — 실제 PostgreSQL이 낸 오류로 시험한다(종료 루틴 자체 점검이 합성 오류만 보던 시험의 빈틈을 짚었다). **공통 로거 한 곳에서**
   (`apps/api/src/common/error-text.ts`의 `errorText`·`errorStack`, `apps/api/src/common/logger.ts`). 서비스가 잡지 않은 오류가 Nest의
   기본 처리기로 가도 같은 길을 지난다. 컨테이너 확인과 보안 검토에서 드러났다.
 
@@ -267,7 +274,8 @@ Authorization: Bearer {API 키}          ← 키가 있을 때만
 - **저장**은 한 트랜잭션이다 — 그 사람의 advisory lock → 대화 만들기·고치기 → 질문·답 넣기 → 개수가 M을 넘으면 고정하지 않은 것
   중 `retain_from`이 가장 오래된 것부터 지우기 → 감사 `llm.ask`. **잠금이 없으면** 두 탭에서 동시에 새 대화를 저장할 때 둘 다
   "아직 100개"로 보고 101개가 된다.
-- 상한 값은 **저장 트랜잭션 안에서** 읽는다(`settings.get(tx)`). K < M은 쓸 때 바꾼 뒤의 전체로 보고(짝을 맞추기 전 값 — 한쪽만
+- 상한 값은 **저장 트랜잭션 안에서** 읽는다(`settings.get(tx)` — 트랜잭션 안의 읽기는 캐시를 보지 않는다. 이 저장만이 아니라
+  트랜잭션을 넘기는 호출자 모두가 한 번 더 읽는다: 설정은 한 행이라 비용이 작다). K < M은 쓸 때 바꾼 뒤의 전체로 보고(짝을 맞추기 전 값 — 한쪽만
   바꿔 어긋나게 하면 400), 잠금 뒤의 DB 값으로 본다(캐시의 옛 값으로 보면 지나간다). 읽을 때도 K를 M 미만으로 맞춘다.
 - K < M이면 고정만으로 M이 찰 수 없어 지울 것이 있다. 관리자가 M을 줄이면 다음 저장에서 넘는 만큼 지운다. **M이나 K를 지금 고정
   수 아래로 내리면** 이미 고정한 것은 그대로 두고 새 고정만 막는다(풀지 않는다 — 사람이 한 설정을 관리 작업이 조용히 되돌리지 않는다).
@@ -399,6 +407,10 @@ llm_messages(
 주소의 id를 API 경로에 넣고(`/llm/:id` → `/api/llm/conversations/{id}`), 라우터는 주소의 `%2F`를 풀어 넘긴다. 누군가 페이지에 심은
 `/llm/..%2F..%2F…` 링크를 열면 **연 사람의 세션과 CSRF 머리말로** 다른 API를 부르게 된다 — Phase 10 이전 화면(페이지 편집의 PUT 등)에도
 같은 길이 있어 한 곳(`api()`)에서 막았다. LLM 화면은 id를 `encodeURIComponent`로 싸서 넣는다.
+점이 없는 **하강**(`x%2Flabels%2Fy` — 같은 컨트롤러의 다른 경로를 부른다)은 점 조각 막기에 걸리지 않는다. 그래서 id를 받는 화면은
+**주소의 `:id`가 식별자 모양일 때만 그린다**(`RequireUuidParam` — 페이지 보기·편집·이력, 스페이스, LLM 대화. `/llm`처럼 `:id`가 없는
+경로는 그대로 그린다 — 같은 화면의 두 경로를 똑같이 감싸야 옮길 때 화면을 새로 만들지 않는다, T-044). 이 시스템의 id는 모두
+UUID이고 서버도 같은 함수(`isUuid`)로 받는다. 라벨은 이름이 경로에 들어가 `.`·`..` 이름을 받지 않는다(종료 루틴).
 
 ## H. 모듈과 등급
 
@@ -418,7 +430,8 @@ llm_messages(
 | 대화 보관 | `apps/api/src/llm/conversations.service.ts` | B | D.5 — 목록·열기·고정·지우기·저장·정리 |
 | 질문 중계 | `apps/api/src/llm/ask.service.ts` | B | D.1 — 흘려보내기 전의 확인(`prepare`), 흘려보내기와 저장(`run`), 중지(`stop`) |
 | 흐름 출구 | `apps/api/src/llm/stream.sink.ts` | B | NDJSON·머리말·살아 있음 줄·받는 쪽 끊김 |
-| 오류 문장 | `apps/api/src/common/error-text.ts` | B | 로그에 적는 오류 한 줄(`errorText`)과 스택(`errorStack`) — PostgreSQL의 코드·문장만, drizzle 문장의 매개변수(질문·답·지시문)를 싣지 않는다 (FR-1117). 공통 로거(`apps/api/src/common/logger.ts`)와 LLM·실시간 편집·메일·헬스가 쓴다 |
+| 오류 문장 | `apps/api/src/common/error-text.ts` | B | 로그에 적는 오류 한 줄(`errorText`)과 스택(`errorStack`) — PostgreSQL의 코드·문장만(데이터 예외는 문장 속 값을 가린다), drizzle 문장의 매개변수(질문·답·지시문)를 싣지 않는다 (FR-1117). 공통 로거(`apps/api/src/common/logger.ts`)와 LLM·실시간 편집·세션 버스·메일·헬스·기동 실패가 쓴다. 실제 PostgreSQL 오류로 시험한다(`error-text.integration.spec.ts`) |
+| 경로 지킴 | `apps/web/src/components/RequireUuidParam.tsx` | B | 주소의 `:id`가 식별자 모양일 때만 화면을 그린다(G절) — 판정은 서버와 같은 `isUuid` |
 | 배선 | `apps/api/src/llm/llm.module.ts` | (측정 밖) | 컨트롤러 둘(`api/llm`, `api/llm/admin/providers`)과 한 시간마다 도는 정리(`LlmSweeper`) |
 | 화면 | `apps/web/src/pages/LlmPage.tsx`·`apps/web/src/pages/LlmPromptsPage.tsx`·`apps/web/src/pages/admin/AdminLlmPage.tsx` | B | G절 |
 | 화면 부품 | `apps/web/src/components/llmStream.ts`(흐름 읽기·상태 기계, Node에서 시험)·`apps/web/src/components/CopyButtons.tsx`·`apps/web/src/components/clipboard.ts` | B | 그리기 분기는 컴포넌트 시험(J절) |

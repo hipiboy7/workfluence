@@ -310,14 +310,14 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 |---|---|
 | 외부 자원 | 런타임에 인터넷 자원을 **하나도** 참조하지 않는다. 폰트·아이콘·Swagger UI 자산 전부 번들. CI에서 빌드 산출물의 외부 URL 참조를 검사한다 |
 | 세션 | 서버측 세션(PG). 쿠키 `HttpOnly; Secure; SameSite=Lax`. 유휴 30분 · 절대 12시간 기본. 로그아웃·비밀번호 변경·관리자 강제 종료 시 서버측 파기 |
-| CSRF | SameSite + 상태 변경 요청에 커스텀 헤더 요구. **화면은 경로에 `.`·`..` 조각이 든 API 요청을 보내지 않는다**(`apps/web/src/api.ts`) — 주소의 id(`%2F`가 풀려 들어온다)로 다른 API를 부르게 하면 연 사람의 세션과 헤더로 나간다(Phase 10 보안 검토) |
+| CSRF | SameSite + 상태 변경 요청에 커스텀 헤더 요구. **화면은 경로에 `.`·`..` 조각이 든 API 요청을 보내지 않고**(`apps/web/src/api.ts`), **주소의 id가 식별자 모양일 때만 그 화면을 그린다**(`apps/web/src/components/RequireUuidParam.tsx`) — 주소의 id(`%2F`가 풀려 들어온다)로 다른 API를 부르게 하면 연 사람의 세션과 헤더로 나간다(Phase 10 보안 검토·종료 루틴) |
 | 로컬 계정 | argon2id. 기본 정책 **8자 이상, 영문 대·소문자·숫자·특수 중 2종** (사용자 결정 2026-09-15). 5회 실패 시 15분 잠금. 로그인·가입·계정 복구는 IP별 rate limit |
 | 계정 생명주기 | 가입 요청 → `승인 대기` → 관리자 승인 → `활성`. 임시 비밀번호는 화면에 1회 표시, 다음 로그인에서 변경 강제. ID 찾기는 email과 이름이 일치할 때 **마스킹된 ID만** (계정 열거 방지) |
 | 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여. 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
 | 권한 | 기본 거부. 모든 엔드포인트에 가드. 가드는 판정하지 않고 데이터를 모아 공유 함수에 넘긴다 |
 | 입력 | 모든 요청 본문·쿼리는 zod 검증. 문서는 JSON만. 링크는 `http(s)`·내부 경로만, 이미지 출처는 내부 첨부 URL만. **실시간 편집의 변경도 적용하기 전에 같은 허용 목록으로 본다** — 어긋나면 받지 않고 끊는다(P9 관문). 편집기 스키마와 허용 목록은 대조 테스트로 같게 둔다 |
 | 응답 헤더 | CSP(`default-src 'self'` 기준), `X-Content-Type-Options`, `frame-ancestors 'none'`, HSTS. HTML·API는 `Cache-Control: no-store`, **해시 파일명 정적 자산은 immutable 캐시 허용** |
-| 로그 | 비밀번호·토큰·세션 ID·문서 본문·**LLM 질문과 답·지시문**을 로그에 남기지 않는다. 사용자는 불투명 ID로. **오류는 `errorText`로 적는다**(`apps/api/src/common/error-text.ts`) — DB 오류는 PostgreSQL의 코드·문장만 싣는다. drizzle의 오류 문장에는 질의 매개변수가 들어 있고, 공통 로거가 Nest 기본 처리기로 온 것까지 같은 길로 거른다(Phase 10). LLM 서버의 거절 문장은 남의 응답이라 싣지 않고 종류와 HTTP 상태만 |
+| 로그 | 비밀번호·토큰·세션 ID·문서 본문·**LLM 질문과 답·지시문**을 로그에 남기지 않는다. 사용자는 불투명 ID로. **오류는 `errorText`로 적는다**(`apps/api/src/common/error-text.ts`) — DB 오류는 PostgreSQL의 코드·문장만 싣고, 문장이 값을 싣는 데이터 예외(SQLSTATE 22)는 따옴표 안을 가린다(실제 PostgreSQL로 시험). drizzle의 오류 문장에는 질의 매개변수가 들어 있고, 공통 로거가 Nest 기본 처리기로 온 것까지 같은 길로 거른다(Phase 10). LLM 서버의 거절 문장은 남의 응답이라 싣지 않고 종류와 HTTP 상태만 |
 | 사내 LLM | 등록·삭제는 root만. API 키는 `WF_LLM_MASTER_KEY`로 암호화(AES-256-GCM, **행 id와 주소**를 AAD로 — 주소만 바꿔도 풀리지 않는다)해 두고 **응답·로그·감사로그에 다시 내보내지 않는다.** LLM 서버의 문장이 키를 되읊으면 가린다. 브라우저는 LLM에 가지 않고 서버만 부른다. 주소는 `http(s)`만, 사용자 정보·질의를 받지 않고 넘겨주기(redirect)를 따르지 않는다. http 주소면 등록 화면이 무엇이 평문으로 가는지 알린다. **세션을 끊으면 받던 답도 멈춘다**(실시간 편집과 같은 버스). 답은 평문으로 그린다(HTML로 그리지 않는다) |
 | TLS | 검증을 끄지 않는다. 사내 CA는 `NODE_EXTRA_CA_CERTS`로 신뢰. nginx가 종단 |
 | 의존성 | lockfile 고정(`--frozen-lockfile`). 허용 라이선스 MIT·Apache-2.0·BSD·ISC·0BSD. GPL·AGPL·SSPL·상용은 승인 없이 금지. TipTap은 npm 공개 MIT 확장만. `pnpm audit`·라이선스 검사·gitleaks를 CI 관문으로. 반입 번들에 SBOM과 라이선스 목록 포함 |

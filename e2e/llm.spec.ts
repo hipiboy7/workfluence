@@ -221,7 +221,7 @@ test('**페이지를 떠나면 받던 답을 멈춘다** — 받은 데까지 �
   await page.getByRole('button', { name: '보내기' }).click();
   await expect(page.getByRole('list', { name: '메시지' })).toContainText('받은 질문: 돌아와서 묻는다 — 끝');
   expect(chats().length).toBe(before + 1);
-  // 떠나기 전의 답은 받은 데까지 남았다 (FR-1115)
+  // 떠나기 전의 답은 받은 데까지 남았다 (FR-1122)
   await expect(page.getByRole('complementary', { name: '대화 목록' })).toContainText('[천천히] 떠나기 전의 답');
 });
 

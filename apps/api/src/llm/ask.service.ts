@@ -42,7 +42,7 @@ type ActiveAsk = { controller: AbortController; sid: string | null; revoked: boo
 type Failure = 'unreachable' | 'rejected' | 'protocol' | 'timeout' | 'aborted' | 'revoked' | 'answer-cap' | 'thinking-cap' | 'length' | 'unknown';
 
 /**
- * 질문 중계 (P10_설계서_Llm D.1·D.2·D.5, FR-1110~1120).
+ * 질문 중계 (P10_설계서_Llm D.1·D.2·D.5, FR-1110~1122).
  *
  * **확인은 흘려보내기 전에 한다**(`prepare`) — 입력·LLM·대화·지시문의 주인·동시 질문·키 풀기. 여기서 실패하면 보통의 HTTP 오류다.
  * 통과하면 흐름을 열고(`run`) LLM 쪽 실패는 **흐름 안에서** `end`로 말한다. `run`은 던지지 않는다.

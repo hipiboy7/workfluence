@@ -10,7 +10,7 @@ import type { ChatMessage } from './domain/openai';
  */
 export const LLM_CLIENT = Symbol('LLM_CLIENT');
 
-/** 부를 곳 — 등록한 LLM 하나. 키는 **풀어 둔 것**이고 요청 하나 동안만 메모리에 있다 (D.4) */
+/** 부를 곳 — 등록한 LLM 하나. 키는 **풀어 둔 것**이고 질문 하나(그 답이 끝날 때까지)나 연결 확인 하나 동안만 메모리에 있다 (D.4) */
 export type LlmTarget = { baseUrl: string; model: string; apiKey: string | null };
 
 /**
