@@ -41,11 +41,12 @@ function change(d: Y.Doc, fn: (f: Y.XmlFragment, d: Y.Doc) => void): Uint8Array 
   if (!out) throw new Error('변경이 없다');
   return out;
 }
+/** 게이트웨이처럼 변경의 바이트까지 넘긴다 — 목록 항목의 첫 자식은 적용한 뒤를 흉내 내야 보인다 (P12 보안 검토 1) */
 const judge = (srv: Y.Doc, update: Uint8Array, sender = U, owners = new Map<number, string>()): GateVerdict =>
-  inspectUpdate(Y.decodeUpdate(update), srv, sender, owners);
+  inspectUpdate(Y.decodeUpdate(update), srv, sender, owners, update);
 /** 게이트웨이처럼 — 판정하고, 지나면 묶고 적용한다 */
 function pass(srv: Y.Doc, update: Uint8Array, owners: Map<number, string>, sender = U): GateVerdict {
-  const v = inspectUpdate(Y.decodeUpdate(update), srv, sender, owners);
+  const v = inspectUpdate(Y.decodeUpdate(update), srv, sender, owners, update);
   if (v.ok) {
     if (v.bind !== null) owners.set(v.bind, sender);
     Y.applyUpdate(srv, update);
@@ -749,6 +750,65 @@ describe('아는 조각·일부만 아는 조각 — Yjs가 들이는 대로 (�
     expect(pass(srv, full, owners).ok).toBe(true);
     expect(firstText(srv.getXmlFragment('default')).toString()).toBe('가나다앞 문단');
     expect(srv.store.pendingStructs).toBeNull();
+  });
+});
+
+/**
+ * **목록 항목의 첫 자식** (P12 보안 검토 1). 받는 편집기(y-tiptap)는 첫 자식이 문단이 아닌 목록 항목을 **통째로** 공유 문서에서 지운다 —
+ * 그 안의 남의 글(중첩 목록까지)과 함께, 그리고 그 삭제는 받은 사람의 연결에서 나가 그 사람 이름으로 저장된다. 조작한 연결은 남의 항목
+ * 앞에 인용 하나를 끼우거나 첫 문단만 지워 그렇게 만들 수 있었다. 관문이 **적용한 뒤의 첫 자식**을 본다. 편집기는 이 모양을 만들지 않는다
+ */
+describe('목록 항목의 첫 자식 — 적용한 뒤를 본다 (P12 보안 검토 1)', () => {
+  const li = (...c: Y.XmlElement[]): Y.XmlElement => {
+    const e = new Y.XmlElement('listItem');
+    e.insert(0, c);
+    return e;
+  };
+  const list = (...items: Y.XmlElement[]): Y.XmlElement => {
+    const e = new Y.XmlElement('bulletList');
+    e.insert(0, items);
+    return e;
+  };
+  /** 서버 문서 — 남의 목록: 항목 하나에 문단과 중첩 목록 */
+  function withList(): Y.Doc {
+    const d = new Y.Doc();
+    d.getXmlFragment('default').insert(0, [list(li(para('남의 글'), list(li(para('남의 중첩'))))), para('끝')]);
+    return d;
+  }
+  const item = (f: Y.XmlFragment): Y.XmlElement => (f.get(0) as Y.XmlElement).get(0) as Y.XmlElement;
+
+  it('**남의 목록 항목 앞에 인용을 끼우면 받지 않는다**', () => {
+    const srv = withList();
+    const quote = new Y.XmlElement('blockquote');
+    quote.insert(0, [para('조작')]);
+    const v = judge(srv, change(screen(srv), (f) => item(f).insert(0, [quote])));
+    expect(refused(v)).toEqual({ ok: false, rule: 'structure', reason: '목록 항목의 첫 자식이 문단이 아니게 되는 변경' });
+  });
+
+  it('**첫 문단만 지우면 받지 않는다** — 남의 중첩 목록이 첫 자식이 된다', () => {
+    const srv = withList();
+    const v = judge(srv, change(screen(srv), (f) => item(f).delete(0, 1)));
+    expect(refused(v).reason).toBe('목록 항목의 첫 자식이 문단이 아니게 되는 변경');
+  });
+
+  it('정상 — 새 항목 더하기·항목 통째로 지우기·첫 문단 고치기·첫 문단을 새 문단으로 바꾸기', () => {
+    const owners = new Map<number, string>();
+    const srv = withList();
+    const a = screen(srv);
+    expect(pass(srv, change(a, (f) => (f.get(0) as Y.XmlElement).insert(1, [li(para('새 항목'))])), owners).ok).toBe(true);
+    expect(pass(srv, change(a, (f) => (item(f).get(0) as Y.XmlElement).get(0) instanceof Y.XmlText && ((item(f).get(0) as Y.XmlElement).get(0) as Y.XmlText).insert(0, '고친 ')), owners).ok).toBe(true);
+    expect(pass(srv, change(a, (f) => { item(f).delete(0, 1); item(f).insert(0, [para('바꾼 첫 문단')]); }), owners).ok).toBe(true);
+    expect(pass(srv, change(a, (f) => (f.get(0) as Y.XmlElement).delete(0, 1)), owners).ok).toBe(true);
+    expect(validateDocument(docFromYDoc(srv))).toEqual({ ok: true });
+  });
+
+  it('옛 상태에 이미 어긴 항목이 있어도 **다른 곳을 고치는 변경은 지난다** — 새로 어기게 만드는 것만 본다', () => {
+    const d = new Y.Doc();
+    const quote = new Y.XmlElement('blockquote');
+    quote.insert(0, [para('옛 인용')]);
+    d.getXmlFragment('default').insert(0, [list(li(quote), li(para('둘째'))), para('끝')]);
+    const v = judge(d, change(screen(d), (f) => ((f.get(0) as Y.XmlElement).get(1) as Y.XmlElement).insert(1, [para('둘째에 더한 문단')])));
+    expect(v.ok).toBe(true);
   });
 });
 

@@ -318,8 +318,8 @@ describe('값 규칙 — style에 들어가는 값 (P9 보안 검토 1)', () => 
 
   it('`colwidth`는 숫자 배열(빈 칸은 null)만 받는다', () => {
     expect(nodeAttrProblems('tableCell', { colwidth: [120, null, 80] })).toEqual([]);
-    expect(nodeAttrProblems('tableCell', { colwidth: ['1px; position:fixed'] })).toEqual(["속성 'colwidth' 값은 1~10000의 정수 배열"]);
-    expect(nodeAttrProblems('tableHeader', { colwidth: 120 })).toEqual(["속성 'colwidth' 값은 1~10000의 정수 배열"]);
+    expect(nodeAttrProblems('tableCell', { colwidth: ['1px; position:fixed'] })).toEqual(["속성 'colwidth' 값은 0~10000의 정수 배열"]);
+    expect(nodeAttrProblems('tableHeader', { colwidth: 120 })).toEqual(["속성 'colwidth' 값은 0~10000의 정수 배열"]);
   });
 
   it('정본 검증도 같은 값 규칙을 본다 — REST로 저장해도 막힌다', () => {
@@ -375,10 +375,10 @@ describe('표 칸 값의 범위 (P12 FR-1322, 보류 27)', () => {
     }
   });
 
-  it('`colwidth`는 1000칸 이하, 값은 비었거나 1~10000의 정수', () => {
-    expect(nodeAttrProblems('tableCell', { colwidth: [null, 1, 10_000] })).toEqual([]);
-    for (const bad of [[0], [10_001], [Number.NaN], [1.5], Array.from({ length: 1001 }, () => 10)]) {
-      expect(nodeAttrProblems('tableCell', { colwidth: bad }), JSON.stringify(bad).slice(0, 30)).toEqual(["속성 'colwidth' 값은 1~10000의 정수 배열"]);
+  it('`colwidth`는 1000칸 이하, 값은 비었거나 0~10000의 정수 — **0은 표 편집(prosemirror-tables)이 "너비 없음"으로 쓴다** (P12 코드 리뷰 1)', () => {
+    expect(nodeAttrProblems('tableCell', { colwidth: [null, 0, 1, 10_000] })).toEqual([]);
+    for (const bad of [[-1], [10_001], [Number.NaN], [1.5], Array.from({ length: 1001 }, () => 10)]) {
+      expect(nodeAttrProblems('tableCell', { colwidth: bad }), JSON.stringify(bad).slice(0, 30)).toEqual(["속성 'colwidth' 값은 0~10000의 정수 배열"]);
     }
   });
 
@@ -402,7 +402,7 @@ describe('순서와 개수 (P12 FR-1310·1312, 보류 25)', () => {
 
   it('**목록 항목은 문단으로 시작한다** — 인용·표로 시작하는 항목은 받지 않는다. 문단 뒤에는 어느 블록이든 온다', () => {
     expect(validateDocument(doc(list(li(para(text('a')), quote(para(text('b')))))))).toEqual({ ok: true });
-    expect(errorsOf(doc(list(li(quote(para(text('b')))))))).toEqual(["doc.content[0].content[0](listItem): 첫 자식은 paragraph여야 한다 — 'blockquote'"]);
+    expect(errorsOf(doc(list(li(quote(para(text('b')))))))).toEqual(["doc.content[0].content[0]: 'listItem'의 첫 자식은 paragraph여야 한다 — 'blockquote'"]);
     expect(errorsOf(doc(list(li(table(row(cell(para()))))))).join()).toContain('첫 자식은 paragraph');
   });
 
@@ -419,6 +419,11 @@ describe('순서와 개수 (P12 FR-1310·1312, 보류 25)', () => {
     ] as const) {
       expect(errorsOf(d).join(), name).toContain(`'${name}'는 비어 있을 수 없다`);
     }
+  });
+
+  it('**모르거나 그 자리에 올 수 없는 첫 자식은 한 번만 짚는다** — 방문·자리 판정이 짚는다 (P12 코드 리뷰 6)', () => {
+    expect(errorsOf(doc(list(li({ type: 'evil' } as DocNode))))).toEqual(["doc.content[0].content[0].content[0]: 허용되지 않는 노드 'evil'"]);
+    expect(errorsOf(doc(list(li(text('x')))))).toEqual(["doc.content[0].content[0].content[0]: 'listItem' 안에 올 수 없는 'text'"]);
   });
 
   it('빈 문단·빈 제목·빈 코드 블록·칸 없는 줄은 된다 — 편집기의 내용 식이 허락한다', () => {
