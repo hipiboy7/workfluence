@@ -64,7 +64,7 @@ const BLOCKS = ['blockquote', 'bulletList', 'codeBlock', 'heading', 'horizontalR
 
 /**
  * **그 자리에 올 수 있는 자식** — 편집기 스키마의 내용 식에서 나올 수 있는 노드 종류다(P9_설계서_Gate D.2). `text`는 글자.
- * 순서와 개수(예: `listItem`은 문단으로 시작한다)는 보지 않는다 — 내용 식 전체를 옮기려면 서버에 ProseMirror가 든다(D.8).
+ * 순서와 개수는 여기서 보지 않고 아래 `NON_EMPTY_NODES`·`FIRST_CHILD`가 본다(P12 D.2). 편집기가 그리는 모양만 옮겼다 — 내용 식 전체는 서버에 ProseMirror가 든다.
  *
  * 조작한 클라이언트는 이것을 무시할 수 있고, 받은 편집기는 그런 문서를 그린 뒤 그 근처의 편집에서 깨진다(P9 B.1).
  */
