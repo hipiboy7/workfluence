@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { POLICY_DEFAULTS, POLICY_KEYS, applyPolicy, policyConsistencyProblems, validatePolicyPatch } from './policy';
+import { POLICY_DEFAULTS, POLICY_KEYS, applyPolicy, mergePolicy, policyConsistencyProblems, validatePolicyPatch } from './policy';
 
 /** A등급 (P4_설계서_Admin E절, FR-524). 테스트를 먼저 썼다. */
 
@@ -104,5 +104,20 @@ describe('LLM 대화 보관 정책값', () => {
     expect(p.llmConversationMax).toBe(10);
     expect(p.llmPinnedMax).toBe(9);
     expect(policyConsistencyProblems(p)).toEqual([]);
+  });
+});
+
+/** 검토 반영 (P10 코드 리뷰 — 짝 규칙이 이미 맞춘 값을 보고 지나간다). 테스트를 먼저 썼다 */
+describe('mergePolicy — 짝을 맞추지 않고 합친다', () => {
+  it('**어긋난 짝을 그대로 둔다** — 쓰기 판정은 이것을 봐야 한다. `applyPolicy`는 맞춘 값이라 판정을 지나가게 한다', () => {
+    const merged = mergePolicy({ llmConversationMax: 10, llmPinnedMax: 50 });
+    expect([merged.llmConversationMax, merged.llmPinnedMax]).toEqual([10, 50]);
+    expect(policyConsistencyProblems(merged)).toHaveLength(1);
+    expect(applyPolicy({ llmConversationMax: 10, llmPinnedMax: 50 }).llmPinnedMax).toBe(9);
+  });
+
+  it('틀린 값은 기본값으로 — 읽기와 같다', () => {
+    expect(mergePolicy({ llmPinnedMax: 'x' } as Record<string, unknown>).llmPinnedMax).toBe(POLICY_DEFAULTS.llmPinnedMax);
+    expect(mergePolicy({})).toEqual(POLICY_DEFAULTS);
   });
 });

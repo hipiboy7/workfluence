@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildChatRequest, createSseParser, readChatChunk, readErrorMessage, readModelIds } from './openai';
+import { LLM_LIMITS } from '@workfluence/shared';
+import { SseOverflowError, buildChatRequest, createSseParser, isContextOverflow, readChatChunk, readErrorMessage, readModelIds, redactSecret, rejectionText } from './openai';
 
 /**
  * A등급 — **테스트 먼저** (P10_설계서_Llm D.2).
@@ -150,5 +151,80 @@ describe('buildChatRequest', () => {
       stream: true,
       stream_options: { include_usage: true },
     });
+  });
+});
+
+/** 검토 반영 (P10 보안 검토 1 · 코드 리뷰 4·12·13 · 자체 점검 2·8). 테스트를 먼저 썼다 */
+describe('SSE 상한 — 한 줄·한 이벤트가 끝없이 자라지 않는다', () => {
+  it('**줄바꿈 없는 줄이 상한을 넘으면 던진다** — 고장 난 게이트웨이가 앱 메모리를 채우지 않게', () => {
+    const p = createSseParser();
+    const chunk = `data: ${'x'.repeat(64 * 1024)}`;
+    expect(() => {
+      for (let i = 0; i * 64 * 1024 <= LLM_LIMITS.sseLineMaxChars + 64 * 1024; i++) p.push(chunk);
+    }).toThrow(SseOverflowError);
+  });
+
+  it('빈 줄 없이 이어지는 `data:` 줄의 합도 상한이다', () => {
+    const p = createSseParser();
+    const line = `data: ${'y'.repeat(1000)}\n`;
+    expect(() => {
+      for (let i = 0; i * 1000 <= LLM_LIMITS.sseLineMaxChars + 1000; i++) p.push(line);
+    }).toThrow(SseOverflowError);
+  });
+
+  it('상한 안의 긴 줄은 받는다 — 조각이 잘게 와도 한 번 이어 붙인다', () => {
+    const p = createSseParser();
+    const body = 'z'.repeat(200_000);
+    const out: string[] = [];
+    for (let i = 0; i < body.length; i += 1000) out.push(...p.push((i === 0 ? 'data: ' : '') + body.slice(i, i + 1000)));
+    out.push(...p.push('\n\n'));
+    expect(out).toEqual([body]);
+  });
+});
+
+describe('흐름 안의 오류 문장 (FR-1120)', () => {
+  it('HTTP 오류와 같이 **줄이고 한 줄로** — 여러 줄 추적 정보를 화면에 쏟지 않는다', () => {
+    const e = readChatChunk(JSON.stringify({ error: { message: `첫 줄\n\n${'x'.repeat(5000)}` } })).error as string;
+    expect(e.length).toBe(LLM_LIMITS.errorMessageMaxChars);
+    expect(e.startsWith('첫 줄 x')).toBe(true);
+  });
+
+  it('비어 있으면 까닭이 없다고 말하지 않고 "도중에 거절했다"', () => {
+    expect(readChatChunk(JSON.stringify({ error: { message: '  ' } })).error).toBe('LLM 서버가 도중에 거절했다');
+    expect(readChatChunk(JSON.stringify({ object: 'error', message: '' })).error).toBe('LLM 서버가 도중에 거절했다');
+  });
+});
+
+describe('문맥 초과 (D.3·FR-1120)', () => {
+  it.each([
+    "This model's maximum context length is 32768 tokens. However, you requested 40000 tokens",
+    'The prompt is too long for the context window',
+    'Input length exceeds the context length',
+  ])('알아본다 — %s', (m) => {
+    expect(isContextOverflow(m)).toBe(true);
+  });
+
+  it('다른 거절은 아니다', () => {
+    expect(isContextOverflow('invalid api key')).toBe(false);
+    expect(isContextOverflow('HTTP 502')).toBe(false);
+  });
+
+  it('**새 대화를 시작하라고 말한다** — LLM 서버의 문장은 뒤에 붙여 남긴다', () => {
+    const t = rejectionText("This model's maximum context length is 32768 tokens.");
+    expect(t).toMatch(/^대화가 모델이 한 번에 읽을 수 있는 길이를 넘었다 — 새 대화를 시작한다/);
+    expect(t).toContain('maximum context length');
+    expect(rejectionText('invalid api key')).toBe('invalid api key');
+  });
+});
+
+describe('redactSecret — 남의 응답이 키를 되읊어도 화면에 나가지 않는다', () => {
+  it('키가 들어 있으면 가린다', () => {
+    expect(redactSecret('invalid api key: Bearer sk-secret-123', 'sk-secret-123')).toBe('invalid api key: Bearer ***');
+    expect(redactSecret('a sk-1234567 b sk-1234567', 'sk-1234567')).toBe('a *** b ***');
+  });
+
+  it('키가 없거나 아주 짧으면 그대로 — 짧은 키로 평범한 글자를 지우지 않게', () => {
+    expect(redactSecret('abc', null)).toBe('abc');
+    expect(redactSecret('abc abc', 'abc')).toBe('abc abc');
   });
 });

@@ -48,6 +48,7 @@ describe('parseLlmEvent — 모양이 맞는 것만 받는다', () => {
   const ok: LlmStreamEvent[] = [
     { type: 'delta', text: '답' },
     { type: 'thinking', text: '생각' },
+    { type: 'rethink' },
     { type: 'ping' },
     { type: 'end', status: 'done', saved: true, conversationId: '00000000-0000-4000-8000-000000000000', evicted: 0, message: null },
     { type: 'end', status: 'failed', saved: false, conversationId: null, evicted: 0, message: 'LLM 서버에 닿지 않는다' },

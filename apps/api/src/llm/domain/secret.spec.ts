@@ -9,7 +9,7 @@ import { SecretError, openSecret, parseMasterKey, providerAad, sealSecret } from
  */
 
 const key = Buffer.alloc(32, 7);
-const aad = providerAad('11111111-1111-4111-8111-111111111111');
+const aad = providerAad('11111111-1111-4111-8111-111111111111', 'http://llm.example.internal:8000/v1');
 
 describe('sealSecret · openSecret', () => {
   it('넣은 것이 그대로 나온다', () => {
@@ -40,7 +40,7 @@ describe('sealSecret · openSecret', () => {
 
   it('**다른 행으로 옮겨 붙이면 풀리지 않는다** — AAD가 행 id에 묶여 있다', () => {
     const sealed = sealSecret('k', key, aad);
-    expect(() => openSecret(sealed, key, providerAad('22222222-2222-4222-8222-222222222222'))).toThrow(SecretError);
+    expect(() => openSecret(sealed, key, providerAad('22222222-2222-4222-8222-222222222222', 'http://llm.example.internal:8000/v1'))).toThrow(SecretError);
   });
 
   it('암호문·태그를 한 글자라도 바꾸면 풀리지 않는다', () => {
@@ -92,7 +92,12 @@ describe('parseMasterKey', () => {
 });
 
 describe('providerAad', () => {
-  it('행 id를 담는다', () => {
-    expect(providerAad('abc')).toBe('llm_providers:abc');
+  it('행 id와 **주소**를 담는다', () => {
+    expect(providerAad('abc', 'http://llm.example.internal/v1')).toBe('llm_providers:abc:http://llm.example.internal/v1');
+  });
+
+  it('**DB에서 주소만 바꾸면 풀리지 않는다** — 키가 등록하지 않은 곳으로 가지 않게 (검토 반영: 보안 검토 2)', () => {
+    const sealed = sealSecret('k', key, providerAad('id-1', 'http://llm.example.internal/v1'));
+    expect(() => openSecret(sealed, key, providerAad('id-1', 'http://attacker.example.internal/v1'))).toThrow(SecretError);
   });
 });

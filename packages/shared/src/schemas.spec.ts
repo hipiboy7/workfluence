@@ -189,3 +189,24 @@ describe('LLM DTO', () => {
     expect(llmAskDto.safeParse({ providerId: uuid, conversationId: uuid, promptId: uuid, question: 'a' }).success).toBe(false);
   });
 });
+
+/** 검토 반영 (P10 보안 검토 3 · 코드 리뷰 10·15). 테스트를 먼저 썼다 */
+describe('LLM DTO — PostgreSQL이 받지 않는 글자와 키의 모양', () => {
+  const base = { name: 'a', baseUrl: 'http://llm.example.internal/v1', model: 'm' };
+
+  it('**U+0000을 받지 않는다** — PostgreSQL text가 거부해 저장이 실패하고, 그 오류 문장에 본문이 실린다', () => {
+    expect(llmAskDto.safeParse({ providerId: uuid, question: 'a\u0000b' }).success).toBe(false);
+    expect(createLlmPromptDto.safeParse({ name: '요약', content: '지시\u0000' }).success).toBe(false);
+    expect(createLlmPromptDto.safeParse({ name: '요\u0000약', content: '지시' }).success).toBe(false);
+    expect(updateLlmPromptDto.safeParse({ content: 'x\u0000' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ ...base, name: 'a\u0000' }).success).toBe(false);
+    expect(createLlmProviderDto.safeParse({ ...base, model: 'm\u0000' }).success).toBe(false);
+  });
+
+  it('**API 키는 보이는 ASCII만** — 폭 없는 빈칸·한글·NUL이 섞인 키는 모든 요청을 "닿지 않는다"로 오진하게 만든다', () => {
+    expect(createLlmProviderDto.parse({ ...base, apiKey: 'sk-AbC_123.xyz' }).apiKey).toBe('sk-AbC_123.xyz');
+    for (const bad of ['k\u200b', '키값', 'k\u0000', 'a b', 'k\t1']) {
+      expect(createLlmProviderDto.safeParse({ ...base, apiKey: bad }).success).toBe(false);
+    }
+  });
+});

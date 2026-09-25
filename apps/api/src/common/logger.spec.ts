@@ -71,4 +71,45 @@ describe('PinoNestLogger (FR-052)', () => {
     new PinoNestLogger(logger).log({ a: 1 });
     expect(typeof calls[0].msg).toBe('string');
   });
+
+  /**
+   * 검토 반영 — **처리되지 않은 예외를 Nest가 오류 객체째 넘긴다** (`ExceptionsHandler`). 예전에는 `String(err)`라 스택이 버려지고
+   * DB 오류면 drizzle 문장(질의 매개변수 = 문서 본문)이 그대로 msg로 갔다 (사용자 요청 "로깅 체계 검토" 2026-09-25, 7절)
+   */
+  it('**오류 객체는 문장을 가려 적고 스택을 남긴다**', () => {
+    const { logger, calls } = fake();
+    const pg = Object.assign(new Error('violates not-null constraint'), { code: '23502' });
+    const err = new Error('Failed query: insert … params: 비밀 본문', { cause: pg });
+    // Nest의 `Logger`는 context가 있으면 `(message, undefined, context)`로 부른다 — 실제로 확인한 모양이다
+    new PinoNestLogger(logger).error(err, undefined, 'ExceptionsHandler');
+    expect(calls[0].msg).toBe('23502 violates not-null constraint');
+    const ctx = calls[0].ctx as { context?: string; trace?: string };
+    expect(ctx.context).toBe('ExceptionsHandler');
+    expect(ctx.trace).toMatch(/\n\s+at /);
+    expect(JSON.stringify(calls)).not.toContain('비밀');
+  });
+
+  it('Nest가 문장과 스택을 따로 줄 때는 그대로 — 문자열 문장은 우리가 쓴 것이다', () => {
+    const { logger, calls } = fake();
+    new PinoNestLogger(logger).error('실패', 'stack...', 'Ctx');
+    expect(calls[0]).toMatchObject({ ctx: { context: 'Ctx', trace: 'stack...' }, msg: '실패' });
+  });
+
+  it('문장과 스택이 **문자열로** 따로 와도 drizzle 문장은 가린다 — `logger.error(e.message, e.stack)` 모양', () => {
+    const { logger, calls } = fake();
+    const err = new Error('Failed query: insert … values ($1)\nparams: 비밀 본문');
+    new PinoNestLogger(logger).error(err.message, err.stack, 'Ctx');
+    expect(calls[0].msg).toBe('(DB 질의 실패 — 문장은 싣지 않는다)');
+    const trace = (calls[0].ctx as { trace?: string }).trace as string;
+    expect(trace).toMatch(/\n\s+at /);
+    expect(JSON.stringify(calls)).not.toContain('비밀');
+  });
+
+  it('경고·기록에 온 오류 객체도 같게', () => {
+    const { logger, calls } = fake();
+    const nest = new PinoNestLogger(logger);
+    nest.warn(new Error('Failed query: x params: 비밀'), 'Ctx');
+    nest.log(new TypeError('t'), 'Ctx');
+    expect(calls.map((c) => c.msg)).toEqual(['Error (DB 질의 실패 — 문장은 싣지 않는다)', 'TypeError: t']);
+  });
 });

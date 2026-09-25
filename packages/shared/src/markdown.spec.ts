@@ -319,3 +319,45 @@ describe('드문 모양', () => {
     expect(md({ type: 'heading', content: [t('무단계')] })).toBe('# 무단계');
   });
 });
+
+/** 검토 반영 (P10 코드 리뷰 11 · 추가 확인). 테스트를 먼저 썼다 */
+describe('검토 반영', () => {
+  it('**세로로 합친 칸(rowspan)은 아래 줄에서 그 자리를 비운다** — 값이 다른 머리 밑으로 밀리지 않게', () => {
+    const out = md(
+      table(
+        tr(cell('tableHeader', {}, p(t('항목'))), cell('tableHeader', {}, p(t('1분기'))), cell('tableHeader', {}, p(t('2분기')))),
+        tr(cell('tableCell', { rowspan: 2 }, p(t('매출'))), cell('tableCell', {}, p(t('10'))), cell('tableCell', {}, p(t('20')))),
+        tr(cell('tableCell', {}, p(t('30'))), cell('tableCell', {}, p(t('40')))),
+      ),
+    );
+    expect(out).toBe('| 항목 | 1분기 | 2분기 |\n| --- | --- | --- |\n| 매출 | 10 | 20 |\n|  | 30 | 40 |');
+  });
+
+  it('가로·세로를 함께 합친 칸은 아래 줄에서 그 너비만큼 비운다', () => {
+    const out = md(
+      table(
+        tr(cell('tableCell', { colspan: 2, rowspan: 2 }, p(t('큰 칸'))), cell('tableCell', {}, p(t('c')))),
+        tr(cell('tableCell', {}, p(t('d')))),
+        tr(cell('tableCell', {}, p(t('e'))), cell('tableCell', {}, p(t('f'))), cell('tableCell', {}, p(t('g')))),
+      ),
+    );
+    expect(out).toBe('| 큰 칸 |  | c |\n| --- | --- | --- |\n|  |  | d |\n| e | f | g |');
+  });
+
+  it('세로 합치기 값이 이상하면 1줄, 너무 크면 상한까지', () => {
+    expect(md(table(tr(cell('tableCell', { rowspan: 0 }, p(t('a')))), tr(cell('tableCell', {}, p(t('b'))))))).toBe('| a |\n| --- |\n| b |');
+    expect(md(table(tr(cell('tableCell', { rowspan: '3' }, p(t('a')))), tr(cell('tableCell', {}, p(t('b'))))))).toBe('| a |\n| --- |\n| b |');
+  });
+
+  it('**`!` 바로 뒤의 링크가 그림 표기가 되지 않는다**', () => {
+    expect(md(p(t('보라!'), t('여기', [link('/p')])))).toBe('보라\\![여기](/p)');
+    expect(md(p(t('보라!'), t('여기', [bold])))).toBe('보라!**여기**');
+  });
+
+  it('**백틱 덩어리가 아주 많아도 던지지 않는다** — 스프레드로 셈하면 인자 수 한도에 걸린다', () => {
+    const many = '` '.repeat(130_000);
+    expect(() => md(p(t(many, [{ type: 'code' }])))).not.toThrow();
+    expect(() => md({ type: 'codeBlock', attrs: {}, content: [t(many)] })).not.toThrow();
+    expect(md({ type: 'codeBlock', attrs: {}, content: [t(many)] }).startsWith('```\n')).toBe(true);
+  });
+});
