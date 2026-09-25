@@ -35,15 +35,18 @@ export function accessLogEntry(x: AccessLogInput): AccessLogEntry | null {
   if (path !== '/api' && !path.startsWith('/api/')) return null;
   if (path === HEALTH_PATH) return null;
 
+  // **전체 잡기 라우트는 맞춘 라우트가 아니다** — SPA 정적 자산의 틀(`{*any}`)이 맞춘 것이 없는 API 요청에도 씌워진다(Nest 12·Express 5).
+  // 그 틀을 적으면 404가 전부 `GET {*any} 404`로 보여 무엇을 불렀는지 모른다 (P11 자체 점검 2)
+  const route = x.route !== null && !x.route.includes('*') ? x.route : null;
   const fields: AccessLogEntry['fields'] = {
     event: 'http.request',
     method: x.method,
-    route: x.route,
+    route,
     status: x.status,
     durationMs: Math.round(x.durationMs),
   };
-  const shown = x.route ?? path.slice(0, LOG_LIMITS.accessLogPathMaxChars);
-  if (x.route === null) fields.path = shown;
+  const shown = route ?? path.slice(0, LOG_LIMITS.accessLogPathMaxChars);
+  if (route === null) fields.path = shown;
   if (x.userId) fields.userId = x.userId;
   if (x.aborted) fields.aborted = true;
   return { level: x.status >= 500 ? 'warn' : 'info', msg: `${x.method} ${shown} ${x.status}`, fields };

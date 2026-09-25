@@ -134,6 +134,8 @@ export const LOG_EVENTS = [
   'http.request',
   'http.unhandled',
   'health.db_failed',
+  // 사내 인증(OIDC) — 사내 IdP와의 처리가 실패했다(닿지 않음·거절·검증 실패). 바깥 탓이라 warn (FR-1215)
+  'auth.oidc_failed',
   // 세션 파기 버스
   'session.revoke_failed',
   // 메일
@@ -176,6 +178,12 @@ export const LOG_LIMITS = {
   /** 맞춘 라우트가 없는 요청의 경로를 접근 로그에 이만큼만 싣는다 */
   accessLogPathMaxChars: 200,
 } as const;
+
+/**
+ * 요청 식별자의 모양 (P11 D.2) — 영문·숫자·`-`, `LOG_LIMITS`의 길이 안. 앱이 받는 `X-Request-Id`의 판정과 감사 조회의 거르기가 **같은
+ * 판정**을 쓴다. 로그 줄에 그대로 들어가는 값이라 줄바꿈·따옴표·공백을 받지 않는다(로그 위조). `g` 깃발이 없어 여럿이 써도 된다
+ */
+export const REQUEST_ID_PATTERN = new RegExp(`^[A-Za-z0-9-]{${LOG_LIMITS.requestIdMinChars},${LOG_LIMITS.requestIdMaxChars}}$`);
 
 /** 페이지 트리 최대 깊이. 무한 중첩은 이동·경로 계산 비용을 키운다. */
 export const PAGE_TREE_MAX_DEPTH = 10;

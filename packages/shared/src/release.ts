@@ -24,6 +24,9 @@ export const RELEASE_REQUIRED_FILES = [
   'sbom.cdx.json',
   'LICENSES.txt',
   '반입절차.md',
+  // **사내 CA 자리** (P11 D.7). compose가 `./ca`를 붙이므로, 묶음에 없으면 첫 기동에서 도커가 `ca/`를 **root 소유로** 만든다 —
+  // 현장에서 인증서를 넣을 때(반입 가이드 10절) 일반 계정은 `Permission denied`다. 안내 파일을 넣어 디렉토리째 풀리게 한다 (P11 검토)
+  'ca/README.md',
 ] as const;
 
 /**

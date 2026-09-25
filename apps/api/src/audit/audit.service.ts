@@ -74,6 +74,8 @@ export class AuditService {
       q.actorId ? eq(auditEvents.actorId, q.actorId) : undefined,
       q.from ? gte(auditEvents.createdAt, q.from) : undefined,
       q.to ? lt(auditEvents.createdAt, q.to) : undefined,
+      // 로그 한 줄의 요청 번호로 그 요청의 감사 행을 찾는다 (P11 FR-1212). 모양은 DTO가 이미 보았다
+      q.requestId ? eq(auditEvents.requestId, q.requestId) : undefined,
     ].filter((c) => c !== undefined);
 
     const rows = await this.db
@@ -86,6 +88,7 @@ export class AuditService {
         targetId: auditEvents.targetId,
         detail: auditEvents.detail,
         ip: auditEvents.ip,
+        requestId: auditEvents.requestId,
         createdAt: auditEvents.createdAt,
       })
       .from(auditEvents)

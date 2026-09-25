@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
   LLM_LIMITS,
+  REQUEST_ID_PATTERN,
   ROLES,
   SPACE_KINDS,
   SPACE_MEMBER_ROLES,
@@ -156,6 +157,8 @@ export const auditQueryDto = z.object({
   from: z.coerce.date().optional(),
   /** 제외. 날짜만 주면 그날 00:00까지 */
   to: z.coerce.date().optional(),
+  /** 요청 번호 — 로그 한 줄의 `requestId`로 그 요청의 감사 행을 찾는다 (P11 FR-1212). 로그에서 복사해 붙인 앞뒤 공백은 뗀다 */
+  requestId: z.string().trim().regex(REQUEST_ID_PATTERN).optional(),
 });
 export type AuditQueryDto = z.infer<typeof auditQueryDto>;
 
@@ -426,6 +429,8 @@ export type AuditEventView = {
   targetId: string | null;
   detail: Record<string, unknown> | null;
   ip: string | null;
+  /** 그 행을 남긴 요청의 번호 (P11 FR-1212). 요청 밖(한 시간마다의 정리·실시간 편집의 자동 저장)과 Phase 11 전의 행은 없다 */
+  requestId: string | null;
   createdAt: string;
 };
 export type ContactInfoView = { message: string; admins: string[] };

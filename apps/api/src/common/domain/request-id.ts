@@ -1,7 +1,4 @@
-import { LOG_LIMITS } from '@workfluence/shared';
-
-/** 영문·숫자·`-`만, 정해진 길이 안에서 (P11 D.2) */
-const SHAPE = new RegExp(`^[A-Za-z0-9-]{${LOG_LIMITS.requestIdMinChars},${LOG_LIMITS.requestIdMaxChars}}$`);
+import { REQUEST_ID_PATTERN } from '@workfluence/shared';
 
 /**
  * 받은 요청 식별자를 쓸 수 있는가 (P11_설계서_Ops D.2, FR-1210). nginx가 `X-Request-Id`로 넘긴다(`$request_id`, 32자 16진).
@@ -11,5 +8,5 @@ const SHAPE = new RegExp(`^[A-Za-z0-9-]{${LOG_LIMITS.requestIdMinChars},${LOG_LI
  */
 export function requestIdFrom(header: unknown): string | null {
   const v: unknown = Array.isArray(header) ? header[0] : header;
-  return typeof v === 'string' && SHAPE.test(v) ? v : null;
+  return typeof v === 'string' && REQUEST_ID_PATTERN.test(v) ? v : null;
 }
