@@ -104,6 +104,13 @@ describe('readChatChunk — 조각 하나를 읽는다', () => {
     expect(readChatChunk('<html>').error).toMatch(/읽을 수 없다/);
     expect(readChatChunk('null').error).toMatch(/읽을 수 없다/);
   });
+
+  it('**읽을 수 없는 조각과 LLM 서버의 거절을 가른다** — 감사·로그의 실패 종류가 달라진다 (종료 루틴 자체 점검 5)', () => {
+    expect([readChatChunk('<html>').malformed, readChatChunk('[1,2]').malformed]).toEqual([true, true]);
+    expect(readChatChunk(JSON.stringify({ error: { message: 'boom' } })).malformed).toBe(false);
+    expect(readChatChunk(JSON.stringify({ choices: [{ index: 0, delta: { content: 'a' } }] })).malformed).toBe(false);
+    expect(readChatChunk('[DONE]').malformed).toBe(false);
+  });
 });
 
 describe('readErrorMessage — 거절의 까닭 (FR-1120)', () => {

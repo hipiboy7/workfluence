@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { emptyDocument } from './document';
 import {
   addMemberDto,
+  attachLabelDto,
+  isUuid,
   changePasswordDto,
   createCategoryDto,
   createPageDto,
@@ -208,5 +210,19 @@ describe('LLM DTO — PostgreSQL이 받지 않는 글자와 키의 모양', () =
     for (const bad of ['k\u200b', '키값', 'k\u0000', 'a b', 'k\t1']) {
       expect(createLlmProviderDto.safeParse({ ...base, apiKey: bad }).success).toBe(false);
     }
+  });
+});
+
+describe('주소에 들어가는 값 (P10 종료 루틴 — 경로 조작)', () => {
+  it('**식별자 모양** — 서버의 `UuidPipe`와 화면의 경로 지킴이 같은 판정을 쓴다', () => {
+    expect([isUuid('3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b'), isUuid('00000000-0000-4000-8000-000000000000')]).toEqual([true, true]);
+    for (const bad of ['', 'x', '3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b/labels/x', '../../api/users', undefined, null, 7]) {
+      expect(isUuid(bad), String(bad)).toBe(false);
+    }
+  });
+
+  it('**라벨 이름은 `.`·`..`일 수 없다** — 라벨 페이지의 API 경로에서 URL 해석이 점 조각으로 읽어 다른 API를 가리킨다', () => {
+    for (const name of ['.', '..', ' .. ']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(false);
+    for (const name of ['...', 'v1.0', '.net']) expect(attachLabelDto.safeParse({ name }).success, name).toBe(true);
   });
 });
