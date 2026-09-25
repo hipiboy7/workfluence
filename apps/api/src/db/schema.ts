@@ -1,3 +1,4 @@
+import { DELEGABLE_ACTIONS } from '@workfluence/shared';
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
@@ -53,7 +54,9 @@ export const users = pgTable(
     uniqueIndex('users_email_uq').on(t.email),
     uniqueIndex('users_oidc_sub_uq').on(t.oidcSub),
     check('users_login_method_chk', sql`${t.passwordHash} IS NOT NULL OR ${t.oidcSub} IS NOT NULL`),
-    check('users_grants_known_chk', sql`${t.grants} <@ ARRAY['llm.manage']::text[]`),
+    // 목록은 코드의 것(`DELEGABLE_ACTIONS`)이다. 마이그레이션(손으로 쓴 SQL)의 CHECK가 같은 목록인지는 `constraints.integration.spec.ts`가 본다
+    // — 위임할 행위를 더하고 CHECK를 잊으면 root의 위임이 날것의 500이 된다 (P11 코드 리뷰 5)
+    check('users_grants_known_chk', sql`${t.grants} <@ ARRAY[${sql.raw(DELEGABLE_ACTIONS.map((a) => `'${a}'`).join(', '))}]::text[]`),
     check('users_grants_admin_chk', sql`cardinality(${t.grants}) = 0 OR ${t.role} = 'admin'`),
   ],
 );

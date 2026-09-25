@@ -1,19 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { DELEGABLE_ACTIONS, ROLES, can, type DelegableAction, type Role, type UserView } from '@workfluence/shared';
+import { DELEGABLE_ACTIONS, ROLES, can, canManageUser, type DelegableAction, type Principal, type Role, type UserView } from '@workfluence/shared';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 
 /** 위임할 수 있는 행위의 이름 — 목록이 늘면 타입이 여기를 채우라고 한다 (P11 D.1) */
 const GRANT_LABELS: Record<DelegableAction, string> = { 'llm.manage': 'LLM 연결 관리' };
 
+/** 관리할 수 없는 행의 조치에 붙는 설명 */
+const CANNOT_MANAGE = '이 사용자를 관리할 권한이 없다 — 시스템 관리자에게 맡긴다';
+
 /**
  * 사용자 관리 (FR-230~234, FR-243). **위임** — 관리자 행마다 root가 주고 거두는 체크(P11_설계서_Ops D.1·G절). 다른 관리자에게는
- * 보이기만 한다. 판정은 서버의 가드와 같은 `can()`이다
+ * 보이기만 한다. 판정은 서버의 가드와 같은 `can()`이다.
+ *
+ * **관리할 수 없는 행의 조치는 누르지 못한다** — root 행, 그리고 자기에게 없는 위임을 가진 관리자의 행(P11 보안 검토 1). 판정은 서버와
+ * 같은 `canManageUser()`다 — 서버가 막는 것을 화면이 누르게 두면 403만 본다
  */
 export function AdminUsersPage() {
   const { me } = useAuth();
-  const canGrant = can(me ? { id: me.id, role: me.role, grants: me.grants } : null, 'user.grants.change');
+  const principal: Principal | null = me ? { id: me.id, role: me.role, grants: me.grants } : null;
+  const canGrant = can(principal, 'user.grants.change');
+  const manageable = (u: UserView) => principal !== null && canManageUser(principal, { role: u.role, grants: u.grants });
   const [rows, setRows] = useState<UserView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [temporary, setTemporary] = useState<{ username: string; password: string } | null>(null);
@@ -63,6 +71,8 @@ export function AdminUsersPage() {
                 <select
                   value={u.role}
                   aria-label={`${u.username} 역할`}
+                  disabled={!manageable(u)}
+                  title={manageable(u) ? undefined : CANNOT_MANAGE}
                   onChange={(e) => void act(() => api(`/api/users/${u.id}/role`, { method: 'PATCH', json: { role: e.target.value as Role } }))}
                 >
                   {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -92,13 +102,15 @@ export function AdminUsersPage() {
               </td>
               <td>
                 {u.status === 'pending' && (
-                  <button type="button" onClick={() => void act(() => api(`/api/users/${u.id}/approve`, { method: 'POST' }))}>승인</button>
+                  <button type="button" disabled={!manageable(u)} title={manageable(u) ? undefined : CANNOT_MANAGE} onClick={() => void act(() => api(`/api/users/${u.id}/approve`, { method: 'POST' }))}>승인</button>
                 )}
                 {u.status === 'locked' && (
-                  <button type="button" onClick={() => void act(() => api(`/api/users/${u.id}/unlock`, { method: 'POST' }))}>잠금 해제</button>
+                  <button type="button" disabled={!manageable(u)} title={manageable(u) ? undefined : CANNOT_MANAGE} onClick={() => void act(() => api(`/api/users/${u.id}/unlock`, { method: 'POST' }))}>잠금 해제</button>
                 )}
                 <button
                   type="button"
+                  disabled={!manageable(u)}
+                  title={manageable(u) ? undefined : CANNOT_MANAGE}
                   onClick={() =>
                     void act(async () => {
                       const r = await api<{ temporaryPassword: string }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
@@ -111,6 +123,8 @@ export function AdminUsersPage() {
                 {/* 관리자 강제 종료 (scope-definition 4.1절 #4). 서버측 세션을 파기한다 */}
                 <button
                   type="button"
+                  disabled={!manageable(u)}
+                  title={manageable(u) ? undefined : CANNOT_MANAGE}
                   onClick={() =>
                     void act(async () => {
                       const r = await api<{ count: number }>(`/api/users/${u.id}/terminate-sessions`, { method: 'POST' });
@@ -125,7 +139,9 @@ export function AdminUsersPage() {
           ))}
         </tbody>
       </table>
-      <p className="muted small">위임은 시스템 관리자가 관리자 한 사람씩 주고 거둔다. 관리자가 아니게 되면 사라진다.</p>
+      <p className="muted small">
+        위임은 시스템 관리자가 관리자 한 사람씩 주고 거둔다. 관리자가 아니게 되면 사라진다. 자기에게 없는 위임을 가진 관리자는 시스템 관리자만 관리한다.
+      </p>
     </main>
   );
 }

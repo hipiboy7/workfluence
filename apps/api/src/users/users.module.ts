@@ -124,11 +124,14 @@ export class UsersController {
     @Req() req: Request,
   ): Promise<UserView> {
     return this.db.transaction(async (tx) => {
-      const { row, before, after } = await this.users.changeGrants(id, dto.grants, actor, tx);
-      await this.audit.record(
-        { action: 'user.grants.change', actorId: actor.id, targetType: 'user', targetId: id, detail: { username: row.username, before, after }, ip: req.ip },
-        tx,
-      );
+      const { row, before, after, changed } = await this.users.changeGrants(id, dto.grants, actor, tx);
+      // 바뀐 것이 없으면 남기지 않는다 — 같은 목록을 다시 보낸 것은 권한 변경이 아니다 (P11 코드 리뷰 9)
+      if (changed) {
+        await this.audit.record(
+          { action: 'user.grants.change', actorId: actor.id, targetType: 'user', targetId: id, detail: { username: row.username, before, after }, ip: req.ip },
+          tx,
+        );
+      }
       return toUserView(row);
     });
   }

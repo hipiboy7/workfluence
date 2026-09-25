@@ -1,5 +1,5 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { BadGatewayException, BadRequestException, ForbiddenException, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
@@ -13,6 +13,7 @@ import { AuthService, toMeView } from './auth.service';
 import { DEV_IDENTITY, encodeMockCode } from './oidc/mock.provider';
 import type { OidcProvider } from './oidc/oidc.provider';
 import { RevocationBus } from '../common/revocation.bus';
+import { isLogLine, type LogLine } from '../common/log-line';
 
 /**
  * B등급 통합 테스트 (P1_설계서_Auth 10절). **실제 PostgreSQL**을 쓴다.
@@ -505,6 +506,120 @@ describe('위임 — root가 관리자에게 LLM 연결 관리를 준다 (P11 D.
     expect([second.role, second.grants]).toEqual(['member', []]);
     const logins = await db.select().from(auditEvents).where(eq(auditEvents.action, 'auth.login.success'));
     expect(logins.map((e) => (e.detail as { clearedGrants?: string[] }).clearedGrants ?? null)).toEqual([null, ['llm.manage']]);
+  });
+
+  it('**같은 목록을 다시 보내면 쓰지 않는다** — `changed: false`, 호출부는 감사 행을 남기지 않는다 (코드 리뷰 9)', async () => {
+    const a = await mkAdmin();
+    expect((await usersSvc.changeGrants(a.id, ['llm.manage'], ROOT)).changed).toBe(true);
+    const again = await usersSvc.changeGrants(a.id, ['llm.manage'], ROOT);
+    expect([again.changed, again.before, again.after, again.row.grants]).toEqual([false, ['llm.manage'], ['llm.manage'], ['llm.manage']]);
+  });
+
+  it('**위임 없는 관리자는 위임받은 관리자를 관리하지 못한다** — 비밀번호를 초기화해 그 계정으로 위임을 얻는 길, 역할을 내렸다 올려 거두는 길 (보안 검토 1)', async () => {
+    const plain = await mkAdmin('plain');
+    const boss = await mkAdmin('boss2');
+    await usersSvc.changeGrants(boss.id, ['llm.manage'], ROOT);
+    const plainActor: Principal = { id: plain.id, role: 'admin', grants: [] };
+    await expect(usersSvc.resetPassword(boss.id, plainActor)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(usersSvc.changeRole(boss.id, 'member', plainActor)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(usersSvc.unlock(boss.id, plainActor)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(usersSvc.terminateSessions(boss.id, plainActor)).rejects.toBeInstanceOf(ForbiddenException);
+    expect((await usersSvc.findById(boss.id))?.grants).toEqual(['llm.manage']);
+
+    // 같은 것을 가진 관리자와 root는 된다. 위임 없는 관리자끼리는 그대로다
+    const peer = await mkAdmin('peer');
+    await usersSvc.changeGrants(peer.id, ['llm.manage'], ROOT);
+    await expect(usersSvc.terminateSessions(boss.id, { id: peer.id, role: 'admin', grants: ['llm.manage'] })).resolves.toBeTypeOf('number');
+    await expect(usersSvc.resetPassword(boss.id, ROOT)).resolves.toMatchObject({ user: { id: boss.id } });
+    const plain2 = await mkAdmin('plain2');
+    await expect(usersSvc.terminateSessions(plain2.id, plainActor)).resolves.toBeTypeOf('number');
+  });
+
+  /** 한 트랜잭션이 위임을 바꾸고 **커밋하기 전에** 다른 연결의 요청을 띄운다 — 잠그지 않으면 그 요청이 옛 값을 읽고 커밋 뒤에 덮는다 */
+  async function whileGrantPending<T>(adminId: string, grants: 'llm.manage'[], run: () => Promise<T>): Promise<T> {
+    let pending: Promise<T> | undefined;
+    await db.transaction(async (tx) => {
+      await usersSvc.changeGrants(adminId, grants, ROOT, tx);
+      pending = run();
+      // 다른 요청이 읽기(잠그지 않았다면)를 마치고 쓰기에서 기다릴 만큼
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    return pending!;
+  }
+
+  it('**역할을 그대로 두는 변경이 그 사이의 위임을 덮지 않는다** — 행을 잠그고 읽는다 (코드 리뷰 4)', async () => {
+    const a = await mkAdmin();
+    const r = await whileGrantPending(a.id, ['llm.manage'], () => usersSvc.changeRole(a.id, 'admin', ROOT));
+    expect([r.row.grants, (await usersSvc.findById(a.id))?.grants]).toEqual([['llm.manage'], ['llm.manage']]);
+  });
+
+  it('**동시에 위임을 바꾸면 뒤의 것이 앞의 결과를 이전 값으로 본다** — 감사 행의 이전 값이 맞다 (코드 리뷰 4)', async () => {
+    const a = await mkAdmin();
+    const second = await whileGrantPending(a.id, ['llm.manage'], () => usersSvc.changeGrants(a.id, [], ROOT));
+    expect([second.before, second.after, second.changed]).toEqual([['llm.manage'], [], true]);
+  });
+
+  it('**사내 계정 동기화도 그 사이의 위임을 덮지 않는다** — 관리자로 다시 로그인하는 사이 root가 준 것 (보안 검토 후보 1)', async () => {
+    const asAdmin = { ...DEV_IDENTITY, groups: ['wf-admins'] };
+    const s1 = await auth.oidcStart();
+    const first = await auth.oidcCallback({ code: encodeMockCode(asAdmin), state: s1.state }, { state: s1.state, nonce: s1.nonce });
+    const s2 = await auth.oidcStart();
+    const again = await whileGrantPending(first.id, ['llm.manage'], () =>
+      auth.oidcCallback({ code: encodeMockCode(asAdmin), state: s2.state }, { state: s2.state, nonce: s2.nonce }),
+    );
+    expect([again.role, again.grants]).toEqual(['admin', ['llm.manage']]);
+  });
+});
+
+describe('사내 IdP가 실패하면 (P11 FR-1215, 코드 리뷰 8)', () => {
+  class FailingProvider implements OidcProvider {
+    constructor(private readonly err: unknown) {}
+    authorizationUrl(): Promise<string> {
+      return Promise.reject(this.err);
+    }
+    exchange(): Promise<typeof DEV_IDENTITY> {
+      return Promise.reject(this.err);
+    }
+  }
+  const eventLines = (spy: { mock: { calls: unknown[][] } }): LogLine[] => spy.mock.calls.map((c) => c[0]).filter(isLogLine);
+
+  it('**닿지 않으면 502와 warn 한 줄** — `auth.oidc_failed`에 단계와 오류(사내 CA를 믿지 못하면 그 코드). 처리되지 않은 예외(500)가 아니다', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const tls = new TypeError('fetch failed', { cause: { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', message: 'unable to verify the first certificate' } });
+      const failing = makeAuth(new FailingProvider(tls));
+      await expect(failing.oidcStart()).rejects.toBeInstanceOf(BadGatewayException);
+      await expect(failing.oidcCallback({ code: 'c', state: 's' }, { state: 's', nonce: 'n' })).rejects.toBeInstanceOf(BadGatewayException);
+      const lines = eventLines(warn);
+      expect(lines.map((l) => [l.event, l.fields.step])).toEqual([
+        ['auth.oidc_failed', 'start'],
+        ['auth.oidc_failed', 'callback'],
+      ]);
+      expect(lines[0].err).toBe(tls);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('**우리가 판정한 거절은 그대로 던지고 남긴다** — 토큰 교환의 거절은 로그에 아무것도 없었다', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const failing = makeAuth(new FailingProvider(new UnauthorizedException('토큰 교환 실패: HTTP 400')));
+      await expect(failing.oidcCallback({ code: 'c', state: 's' }, { state: 's', nonce: 'n' })).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(eventLines(warn).map((l) => [l.event, l.fields.step])).toEqual([['auth.oidc_failed', 'callback']]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('state가 맞지 않는 것은 IdP 탓이 아니다 — 남기지 않는다', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(auth.oidcCallback({ code: 'c', state: 'tampered' }, { state: 's', nonce: 'n' })).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(eventLines(warn)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

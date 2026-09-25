@@ -88,6 +88,19 @@ export class UsersService {
     return tx.query.users.findFirst({ where: eq(users.oidcSub, sub) });
   }
 
+  /**
+   * **잠그고** 읽는다(`SELECT … FOR UPDATE`) — 역할·위임을 읽고 그 값으로 다시 쓰는 곳(역할 변경·위임·사내 계정 동기화)이 쓴다.
+   *
+   * 잠그지 않으면 읽은 뒤 끝난 다른 요청의 위임을 **옛 값으로 덮는다** — 역할을 그대로 두는 변경(admin → admin)도 읽은 `grants`를 다시
+   * 쓰므로, 그 사이 root가 준 것이 사라지거나 거둔 것이 되살아나고, 감사 행의 이전 값도 틀린다 (P11 코드 리뷰 4·보안 검토 후보 1).
+   * 잠금은 트랜잭션이 끝날 때 풀린다 — 호출부가 트랜잭션 안에서 부른다
+   */
+  async lockForUpdate(by: { id: string } | { oidcSub: string }, tx: Db): Promise<UserRow | undefined> {
+    const where = 'id' in by ? eq(users.id, by.id) : eq(users.oidcSub, by.oidcSub);
+    const [row] = await tx.select().from(users).where(where).for('update');
+    return row;
+  }
+
   async list(limit: number): Promise<UserView[]> {
     const rows = await this.db.select().from(users).orderBy(desc(users.createdAt)).limit(limit);
     const now = new Date();
@@ -184,10 +197,11 @@ export class UsersService {
     return row;
   }
 
-  private async getManaged(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
-    const target = await this.findById(id, tx);
+  /** 관리할 대상 — 역할과 **위임까지** 보고 판정한다(`canManageUser`, P11 보안 검토 1). `lock`이면 행을 잠그고 읽는다(`lockForUpdate`) */
+  private async getManaged(id: string, actor: Principal, tx: Db = this.db, lock = false): Promise<UserRow> {
+    const target = lock ? await this.lockForUpdate({ id }, tx) : await this.findById(id, tx);
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
-    if (!canManageUser(actor, target.role as Role)) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
+    if (!canManageUser(actor, { role: target.role as Role, grants: target.grants })) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
     return target;
   }
 
@@ -249,7 +263,8 @@ export class UsersService {
    */
   async changeRole(id: string, role: Role, actor: Principal, tx: Db = this.db): Promise<{ row: UserRow; clearedGrants: DelegableAction[] }> {
     if (id === actor.id) throw new BadRequestException('자기 자신의 역할은 바꿀 수 없다');
-    const target = await this.getManaged(id, actor, tx);
+    // **잠그고 읽는다** — 읽은 위임으로 다시 쓰므로, 그 사이의 위임 변경을 덮지 않게 (`lockForUpdate`)
+    const target = await this.getManaged(id, actor, tx, true);
     if (!canAssignRole(actor, role)) throw new ForbiddenException(`'${role}' 역할을 부여할 권한이 없다`);
     // 마지막 root를 강등하면 아무도 root 권한을 되돌릴 수 없다 (FR-233). 순수 함수로 두기 어려워 여기서 센다
     if (target.role === 'root' && role !== 'root') {
@@ -274,21 +289,24 @@ export class UsersService {
     grants: readonly DelegableAction[],
     actor: Principal,
     tx: Db = this.db,
-  ): Promise<{ row: UserRow; before: DelegableAction[]; after: DelegableAction[] }> {
+  ): Promise<{ row: UserRow; before: DelegableAction[]; after: DelegableAction[]; changed: boolean }> {
     if (!can(actor, 'user.grants.change')) throw new ForbiddenException('위임은 시스템 관리자만 주고 거둔다');
-    const target = await tx.query.users.findFirst({ where: eq(users.id, id) });
+    // **잠그고 읽는다** — 이전 값이 감사 행에 가고, 동시에 바꾸는 두 요청이 서로를 덮지 않게 (`lockForUpdate`)
+    const target = await this.lockForUpdate({ id }, tx);
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
     if (target.role !== 'admin') throw new BadRequestException('위임은 관리자에게만 준다 — 관리자가 아니다');
     const before = grantsForRole('admin', target.grants);
     const after = grantsForRole('admin', grants);
-    // 읽은 뒤 역할이 바뀌었으면(다른 요청이 member로 내렸다) 아무것도 바꾸지 않는다 — 판정한 상태에서만 쓴다
+    // **바뀌는 것이 없으면 쓰지 않는다** — 같은 목록을 다시 보내도 감사 행(1년 남는다)이 쌓이지 않게 (P11 코드 리뷰 9)
+    if (before.length === after.length && before.every((g) => after.includes(g))) return { row: target, before, after, changed: false };
+    // 역할이 관리자인 것은 잠근 행으로 보았다. 조건은 한 번 더 둔다 — 잠그지 않고 부르는 호출부가 생겨도 판정한 상태에서만 쓴다
     const [row] = await tx
       .update(users)
       .set({ grants: after, updatedAt: sql`now()` })
       .where(and(eq(users.id, id), eq(users.role, 'admin')))
       .returning();
     if (!row) throw new ConflictException('그 사이 역할이 바뀌었다 — 목록을 다시 본다');
-    return { row, before, after };
+    return { row, before, after, changed: true };
   }
 
   /** ID 찾기 (FR-208): email + 이름이 **모두** 일치할 때만 */
@@ -319,9 +337,7 @@ export class UsersService {
    * 변경과 같은 판단이다 (FR-224). `sess`는 connect-pg-simple가 넣은 세션 객체 전체다.
    */
   async terminateSessions(id: string, actor: Principal, tx: Db = this.db): Promise<number> {
-    const target = await this.findById(id, tx);
-    if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
-    if (!canManageUser(actor, target.role as Role)) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
+    await this.getManaged(id, actor, tx);
     const r = await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
     this.revocation.revoke(id);
     return r.rowCount ?? 0;

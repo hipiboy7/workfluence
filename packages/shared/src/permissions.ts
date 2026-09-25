@@ -102,10 +102,19 @@ export function canAssignRole(actor: Principal, role: Role): boolean {
   return false;
 }
 
-/** actor가 targetRole의 사용자를 관리(승인·초기화·잠금 해제·역할 변경)할 수 있는가. admin은 root를 건드릴 수 없다. */
-export function canManageUser(actor: Principal, targetRole: Role): boolean {
+/**
+ * actor가 target 사용자를 관리(승인·초기화·잠금 해제·역할 변경·세션 종료)할 수 있는가. admin은 root를 건드릴 수 없다.
+ *
+ * **자기에게 없는 위임을 가진 관리자도 건드릴 수 없다** (P11 보안 검토 1). 위임이 관리자 사이에 차이를 만들었다 — 위임 없는 관리자가
+ * 위임받은 관리자의 비밀번호를 초기화하면 그 계정으로 로그인해 위임을 얻고, 역할을 내렸다 올리면 root가 준 것을 거둔다. 역할의 우열과
+ * 같이 **가진 것의 우열**을 본다. root는 모두를 관리한다. 위임은 관리자만 가진다(`grantsForRole`) — member·root 행의 값은 보지 않는다
+ */
+export function canManageUser(actor: Principal, target: { role: Role; grants?: readonly string[] }): boolean {
   if (!isAdminRole(actor.role)) return false;
-  return ROLE_RANK[actor.role] >= ROLE_RANK[targetRole];
+  if (ROLE_RANK[actor.role] < ROLE_RANK[target.role]) return false;
+  if (actor.role === 'root') return true;
+  const mine = grantsForRole(actor.role, actor.grants ?? []);
+  return grantsForRole(target.role, target.grants ?? []).every((g) => mine.includes(g));
 }
 
 export type SpaceLike = {

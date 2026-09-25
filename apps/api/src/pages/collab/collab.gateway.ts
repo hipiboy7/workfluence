@@ -720,7 +720,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         n += 1;
       }
     }
-    if (n) this.log.log(logLine('collab.revoked', '편집 연결을 끊었다', { userId, count: n, reason: why, sessionOnly: sid !== undefined }));
+    // **대상은 `targetUserId`다** — 이 줄은 세션을 끊은 요청(관리자의 강제 종료 등) 안에서 남아, 로그의 `userId`는 그 요청을 보낸 사람이다
+    // (요청 문맥). 같은 이름을 쓰면 줄이 준 값이 이겨 부른 사람이 지워진다 (P11 코드 리뷰 6)
+    if (n) this.log.log(logLine('collab.revoked', '편집 연결을 끊었다', { targetUserId: userId, count: n, reason: why, sessionOnly: sid !== undefined }));
   }
 
   /**

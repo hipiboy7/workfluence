@@ -32,8 +32,11 @@ const HEALTH_PATH = '/api/health';
  */
 export function accessLogEntry(x: AccessLogInput): AccessLogEntry | null {
   const path = x.url.split('?', 1)[0];
-  if (path !== '/api' && !path.startsWith('/api/')) return null;
-  if (path === HEALTH_PATH) return null;
+  // **대소문자를 가리지 않고 본다** — 라우터가 `/API/…`도 같은 처리기·가드로 보낸다. 가리면 대문자로 부른 요청이 접근 로그에서만 빠진다
+  // (P11 보안 검토 2). 싣는 경로는 받은 그대로다
+  const lower = path.toLowerCase();
+  if (lower !== '/api' && !lower.startsWith('/api/')) return null;
+  if (lower === HEALTH_PATH) return null;
 
   // **전체 잡기 라우트는 맞춘 라우트가 아니다** — SPA 정적 자산의 틀(`{*any}`)이 맞춘 것이 없는 API 요청에도 씌워진다(Nest 12·Express 5).
   // 그 틀을 적으면 404가 전부 `GET {*any} 404`로 보여 무엇을 불렀는지 모른다 (P11 자체 점검 2)

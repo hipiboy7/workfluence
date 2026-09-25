@@ -44,7 +44,8 @@ export class RevocationBus {
       try {
         fn(userId, sid);
       } catch (e) {
-        this.log.warn(logLine('session.revoke_failed', '세션 파기 통지 처리 실패', { userId }, e));
+        // 대상은 `targetUserId` — 로그의 `userId`는 세션을 끊은 요청을 보낸 사람이다(요청 문맥, P11 코드 리뷰 6)
+        this.log.warn(logLine('session.revoke_failed', '세션 파기 통지 처리 실패', { targetUserId: userId }, e));
       }
     }
   }

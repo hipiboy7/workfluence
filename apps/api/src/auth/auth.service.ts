@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, HttpException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import {
   maskEmail,
   maskUsername,
@@ -15,6 +15,7 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
+import { logLine } from '../common/log-line';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { users, type UserRow } from '../db/schema';
@@ -45,6 +46,8 @@ export function toMeView(u: UserRow): MeView {
 
 @Injectable()
 export class AuthService {
+  private readonly log = new Logger('Auth');
+
   constructor(
     private readonly users: UsersService,
     private readonly audit: AuditService,
@@ -148,8 +151,24 @@ export class AuthService {
     const state = randomBytes(16).toString('base64url');
     const nonce = randomBytes(16).toString('base64url');
     const pkce = this.env.WF_OIDC_PKCE ? newPkce() : undefined;
-    const url = await p.authorizationUrl(state, nonce, pkce);
+    const url = await this.idp('start', () => p.authorizationUrl(state, nonce, pkce));
     return { url, state, nonce, verifier: pkce?.verifier };
+  }
+
+  /**
+   * 사내 IdP와의 처리 (P11 FR-1215, 코드 리뷰 8). **실패는 바깥 탓이라 warn 한 줄**(`auth.oidc_failed` — 단계·오류). 예전에는 IdP에 닿지
+   * 않으면(Discovery·TLS·JWKS) 처리되지 않은 예외(500, `http.unhandled` error)였고, 토큰 교환의 거절은 로그에 아무것도 없었다.
+   * 우리가 판정한 거절(`HttpException` — 토큰 교환 실패·nonce 불일치 등)은 그대로 던지고, 그 밖(닿지 않음·TLS·서명 검증)은 502로 바꾼다.
+   * 사내 CA를 믿지 못하는 것(반입 가이드 10절 ②)이 여기서 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`로 보인다
+   */
+  private async idp<T>(step: 'start' | 'callback', run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (e) {
+      this.log.warn(logLine('auth.oidc_failed', '사내 인증 서버와의 처리가 실패했다', { step }, e));
+      if (e instanceof HttpException) throw e;
+      throw new BadGatewayException('사내 인증 서버와 처리하지 못했다 — 잠시 뒤 다시 로그인한다. 계속되면 관리자에게 알린다');
+    }
   }
 
   /**
@@ -164,7 +183,7 @@ export class AuthService {
     const p = this.provider();
     if (!saved.state || saved.state !== args.state) throw new UnauthorizedException('state가 일치하지 않는다');
 
-    const claims = await p.exchange(args.code, saved.nonce ?? '', saved.verifier);
+    const claims = await this.idp('callback', () => p.exchange(args.code, saved.nonce ?? '', saved.verifier));
     const role = mapGroupsToRole(claims.groups, this.env.WF_OIDC_ROLE_MAP);
     if (!role) {
       await this.audit.record({ action: 'auth.login.failure', targetType: 'oidc_sub', targetId: claims.sub, detail: { reason: 'no_role_mapped' }, ip });
@@ -190,7 +209,8 @@ export class AuthService {
   private async upsertFromClaims(claims: OidcClaims, role: Role, tx: Db): Promise<{ row: UserRow; clearedGrants: DelegableAction[] }> {
     // **조회도 `tx`로 한다.** 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면 동시 요청이
     // 풀 크기에 닿는 순간 전원이 서로를 기다린다 (T-026)
-    const existing = await this.users.findByOidcSub(claims.sub, tx);
+    // **잠그고 읽는다** — 읽은 위임으로 다시 쓰므로, 그 사이 root가 바꾼 위임을 덮지 않게 (P11 코드 리뷰 4 — `lockForUpdate`)
+    const existing = await this.users.lockForUpdate({ oidcSub: claims.sub }, tx);
     // **IdP가 준 값도 검증한다** (P7 보안 검토 F4). 로컬 가입은 `displayNameSchema`가
     // 줄바꿈을 막는데(FR-807) JIT 동기화는 zod를 거치지 않아 **주 로그인 경로가 그 방어를
     // 비켜 갔다.** 이 값은 멘션 메일 제목에 들어간다 — 사내 메일 API가 제목을 헤더로

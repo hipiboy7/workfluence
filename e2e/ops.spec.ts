@@ -89,6 +89,15 @@ test('**시스템 관리자가 관리자에게 LLM 연결 관리를 주면** 그
   await expect(boss.getByRole('link', { name: '사용자 관리' })).toBeVisible();
   await expect(boss.getByRole('link', { name: 'LLM 연결' })).toHaveCount(0);
   await bossContext.close();
+
+  // **관리 화면의 감사로그도 그 번호로 거른다** (FR-1212) — 로그 한 줄의 requestId에서 DB를 열지 않고 그 요청의 행으로 간다
+  await page.goto('/admin/audit');
+  await page.getByLabel('요청 번호').fill(` ${requestId} `);
+  await page.getByRole('button', { name: '거르기' }).click();
+  const hit = page.getByRole('row').filter({ hasText: requestId });
+  await expect(hit).toHaveCount(1);
+  await expect(hit).toContainText('user.grants.change');
+  await expect(page.getByText(/^1건 \(최대/)).toBeVisible();
 });
 
 test('**요청마다 번호가 붙는다** — 받은 번호가 모양에 맞으면 그대로, 틀리면 새로 만든다 (FR-1210)', async ({ request }) => {

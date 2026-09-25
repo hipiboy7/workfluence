@@ -89,4 +89,18 @@ describe('AdminUsersPage — 위임', () => {
     expect(box.disabled).toBe(true);
     expect(box.title).toMatch(/시스템 관리자만/);
   });
+
+  it('**위임 없는 관리자는 위임받은 관리자를 관리하지 못한다** — 그 행의 조치는 눌리지 않는다. 다른 행은 그대로 (보안 검토 1)', async () => {
+    me = { ...me, id: 'a2', role: 'admin', grants: [] };
+    rows = [user({ id: 'a1', username: 'boss', role: 'admin', grants: ['llm.manage'] }), user({ id: 'a3', username: 'peer', role: 'admin' }), user({ id: 'm1', username: 'alice' })];
+    renderPage();
+    await screen.findByRole('checkbox', { name: 'boss LLM 연결 관리' });
+    await waitFor(() => expect((screen.getByRole('combobox', { name: 'boss 역할' }) as HTMLSelectElement).disabled).toBe(true));
+    const resets = screen.getAllByRole('button', { name: '비밀번호 초기화' }) as HTMLButtonElement[];
+    const ends = screen.getAllByRole('button', { name: '세션 강제 종료' }) as HTMLButtonElement[];
+    expect(resets.map((b) => b.disabled)).toEqual([true, false, false]);
+    expect(ends.map((b) => b.disabled)).toEqual([true, false, false]);
+    expect(resets[0].title).toMatch(/권한이 없다/);
+    expect((screen.getByRole('combobox', { name: 'peer 역할' }) as HTMLSelectElement).disabled).toBe(false);
+  });
 });
