@@ -3,8 +3,8 @@ import { defineConfig } from 'vitest/config';
 /**
  * 커버리지 대상 (CLAUDE.md 3절).
  *
- * 등급이 섞여 있어 임계값은 **낮은 쪽(B등급 70%)**에 맞추고, A등급(auth/domain)은
- * 별도 프로젝트로 90%를 따로 건다.
+ * 등급이 섞여 있어 임계값은 **낮은 쪽(B등급 70%)**에 맞추고, A등급(모듈마다의 `domain` 디렉토리)은
+ * 파일마다 90%를 따로 건다 (아래 `thresholds`).
  *
  * 부트스트랩(main.ts)·모듈 조립·마이그레이션 실행·실 IdP 어댑터는 제외한다.
  * - `*.module.ts`: 모듈 조립과 컨트롤러다. 컨트롤러가 하는 일은 `db.transaction(...)` 안에서
@@ -58,11 +58,9 @@ export default defineConfig({
         // A등급은 90% (CLAUDE.md 3절). 디렉토리로 고정해 측정을 기계적으로 만든다.
         // **`perFile`을 켠다** — shared와 같은 이유다. 합계로만 재면 새 domain 파일이 0%로
         // 들어와도 옆 파일이 덮어 준다 (코드 리뷰 14)
-        'src/auth/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
-        'src/pages/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
-        'src/attachments/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
-        'src/notifications/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
-        'src/llm/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
+        // **domain 디렉토리를 열거하지 않는다** — 규칙(3절)의 모양 `apps/api/src/**/domain/**` 그대로 건다. 열거하던 때 Phase 11의
+        // `common/domain`이 빠져 0%여도 관문이 초록이었다 (T-047 — 위 `include`의 T-020과 같은 모양)
+        'src/**/domain/**': { perFile: true, lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

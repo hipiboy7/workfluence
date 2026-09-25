@@ -241,16 +241,16 @@ ALTER TABLE audit_events ADD COLUMN request_id text;
 | 권한 판정 | `packages/shared/src/permissions.ts` | **A** | 위임 규칙(D.1) |
 | 로그 코드 | `packages/shared/src/constants.ts` | **A** | `LOG_EVENTS` |
 | DTO | `packages/shared/src/schemas.ts` | **A** | 위임 목록(`userGrantsDto`) |
-| 요청 식별자 모양 | apps/api/src/common/domain/request-id.ts | **A** | D.2 |
-| 접근 로그 판정 | apps/api/src/common/domain/access-log.ts | **A** | D.3 — 남기나·수준·필드 |
-| 요청 문맥 | apps/api/src/common/request-context.ts | B | `AsyncLocalStorage` — 식별자·사용자 |
+| 요청 식별자 모양 | `apps/api/src/common/domain/request-id.ts` | **A** | D.2 |
+| 접근 로그 판정 | `apps/api/src/common/domain/access-log.ts` | **A** | D.3 — 남기나·수준·필드 |
+| 요청 문맥 | `apps/api/src/common/request-context.ts` | B | `AsyncLocalStorage` — 식별자·사용자 |
 | 로거 | `apps/api/src/common/logger.ts` | B | mixin(문맥) · event 줄 · `http.unhandled` |
-| 로그 한 줄 | apps/api/src/common/log-line.ts | B | event + 필드 + 문장을 로거에 넘기는 모양 |
+| 로그 한 줄 | `apps/api/src/common/log-line.ts` | B | event + 필드 + 문장을 로거에 넘기는 모양 |
 | 감사 | `apps/api/src/audit/audit.service.ts` | B | `request_id` |
 | 위임 | `apps/api/src/users/users.service.ts` · `users.module.ts` | B | D.1 |
 | 사내 계정 동기화 | `apps/api/src/auth/auth.service.ts` | B | 역할이 바뀌면 위임을 비운다 |
 | 배선 | `apps/api/src/main.ts` | (측정 밖) | 첫 미들웨어(식별자·문맥)·접근 로그 |
-| 시작 스크립트 | deploy/entrypoint.sh | (컨테이너 확인) | D.7 |
+| 시작 스크립트 | `deploy/entrypoint.sh` | (컨테이너 확인) | D.7 |
 | 화면 | `apps/web/src/pages/admin/AdminUsersPage.tsx` · `apps/web/src/pages/SpacesPage.tsx` | B | G절 |
 
 ## I. 설정 항목
