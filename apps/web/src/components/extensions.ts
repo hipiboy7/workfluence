@@ -3,7 +3,7 @@ import { Fragment, Slice, type Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import StarterKit from '@tiptap/starter-kit';
-import { ALLOWED_LINK_HREF } from '@workfluence/shared';
+import { ALLOWED_LINK_HREF, TABLE_LIMITS } from '@workfluence/shared';
 
 /**
  * **링크가 되어도 되는 주소인가** — 서버 검증과 같은 식이다(7절: http(s)·내부 경로·앵커만, P9_설계서_Gate FR-1008).
@@ -68,6 +68,45 @@ const PastedLinkRel = Extension.create({
  *
  * `collab`이면 실행 취소를 끈다 — Yjs가 자기 실행 취소를 들고 있어 둘을 같이 두면 내 취소가 남의 편집까지 되돌린다.
  */
+/**
+ * 붙여 넣은 HTML의 **합치는 수**를 서버가 받는 범위로 (P12_설계서_Limits D.4, FR-1323). TipTap은 `colspan`·`rowspan`을 그대로 읽는다 —
+ * 숫자가 아니면 글자로, 큰 값은 그대로 남아 관문이 그 사람을 끊었다. 정수가 아니거나 1보다 작으면 1, 넘으면 상한(브라우저가 그리는 것과 같다)
+ */
+export function clampSpan(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number.parseInt(typeof raw === 'string' ? raw : '', 10);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(Math.trunc(n), TABLE_LIMITS.maxSpan);
+}
+
+/**
+ * 붙여 넣은 **열 너비** — TipTap은 `parseInt`로 읽어 숫자가 아닌 칸이 `NaN`이 된다. 그 칸은 비우고(null), 넘는 너비는 상한으로, 칸 수도
+ * 상한까지 (FR-1323). 모두 비면 너비가 없는 것(null)이다
+ */
+export function clampColwidth(raw: unknown): (number | null)[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out = raw
+    .slice(0, TABLE_LIMITS.maxSpan)
+    .map((w: unknown) => (typeof w === 'number' && Number.isFinite(w) && w >= 1 ? Math.min(Math.trunc(w), TABLE_LIMITS.maxColWidthPx) : null));
+  return out.some((w) => w !== null) ? out : null;
+}
+
+type AttrSpec = { default?: unknown; parseHTML?: (el: HTMLElement) => unknown };
+
+/** 표 칸·표 머리 — 붙여 넣은 값을 범위로 줄인다. 이름과 속성 키는 그대로다(대조 시험) */
+function boundedCell<T extends typeof TableCell | typeof TableHeader>(cell: T): T {
+  return cell.extend({
+    addAttributes() {
+      const parent = (this.parent?.() ?? {}) as Record<string, AttrSpec>;
+      return {
+        ...parent,
+        colspan: { ...parent.colspan, parseHTML: (el: HTMLElement) => clampSpan(el.getAttribute('colspan')) },
+        rowspan: { ...parent.rowspan, parseHTML: (el: HTMLElement) => clampSpan(el.getAttribute('rowspan')) },
+        colwidth: { ...parent.colwidth, parseHTML: (el: HTMLElement) => clampColwidth(parent.colwidth?.parseHTML?.(el)) },
+      };
+    },
+  }) as T;
+}
+
 export function editorExtensions(opts: { collab?: boolean } = {}): AnyExtension[] {
   return [
     StarterKit.configure({
@@ -81,8 +120,8 @@ export function editorExtensions(opts: { collab?: boolean } = {}): AnyExtension[
     }),
     Table.configure({ resizable: false }),
     TableRow,
-    TableHeader,
-    TableCell,
+    boundedCell(TableHeader),
+    boundedCell(TableCell),
     PastedLinkRel,
   ];
 }

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent, t
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { writeClipboard } from '../components/clipboard';
-import { askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, statusLabel } from '../components/llmStream';
+import { askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, statusLabel, waitLabel } from '../components/llmStream';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -118,6 +118,16 @@ export function LlmPage() {
     setProviderId((cur) => fromConversation ?? (providers.some((p) => p.id === cur) ? cur : providers[0].id));
   }, [providers, conversation]);
 
+  // **기다린 초** (P12 FR-1300·1301) — 첫 답 조각이 올 때까지만 1초마다 다시 그린다. 서버를 부르지 않는다(NFR-121)
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (chat.waitingSince === null) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [chat.waitingSince]);
+  const waiting = chat.waitingSince === null ? null : waitLabel(chat.waitingSince, now);
+
   // 저장되지 않은 질문은 입력칸에 되돌린다 (D.5) — 비어 있을 때만. 그 사이 새로 친 것을 덮지 않는다
   useEffect(() => {
     if (chat.restore) setQuestion((cur) => cur || (chat.restore as string));
@@ -129,7 +139,7 @@ export function LlmPage() {
     setQuestion('');
     setPageError(null);
     setCopied(null);
-    dispatch({ type: 'send', question: q });
+    dispatch({ type: 'send', question: q, at: Date.now() });
     const me: RunningAsk = { controller: new AbortController(), conversationId: conversation?.id ?? null };
     running.current = me;
     // 떠났거나 다른 대화로 옮겼으면(`running`이 비었다) 이 흐름은 화면을 바꾸지 않는다
@@ -329,6 +339,17 @@ export function LlmPage() {
                     {provider?.model ?? 'LLM'}
                     {busy && ` — ${chat.phase === 'stopping' ? '멈추는 중…' : chat.phase === 'sending' ? '보내는 중…' : '답을 받는 중…'}`}
                   </p>
+                  {waiting && (
+                    <p className="llm-waiting" role="status">
+                      답변을 기다리고 있습니다 · {waiting.seconds}s
+                      {waiting.slow && (
+                        <>
+                          <br />
+                          <strong>답변이 늦어지고 있습니다.</strong>
+                        </>
+                      )}
+                    </p>
+                  )}
                   {chat.live.thinking && (
                     <details className="llm-thinking" open={!chat.live.answer}>
                       <summary>생각 과정 (저장하지 않는다)</summary>

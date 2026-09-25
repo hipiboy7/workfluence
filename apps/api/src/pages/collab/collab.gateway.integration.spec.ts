@@ -2,7 +2,8 @@ import { Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
-import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, DOCUMENT_SCHEMA_VERSION, MAX_DOCUMENT_NODES, type CollabStatus } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_LIMITS, COLLAB_MSG, DOCUMENT_SCHEMA_VERSION, MAX_DOCUMENT_NODES, type CollabStatus } from '@workfluence/shared';
+import { createServer } from 'node:http';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { AuditService } from '../../audit/audit.service';
@@ -208,6 +209,35 @@ async function attach(uid = userId, session = sid): Promise<{ socket: FakeSocket
 
 /** 경고 spy가 받은 event 줄 (P11 D.4) — 문장이 아니라 event 코드와 필드로 가린다 */
 const eventLines = (spy: { mock: { calls: unknown[][] } }): LogLine[] => spy.mock.calls.map((c) => c[0]).filter(isLogLine);
+
+describe('한 프레임의 상한 (P12 FR-1320, 보류 27)', () => {
+  it('**서버가 16MiB를 넘는 프레임을 읽지 않는다** — `ws`의 `maxPayload`로 건다', () => {
+    const server = createServer();
+    try {
+      gw.attach(server);
+      expect((gw as unknown as { wss: { options: { maxPayload: number } } }).wss.options.maxPayload).toBe(COLLAB_LIMITS.maxFrameBytes);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('넘으면 그 연결을 닫고 warn 한 줄 — 누구의 어느 페이지인지와 상한', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const { socket } = await attach();
+      socket.emit('error', Object.assign(new RangeError('Max payload size exceeded'), { code: 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' }));
+      expect(socket.closed).not.toBeNull();
+      const lines = eventLines(warn).filter((l) => l.event === 'collab.frame_too_large');
+      expect(lines.map((l) => l.fields)).toEqual([{ pageId, userId, limitBytes: COLLAB_LIMITS.maxFrameBytes }]);
+      // 다른 소켓 오류는 닫기만 한다
+      const other = await attach();
+      other.socket.emit('error', new Error('ECONNRESET'));
+      expect(eventLines(warn).filter((l) => l.event === 'collab.frame_too_large')).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 describe('마지막 퇴장 저장 (FR-710)', () => {
   it('고친 뒤 마지막 사람이 나가면 버전이 하나 남는다', async () => {

@@ -1,6 +1,6 @@
 import { getSchema } from '@tiptap/core';
 import type { ContentMatch, NodeType } from '@tiptap/pm/model';
-import { ALLOWED_CHILDREN, ALLOWED_MARKS, ALLOWED_NODES, MARKS_IN } from '@workfluence/shared';
+import { ALLOWED_CHILDREN, ALLOWED_MARKS, ALLOWED_NODES, FIRST_CHILD, MARKS_IN, NON_EMPTY_NODES } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
 import { Fragment, Slice, type Node as PMNode } from '@tiptap/pm/model';
 import { editorExtensions, linkAllowed, relWithoutOpener, sliceWithoutOpener } from './extensions';
@@ -36,6 +36,32 @@ function childTypes(type: NodeType): string[] {
 }
 const sorted = (xs: readonly string[]): string[] => [...xs].sort();
 
+/** 한 상태에서 나가는 자식 종류 */
+const edgeTypes = (m: ContentMatch): string[] => sorted(Array.from({ length: m.edgeCount }, (_, i) => m.edge(i).type.name));
+
+/**
+ * **내용 식을 "첫 자식 · 그 뒤 허용 자식의 되풀이 · 비어도 되는가"로 읽는다** (P12 FR-1311, 보류 25). 첫 걸음 뒤의 모든 상태가 "끝나도 되고,
+ * 허용 자식 전부로 나가고, 나간 곳도 같은 상태"여야 한다 — 아니면 두 번째 자식의 규칙 같은 다른 모양이라 `'other'`다.
+ */
+function orderRules(type: NodeType): { nonEmpty: boolean; first: string[] | null } | 'other' {
+  const kids = childTypes(type);
+  const loops = new Map<ContentMatch, boolean>();
+  const isLoop = (m: ContentMatch): boolean => {
+    if (loops.has(m)) return loops.get(m)!;
+    loops.set(m, true); // 되돌아오는 상태는 지금 보는 중이다
+    const ok = m.validEnd && edgeTypes(m).join() === kids.join() && Array.from({ length: m.edgeCount }, (_, i) => m.edge(i).next).every(isLoop);
+    loops.set(m, ok);
+    return ok;
+  };
+  const start = type.contentMatch;
+  if (start.edgeCount === 0) return start.validEnd ? { nonEmpty: false, first: null } : 'other';
+  const nexts = Array.from({ length: start.edgeCount }, (_, i) => start.edge(i).next);
+  if (!nexts.every(isLoop)) return 'other';
+  const firsts = edgeTypes(start);
+  if (start.validEnd && firsts.join() !== kids.join()) return 'other';
+  return { nonEmpty: !start.validEnd, first: firsts.join() === kids.join() ? null : firsts };
+}
+
 describe('편집기 스키마 = 서버 허용 목록 (FR-1007)', () => {
   it('노드 이름이 같다', () => {
     expect(sorted(Object.keys(schema.nodes))).toEqual(sorted(Object.keys(ALLOWED_NODES)));
@@ -58,6 +84,13 @@ describe('편집기 스키마 = 서버 허용 목록 (FR-1007)', () => {
   it('자식 종류가 같다 — 편집기의 내용 식에서 나올 수 있는 것', () => {
     for (const [name, type] of Object.entries(schema.nodes)) {
       expect([name, childTypes(type)]).toEqual([name, sorted(ALLOWED_CHILDREN[name])]);
+    }
+  });
+
+  it('**순서와 개수가 같다** — 첫 자식(`FIRST_CHILD`)·비어 있을 수 없음(`NON_EMPTY_NODES`), 그 밖의 순서 규칙은 없다 (P12 FR-1311, 보류 25)', () => {
+    for (const [name, type] of Object.entries(schema.nodes)) {
+      const expected = { nonEmpty: NON_EMPTY_NODES.includes(name), first: Object.hasOwn(FIRST_CHILD, name) ? sorted(FIRST_CHILD[name]) : null };
+      expect([name, orderRules(type)]).toEqual([name, expected]);
     }
   });
 

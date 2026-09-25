@@ -1,4 +1,4 @@
-import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, type CollabStatus } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_CLOSE_TOO_LARGE, COLLAB_MSG, type CollabStatus } from '@workfluence/shared';
 import { type Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 
@@ -83,8 +83,9 @@ export class CollabLink {
     socket.onmessage = (ev) => this.received(new Uint8Array(ev.data));
     // **끊기면 그렇다고 말한다.** 조용히 끊기면 사람은 계속 쓰고 있는데 아무에게도 안 가고, 새로고침하면 그 내용이 사라진다.
     // **거절로 끊긴 것은 따로 말한다** (P9 FR-1005) — 다시 보내도 같은 편집은 다시 거절된다. 끊긴 방의 저장 상태는 더 모른다
+    // 너무 큰 프레임으로 닫힌 것(1009)도 거절이다 — 같은 편집을 다시 보내도 다시 닫힌다 (P12 FR-1321)
     socket.onclose = (ev) => {
-      this.setState(this.state === 'refused' || ev.code === COLLAB_CLOSE_REFUSED ? 'refused' : 'offline');
+      this.setState(this.state === 'refused' || ev.code === COLLAB_CLOSE_REFUSED || ev.code === COLLAB_CLOSE_TOO_LARGE ? 'refused' : 'offline');
       opts.onSaveBlocked(null);
     };
     socket.onerror = () => {

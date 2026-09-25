@@ -104,6 +104,12 @@ export const AUDIT_ACTIONS = [
 export const COLLAB_CLOSE_REFUSED = 4400;
 
 /**
+ * 한 프레임이 상한(`COLLAB_LIMITS.maxFrameBytes`)을 넘어 서버가 닫았다 — WebSocket 표준의 1009("메시지가 너무 크다", `ws`가 보낸다).
+ * 화면은 관문의 거절(4400)과 같게 말한다 — 다시 보내도 같은 편집은 다시 닫힌다 (P12 FR-1321)
+ */
+export const COLLAB_CLOSE_TOO_LARGE = 1009;
+
+/**
  * 거절·검증 실패의 **까닭**에 적는 이름·키의 최대 길이 (P9 코드 리뷰 4 · 두 번째 코드 리뷰 8). 까닭은 경고 로그와 감사로그(지울 수 없다)로 가고, 이름·키는
  * 조작한 클라이언트가 정한다 — 넘으면 자른다(`cutName`)
  */
@@ -167,6 +173,7 @@ export const LOG_EVENTS = [
   'collab.revoked',
   'collab.recheck_failed',
   'collab.closed',
+  'collab.frame_too_large',
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 

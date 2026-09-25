@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, type CollabStatus, type DocNode, type Principal } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_LIMITS, COLLAB_MSG, type CollabStatus, type DocNode, type Principal } from '@workfluence/shared';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -156,6 +156,9 @@ type Room = {
   saveBlocked: string | null;
 };
 
+/** `ws`가 `maxPayload`를 넘은 프레임에 내는 오류 코드 (ws 8) */
+const WS_FRAME_TOO_LARGE = 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH';
+
 @Injectable()
 export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Collab');
@@ -217,7 +220,8 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       this.log.log(logLine('collab.disabled', '실시간 편집이 꺼져 있다 (WF_COLLAB_ENABLED=false)'));
       return;
     }
-    this.wss = new WebSocketServer({ noServer: true });
+    // **한 프레임의 상한** (P12 FR-1320, 보류 27) — 없으면 `ws` 기본 100MiB를 읽고 판정한다. 넘으면 `ws`가 읽지 않고 1009로 닫는다
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: COLLAB_LIMITS.maxFrameBytes });
     server.on('upgrade', (req, socket, head) => void this.upgrade(req, socket, head));
     // 유휴 저장은 **주기로 본다.** 변경마다 타이머를 걸면 타이머가 타이핑 수만큼 생긴다
     this.timer = setInterval(() => void this.sweep(), 1_000);
@@ -597,7 +601,13 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         this.track(this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(logLine('collab.save_failed', '퇴장 저장 실패', { pageId, trigger: 'leave' }, e))));
       }
     });
-    socket.on('error', () => socket.close());
+    socket.on('error', (e: Error & { code?: string }) => {
+      // 너무 큰 프레임은 `ws`가 읽지 않고 1009로 닫는다(`maxPayload`) — 화면은 관문의 거절과 같게 말한다 (P12 FR-1320·1321)
+      if (e.code === WS_FRAME_TOO_LARGE) {
+        this.log.warn(logLine('collab.frame_too_large', '너무 큰 편집 프레임 — 연결을 닫았다', { pageId, userId: member.principal.id, limitBytes: COLLAB_LIMITS.maxFrameBytes }));
+      }
+      socket.close();
+    });
   }
 
   /**

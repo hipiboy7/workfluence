@@ -1,4 +1,4 @@
-import { createLineSplitter, parseLlmEvent, type LlmAskDto, type LlmStreamEvent } from '@workfluence/shared';
+import { LLM_TIMINGS, createLineSplitter, parseLlmEvent, type LlmAskDto, type LlmStreamEvent } from '@workfluence/shared';
 import { readApiError, requestInit } from '../api';
 
 /**
@@ -119,10 +119,16 @@ export type ChatState = {
   /** 저장되지 않아 입력칸에 되돌릴 질문 (D.5) */
   restore: string | null;
   lastEnd: EndEvent | null;
+  /**
+   * 보낸 시각 — **첫 답 조각이 올 때까지** 기다린 초를 보인다 (P12 FR-1300). 생각 과정도 답 조각이다. 살아 있음 줄은 아니다.
+   * 끝·실패·옮김에서도 비운다. 없으면 `null`
+   */
+  waitingSince: number | null;
 };
 
 export type ChatAction =
-  | { type: 'send'; question: string }
+  /** `at` — 보낸 시각(`Date.now()`). 상태 기계는 시계를 읽지 않는다 */
+  | { type: 'send'; question: string; at: number }
   /** 흐름이 열렸다 — 이제 중지가 닿는다 */
   | { type: 'opened' }
   | { type: 'event'; event: LlmStreamEvent }
@@ -136,7 +142,7 @@ export type ChatAction =
   /** 다른 대화로 옮겼다 */
   | { type: 'reset' };
 
-export const initialChat: ChatState = { phase: 'idle', live: null, error: null, notice: null, restore: null, lastEnd: null };
+export const initialChat: ChatState = { phase: 'idle', live: null, error: null, notice: null, restore: null, lastEnd: null, waitingSince: null };
 
 function evictedNotice(n: number): string | null {
   return n > 0 ? `보관 상한을 넘어 오래된 대화 ${n}개를 지웠다` : null;
@@ -144,7 +150,7 @@ function evictedNotice(n: number): string | null {
 
 /** 끝 줄이 화면에 무엇을 남기나 (D.1·D.5) */
 function onEnd(state: ChatState, e: EndEvent): ChatState {
-  const base = { ...state, phase: 'idle' as const, lastEnd: e };
+  const base = { ...state, phase: 'idle' as const, lastEnd: e, waitingSince: null };
   if (e.saved) {
     const notice = [e.status === 'stopped' ? '중지했다 — 거기까지 저장했다' : null, evictedNotice(e.evicted)].filter(Boolean).join(' · ') || null;
     // 저장은 됐지만 끊긴 답 — 까닭을 말한다(FR-1120). 빈 문장도 까닭이 없는 것이다(`||`)
@@ -157,29 +163,46 @@ function onEnd(state: ChatState, e: EndEvent): ChatState {
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case 'send':
-      return { phase: 'sending', live: { question: action.question, answer: '', thinking: '' }, error: null, notice: null, restore: null, lastEnd: null };
+      return {
+        phase: 'sending',
+        live: { question: action.question, answer: '', thinking: '' },
+        error: null,
+        notice: null,
+        restore: null,
+        lastEnd: null,
+        waitingSince: action.at,
+      };
     case 'opened':
       return state.phase === 'sending' ? { ...state, phase: 'streaming' } : state;
     case 'event': {
       const e = action.event;
       if (e.type === 'end') return onEnd(state, e);
       if (!state.live || e.type === 'ping') return state;
-      if (e.type === 'delta') return { ...state, live: { ...state.live, answer: state.live.answer + e.text } };
+      // 답 조각이 왔다 — 기다림이 끝났다 (P12 FR-1300)
+      if (e.type === 'delta') return { ...state, waitingSince: null, live: { ...state.live, answer: state.live.answer + e.text } };
       // 지금까지 흘러온 답은 생각 과정이었다 (FR-1119) — 생각 과정 쪽으로 옮긴다
-      if (e.type === 'rethink') return { ...state, live: { ...state.live, thinking: state.live.thinking + state.live.answer, answer: '' } };
-      return { ...state, live: { ...state.live, thinking: state.live.thinking + e.text } };
+      if (e.type === 'rethink') return { ...state, waitingSince: null, live: { ...state.live, thinking: state.live.thinking + state.live.answer, answer: '' } };
+      return { ...state, waitingSince: null, live: { ...state.live, thinking: state.live.thinking + e.text } };
     }
     case 'stop':
       return state.phase === 'streaming' ? { ...state, phase: 'stopping' } : state;
     case 'stop-missed':
       return state.phase === 'stopping' ? { ...state, phase: 'streaming' } : state;
     case 'failed':
-      return { ...state, phase: 'idle', live: null, error: action.message, notice: null, restore: state.live?.question ?? null };
+      return { ...state, phase: 'idle', live: null, error: action.message, notice: null, restore: state.live?.question ?? null, waitingSince: null };
     case 'settled':
       return { ...state, live: null, restore: null };
     case 'reset':
       return initialChat;
   }
+}
+
+/**
+ * 기다림의 표시 (P12 FR-1300·1301) — 기다린 초(내림)와 늦어지고 있는가(`LLM_TIMINGS.slowAnswerMs` 이상). 시계는 부르는 쪽이 준다
+ */
+export function waitLabel(since: number, now: number): { seconds: number; slow: boolean } {
+  const ms = Math.max(0, now - since);
+  return { seconds: Math.floor(ms / 1000), slow: ms >= LLM_TIMINGS.slowAnswerMs };
 }
 
 /** 고정하지 않은 대화의 남은 날 — 화면의 "N일 뒤 지워짐" */
