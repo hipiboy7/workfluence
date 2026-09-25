@@ -134,10 +134,31 @@ function fromYNode(node: unknown): DocNode[] {
   // **순서·개수를 어긴 요소는 떨어뜨린다** (P12 FR-1313, 보류 25). 편집기(y-tiptap)는 그런 요소를 노드로 만들지 못해 공유 문서에서 지우고
   // 이웃은 남긴다(설계서 C.2 실측) — 자식을 먼저 읽으므로 비게 된 부모도 같은 판정으로 떨어진다. 정본은 편집기가 보는 모양을 적는다
   if (childOrderProblem(el.nodeName, content.map((c) => c.type))) return [];
+  // (같은 판정을 `keeps`가 공유 문서에서 한다 — 멘션 자리가 정본과 같게)
   const out: DocNode = { type: el.nodeName };
   if (Object.keys(attrs).length) out.attrs = attrs;
   if (content.length) out.content = content;
   return [out];
+}
+
+/**
+ * **편집기가 이 요소를 그리는가** — `fromYNode`가 떨어뜨리는 것과 같은 판정을 공유 문서에서 한다(자식을 먼저, 아래에서 위로). 멘션 자리
+ * (`mentionSites`)가 정본에 없는 요소 안을 세지 않게 (P12 코드 리뷰 3). 글자는 비어 있지 않을 때만 자식이다(`fromYText`와 같다)
+ */
+function keeps(el: Y.XmlElement, memo: Map<Y.XmlElement, boolean>): boolean {
+  const hit = memo.get(el);
+  if (hit !== undefined) return hit;
+  const kinds: string[] = [];
+  for (const c of el.toArray()) {
+    if (c instanceof Y.XmlText) {
+      if (fromYText(c).length) kinds.push('text');
+    } else if (c instanceof Y.XmlElement && keeps(c, memo)) {
+      kinds.push(c.nodeName);
+    }
+  }
+  const ok = childOrderProblem(el.nodeName, kinds) === null;
+  memo.set(el, ok);
+  return ok;
 }
 
 /**
@@ -182,6 +203,7 @@ export function mentionSites(
     clients.push(-1);
     clocks.push(-1);
   };
+  const kept = new Map<Y.XmlElement, boolean>();
   const walk = (node: unknown): void => {
     if (node instanceof Y.XmlText) {
       for (let item = node._start; item; item = item.right) {
@@ -203,6 +225,8 @@ export function mentionSites(
       pushBreak();
       return;
     }
+    // 변환이 떨어뜨리는 요소는 정본에 없다 — 그 안의 멘션도 자리가 아니다 (P12 코드 리뷰 3)
+    if (!keeps(node, kept)) return;
     for (const child of node.toArray()) walk(child);
     if (BLOCK_NODES.has(node.nodeName)) pushBreak();
   };

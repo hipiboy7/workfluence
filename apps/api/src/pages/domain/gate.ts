@@ -1,4 +1,4 @@
-import { ALLOWED_CHILDREN, MARKS_IN, MAX_DOCUMENT_DEPTH, cutName, markProblems, nodeAttrProblems } from '@workfluence/shared';
+import { ALLOWED_CHILDREN, FIRST_CHILD, MARKS_IN, MAX_DOCUMENT_DEPTH, cutName, markProblems, nodeAttrProblems } from '@workfluence/shared';
 import * as Y from 'yjs';
 import { COLLAB_FIELD } from './ydoc';
 
@@ -408,6 +408,57 @@ function repeatsClient(decoded: Decoded, encoded?: Uint8Array): boolean {
 }
 
 /**
+ * 변경이 **자식 목록을 건드리는 목록 항목** — 새 조각이 목록 항목 바로 아래에 놓이거나, 지우는 조각이 목록 항목 바로 아래에 있다.
+ * 글자를 치고 지우는 것(목록 항목의 문단 안)은 여기 없다 — 흉내 내는 비용(문서 복제)은 목록 항목의 구조를 바꿀 때만 든다
+ */
+function listItemsTouched(items: readonly Y.Item[], decoded: Decoded, doc: Y.Doc, lookup: Lookup): IdLike[] {
+  const out = new Map<string, IdLike>();
+  const add = (holder: Y.Item | null): void => {
+    if (holder) out.set(`${holder.id.client}:${holder.id.clock}`, holder.id);
+  };
+  for (const item of items) {
+    const at = lookup.locate(item);
+    if (at.parentSub === null && at.place.kind === 'element' && at.place.name === 'listItem') add(at.holder);
+  }
+  // 지우는 조각 — 서버에 있는 것은 서버 문서에서, 같은 변경이 막 만든 것은 변경 안에서 찾는다(치고 지우기를 한 트랜잭션에서).
+  // 새 조각의 자리는 위에서 이미 보았다
+  for (const [client, ranges] of decoded.ds.clients) {
+    const state = Y.getState(doc.store, client);
+    for (const r of ranges) {
+      for (let clock = r.clock; clock < Math.min(r.clock + r.len, state); ) {
+        const s = Y.getItem(doc.store, Y.createID(client, clock)) as Y.Item | Y.GC | undefined;
+        if (!s) break;
+        if (s instanceof Y.Item && s.parentSub === null && s.parent instanceof Y.XmlElement && s.parent.nodeName === 'listItem') add(s.parent._item);
+        clock = s.id.clock + s.length;
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+/** 그 문서에서 그 목록 항목의 첫 자식이 문단이 아닌가 (지워졌거나 없으면 아니다) */
+function firstChildBroken(d: Y.Doc, id: IdLike): boolean {
+  if (id.clock >= Y.getState(d.store, id.client)) return false;
+  const item = Y.getItem(d.store, Y.createID(id.client, id.clock));
+  if (!(item instanceof Y.Item) || item.deleted || !(item.content instanceof Y.ContentType) || !(item.content.type instanceof Y.XmlElement)) return false;
+  const first = item.content.type.toArray()[0];
+  return first !== undefined && !(first instanceof Y.XmlElement && FIRST_CHILD.listItem.includes(first.nodeName));
+}
+
+/**
+ * **적용한 뒤 새로 첫 자식이 문단이 아니게 되는 목록 항목이 있는가** (P12 보안 검토 1). 받는 편집기(y-tiptap)는 그런 항목을 **통째로**
+ * 지운다 — 그 안의 남의 글까지, 그리고 그 삭제는 받은 사람의 연결에서 나가 그 사람 이름으로 저장된다. 서버 문서를 복제해 변경을 적용해
+ * 본다(서버 문서는 고치지 않는다). 옛 상태에서 이미 어긴 항목은 보지 않는다 — 새로 만드는 것만 막는다.
+ * 비어 있게 되는 것은 막지 않는다 — 두 사람이 따로 지운 결과일 수 있고(정상 동시 편집), 받는 편집기가 지우는 것은 이미 비운 요소다
+ */
+function firstChildBreaks(doc: Y.Doc, encoded: Uint8Array, targets: readonly IdLike[]): boolean {
+  const sim = new Y.Doc();
+  Y.applyUpdate(sim, Y.encodeStateAsUpdate(doc));
+  Y.applyUpdate(sim, encoded);
+  return targets.some((id) => firstChildBroken(sim, id) && !firstChildBroken(doc, id));
+}
+
+/**
  * 변경 하나를 판정한다 (D.2~D.4). `owners`는 클라이언트 ID → 주인(P8 `owners`를 넓힌 것, D.4). `encoded`는 그 변경의 바이트다 —
  * 주면 클라이언트 덩어리 수까지 대조한다(게이트웨이는 늘 준다).
  * 지나면 `bind`에 **새로 묶을 클라이언트**를 준다 — 새 조각이 든 클라이언트가 하나이고 주인이 없을 때만.
@@ -450,6 +501,14 @@ export function inspectUpdate(decoded: Decoded, doc: Y.Doc, sender: string, owne
   for (const item of items) {
     const problem = structureProblem(item, lookup);
     if (problem) return { ok: false, rule: 'structure', reason: problem };
+  }
+
+  // 2-1. 목록 항목의 첫 자식 — **적용한 뒤를 본다** (P12 보안 검토 1). 목록 항목의 자식 목록을 건드리는 변경만 흉내 낸다
+  if (encoded) {
+    const targets = listItemsTouched(items, decoded, doc, lookup);
+    if (targets.length && firstChildBreaks(doc, encoded, targets)) {
+      return { ok: false, rule: 'structure', reason: '목록 항목의 첫 자식이 문단이 아니게 되는 변경' };
+    }
   }
 
   // 3. 주인 (D.4)

@@ -3,7 +3,10 @@ import { Fragment, Slice, type Node as PMNode } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import StarterKit from '@tiptap/starter-kit';
-import { ALLOWED_LINK_HREF, TABLE_LIMITS } from '@workfluence/shared';
+import { ALLOWED_LINK_HREF, TABLE_LIMITS, nodeAttrProblems } from '@workfluence/shared';
+import { ySyncPluginKey } from '@tiptap/y-tiptap';
+import type { Transaction } from '@tiptap/pm/state';
+import { AttrStep, ReplaceAroundStep, ReplaceStep } from '@tiptap/pm/transform';
 
 /**
  * **링크가 되어도 되는 주소인가** — 서버 검증과 같은 식이다(7절: http(s)·내부 경로·앵커만, P9_설계서_Gate FR-1008).
@@ -63,12 +66,6 @@ const PastedLinkRel = Extension.create({
 });
 
 /**
- * **두 편집기가 쓰는 확장 목록** (P9 D.7, FR-1007). 보기·편집용(`Editor.tsx`)과 실시간(`CollabEditor.tsx`)이 이것 하나를 쓴다 —
- * 따로 들면 한쪽만 바뀐다. 이 목록에서 뽑은 스키마가 서버 허용 목록과 같은지를 `extensions.spec.ts`가 본다.
- *
- * `collab`이면 실행 취소를 끈다 — Yjs가 자기 실행 취소를 들고 있어 둘을 같이 두면 내 취소가 남의 편집까지 되돌린다.
- */
-/**
  * 붙여 넣은 HTML의 **합치는 수**를 서버가 받는 범위로 (P12_설계서_Limits D.4, FR-1323). TipTap은 `colspan`·`rowspan`을 그대로 읽는다 —
  * 숫자가 아니면 글자로, 큰 값은 그대로 남아 관문이 그 사람을 끊었다. 정수가 아니거나 1보다 작으면 1, 넘으면 상한(브라우저가 그리는 것과 같다)
  */
@@ -80,13 +77,13 @@ export function clampSpan(raw: unknown): number {
 
 /**
  * 붙여 넣은 **열 너비** — TipTap은 `parseInt`로 읽어 숫자가 아닌 칸이 `NaN`이 된다. 그 칸은 비우고(null), 넘는 너비는 상한으로, 칸 수도
- * 상한까지 (FR-1323). 모두 비면 너비가 없는 것(null)이다
+ * 상한까지 (FR-1323). 0은 둔다 — 표 편집(prosemirror-tables)이 "너비 없음"으로 쓰는 값이다. 모두 비면 너비가 없는 것(null)이다
  */
 export function clampColwidth(raw: unknown): (number | null)[] | null {
   if (!Array.isArray(raw)) return null;
   const out = raw
     .slice(0, TABLE_LIMITS.maxSpan)
-    .map((w: unknown) => (typeof w === 'number' && Number.isFinite(w) && w >= 1 ? Math.min(Math.trunc(w), TABLE_LIMITS.maxColWidthPx) : null));
+    .map((w: unknown) => (typeof w === 'number' && Number.isFinite(w) && w >= 0 ? Math.min(Math.trunc(w), TABLE_LIMITS.maxColWidthPx) : null));
   return out.some((w) => w !== null) ? out : null;
 }
 
@@ -107,6 +104,47 @@ function boundedCell<T extends typeof TableCell | typeof TableHeader>(cell: T): 
   }) as T;
 }
 
+/** 표 칸의 값이 서버가 받는 범위 밖인가 — 서버의 정본 검증·관문과 **같은 함수**다(`nodeAttrProblems`) */
+function badCell(node: PMNode): boolean {
+  return (node.type.name === 'tableCell' || node.type.name === 'tableHeader') && nodeAttrProblems(node.type.name, node.attrs).length > 0;
+}
+
+/** 이 트랜잭션이 범위 밖의 표 칸 값을 **만드는가** — 들어오는 조각과 속성 바꾸기만 본다(문서 전체를 훑지 않는다) */
+export function makesBadCell(tr: Transaction): boolean {
+  for (const step of tr.steps) {
+    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) {
+      let bad = false;
+      step.slice.content.descendants((n) => {
+        if (badCell(n)) bad = true;
+        return !bad;
+      });
+      if (bad) return true;
+    } else if (step instanceof AttrStep && ['colspan', 'rowspan', 'colwidth'].includes(step.attr)) {
+      const node = tr.docs[tr.steps.indexOf(step)]?.nodeAt(step.pos);
+      if (node && badCell(node.type.create({ ...node.attrs, [step.attr]: step.value }))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * **표 명령이 범위 밖의 값을 만들면 그 편집을 하지 않는다** (P12 보안 검토 2 · 코드 리뷰 2). 붙여 넣기는 줄이지만(`boundedCell`), 칸 합치기·
+ * 열 넣기는 있는 값을 더한다 — 누가 `colspan` 999를 심어 두면 옆 칸과 합친 동료의 편집기가 1001을 만들어 관문에 끊겼다. 서버와 같은 판정으로
+ * 편집기가 먼저 거른다. **남에게서 온 변경(실시간 동기화)은 거르지 않는다** — 거르면 화면과 공유 문서가 어긋난다
+ */
+const BoundedTableValues = Extension.create({
+  name: 'boundedTableValues',
+  addProseMirrorPlugins() {
+    return [new Plugin({ filterTransaction: (tr) => !tr.docChanged || tr.getMeta(ySyncPluginKey) !== undefined || !makesBadCell(tr) })];
+  },
+});
+
+/**
+ * **두 편집기가 쓰는 확장 목록** (P9 D.7, FR-1007). 보기·편집용(`Editor.tsx`)과 실시간(`CollabEditor.tsx`)이 이것 하나를 쓴다 —
+ * 따로 들면 한쪽만 바뀐다. 이 목록에서 뽑은 스키마가 서버 허용 목록과 같은지를 `extensions.spec.ts`가 본다.
+ *
+ * `collab`이면 실행 취소를 끈다 — Yjs가 자기 실행 취소를 들고 있어 둘을 같이 두면 내 취소가 남의 편집까지 되돌린다.
+ */
 export function editorExtensions(opts: { collab?: boolean } = {}): AnyExtension[] {
   return [
     StarterKit.configure({
@@ -122,6 +160,7 @@ export function editorExtensions(opts: { collab?: boolean } = {}): AnyExtension[
     TableRow,
     boundedCell(TableHeader),
     boundedCell(TableCell),
+    BoundedTableValues,
     PastedLinkRel,
   ];
 }

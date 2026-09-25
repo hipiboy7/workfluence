@@ -104,7 +104,7 @@ export const FIRST_CHILD: Record<string, readonly string[]> = { listItem: ['para
 export function childOrderProblem(type: string, childTypes: readonly string[]): string | null {
   if (childTypes.length === 0) return NON_EMPTY_NODES.includes(type) ? `'${type}'는 비어 있을 수 없다` : null;
   const firsts = Object.hasOwn(FIRST_CHILD, type) ? FIRST_CHILD[type] : null;
-  if (firsts && !firsts.includes(childTypes[0])) return `첫 자식은 ${firsts.join('·')}여야 한다 — '${cutName(childTypes[0])}'`;
+  if (firsts && !firsts.includes(childTypes[0])) return `'${type}'의 첫 자식은 ${firsts.join('·')}여야 한다 — '${cutName(childTypes[0])}'`;
   return null;
 }
 
@@ -171,9 +171,12 @@ export function validateDocument(input: unknown): DocumentValidation {
       errors.push(`${path}: content는 배열`);
     } else if (type !== 'text') {
       const kids = (node.content ?? []) as unknown[];
-      // 순서·개수 (P12 FR-1312) — 종류를 모르는 자식은 방문할 때 짚는다
-      const order = childOrderProblem(type, kids.map((k) => (isRecord(k) && typeof k.type === 'string' ? k.type : '')));
-      if (order) errors.push(type === 'doc' && order.endsWith('비어 있을 수 없다') ? `${path}: ${order}` : `${path}(${type}): ${order}`);
+      const kinds = kids.map((k) => (isRecord(k) && typeof k.type === 'string' ? k.type : ''));
+      // 순서·개수 (P12 FR-1312). **첫 자식이 그 자리에 올 수 없는 것이면 여기서 짚지 않는다** — 방문·자리 판정이 짚는다. 같은 잘못을 두 번
+      // 말하면 오류 20건의 한도를 헛되이 쓴다 (P12 코드 리뷰 6)
+      const firstFits = kinds.length === 0 || ALLOWED_CHILDREN[type].includes(kinds[0]);
+      const order = firstFits ? childOrderProblem(type, kinds) : null;
+      if (order) errors.push(`${path}: ${order}`);
       kids.forEach((child, i) => {
         const childPath = `${path}.content[${i}]`;
         placementProblems(type, child, childPath, errors);
@@ -241,15 +244,17 @@ export function nodeAttrProblems(type: string, attrs: unknown, opts: { partial?:
     for (const [key, v] of [['colspan', colspan], ['rowspan', rowspan]] as const) {
       if (v !== undefined && v !== null && !inRange(v, TABLE_LIMITS.maxSpan)) out.push(`속성 '${key}' 값은 1~${TABLE_LIMITS.maxSpan}의 정수`);
     }
-    const widthsOk = Array.isArray(colwidth) && colwidth.length <= TABLE_LIMITS.maxSpan && colwidth.every((w) => w === null || inRange(w, TABLE_LIMITS.maxColWidthPx));
-    if (colwidth !== undefined && colwidth !== null && !widthsOk) out.push(`속성 'colwidth' 값은 1~${TABLE_LIMITS.maxColWidthPx}의 정수 배열`);
+    // **0을 받는다** — 표 편집(prosemirror-tables)이 "너비 없음"으로 0을 쓴다(열 넣기·표 정리). 막으면 정상 편집이 끊긴다 (P12 코드 리뷰 1)
+    const widthsOk =
+      Array.isArray(colwidth) && colwidth.length <= TABLE_LIMITS.maxSpan && colwidth.every((w) => w === null || inRange(w, TABLE_LIMITS.maxColWidthPx, 0));
+    if (colwidth !== undefined && colwidth !== null && !widthsOk) out.push(`속성 'colwidth' 값은 0~${TABLE_LIMITS.maxColWidthPx}의 정수 배열`);
   }
   return out;
 }
 
-/** 1 이상 `max` 이하의 정수인가 */
-function inRange(v: unknown, max: number): boolean {
-  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= max;
+/** `min` 이상 `max` 이하의 정수인가 */
+function inRange(v: unknown, max: number, min = 1): boolean {
+  return typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 }
 
 /** 표 칸 정렬 — TipTap `normalizeTableCellAlign`이 받는 값과 같다 */

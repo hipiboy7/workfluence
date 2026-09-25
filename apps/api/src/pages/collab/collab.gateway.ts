@@ -605,6 +605,19 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       // 너무 큰 프레임은 `ws`가 읽지 않고 1009로 닫는다(`maxPayload`) — 화면은 관문의 거절과 같게 말한다 (P12 FR-1320·1321)
       if (e.code === WS_FRAME_TOO_LARGE) {
         this.log.warn(logLine('collab.frame_too_large', '너무 큰 편집 프레임 — 연결을 닫았다', { pageId, userId: member.principal.id, limitBytes: COLLAB_LIMITS.maxFrameBytes }));
+        // **감사에도 남긴다** — 화면은 이것을 관문의 거절과 같게 말하고 "관리자가 감사로그에서 본다"고 한다 (6절 감사 대상, P12 코드 리뷰 4)
+        this.track(
+          this.audit
+            .record({
+              action: 'page.collab.reject',
+              actorId: member.principal.id,
+              targetType: 'page',
+              targetId: pageId,
+              detail: { rule: 'size', reason: `한 번에 보낼 수 있는 크기(${COLLAB_LIMITS.maxFrameBytes / 1024 / 1024}MiB)를 넘은 편집` },
+              ip: member.ip ?? undefined,
+            })
+            .catch((err: unknown) => this.log.error(logLine('collab.gate_audit_failed', '거절을 감사로그에 남기지 못했다', { pageId }, err))),
+        );
       }
       socket.close();
     });

@@ -22,6 +22,31 @@ type EndEvent = Extract<LlmStreamEvent, { type: 'end' }>;
 type RunningAsk = { controller: AbortController; conversationId: string | null };
 
 /**
+ * **첫 답을 기다린 초** (P12 FR-1300·1301). 이 줄만 1초마다 다시 그린다 — 화면 전체(대화 목록·메시지)를 다시 그리지 않게(P12 코드 리뷰 9).
+ * 초는 읽어 주지 않는다(`aria-hidden`) — 답 자리는 읽어 주는 곳이라 1초마다 읽는다. 늦어진다는 알림은 한 번 읽힌다. 서버를 부르지 않는다(NFR-121)
+ */
+function WaitLabel({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [since]);
+  const w = waitLabel(since, now);
+  return (
+    <p className="llm-waiting">
+      <span aria-hidden="true">답변을 기다리고 있습니다 · {w.seconds}s</span>
+      {w.slow && (
+        <>
+          <br />
+          <strong>답변이 늦어지고 있습니다.</strong>
+        </>
+      )}
+    </p>
+  );
+}
+
+/**
  * LLM 질문 (P10_설계서_Llm G절, FR-1110~1139).
  *
  * 왼쪽은 내 대화(고정·최근)와 지켜야 할 상한, 오른쪽은 대화와 흘러나오는 답이다. 흐름을 읽고 상태를 바꾸는 규칙은
@@ -117,16 +142,6 @@ export function LlmPage() {
     const fromConversation = conversation?.providerId && providers.some((p) => p.id === conversation.providerId) ? conversation.providerId : null;
     setProviderId((cur) => fromConversation ?? (providers.some((p) => p.id === cur) ? cur : providers[0].id));
   }, [providers, conversation]);
-
-  // **기다린 초** (P12 FR-1300·1301) — 첫 답 조각이 올 때까지만 1초마다 다시 그린다. 서버를 부르지 않는다(NFR-121)
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (chat.waitingSince === null) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [chat.waitingSince]);
-  const waiting = chat.waitingSince === null ? null : waitLabel(chat.waitingSince, now);
 
   // 저장되지 않은 질문은 입력칸에 되돌린다 (D.5) — 비어 있을 때만. 그 사이 새로 친 것을 덮지 않는다
   useEffect(() => {
@@ -339,17 +354,8 @@ export function LlmPage() {
                     {provider?.model ?? 'LLM'}
                     {busy && ` — ${chat.phase === 'stopping' ? '멈추는 중…' : chat.phase === 'sending' ? '보내는 중…' : '답을 받는 중…'}`}
                   </p>
-                  {waiting && (
-                    <p className="llm-waiting" role="status">
-                      답변을 기다리고 있습니다 · {waiting.seconds}s
-                      {waiting.slow && (
-                        <>
-                          <br />
-                          <strong>답변이 늦어지고 있습니다.</strong>
-                        </>
-                      )}
-                    </p>
-                  )}
+                  {/* 멈추는 중이면 보이지 않는다 — 사람이 멈추라고 했는데 "늦어지고 있다"고 말하지 않는다 (P12 코드 리뷰 10) */}
+                  {chat.waitingSince !== null && chat.phase !== 'stopping' && <WaitLabel since={chat.waitingSince} />}
                   {chat.live.thinking && (
                     <details className="llm-thinking" open={!chat.live.answer}>
                       <summary>생각 과정 (저장하지 않는다)</summary>

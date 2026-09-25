@@ -233,6 +233,10 @@ describe('한 프레임의 상한 (P12 FR-1320, 보류 27)', () => {
       const other = await attach();
       other.socket.emit('error', new Error('ECONNRESET'));
       expect(eventLines(warn).filter((l) => l.event === 'collab.frame_too_large')).toHaveLength(1);
+      // 감사에도(다른 소켓 오류는 남기지 않는다) 거절로 남는다 — 화면이 "관리자가 감사로그에서 본다"고 말한다
+      await gw.onModuleDestroy();
+      const rows = await db.execute<{ actor_id: string; detail: { rule: string } }>(sql`SELECT actor_id, detail FROM audit_events WHERE action = 'page.collab.reject'`);
+      expect(rows.rows.map((r) => [r.actor_id, r.detail.rule])).toEqual([[userId, 'size']]);
     } finally {
       warn.mockRestore();
     }

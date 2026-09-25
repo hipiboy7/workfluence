@@ -291,6 +291,9 @@ describe('mentionSites — 멘션 자리', () => {
       doc({ type: 'blockquote', content: [p(t('인용 kim@example.internal'))] }, { type: 'codeBlock', content: [t('code @x1')] }),
       doc(p(), p(), p(), p(t('빈 문단 뒤 @kim @kim'))),
       doc(),
+      // **변환이 떨어뜨리는 요소 안의 멘션은 자리가 아니다** — 정본에 없는 멘션으로 부른 사람을 고르면 안 된다 (P12 코드 리뷰 3)
+      doc({ type: 'bulletList', content: [{ type: 'listItem', content: [p(t('@kim 보임'))] }, { type: 'listItem', content: [{ type: 'blockquote', content: [p(t('@lee 조작'))] }] }] }),
+      doc({ type: 'blockquote', content: [] }, p(t('@park'))),
     ];
     for (const d of samples) {
       const ydoc = yDocFromDoc(d);
