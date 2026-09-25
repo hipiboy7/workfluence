@@ -24,7 +24,7 @@ const seen: Seen[] = [];
 let mock: Server;
 let mockBase = '';
 
-/** 가짜 vLLM — `/v1/models`와 `/v1/chat/completions`(SSE). 질문에 `[천천히]`가 있으면 끝없이 천천히 흘린다(중지 시험) */
+/** 가짜 vLLM — `/v1/models`와 `/v1/chat/completions`(SSE). 질문에 `[천천히]`가 있으면 끝없이 천천히 흘린다(중지 시험), `[늦게]`가 있으면 첫 조각을 6초 늦춘다(붐빌 때 — P12 기다림 시험) */
 function handle(req: IncomingMessage, res: ServerResponse, raw: string): void {
   const body = raw ? (JSON.parse(raw) as { messages?: { role: string; content: string }[] }) : {};
   const s: Seen = { method: req.method ?? '', url: req.url ?? '', auth: req.headers.authorization, messages: body.messages ?? [], closedEarly: false };
@@ -61,7 +61,8 @@ function handle(req: IncomingMessage, res: ServerResponse, raw: string): void {
     finished = true;
     res.end('data: [DONE]\n\n');
   };
-  tick();
+  if (last.includes('[늦게]')) setTimeout(tick, 6_000);
+  else tick();
 }
 
 const chats = () => seen.filter((s) => s.url === '/v1/chat/completions');
@@ -223,6 +224,26 @@ test('**페이지를 떠나면 받던 답을 멈춘다** — 받은 데까지 �
   expect(chats().length).toBe(before + 1);
   // 떠나기 전의 답은 받은 데까지 남았다 (FR-1122)
   await expect(page.getByRole('complementary', { name: '대화 목록' })).toContainText('[천천히] 떠나기 전의 답');
+});
+
+test('**답을 기다리는 동안 기다린 초가 보이고, 5초부터 "답변이 늦어지고 있습니다."** — 첫 답이 오면 사라진다 (P12 FR-1300·1301)', async ({ page }) => {
+  await login(page, MEMBER.username, MEMBER.password);
+  await page.goto('/llm');
+  await chooseProvider(page);
+  await page.getByLabel('질문', { exact: true }).fill('[늦게] 붐빌 때의 질문');
+  await page.getByRole('button', { name: '보내기' }).click();
+
+  const live = page.getByLabel('흘러나오는 답');
+  await expect(live).toContainText(/답변을 기다리고 있습니다 · [0-3]s/);
+  await expect(live).not.toContainText('답변이 늦어지고 있습니다.');
+  await expect(live).toContainText('답변이 늦어지고 있습니다.', { timeout: 8_000 });
+  await expect(live).toContainText(/답변을 기다리고 있습니다 · [5-6]s/);
+  // 첫 조각(가짜 LLM이 6초 뒤에 보낸다)이 오면 기다림이 사라지고 답이 흐른다
+  await expect(live).toContainText('받은 질문:', { timeout: 10_000 });
+  await expect(live).not.toContainText('기다리고 있습니다');
+  await expect(live).not.toContainText('늦어지고 있습니다');
+  // 저장까지 기다린다 — 흐르는 중에 시험이 끝나면 뒤의 정리와 겹친다 (T-050)
+  await expect(page).toHaveURL(/\/llm\/[0-9a-f-]{36}$/);
 });
 
 test('위키 페이지를 마크다운으로 복사해 질문에 붙인다', async ({ page }) => {
