@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { MAX_DOCUMENT_DEPTH, validateDocument } from '@workfluence/shared';
+import { FIRST_CHILD, MAX_DOCUMENT_DEPTH, validateDocument } from '@workfluence/shared';
 import { inspectUpdate, integrable, type GateVerdict } from './gate';
 import { docFromYDoc } from './ydoc';
 
@@ -809,6 +809,79 @@ describe('목록 항목의 첫 자식 — 적용한 뒤를 본다 (P12 보안 �
     d.getXmlFragment('default').insert(0, [list(li(quote), li(para('둘째'))), para('끝')]);
     const v = judge(d, change(screen(d), (f) => ((f.get(0) as Y.XmlElement).get(1) as Y.XmlElement).insert(1, [para('둘째에 더한 문단')])));
     expect(v.ok).toBe(true);
+  });
+
+  it('첫 자식 규칙이 있는 노드마다 본다 — 공유 규칙(`FIRST_CHILD`)에 노드가 늘면 관문도 따라간다 (P12 종료 루틴 자체 점검 4)', () => {
+    for (const type of Object.keys(FIRST_CHILD)) {
+      const d = new Y.Doc();
+      const holder = new Y.XmlElement(type);
+      holder.insert(0, [para('첫 문단')]);
+      d.getXmlFragment('default').insert(0, [list(holder)]);
+      const quote = new Y.XmlElement('blockquote');
+      quote.insert(0, [para('조작')]);
+      const v = judge(d, change(screen(d), (f) => ((f.get(0) as Y.XmlElement).get(0) as Y.XmlElement).insert(0, [quote])));
+      expect(refused(v).reason, type).toBe('목록 항목의 첫 자식이 문단이 아니게 되는 변경');
+    }
+  });
+});
+
+/**
+ * **흉내는 방이 들고 있는 복제본에 한다** (P12 종료 루틴 자체 점검 1). 변경마다 서버 문서를 통째로 복제하면 그 비용이 **편집 이력의 크기**에
+ * 비례한다 — 30만 번 고친 문서에서 목록의 Enter 한 번이 1.6초 동안 서버의 모든 방을 멈췄다. 게이트웨이는 서버 문서와 같은 복제본을 하나
+ * 들고(`scratch`), 관문은 거기에 그 변경만 적용한다 — 비용은 변경의 크기다. 받은 변경은 서버 문서에도 적용되어 둘이 다시 같아지고, 받지
+ * 않았으면 게이트웨이가 복제본을 버린다. 그래서 **흉내는 다른 판정을 다 지난 뒤에** 한다 — 흉내 뒤에 다른 까닭으로 거절되면 복제본을
+ * 버릴 일이 늘어난다
+ */
+describe('흉내는 방의 복제본에 — 변경마다 복제하지 않는다 (P12 종료 루틴 자체 점검 1)', () => {
+  const li = (...c: Y.XmlElement[]): Y.XmlElement => {
+    const e = new Y.XmlElement('listItem');
+    e.insert(0, c);
+    return e;
+  };
+  function withList(): Y.Doc {
+    const d = new Y.Doc();
+    const l = new Y.XmlElement('bulletList');
+    l.insert(0, [li(para('남의 글'))]);
+    d.getXmlFragment('default').insert(0, [l, para('끝')]);
+    return d;
+  }
+  const clone = (d: Y.Doc): Y.Doc => {
+    const c = new Y.Doc();
+    Y.applyUpdate(c, Y.encodeStateAsUpdate(d));
+    return c;
+  };
+  const sv = (d: Y.Doc): string => Buffer.from(Y.encodeStateVector(d)).toString('hex');
+
+  it('목록 구조를 바꾸는 변경은 복제본에 그 변경만 적용한다 — 받으면 복제본이 서버 문서의 다음 모습과 같다', () => {
+    const srv = withList();
+    const copy = clone(srv);
+    let asked = 0;
+    const u = change(screen(srv), (f) => (f.get(0) as Y.XmlElement).insert(1, [li(para('새 항목'))]));
+    const v = inspectUpdate(Y.decodeUpdate(u), srv, U, new Map(), u, () => (asked++, copy));
+    expect(v.ok).toBe(true);
+    expect(asked).toBe(1);
+    Y.applyUpdate(srv, u);
+    expect(sv(copy)).toBe(sv(srv));
+  });
+
+  it('글자 치기는 복제본을 부르지 않는다', () => {
+    const srv = withList();
+    let asked = 0;
+    const s = screen(srv);
+    const u = change(s, (f) => (((f.get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) instanceof Y.XmlText && ((((f.get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) as Y.XmlText).insert(0, '가'));
+    expect(inspectUpdate(Y.decodeUpdate(u), srv, U, new Map(), u, () => (asked++, clone(srv))).ok).toBe(true);
+    expect(asked).toBe(0);
+  });
+
+  it('**다른 까닭으로 거절되는 변경은 복제본을 건드리지 않는다** — 흉내는 마지막이다', () => {
+    const srv = withList();
+    const s = screen(srv);
+    const owners = new Map([[s.clientID, X]]);
+    let asked = 0;
+    const u = change(s, (f) => (f.get(0) as Y.XmlElement).insert(1, [li(para('남의 이름으로 새 항목'))]));
+    const v = inspectUpdate(Y.decodeUpdate(u), srv, U, owners, u, () => (asked++, clone(srv)));
+    expect(refused(v).rule).toBe('owner');
+    expect(asked).toBe(0);
   });
 });
 
