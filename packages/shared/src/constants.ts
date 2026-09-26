@@ -174,6 +174,7 @@ export const LOG_EVENTS = [
   'collab.recheck_failed',
   'collab.closed',
   'collab.frame_too_large',
+  'collab.scratch_failed',
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 

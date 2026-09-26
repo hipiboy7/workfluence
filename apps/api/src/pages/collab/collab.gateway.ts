@@ -435,8 +435,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (!room.scratch) return;
       try {
         Y.applyUpdate(room.scratch, update);
-      } catch {
+      } catch (e) {
         room.scratch = null;
+        // 조용히 버리면 되풀이될 때 목록 변경마다 복제본을 다시 만들며 느려지고 아무 줄도 남지 않는다 (P12 종료 루틴 자체 점검 둘째 4)
+        this.log.warn(logLine('collab.scratch_failed', '관문의 복제본이 서버 문서를 따라가지 못해 버렸다', { pageId }, e));
       }
     });
 
@@ -578,10 +580,16 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         }
         // **적용하기 전에 본다** (P9 D.1). 적용한 뒤 고치는 길은 남이 차지한 시계 구간을 되돌리지 못한다(보류 24).
         // 받은 바이트도 넘긴다 — 같은 클라이언트의 덩어리가 되풀이됐는지는 읽은 것만으로 가릴 수 없다 (D.2)
-        const verdict = inspectUpdate(decoded, room.doc, member.principal.id, room.ledger.owners, payload, () => (room.scratch ??= cloneDoc(room.doc)));
+        let simulated = false;
+        const scratch = (): Y.Doc => {
+          simulated = true;
+          return (room.scratch ??= cloneDoc(room.doc));
+        };
+        const verdict = inspectUpdate(decoded, room.doc, member.principal.id, room.ledger.owners, payload, scratch);
         if (!verdict.ok) {
-          // 관문이 복제본에 적용해 봤을 수 있다 — 받지 않은 변경이 든 복제본은 서버 문서와 다르다
-          room.scratch = null;
+          // 관문이 복제본에 적용해 봤으면 버린다 — 받지 않은 변경이 든 복제본은 서버 문서와 다르다. **적용해 보지 않은 거절에는 버리지
+          // 않는다** — 버리면 한 바이트짜리 거절로 남의 다음 목록 변경에 복제본을 다시 만들게 할 수 있다 (P12 종료 루틴 자체 점검 둘째 3)
+          if (simulated) room.scratch = null;
           this.refuse(pageId, room, member, verdict.rule, verdict.reason);
           return;
         }

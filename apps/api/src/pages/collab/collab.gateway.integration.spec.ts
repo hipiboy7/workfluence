@@ -971,7 +971,12 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
 
     it('**관문의 복제본이 서버 문서를 따라간다** — 받은 변경 뒤에는 같고, 받지 않으면 버리고, 다시 만든 것으로 다음 거절도 맞다 (P12 종료 루틴 자체 점검 1)', async () => {
       const scratch = (): Y.Doc | null => (room as unknown as { scratch: Y.Doc | null }).scratch;
-      const sv = (d: Y.Doc): string => Buffer.from(Y.encodeStateVector(d)).toString('hex');
+      // 상태 벡터는 삭제를 보지 않는다 — 삭제 집합과 정본까지 (P12 종료 루틴 자체 점검 둘째 5)
+      const same = (a: Y.Doc, b: Y.Doc): void => {
+        expect(Buffer.from(Y.encodeStateVector(a)).toString('hex')).toBe(Buffer.from(Y.encodeStateVector(b)).toString('hex'));
+        expect(Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store))).toBe(true);
+        expect(docFromYDoc(a)).toEqual(docFromYDoc(b));
+      };
       const el = (name: string, ...c: (Y.XmlElement | Y.XmlText)[]): Y.XmlElement => {
         const e = new Y.XmlElement(name);
         e.insert(0, c);
@@ -984,7 +989,13 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       expect(refusedCode(u)).toBeUndefined();
       expect(scratch()).not.toBeNull();
       act(u, (f) => newPara(f, '목록 밖 글')); // 흉내 없이 받은 변경도 복제본이 따라 받는다
-      expect(sv(scratch()!)).toBe(sv(room.doc));
+      same(scratch()!, room.doc);
+      // 흉내 전에 거절된 것(구조 — 편집기가 만들지 않는 타입)은 복제본을 버리지 않는다 — 버리면 남의 다음 목록 변경이 다시 만든다 (자체 점검 둘째 3)
+      const kept = scratch();
+      const z = await enter(otherId);
+      act(z, (f) => f.insert(f.length, [new Y.XmlHook('hook') as never]));
+      expect(refusedCode(z)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(scratch()).toBe(kept);
 
       const x = await enter(otherId);
       act(x, (f) => (listAt(f).get(0) as Y.XmlElement).insert(0, [el('blockquote', el('paragraph', new Y.XmlText('조작')))]));
@@ -993,9 +1004,11 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
 
       act(u, (f) => listAt(f).insert(1, [el('listItem', el('paragraph', new Y.XmlText('둘째 항목')), el('bulletList', el('listItem', el('paragraph', new Y.XmlText('중첩')))))]));
       expect(refusedCode(u)).toBeUndefined();
-      expect(sv(scratch()!)).toBe(sv(room.doc));
+      same(scratch()!, room.doc);
+      act(u, (f) => listAt(f).delete(0, 1)); // 지우기만 하는 목록 변경 — 복제본도 지운다
+      same(scratch()!, room.doc);
       const y = await enter(otherId);
-      act(y, (f) => (listAt(f).get(1) as Y.XmlElement).delete(0, 1)); // 첫 문단만 — 중첩 목록이 첫 자식이 된다
+      act(y, (f) => (listAt(f).get(0) as Y.XmlElement).delete(0, 1)); // 첫 문단만 — 중첩 목록이 첫 자식이 된다
       expect(refusedCode(y)).toBe(COLLAB_CLOSE_REFUSED);
       expect(JSON.stringify(docFromYDoc(room.doc))).toContain('둘째 항목');
     });

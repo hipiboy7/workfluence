@@ -827,7 +827,7 @@ describe('목록 항목의 첫 자식 — 적용한 뒤를 본다 (P12 보안 �
 
 /**
  * **흉내는 방이 들고 있는 복제본에 한다** (P12 종료 루틴 자체 점검 1). 변경마다 서버 문서를 통째로 복제하면 그 비용이 **편집 이력의 크기**에
- * 비례한다 — 30만 번 고친 문서에서 목록의 Enter 한 번이 1.6초 동안 서버의 모든 방을 멈췄다. 게이트웨이는 서버 문서와 같은 복제본을 하나
+ * 비례한다 — 30만 번 고친 문서에서 목록의 Enter 한 번이 약 2초 동안(P12 검증기록 2.5) 서버의 모든 방을 멈췄다. 게이트웨이는 서버 문서와 같은 복제본을 하나
  * 들고(`scratch`), 관문은 거기에 그 변경만 적용한다 — 비용은 변경의 크기다. 받은 변경은 서버 문서에도 적용되어 둘이 다시 같아지고, 받지
  * 않았으면 게이트웨이가 복제본을 버린다. 그래서 **흉내는 다른 판정을 다 지난 뒤에** 한다 — 흉내 뒤에 다른 까닭으로 거절되면 복제본을
  * 버릴 일이 늘어난다
@@ -850,7 +850,12 @@ describe('흉내는 방의 복제본에 — 변경마다 복제하지 않는다 
     Y.applyUpdate(c, Y.encodeStateAsUpdate(d));
     return c;
   };
-  const sv = (d: Y.Doc): string => Buffer.from(Y.encodeStateVector(d)).toString('hex');
+  /** 같은 문서인가 — 상태 벡터는 삭제를 보지 않으므로 삭제 집합과 정본까지 본다 (P12 종료 루틴 자체 점검 둘째 5) */
+  const same = (a: Y.Doc, b: Y.Doc): void => {
+    expect(Buffer.from(Y.encodeStateVector(a)).toString('hex')).toBe(Buffer.from(Y.encodeStateVector(b)).toString('hex'));
+    expect(Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store))).toBe(true);
+    expect(docFromYDoc(a)).toEqual(docFromYDoc(b));
+  };
 
   it('목록 구조를 바꾸는 변경은 복제본에 그 변경만 적용한다 — 받으면 복제본이 서버 문서의 다음 모습과 같다', () => {
     const srv = withList();
@@ -861,7 +866,16 @@ describe('흉내는 방의 복제본에 — 변경마다 복제하지 않는다 
     expect(v.ok).toBe(true);
     expect(asked).toBe(1);
     Y.applyUpdate(srv, u);
-    expect(sv(copy)).toBe(sv(srv));
+    same(copy, srv);
+  });
+
+  it('지우기만 하는 목록 변경도 복제본에 그대로 — 항목을 통째로 지운 뒤 같다', () => {
+    const srv = withList();
+    const copy = clone(srv);
+    const u = change(screen(srv), (f) => (f.get(0) as Y.XmlElement).delete(0, 1));
+    expect(inspectUpdate(Y.decodeUpdate(u), srv, U, new Map(), u, () => copy).ok).toBe(true);
+    Y.applyUpdate(srv, u);
+    same(copy, srv);
   });
 
   it('글자 치기는 복제본을 부르지 않는다', () => {
