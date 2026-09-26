@@ -2,7 +2,8 @@ import { Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocNode, Principal } from '@workfluence/shared';
-import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, DOCUMENT_SCHEMA_VERSION, MAX_DOCUMENT_NODES, type CollabStatus } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_LIMITS, COLLAB_MSG, DOCUMENT_SCHEMA_VERSION, MAX_DOCUMENT_NODES, type CollabStatus } from '@workfluence/shared';
+import { createServer } from 'node:http';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { AuditService } from '../../audit/audit.service';
@@ -208,6 +209,54 @@ async function attach(uid = userId, session = sid): Promise<{ socket: FakeSocket
 
 /** 경고 spy가 받은 event 줄 (P11 D.4) — 문장이 아니라 event 코드와 필드로 가린다 */
 const eventLines = (spy: { mock: { calls: unknown[][] } }): LogLine[] => spy.mock.calls.map((c) => c[0]).filter(isLogLine);
+
+describe('한 프레임의 상한 (P12 FR-1320, 보류 27)', () => {
+  it('**서버가 16MiB를 넘는 프레임을 읽지 않는다** — `ws`의 `maxPayload`로 건다', () => {
+    const server = createServer();
+    try {
+      gw.attach(server);
+      expect((gw as unknown as { wss: { options: { maxPayload: number } } }).wss.options.maxPayload).toBe(COLLAB_LIMITS.maxFrameBytes);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('넘으면 그 연결을 닫고 warn 한 줄 — 누구의 어느 페이지인지와 상한', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const { socket } = await attach();
+      socket.emit('error', Object.assign(new RangeError('Max payload size exceeded'), { code: 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' }));
+      expect(socket.closed).not.toBeNull();
+      const lines = eventLines(warn).filter((l) => l.event === 'collab.frame_too_large');
+      expect(lines.map((l) => l.fields)).toEqual([{ pageId, userId, limitBytes: COLLAB_LIMITS.maxFrameBytes }]);
+      // 다른 소켓 오류는 닫기만 한다
+      const other = await attach();
+      other.socket.emit('error', new Error('ECONNRESET'));
+      expect(eventLines(warn).filter((l) => l.event === 'collab.frame_too_large')).toHaveLength(1);
+      // 감사에도(다른 소켓 오류는 남기지 않는다) 거절로 남는다 — 화면이 "관리자가 감사로그에서 본다"고 말한다
+      await gw.onModuleDestroy();
+      const rows = await db.execute<{ actor_id: string; detail: { rule: string } }>(sql`SELECT actor_id, detail FROM audit_events WHERE action = 'page.collab.reject'`);
+      expect(rows.rows.map((r) => [r.actor_id, r.detail.rule])).toEqual([[userId, 'size']]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('이미 끊은 연결의 늦은 오류는 남기지 않는다 — 강제 종료 뒤에 온 것이 그 사람의 거절로 남지 않게 (P12 종료 루틴 자체 점검 6)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const { socket } = await attach();
+      bus.revoke(userId);
+      socket.emit('error', Object.assign(new RangeError('Max payload size exceeded'), { code: 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' }));
+      expect(eventLines(warn).filter((l) => l.event === 'collab.frame_too_large')).toHaveLength(0);
+      await gw.onModuleDestroy();
+      const rows = await db.execute(sql`SELECT 1 FROM audit_events WHERE action = 'page.collab.reject'`);
+      expect(rows.rows).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 describe('마지막 퇴장 저장 (FR-710)', () => {
   it('고친 뒤 마지막 사람이 나가면 버전이 하나 남는다', async () => {
@@ -918,6 +967,50 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       await vi.waitFor(async () =>
         expect(await rejections()).toEqual([{ actor_id: otherId, target_id: pageId, rule: 'owner', reason: '남의 클라이언트 ID로 쓴 조각', ip: '10.0.0.8' }]),
       );
+    });
+
+    it('**관문의 복제본이 서버 문서를 따라간다** — 받은 변경 뒤에는 같고, 받지 않으면 버리고, 다시 만든 것으로 다음 거절도 맞다 (P12 종료 루틴 자체 점검 1)', async () => {
+      const scratch = (): Y.Doc | null => (room as unknown as { scratch: Y.Doc | null }).scratch;
+      // 상태 벡터는 삭제를 보지 않는다 — 삭제 집합과 정본까지 (P12 종료 루틴 자체 점검 둘째 5)
+      const same = (a: Y.Doc, b: Y.Doc): void => {
+        expect(Buffer.from(Y.encodeStateVector(a)).toString('hex')).toBe(Buffer.from(Y.encodeStateVector(b)).toString('hex'));
+        expect(Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store))).toBe(true);
+        expect(docFromYDoc(a)).toEqual(docFromYDoc(b));
+      };
+      const el = (name: string, ...c: (Y.XmlElement | Y.XmlText)[]): Y.XmlElement => {
+        const e = new Y.XmlElement(name);
+        e.insert(0, c);
+        return e;
+      };
+      // 목록은 끝에서 둘째다 — 뒤에 목록 밖 문단을 하나 더한다
+      const listAt = (f: Y.XmlFragment): Y.XmlElement => f.get(f.length - 2) as Y.XmlElement;
+      const u = await enter(userId);
+      act(u, (f) => f.insert(f.length, [el('bulletList', el('listItem', el('paragraph', new Y.XmlText('U의 항목'))))]));
+      expect(refusedCode(u)).toBeUndefined();
+      expect(scratch()).not.toBeNull();
+      act(u, (f) => newPara(f, '목록 밖 글')); // 흉내 없이 받은 변경도 복제본이 따라 받는다
+      same(scratch()!, room.doc);
+      // 흉내 전에 거절된 것(구조 — 편집기가 만들지 않는 타입)은 복제본을 버리지 않는다 — 버리면 남의 다음 목록 변경이 다시 만든다 (자체 점검 둘째 3)
+      const kept = scratch();
+      const z = await enter(otherId);
+      act(z, (f) => f.insert(f.length, [new Y.XmlHook('hook') as never]));
+      expect(refusedCode(z)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(scratch()).toBe(kept);
+
+      const x = await enter(otherId);
+      act(x, (f) => (listAt(f).get(0) as Y.XmlElement).insert(0, [el('blockquote', el('paragraph', new Y.XmlText('조작')))]));
+      expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(scratch()).toBeNull();
+
+      act(u, (f) => listAt(f).insert(1, [el('listItem', el('paragraph', new Y.XmlText('둘째 항목')), el('bulletList', el('listItem', el('paragraph', new Y.XmlText('중첩')))))]));
+      expect(refusedCode(u)).toBeUndefined();
+      same(scratch()!, room.doc);
+      act(u, (f) => listAt(f).delete(0, 1)); // 지우기만 하는 목록 변경 — 복제본도 지운다
+      same(scratch()!, room.doc);
+      const y = await enter(otherId);
+      act(y, (f) => (listAt(f).get(0) as Y.XmlElement).delete(0, 1)); // 첫 문단만 — 중첩 목록이 첫 자식이 된다
+      expect(refusedCode(y)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(JSON.stringify(docFromYDoc(room.doc))).toContain('둘째 항목');
     });
 
     it('**주인 없는 클라이언트를 이어 쓴 사람이 그 주인이 된다** — 정본에서 만든 서버 클라이언트처럼. 다음 사람은 받지 않는다 (D.4)', async () => {

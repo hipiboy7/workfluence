@@ -81,4 +81,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 /* **답은 평문이다** — 줄바꿈을 지키고 HTML로 그리지 않는다 (A.1-4) */
 .llm-text { white-space: pre-wrap; word-break: break-word; }
 .llm-thinking { color: var(--muted); font-size: .9rem; margin: 0 0 .4rem; }
+/* 첫 답을 기다리는 동안 (P12 FR-1300·1301) — 기다린 초와 늦어진다는 알림 */
+.llm-waiting { color: var(--muted); font-size: .9rem; margin: 0 0 .4rem; }
+.llm-waiting strong { color: inherit; font-weight: 600; }
 .llm-chat textarea, .card textarea { width: 100%; font: inherit; padding: .5rem; border: 1px solid var(--line); border-radius: 6px; }

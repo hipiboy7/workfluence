@@ -1,4 +1,4 @@
-import { ALLOWED_CHILDREN, MARKS_IN, MAX_DOCUMENT_DEPTH, cutName, markProblems, nodeAttrProblems } from '@workfluence/shared';
+import { ALLOWED_CHILDREN, FIRST_CHILD, MARKS_IN, MAX_DOCUMENT_DEPTH, cutName, markProblems, nodeAttrProblems } from '@workfluence/shared';
 import * as Y from 'yjs';
 import { COLLAB_FIELD } from './ydoc';
 
@@ -408,11 +408,82 @@ function repeatsClient(decoded: Decoded, encoded?: Uint8Array): boolean {
 }
 
 /**
+ * 변경이 **자식 목록을 건드리는 목록 항목** — 새 조각이 목록 항목 바로 아래에 놓이거나, 지우는 조각이 목록 항목 바로 아래에 있다.
+ * 글자를 치고 지우는 것(목록 항목의 문단 안)은 여기 없다 — 흉내 내는 비용(문서 복제)은 목록 항목의 구조를 바꿀 때만 든다
+ */
+function listItemsTouched(items: readonly Y.Item[], decoded: Decoded, doc: Y.Doc, lookup: Lookup): IdLike[] {
+  const out = new Map<string, IdLike>();
+  const add = (holder: Y.Item | null): void => {
+    if (holder) out.set(`${holder.id.client}:${holder.id.clock}`, holder.id);
+  };
+  for (const item of items) {
+    const at = lookup.locate(item);
+    if (at.parentSub === null && at.place.kind === 'element' && Object.hasOwn(FIRST_CHILD, at.place.name)) add(at.holder);
+  }
+  // 지우는 조각 — 서버에 있는 것은 서버 문서에서, 같은 변경이 막 만든 것은 변경 안에서 찾는다(치고 지우기를 한 트랜잭션에서).
+  // 새 조각의 자리는 위에서 이미 보았다
+  for (const [client, ranges] of decoded.ds.clients) {
+    const state = Y.getState(doc.store, client);
+    for (const r of ranges) {
+      for (let clock = r.clock; clock < Math.min(r.clock + r.len, state); ) {
+        const s = Y.getItem(doc.store, Y.createID(client, clock)) as Y.Item | Y.GC | undefined;
+        if (!s) break;
+        if (s instanceof Y.Item && s.parentSub === null && s.parent instanceof Y.XmlElement && Object.hasOwn(FIRST_CHILD, s.parent.nodeName)) add(s.parent._item);
+        clock = s.id.clock + s.length;
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+/** 그 문서에서 그 요소의 첫 자식이 공유 규칙(`FIRST_CHILD`)을 어기는가 (지워졌거나 없으면 아니다) */
+function firstChildBroken(d: Y.Doc, id: IdLike): boolean {
+  if (id.clock >= Y.getState(d.store, id.client)) return false;
+  const item = Y.getItem(d.store, Y.createID(id.client, id.clock));
+  if (!(item instanceof Y.Item) || item.deleted || !(item.content instanceof Y.ContentType) || !(item.content.type instanceof Y.XmlElement)) return false;
+  const el = item.content.type;
+  const rule = Object.hasOwn(FIRST_CHILD, el.nodeName) ? FIRST_CHILD[el.nodeName as keyof typeof FIRST_CHILD] : null;
+  const first = el.toArray()[0];
+  return rule !== null && first !== undefined && !(first instanceof Y.XmlElement && rule.includes(first.nodeName));
+}
+
+/** 서버 문서와 같은 복제본 — 게이트웨이가 방마다 하나 들고(`scratch`), 주지 않으면 관문이 그때 만든다 */
+export function cloneDoc(doc: Y.Doc): Y.Doc {
+  const c = new Y.Doc();
+  Y.applyUpdate(c, Y.encodeStateAsUpdate(doc));
+  return c;
+}
+
+/**
+ * **적용한 뒤 새로 첫 자식이 문단이 아니게 되는 목록 항목이 있는가** (P12 보안 검토 1). 받는 편집기(y-tiptap)는 그런 항목을 **통째로**
+ * 지운다 — 그 안의 남의 글까지, 그리고 그 삭제는 받은 사람의 연결에서 나가 그 사람 이름으로 저장된다. 서버 문서를 복제해 변경을 적용해
+ * 본다(서버 문서는 고치지 않는다). 옛 상태에서 이미 어긴 항목은 보지 않는다 — 새로 만드는 것만 막는다.
+ *
+ * **복제는 방이 들고 있는 것(`scratch`)을 쓴다** (P12 종료 루틴 자체 점검 1). 변경마다 새로 복제하면 비용이 편집 이력의 크기에 비례한다
+ * (30만 번 고친 문서에서 약 2초 — 그동안 서버의 모든 방이 멈춘다, P12 검증기록 2.5). 방의 복제본에는 그 변경만 적용한다. 주지 않으면(시험) 새로 복제한다.
+ * 비어 있게 되는 것은 막지 않는다 — 두 사람이 따로 지운 결과일 수 있고(정상 동시 편집), 받는 편집기가 지우는 것은 이미 비운 요소다
+ */
+function firstChildBreaks(doc: Y.Doc, encoded: Uint8Array, targets: readonly IdLike[], scratch?: () => Y.Doc): boolean {
+  const sim = scratch ? scratch() : cloneDoc(doc);
+  Y.applyUpdate(sim, encoded);
+  return targets.some((id) => firstChildBroken(sim, id) && !firstChildBroken(doc, id));
+}
+
+/**
  * 변경 하나를 판정한다 (D.2~D.4). `owners`는 클라이언트 ID → 주인(P8 `owners`를 넓힌 것, D.4). `encoded`는 그 변경의 바이트다 —
  * 주면 클라이언트 덩어리 수까지 대조한다(게이트웨이는 늘 준다).
  * 지나면 `bind`에 **새로 묶을 클라이언트**를 준다 — 새 조각이 든 클라이언트가 하나이고 주인이 없을 때만.
+ * `scratch`는 **서버 문서와 같은 복제본**을 돌려준다. 관문이 거기에 이 변경을 적용할 수 있다 — 지나면 부른 쪽이 서버 문서에도 적용해
+ * 둘이 다시 같아지고, **받지 않았으면 부른 쪽이 그 복제본을 버린다**.
  */
-export function inspectUpdate(decoded: Decoded, doc: Y.Doc, sender: string, owners: ReadonlyMap<number, string>, encoded?: Uint8Array): GateVerdict {
+export function inspectUpdate(
+  decoded: Decoded,
+  doc: Y.Doc,
+  sender: string,
+  owners: ReadonlyMap<number, string>,
+  encoded?: Uint8Array,
+  scratch?: () => Y.Doc,
+): GateVerdict {
   const store = doc.store;
   if (repeatsClient(decoded, encoded)) return { ok: false, rule: 'structure', reason: '같은 클라이언트가 두 번 나온 변경' };
   const structs = decoded.structs.filter((s) => !(s instanceof Y.Skip)) as (Y.Item | Y.GC)[];
@@ -457,6 +528,15 @@ export function inspectUpdate(decoded: Decoded, doc: Y.Doc, sender: string, owne
   for (const c of clients) {
     const owner = owners.get(c);
     if (owner !== undefined && owner !== sender) return { ok: false, rule: 'owner', reason: '남의 클라이언트 ID로 쓴 조각' };
+  }
+
+  // 4. 목록 항목의 첫 자식 — **적용한 뒤를 본다** (P12 보안 검토 1). 목록 항목의 자식 목록을 건드리는 변경만 흉내 낸다.
+  // **마지막에 한다** — 흉내는 방의 복제본을 바꾸므로, 그 뒤에 다른 까닭으로 거절되면 복제본을 버릴 일이 늘어난다
+  if (encoded) {
+    const targets = listItemsTouched(items, decoded, doc, lookup);
+    if (targets.length && firstChildBreaks(doc, encoded, targets, scratch)) {
+      return { ok: false, rule: 'structure', reason: '목록 항목의 첫 자식이 문단이 아니게 되는 변경' };
+    }
   }
   const [only] = clients;
   return { ok: true, bind: clients.size === 1 && owners.get(only) === undefined ? only : null };

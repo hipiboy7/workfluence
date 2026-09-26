@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { MAX_DOCUMENT_DEPTH, validateDocument } from '@workfluence/shared';
+import { FIRST_CHILD, MAX_DOCUMENT_DEPTH, validateDocument } from '@workfluence/shared';
 import { inspectUpdate, integrable, type GateVerdict } from './gate';
 import { docFromYDoc } from './ydoc';
 
@@ -41,11 +41,12 @@ function change(d: Y.Doc, fn: (f: Y.XmlFragment, d: Y.Doc) => void): Uint8Array 
   if (!out) throw new Error('변경이 없다');
   return out;
 }
+/** 게이트웨이처럼 변경의 바이트까지 넘긴다 — 목록 항목의 첫 자식은 적용한 뒤를 흉내 내야 보인다 (P12 보안 검토 1) */
 const judge = (srv: Y.Doc, update: Uint8Array, sender = U, owners = new Map<number, string>()): GateVerdict =>
-  inspectUpdate(Y.decodeUpdate(update), srv, sender, owners);
+  inspectUpdate(Y.decodeUpdate(update), srv, sender, owners, update);
 /** 게이트웨이처럼 — 판정하고, 지나면 묶고 적용한다 */
 function pass(srv: Y.Doc, update: Uint8Array, owners: Map<number, string>, sender = U): GateVerdict {
-  const v = inspectUpdate(Y.decodeUpdate(update), srv, sender, owners);
+  const v = inspectUpdate(Y.decodeUpdate(update), srv, sender, owners, update);
   if (v.ok) {
     if (v.bind !== null) owners.set(v.bind, sender);
     Y.applyUpdate(srv, update);
@@ -749,6 +750,152 @@ describe('아는 조각·일부만 아는 조각 — Yjs가 들이는 대로 (�
     expect(pass(srv, full, owners).ok).toBe(true);
     expect(firstText(srv.getXmlFragment('default')).toString()).toBe('가나다앞 문단');
     expect(srv.store.pendingStructs).toBeNull();
+  });
+});
+
+/**
+ * **목록 항목의 첫 자식** (P12 보안 검토 1). 받는 편집기(y-tiptap)는 첫 자식이 문단이 아닌 목록 항목을 **통째로** 공유 문서에서 지운다 —
+ * 그 안의 남의 글(중첩 목록까지)과 함께, 그리고 그 삭제는 받은 사람의 연결에서 나가 그 사람 이름으로 저장된다. 조작한 연결은 남의 항목
+ * 앞에 인용 하나를 끼우거나 첫 문단만 지워 그렇게 만들 수 있었다. 관문이 **적용한 뒤의 첫 자식**을 본다. 편집기는 이 모양을 만들지 않는다
+ */
+describe('목록 항목의 첫 자식 — 적용한 뒤를 본다 (P12 보안 검토 1)', () => {
+  const li = (...c: Y.XmlElement[]): Y.XmlElement => {
+    const e = new Y.XmlElement('listItem');
+    e.insert(0, c);
+    return e;
+  };
+  const list = (...items: Y.XmlElement[]): Y.XmlElement => {
+    const e = new Y.XmlElement('bulletList');
+    e.insert(0, items);
+    return e;
+  };
+  /** 서버 문서 — 남의 목록: 항목 하나에 문단과 중첩 목록 */
+  function withList(): Y.Doc {
+    const d = new Y.Doc();
+    d.getXmlFragment('default').insert(0, [list(li(para('남의 글'), list(li(para('남의 중첩'))))), para('끝')]);
+    return d;
+  }
+  const item = (f: Y.XmlFragment): Y.XmlElement => (f.get(0) as Y.XmlElement).get(0) as Y.XmlElement;
+
+  it('**남의 목록 항목 앞에 인용을 끼우면 받지 않는다**', () => {
+    const srv = withList();
+    const quote = new Y.XmlElement('blockquote');
+    quote.insert(0, [para('조작')]);
+    const v = judge(srv, change(screen(srv), (f) => item(f).insert(0, [quote])));
+    expect(refused(v)).toEqual({ ok: false, rule: 'structure', reason: '목록 항목의 첫 자식이 문단이 아니게 되는 변경' });
+  });
+
+  it('**첫 문단만 지우면 받지 않는다** — 남의 중첩 목록이 첫 자식이 된다', () => {
+    const srv = withList();
+    const v = judge(srv, change(screen(srv), (f) => item(f).delete(0, 1)));
+    expect(refused(v).reason).toBe('목록 항목의 첫 자식이 문단이 아니게 되는 변경');
+  });
+
+  it('정상 — 새 항목 더하기·항목 통째로 지우기·첫 문단 고치기·첫 문단을 새 문단으로 바꾸기', () => {
+    const owners = new Map<number, string>();
+    const srv = withList();
+    const a = screen(srv);
+    expect(pass(srv, change(a, (f) => (f.get(0) as Y.XmlElement).insert(1, [li(para('새 항목'))])), owners).ok).toBe(true);
+    expect(pass(srv, change(a, (f) => (item(f).get(0) as Y.XmlElement).get(0) instanceof Y.XmlText && ((item(f).get(0) as Y.XmlElement).get(0) as Y.XmlText).insert(0, '고친 ')), owners).ok).toBe(true);
+    expect(pass(srv, change(a, (f) => { item(f).delete(0, 1); item(f).insert(0, [para('바꾼 첫 문단')]); }), owners).ok).toBe(true);
+    expect(pass(srv, change(a, (f) => (f.get(0) as Y.XmlElement).delete(0, 1)), owners).ok).toBe(true);
+    expect(validateDocument(docFromYDoc(srv))).toEqual({ ok: true });
+  });
+
+  it('옛 상태에 이미 어긴 항목이 있어도 **다른 곳을 고치는 변경은 지난다** — 새로 어기게 만드는 것만 본다', () => {
+    const d = new Y.Doc();
+    const quote = new Y.XmlElement('blockquote');
+    quote.insert(0, [para('옛 인용')]);
+    d.getXmlFragment('default').insert(0, [list(li(quote), li(para('둘째'))), para('끝')]);
+    const v = judge(d, change(screen(d), (f) => ((f.get(0) as Y.XmlElement).get(1) as Y.XmlElement).insert(1, [para('둘째에 더한 문단')])));
+    expect(v.ok).toBe(true);
+  });
+
+  it('첫 자식 규칙이 있는 노드마다 본다 — 공유 규칙(`FIRST_CHILD`)에 노드가 늘면 관문도 따라간다 (P12 종료 루틴 자체 점검 4)', () => {
+    for (const type of Object.keys(FIRST_CHILD)) {
+      const d = new Y.Doc();
+      const holder = new Y.XmlElement(type);
+      holder.insert(0, [para('첫 문단')]);
+      d.getXmlFragment('default').insert(0, [list(holder)]);
+      const quote = new Y.XmlElement('blockquote');
+      quote.insert(0, [para('조작')]);
+      const v = judge(d, change(screen(d), (f) => ((f.get(0) as Y.XmlElement).get(0) as Y.XmlElement).insert(0, [quote])));
+      expect(refused(v).reason, type).toBe('목록 항목의 첫 자식이 문단이 아니게 되는 변경');
+    }
+  });
+});
+
+/**
+ * **흉내는 방이 들고 있는 복제본에 한다** (P12 종료 루틴 자체 점검 1). 변경마다 서버 문서를 통째로 복제하면 그 비용이 **편집 이력의 크기**에
+ * 비례한다 — 30만 번 고친 문서에서 목록의 Enter 한 번이 약 2초 동안(P12 검증기록 2.5) 서버의 모든 방을 멈췄다. 게이트웨이는 서버 문서와 같은 복제본을 하나
+ * 들고(`scratch`), 관문은 거기에 그 변경만 적용한다 — 비용은 변경의 크기다. 받은 변경은 서버 문서에도 적용되어 둘이 다시 같아지고, 받지
+ * 않았으면 게이트웨이가 복제본을 버린다. 그래서 **흉내는 다른 판정을 다 지난 뒤에** 한다 — 흉내 뒤에 다른 까닭으로 거절되면 복제본을
+ * 버릴 일이 늘어난다
+ */
+describe('흉내는 방의 복제본에 — 변경마다 복제하지 않는다 (P12 종료 루틴 자체 점검 1)', () => {
+  const li = (...c: Y.XmlElement[]): Y.XmlElement => {
+    const e = new Y.XmlElement('listItem');
+    e.insert(0, c);
+    return e;
+  };
+  function withList(): Y.Doc {
+    const d = new Y.Doc();
+    const l = new Y.XmlElement('bulletList');
+    l.insert(0, [li(para('남의 글'))]);
+    d.getXmlFragment('default').insert(0, [l, para('끝')]);
+    return d;
+  }
+  const clone = (d: Y.Doc): Y.Doc => {
+    const c = new Y.Doc();
+    Y.applyUpdate(c, Y.encodeStateAsUpdate(d));
+    return c;
+  };
+  /** 같은 문서인가 — 상태 벡터는 삭제를 보지 않으므로 삭제 집합과 정본까지 본다 (P12 종료 루틴 자체 점검 둘째 5) */
+  const same = (a: Y.Doc, b: Y.Doc): void => {
+    expect(Buffer.from(Y.encodeStateVector(a)).toString('hex')).toBe(Buffer.from(Y.encodeStateVector(b)).toString('hex'));
+    expect(Y.equalDeleteSets(Y.createDeleteSetFromStructStore(a.store), Y.createDeleteSetFromStructStore(b.store))).toBe(true);
+    expect(docFromYDoc(a)).toEqual(docFromYDoc(b));
+  };
+
+  it('목록 구조를 바꾸는 변경은 복제본에 그 변경만 적용한다 — 받으면 복제본이 서버 문서의 다음 모습과 같다', () => {
+    const srv = withList();
+    const copy = clone(srv);
+    let asked = 0;
+    const u = change(screen(srv), (f) => (f.get(0) as Y.XmlElement).insert(1, [li(para('새 항목'))]));
+    const v = inspectUpdate(Y.decodeUpdate(u), srv, U, new Map(), u, () => (asked++, copy));
+    expect(v.ok).toBe(true);
+    expect(asked).toBe(1);
+    Y.applyUpdate(srv, u);
+    same(copy, srv);
+  });
+
+  it('지우기만 하는 목록 변경도 복제본에 그대로 — 항목을 통째로 지운 뒤 같다', () => {
+    const srv = withList();
+    const copy = clone(srv);
+    const u = change(screen(srv), (f) => (f.get(0) as Y.XmlElement).delete(0, 1));
+    expect(inspectUpdate(Y.decodeUpdate(u), srv, U, new Map(), u, () => copy).ok).toBe(true);
+    Y.applyUpdate(srv, u);
+    same(copy, srv);
+  });
+
+  it('글자 치기는 복제본을 부르지 않는다', () => {
+    const srv = withList();
+    let asked = 0;
+    const s = screen(srv);
+    const u = change(s, (f) => (((f.get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) instanceof Y.XmlText && ((((f.get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) as Y.XmlElement).get(0) as Y.XmlText).insert(0, '가'));
+    expect(inspectUpdate(Y.decodeUpdate(u), srv, U, new Map(), u, () => (asked++, clone(srv))).ok).toBe(true);
+    expect(asked).toBe(0);
+  });
+
+  it('**다른 까닭으로 거절되는 변경은 복제본을 건드리지 않는다** — 흉내는 마지막이다', () => {
+    const srv = withList();
+    const s = screen(srv);
+    const owners = new Map([[s.clientID, X]]);
+    let asked = 0;
+    const u = change(s, (f) => (f.get(0) as Y.XmlElement).insert(1, [li(para('남의 이름으로 새 항목'))]));
+    const v = inspectUpdate(Y.decodeUpdate(u), srv, U, owners, u, () => (asked++, clone(srv)));
+    expect(refused(v).rule).toBe('owner');
+    expect(asked).toBe(0);
   });
 });
 

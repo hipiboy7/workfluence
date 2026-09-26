@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { COLLAB_CLOSE_REFUSED, COLLAB_MSG, type CollabStatus, type DocNode, type Principal } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_LIMITS, COLLAB_MSG, type CollabStatus, type DocNode, type Principal } from '@workfluence/shared';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -35,7 +35,7 @@ import {
   type Site,
 } from '../domain/makers';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
-import { inspectUpdate, type GateRule } from '../domain/gate';
+import { cloneDoc, inspectUpdate, type GateRule } from '../domain/gate';
 import { MAX_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence } from '../domain/presence';
 import { readClientIp, readPageId, readSessionId } from './session-auth';
 import { logLine } from '../../common/log-line';
@@ -154,7 +154,16 @@ type Room = {
    * 검증을 지난 판정이 나면 `null`로 돌아간다 (P9 FR-1011)
    */
   saveBlocked: string | null;
+  /**
+   * **관문이 흉내 낼 복제본** — `doc`와 늘 같다 (P12 종료 루틴 자체 점검 1). 목록 구조를 바꾸는 변경이 처음 올 때 만들고, `doc`의 모든
+   * 변경을 따라 받는다. 관문이 여기에 변경을 적용해 보고 받지 않으면 버린다(다음에 다시 만든다). 변경마다 복제하면 비용이 편집 이력의
+   * 크기에 비례했다 — 만드는 비용은 방을 열 때 실시간 상태를 읽는 것과 같다
+   */
+  scratch: Y.Doc | null;
 };
+
+/** `ws`가 `maxPayload`를 넘은 프레임에 내는 오류 코드 (ws 8) */
+const WS_FRAME_TOO_LARGE = 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH';
 
 @Injectable()
 export class CollabGateway implements OnModuleInit, OnModuleDestroy {
@@ -217,7 +226,8 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       this.log.log(logLine('collab.disabled', '실시간 편집이 꺼져 있다 (WF_COLLAB_ENABLED=false)'));
       return;
     }
-    this.wss = new WebSocketServer({ noServer: true });
+    // **한 프레임의 상한** (P12 FR-1320, 보류 27) — 없으면 `ws` 기본 100MiB를 읽고 판정한다. 넘으면 `ws`가 읽지 않고 1009로 닫는다
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: COLLAB_LIMITS.maxFrameBytes });
     server.on('upgrade', (req, socket, head) => void this.upgrade(req, socket, head));
     // 유휴 저장은 **주기로 본다.** 변경마다 타이머를 걸면 타이머가 타이핑 수만큼 생긴다
     this.timer = setInterval(() => void this.sweep(), 1_000);
@@ -416,7 +426,21 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       // **방을 열 때도 저장할 수 있는 상태인지 본다** (P9 D.9, 두 번째 코드 리뷰 4·자체 점검 1). 알림은 방의 메모리에만 있어, 다시
       // 만든 방(재기동 뒤·모두 나간 뒤 남은 실시간 상태, Phase 9 전의 정본)은 첫 판정까지 몰랐다 — 들어오는 사람이 곧바로 안다
       saveBlocked: saveBlockedReason(docFromYDoc(doc)),
+      scratch: null,
     };
+
+    // **복제본은 서버 문서를 따라간다.** 관문이 이미 적용해 본 변경이 다시 와도 Yjs는 아는 조각을 건너뛴다. 따라가지 못하면 버린다 —
+    // 여기서 던지면 서버 문서의 변경이 막힌다(T-035)
+    doc.on('update', (update: Uint8Array) => {
+      if (!room.scratch) return;
+      try {
+        Y.applyUpdate(room.scratch, update);
+      } catch (e) {
+        room.scratch = null;
+        // 조용히 버리면 되풀이될 때 목록 변경마다 복제본을 다시 만들며 느려지고 아무 줄도 남지 않는다 (P12 종료 루틴 자체 점검 둘째 4)
+        this.log.warn(logLine('collab.scratch_failed', '관문의 복제본이 서버 문서를 따라가지 못해 버렸다', { pageId }, e));
+      }
+    });
 
     /**
      * **작성자는 Yjs에게 묻는다** (FR-802).
@@ -556,8 +580,16 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         }
         // **적용하기 전에 본다** (P9 D.1). 적용한 뒤 고치는 길은 남이 차지한 시계 구간을 되돌리지 못한다(보류 24).
         // 받은 바이트도 넘긴다 — 같은 클라이언트의 덩어리가 되풀이됐는지는 읽은 것만으로 가릴 수 없다 (D.2)
-        const verdict = inspectUpdate(decoded, room.doc, member.principal.id, room.ledger.owners, payload);
+        let simulated = false;
+        const scratch = (): Y.Doc => {
+          simulated = true;
+          return (room.scratch ??= cloneDoc(room.doc));
+        };
+        const verdict = inspectUpdate(decoded, room.doc, member.principal.id, room.ledger.owners, payload, scratch);
         if (!verdict.ok) {
+          // 관문이 복제본에 적용해 봤으면 버린다 — 받지 않은 변경이 든 복제본은 서버 문서와 다르다. **적용해 보지 않은 거절에는 버리지
+          // 않는다** — 버리면 한 바이트짜리 거절로 남의 다음 목록 변경에 복제본을 다시 만들게 할 수 있다 (P12 종료 루틴 자체 점검 둘째 3)
+          if (simulated) room.scratch = null;
           this.refuse(pageId, room, member, verdict.rule, verdict.reason);
           return;
         }
@@ -573,6 +605,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
           // 예전에는 여기서 돌아가 퍼뜨리지 않았고, 서버 문서만 바뀐 채 모두의 화면이 조용히 갈렸다 (네 번째 코드 리뷰 5).
           // 퍼뜨린다 — 받은 쪽도 같은 변경을 적용한다
           this.log.error(logLine('collab.apply_failed', '변경을 적용하는 중 예외가 났다 — 퍼뜨린다', { pageId }, e));
+          room.scratch = null;
         } finally {
           // **반드시 비운다.** 남아 있으면 이 연결과 무관한 다음 변경(서버가 직접 고치는 것)에
           // 이 연결이 보낸 ID 목록이 묻어 간다
@@ -597,7 +630,27 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         this.track(this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(logLine('collab.save_failed', '퇴장 저장 실패', { pageId, trigger: 'leave' }, e))));
       }
     });
-    socket.on('error', () => socket.close());
+    socket.on('error', (e: Error & { code?: string }) => {
+      // 너무 큰 프레임은 `ws`가 읽지 않고 1009로 닫는다(`maxPayload`) — 화면은 관문의 거절과 같게 말한다 (P12 FR-1320·1321)
+      // 이미 끊은 연결(강제 종료·재판정·관문)의 늦은 오류는 남기지 않는다 — `refuse`와 같다 (P12 종료 루틴 자체 점검 6)
+      if (e.code === WS_FRAME_TOO_LARGE && !member.revoked) {
+        this.log.warn(logLine('collab.frame_too_large', '너무 큰 편집 프레임 — 연결을 닫았다', { pageId, userId: member.principal.id, limitBytes: COLLAB_LIMITS.maxFrameBytes }));
+        // **감사에도 남긴다** — 화면은 이것을 관문의 거절과 같게 말하고 "관리자가 감사로그에서 본다"고 한다 (6절 감사 대상, P12 코드 리뷰 4)
+        this.track(
+          this.audit
+            .record({
+              action: 'page.collab.reject',
+              actorId: member.principal.id,
+              targetType: 'page',
+              targetId: pageId,
+              detail: { rule: 'size', reason: `한 번에 보낼 수 있는 크기(${COLLAB_LIMITS.maxFrameBytes / 1024 / 1024}MiB)를 넘은 편집` },
+              ip: member.ip ?? undefined,
+            })
+            .catch((err: unknown) => this.log.error(logLine('collab.gate_audit_failed', '거절을 감사로그에 남기지 못했다', { pageId }, err))),
+        );
+      }
+      socket.close();
+    });
   }
 
   /**

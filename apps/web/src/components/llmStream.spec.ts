@@ -1,7 +1,7 @@
 import { CSRF_HEADER, encodeLlmEvent, type LlmStreamEvent } from '@workfluence/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api';
-import { LOST_END, askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, readLlmStream, statusLabel, type ChatState } from './llmStream';
+import { LOST_END, askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, readLlmStream, statusLabel, waitLabel, type ChatState } from './llmStream';
 
 /**
  * LLM 질문의 흐름 하나와 화면 상태 기계 — **브라우저 없이** 본다 (P10_설계서_Llm D.1·D.5·G절, 3절).
@@ -11,7 +11,7 @@ import { LOST_END, askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, r
 type End = Extract<LlmStreamEvent, { type: 'end' }>;
 const end = (over: Partial<End> = {}): End => ({ type: 'end', status: 'done', saved: true, conversationId: 'c1', evicted: 0, message: null, ...over });
 const run = (actions: Parameters<typeof chatReducer>[1][], from: ChatState = initialChat) => actions.reduce(chatReducer, from);
-const sending = run([{ type: 'send', question: '질문' }]);
+const sending = run([{ type: 'send', question: '질문', at: 1_000 }]);
 /** 흐름이 열렸다 — 서버가 자리를 잡았다 */
 const streaming = run([{ type: 'opened' }], sending);
 
@@ -31,8 +31,8 @@ const enc = new TextEncoder();
 
 describe('chatReducer — 받는 동안', () => {
   it('보내면 보내는 중이 되고 앞의 알림·오류를 지운다 — 흐름이 열리면 받는 중', () => {
-    const s = run([{ type: 'failed', message: '앞 오류' }, { type: 'send', question: '질문' }]);
-    expect(s).toEqual({ phase: 'sending', live: { question: '질문', answer: '', thinking: '' }, error: null, notice: null, restore: null, lastEnd: null });
+    const s = run([{ type: 'failed', message: '앞 오류' }, { type: 'send', question: '질문', at: 1_000 }]);
+    expect(s).toEqual({ phase: 'sending', live: { question: '질문', answer: '', thinking: '' }, error: null, notice: null, restore: null, lastEnd: null, waitingSince: 1_000 });
     expect(run([{ type: 'opened' }], s).phase).toBe('streaming');
     // 열리는 것은 보내는 중에만 — 끝난 뒤 늦게 온 것은 버린다
     expect(run([{ type: 'opened' }]).phase).toBe('idle');
@@ -78,6 +78,31 @@ describe('chatReducer — 받는 동안', () => {
     expect(run([{ type: 'stop-missed' }], stopping).phase).toBe('streaming');
     expect(run([{ type: 'stop-missed' }], streaming).phase).toBe('streaming');
     expect(run([{ type: 'event', event: end() }, { type: 'stop-missed' }], stopping).phase).toBe('idle');
+  });
+});
+
+describe('기다림 — 첫 답 조각까지 (P12 FR-1300·1301)', () => {
+  it('**보낸 시각부터 기다린다** — 흐름이 열리고 살아 있음 줄이 와도 기다린다', () => {
+    expect(sending.waitingSince).toBe(1_000);
+    expect(run([{ type: 'event', event: { type: 'ping' } }], streaming).waitingSince).toBe(1_000);
+  });
+
+  it('**첫 답 조각에서 끝난다** — 생각 과정·답·되짚기 어느 것이든. 끝·실패·옮김도', () => {
+    for (const event of [{ type: 'thinking', text: '음' }, { type: 'delta', text: '안녕' }, { type: 'rethink' }] as LlmStreamEvent[]) {
+      expect(run([{ type: 'event', event }], streaming).waitingSince, event.type).toBeNull();
+    }
+    expect(run([{ type: 'event', event: end({ saved: false, status: 'failed', message: '붐빈다' }) }], streaming).waitingSince).toBeNull();
+    expect(run([{ type: 'failed', message: '409' }], sending).waitingSince).toBeNull();
+    expect(run([{ type: 'reset' }], sending).waitingSince).toBeNull();
+  });
+
+  it('표시 — 기다린 초는 내림, **5초부터** 늦어진다고 알린다', () => {
+    expect(waitLabel(1_000, 1_000)).toEqual({ seconds: 0, slow: false });
+    expect(waitLabel(1_000, 5_999)).toEqual({ seconds: 4, slow: false });
+    expect(waitLabel(1_000, 6_000)).toEqual({ seconds: 5, slow: true });
+    expect(waitLabel(1_000, 73_400)).toEqual({ seconds: 72, slow: true });
+    // 시계가 되돌아가도 음수가 되지 않는다
+    expect(waitLabel(5_000, 1_000)).toEqual({ seconds: 0, slow: false });
   });
 });
 

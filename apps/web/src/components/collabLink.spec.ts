@@ -1,4 +1,4 @@
-import { COLLAB_CLOSE_REFUSED, COLLAB_MSG } from '@workfluence/shared';
+import { COLLAB_CLOSE_REFUSED, COLLAB_CLOSE_TOO_LARGE, COLLAB_MSG } from '@workfluence/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
@@ -170,6 +170,14 @@ describe('끊길 때 (P9 FR-1005·1011, 코드 리뷰 7)', () => {
     b.socket.shut(COLLAB_CLOSE_REFUSED);
     b.socket.onerror?.({} as Event);
     expect(b.states.at(-1)).toBe('refused');
+  });
+
+  it('**너무 큰 프레임으로 닫히면(1009) "받지 않았다"** — 다시 보내도 같은 편집은 다시 닫힌다 (P12 FR-1321)', () => {
+    const c = setup();
+    c.socket.open();
+    c.socket.shut(COLLAB_CLOSE_TOO_LARGE);
+    expect(c.states.at(-1)).toBe('refused');
+    expect(c.blocked).toEqual([null]);
   });
 
   it('정리한 뒤에는 **옛 소켓의 소식을 듣지 않는다** — 다시 붙을 때 옛 소켓이 늦게 닫혀도 새 화면이 "끊겼다"가 되지 않는다', () => {

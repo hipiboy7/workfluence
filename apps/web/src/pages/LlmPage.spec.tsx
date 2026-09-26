@@ -192,6 +192,72 @@ describe('묻기 (FR-1110~1122)', () => {
     expect(screen.queryByLabelText('지시문')).toBeNull();
   });
 
+  it('**첫 답이 올 때까지 기다린 초를 보이고, 5초부터 "답변이 늦어지고 있습니다."** — 답이 오면 사라진다 (P12 FR-1300·1301)', async () => {
+    // 시계만 가짜로 — 화면의 1초 시계(setInterval)와 Date. 흐름의 모아 그리기(setTimeout)는 그대로 둔다
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      const s = stream(
+        [
+          { type: 'ping' },
+          { type: 'delta', text: '늦은 답' },
+          { type: 'end', status: 'done', saved: true, conversationId: 'c1', evicted: 0, message: null },
+        ],
+        1,
+      );
+      routes['POST /api/llm/ask'] = () => s.res;
+      routes['GET /api/llm/conversations/c1'] = () => json(200, conversation('c1'));
+      renderAt('/llm');
+      await within(await screen.findByLabelText('지시문')).findByText('세 줄');
+      fireEvent.change(screen.getByLabelText('질문'), { target: { value: '붐빌 때의 질문' } });
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+
+      const live = await screen.findByLabelText('흘러나오는 답');
+      const waiting = await within(live).findByText(/답변을 기다리고 있습니다/);
+      expect(live.textContent).toContain('답변을 기다리고 있습니다 · 0s');
+      // 문구는 읽히고 1초마다 바뀌는 초만 읽지 않는다 (P12 코드 리뷰 9 · 종료 루틴 자체 점검 3)
+      expect(waiting.closest('[aria-hidden="true"]')).toBeNull();
+      expect(waiting.querySelector('[aria-hidden="true"]')?.textContent).toBe(' · 0s');
+      act(() => void vi.advanceTimersByTime(3_000));
+      expect(live.textContent).toContain('답변을 기다리고 있습니다 · 3s');
+      expect(live.textContent).not.toContain('답변이 늦어지고 있습니다.');
+      act(() => void vi.advanceTimersByTime(2_000));
+      expect(live.textContent).toContain('답변을 기다리고 있습니다 · 5s');
+      expect(live.textContent).toContain('답변이 늦어지고 있습니다.');
+
+      await act(async () => s.release());
+      const messages = await screen.findByRole('list', { name: '메시지' });
+      await within(messages).findByText('세 줄 요약');
+      expect(messages.textContent).not.toContain('기다리고 있습니다');
+      expect(messages.textContent).not.toContain('늦어지고 있습니다');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('**중지를 누르면 기다림이 사라진다** — 멈추라고 했는데 "늦어지고 있다"고 말하지 않는다 (P12 코드 리뷰 10)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      const s = stream([{ type: 'ping' }, { type: 'end', status: 'stopped', saved: false, conversationId: null, evicted: 0, message: null }], 1);
+      routes['POST /api/llm/ask'] = () => s.res;
+      routes['POST /api/llm/stop'] = () => json(200, { stopped: true });
+      renderAt('/llm');
+      fireEvent.change(await screen.findByLabelText('질문'), { target: { value: 'q' } });
+      await screen.findByRole('option', { name: '사내 Qwen · mock-qwen3' });
+      fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+      const live = await screen.findByLabelText('흘러나오는 답');
+      await within(live).findByText(/답변을 기다리고 있습니다/);
+      act(() => void vi.advanceTimersByTime(6_000));
+      expect(live.textContent).toContain('답변이 늦어지고 있습니다.');
+      await waitFor(() => expect(screen.getByRole('button', { name: '중지' })).toHaveProperty('disabled', false));
+      fireEvent.click(screen.getByRole('button', { name: '중지' }));
+      expect(live.textContent).not.toContain('기다리고 있습니다');
+      expect(live.textContent).not.toContain('늦어지고 있습니다');
+      await act(async () => s.release());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('이어 묻기는 대화 id를 보내고 같은 대화를 다시 읽는다', async () => {
     routes['GET /api/llm/conversations/c1'] = () => json(200, conversation('c1', { promptName: '세 줄' }));
     routes['POST /api/llm/ask'] = () => stream([{ type: 'delta', text: '둘째' }, { type: 'end', status: 'done', saved: true, conversationId: 'c1', evicted: 1, message: null }]).res;

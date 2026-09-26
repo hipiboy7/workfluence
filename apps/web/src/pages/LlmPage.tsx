@@ -12,7 +12,7 @@ import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent, t
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { writeClipboard } from '../components/clipboard';
-import { askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, statusLabel } from '../components/llmStream';
+import { askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, statusLabel, waitLabel } from '../components/llmStream';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -20,6 +20,32 @@ type EndEvent = Extract<LlmStreamEvent, { type: 'end' }>;
 
 /** 받고 있는 답 하나 — 어느 대화에서 시작했고 무엇으로 끊나 */
 type RunningAsk = { controller: AbortController; conversationId: string | null };
+
+/**
+ * **첫 답을 기다린 초** (P12 FR-1300·1301). 이 줄만 1초마다 다시 그린다 — 화면 전체(대화 목록·메시지)를 다시 그리지 않게(P12 코드 리뷰 9).
+ * 초는 읽어 주지 않는다(`aria-hidden`) — 답 자리는 읽어 주는 곳이라 1초마다 읽는다. 늦어진다는 알림은 한 번 읽힌다. 서버를 부르지 않는다(NFR-121)
+ */
+function WaitLabel({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [since]);
+  const w = waitLabel(since, now);
+  return (
+    <p className="llm-waiting">
+      {/* 문구는 한 번 읽히고, 1초마다 바뀌는 초는 읽지 않는다 — 읽는 곳은 부모의 `aria-live` */}
+      답변을 기다리고 있습니다<span aria-hidden="true"> · {w.seconds}s</span>
+      {w.slow && (
+        <>
+          <br />
+          <strong>답변이 늦어지고 있습니다.</strong>
+        </>
+      )}
+    </p>
+  );
+}
 
 /**
  * LLM 질문 (P10_설계서_Llm G절, FR-1110~1139).
@@ -129,7 +155,7 @@ export function LlmPage() {
     setQuestion('');
     setPageError(null);
     setCopied(null);
-    dispatch({ type: 'send', question: q });
+    dispatch({ type: 'send', question: q, at: Date.now() });
     const me: RunningAsk = { controller: new AbortController(), conversationId: conversation?.id ?? null };
     running.current = me;
     // 떠났거나 다른 대화로 옮겼으면(`running`이 비었다) 이 흐름은 화면을 바꾸지 않는다
@@ -329,6 +355,8 @@ export function LlmPage() {
                     {provider?.model ?? 'LLM'}
                     {busy && ` — ${chat.phase === 'stopping' ? '멈추는 중…' : chat.phase === 'sending' ? '보내는 중…' : '답을 받는 중…'}`}
                   </p>
+                  {/* 멈추는 중이면 보이지 않는다 — 사람이 멈추라고 했는데 "늦어지고 있다"고 말하지 않는다 (P12 코드 리뷰 10) */}
+                  {chat.waitingSince !== null && chat.phase !== 'stopping' && <WaitLabel since={chat.waitingSince} />}
                   {chat.live.thinking && (
                     <details className="llm-thinking" open={!chat.live.answer}>
                       <summary>생각 과정 (저장하지 않는다)</summary>

@@ -104,6 +104,12 @@ export const AUDIT_ACTIONS = [
 export const COLLAB_CLOSE_REFUSED = 4400;
 
 /**
+ * 한 프레임이 상한(`COLLAB_LIMITS.maxFrameBytes`)을 넘어 서버가 닫았다 — WebSocket 표준의 1009("메시지가 너무 크다", `ws`가 보낸다).
+ * 화면은 관문의 거절(4400)과 같게 말한다 — 다시 보내도 같은 편집은 다시 닫힌다 (P12 FR-1321)
+ */
+export const COLLAB_CLOSE_TOO_LARGE = 1009;
+
+/**
  * 거절·검증 실패의 **까닭**에 적는 이름·키의 최대 길이 (P9 코드 리뷰 4 · 두 번째 코드 리뷰 8). 까닭은 경고 로그와 감사로그(지울 수 없다)로 가고, 이름·키는
  * 조작한 클라이언트가 정한다 — 넘으면 자른다(`cutName`)
  */
@@ -167,6 +173,8 @@ export const LOG_EVENTS = [
   'collab.revoked',
   'collab.recheck_failed',
   'collab.closed',
+  'collab.frame_too_large',
+  'collab.scratch_failed',
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 
@@ -313,4 +321,23 @@ export const LLM_TIMINGS = {
   checkTimeoutMs: 10_000,
   /** 화면이 흘러오는 글자를 모아 그리는 간격 — 조각마다 그리면 답이 길어질수록 느려진다(그릴 때마다 답 전체를 다시 그린다) */
   renderBatchMs: 50,
+  /** 첫 답 조각을 이만큼 기다렸으면 "답변이 늦어지고 있습니다."를 함께 보인다 (P12 FR-1301 — 사용자가 정한 값) */
+  slowAnswerMs: 5_000,
+} as const;
+
+/**
+ * 실시간 편집의 상한 (P12_설계서_Limits A.1-4, 보류 27). 가장 큰 정상 프레임은 접속 직후의 전체 상태다 — REST 저장 상한(2MB JSON)의 문서가
+ * Yjs로 약 2MB(설계서 C.3 실측)라 편집 이력까지 8배를 둔다. 넘으면 서버가 그 연결을 닫는다(1009). 이 값이 없으면 `ws` 기본 100MiB다
+ */
+export const COLLAB_LIMITS = {
+  maxFrameBytes: 16 * 1024 * 1024,
+} as const;
+
+/**
+ * 표 칸 값의 범위 (P12 A.1-5, 보류 27). `maxSpan` — `colspan`·`rowspan`, 그리고 `colwidth`의 길이. HTML 표준이 `colspan`을 읽는 상한이다(브라우저는
+ * 넘는 값을 1000으로 그린다). `maxColWidthPx` — 열 너비(화면이 `width: …px`로 넣는다). 편집기가 붙여 넣은 HTML의 값을 이 범위로 줄인다
+ */
+export const TABLE_LIMITS = {
+  maxSpan: 1000,
+  maxColWidthPx: 10_000,
 } as const;
