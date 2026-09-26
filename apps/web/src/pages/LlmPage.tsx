@@ -35,7 +35,8 @@ function WaitLabel({ since }: { since: number }) {
   const w = waitLabel(since, now);
   return (
     <p className="llm-waiting">
-      <span aria-hidden="true">답변을 기다리고 있습니다 · {w.seconds}s</span>
+      {/* 문구는 한 번 읽히고, 1초마다 바뀌는 초는 읽지 않는다 — 읽는 곳은 부모의 `aria-live` */}
+      답변을 기다리고 있습니다<span aria-hidden="true"> · {w.seconds}s</span>
       {w.slow && (
         <>
           <br />

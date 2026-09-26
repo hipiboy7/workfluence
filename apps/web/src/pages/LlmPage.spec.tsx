@@ -212,7 +212,11 @@ describe('묻기 (FR-1110~1122)', () => {
       fireEvent.click(screen.getByRole('button', { name: '보내기' }));
 
       const live = await screen.findByLabelText('흘러나오는 답');
-      await within(live).findByText(/답변을 기다리고 있습니다 · 0s/);
+      const waiting = await within(live).findByText(/답변을 기다리고 있습니다/);
+      expect(live.textContent).toContain('답변을 기다리고 있습니다 · 0s');
+      // 문구는 읽히고 1초마다 바뀌는 초만 읽지 않는다 (P12 코드 리뷰 9 · 종료 루틴 자체 점검 3)
+      expect(waiting.closest('[aria-hidden="true"]')).toBeNull();
+      expect(waiting.querySelector('[aria-hidden="true"]')?.textContent).toBe(' · 0s');
       act(() => void vi.advanceTimersByTime(3_000));
       expect(live.textContent).toContain('답변을 기다리고 있습니다 · 3s');
       expect(live.textContent).not.toContain('답변이 늦어지고 있습니다.');
