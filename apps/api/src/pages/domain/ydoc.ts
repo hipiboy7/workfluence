@@ -143,7 +143,7 @@ function fromYNode(node: unknown): DocNode[] {
 
 /**
  * **편집기가 이 요소를 그리는가** — `fromYNode`가 떨어뜨리는 것과 같은 판정을 공유 문서에서 한다(자식을 먼저, 아래에서 위로). 멘션 자리
- * (`mentionSites`)가 정본에 없는 요소 안을 세지 않게 (P12 코드 리뷰 3). 글자는 비어 있지 않을 때만 자식이다(`fromYText`와 같다)
+ * (`mentionSites`)가 정본에 없는 요소 안을 세지 않게 (P12 코드 리뷰 3). 자식 종류 목록은 `fromYNode`가 만드는 것과 같다(글자는 `fromYText`의 조각마다)
  */
 function keeps(el: Y.XmlElement, memo: Map<Y.XmlElement, boolean>): boolean {
   const hit = memo.get(el);
@@ -151,7 +151,8 @@ function keeps(el: Y.XmlElement, memo: Map<Y.XmlElement, boolean>): boolean {
   const kinds: string[] = [];
   for (const c of el.toArray()) {
     if (c instanceof Y.XmlText) {
-      if (fromYText(c).length) kinds.push('text');
+      // `fromYNode`처럼 서식 구간마다 하나씩 — 개수를 보는 규칙이 들어와도 둘이 갈리지 않게 (P12 종료 루틴 자체 점검 5)
+      kinds.push(...fromYText(c).map((n) => n.type));
     } else if (c instanceof Y.XmlElement && keeps(c, memo)) {
       kinds.push(c.nodeName);
     }

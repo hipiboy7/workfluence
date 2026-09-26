@@ -35,7 +35,7 @@ import {
   type Site,
 } from '../domain/makers';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
-import { inspectUpdate, type GateRule } from '../domain/gate';
+import { cloneDoc, inspectUpdate, type GateRule } from '../domain/gate';
 import { MAX_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence } from '../domain/presence';
 import { readClientIp, readPageId, readSessionId } from './session-auth';
 import { logLine } from '../../common/log-line';
@@ -154,6 +154,12 @@ type Room = {
    * 검증을 지난 판정이 나면 `null`로 돌아간다 (P9 FR-1011)
    */
   saveBlocked: string | null;
+  /**
+   * **관문이 흉내 낼 복제본** — `doc`와 늘 같다 (P12 종료 루틴 자체 점검 1). 목록 구조를 바꾸는 변경이 처음 올 때 만들고, `doc`의 모든
+   * 변경을 따라 받는다. 관문이 여기에 변경을 적용해 보고 받지 않으면 버린다(다음에 다시 만든다). 변경마다 복제하면 비용이 편집 이력의
+   * 크기에 비례했다 — 만드는 비용은 방을 열 때 실시간 상태를 읽는 것과 같다
+   */
+  scratch: Y.Doc | null;
 };
 
 /** `ws`가 `maxPayload`를 넘은 프레임에 내는 오류 코드 (ws 8) */
@@ -420,7 +426,19 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       // **방을 열 때도 저장할 수 있는 상태인지 본다** (P9 D.9, 두 번째 코드 리뷰 4·자체 점검 1). 알림은 방의 메모리에만 있어, 다시
       // 만든 방(재기동 뒤·모두 나간 뒤 남은 실시간 상태, Phase 9 전의 정본)은 첫 판정까지 몰랐다 — 들어오는 사람이 곧바로 안다
       saveBlocked: saveBlockedReason(docFromYDoc(doc)),
+      scratch: null,
     };
+
+    // **복제본은 서버 문서를 따라간다.** 관문이 이미 적용해 본 변경이 다시 와도 Yjs는 아는 조각을 건너뛴다. 따라가지 못하면 버린다 —
+    // 여기서 던지면 서버 문서의 변경이 막힌다(T-035)
+    doc.on('update', (update: Uint8Array) => {
+      if (!room.scratch) return;
+      try {
+        Y.applyUpdate(room.scratch, update);
+      } catch {
+        room.scratch = null;
+      }
+    });
 
     /**
      * **작성자는 Yjs에게 묻는다** (FR-802).
@@ -560,8 +578,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         }
         // **적용하기 전에 본다** (P9 D.1). 적용한 뒤 고치는 길은 남이 차지한 시계 구간을 되돌리지 못한다(보류 24).
         // 받은 바이트도 넘긴다 — 같은 클라이언트의 덩어리가 되풀이됐는지는 읽은 것만으로 가릴 수 없다 (D.2)
-        const verdict = inspectUpdate(decoded, room.doc, member.principal.id, room.ledger.owners, payload);
+        const verdict = inspectUpdate(decoded, room.doc, member.principal.id, room.ledger.owners, payload, () => (room.scratch ??= cloneDoc(room.doc)));
         if (!verdict.ok) {
+          // 관문이 복제본에 적용해 봤을 수 있다 — 받지 않은 변경이 든 복제본은 서버 문서와 다르다
+          room.scratch = null;
           this.refuse(pageId, room, member, verdict.rule, verdict.reason);
           return;
         }
@@ -577,6 +597,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
           // 예전에는 여기서 돌아가 퍼뜨리지 않았고, 서버 문서만 바뀐 채 모두의 화면이 조용히 갈렸다 (네 번째 코드 리뷰 5).
           // 퍼뜨린다 — 받은 쪽도 같은 변경을 적용한다
           this.log.error(logLine('collab.apply_failed', '변경을 적용하는 중 예외가 났다 — 퍼뜨린다', { pageId }, e));
+          room.scratch = null;
         } finally {
           // **반드시 비운다.** 남아 있으면 이 연결과 무관한 다음 변경(서버가 직접 고치는 것)에
           // 이 연결이 보낸 ID 목록이 묻어 간다
@@ -603,7 +624,8 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     });
     socket.on('error', (e: Error & { code?: string }) => {
       // 너무 큰 프레임은 `ws`가 읽지 않고 1009로 닫는다(`maxPayload`) — 화면은 관문의 거절과 같게 말한다 (P12 FR-1320·1321)
-      if (e.code === WS_FRAME_TOO_LARGE) {
+      // 이미 끊은 연결(강제 종료·재판정·관문)의 늦은 오류는 남기지 않는다 — `refuse`와 같다 (P12 종료 루틴 자체 점검 6)
+      if (e.code === WS_FRAME_TOO_LARGE && !member.revoked) {
         this.log.warn(logLine('collab.frame_too_large', '너무 큰 편집 프레임 — 연결을 닫았다', { pageId, userId: member.principal.id, limitBytes: COLLAB_LIMITS.maxFrameBytes }));
         // **감사에도 남긴다** — 화면은 이것을 관문의 거절과 같게 말하고 "관리자가 감사로그에서 본다"고 한다 (6절 감사 대상, P12 코드 리뷰 4)
         this.track(

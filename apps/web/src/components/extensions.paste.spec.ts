@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { Editor, generateJSON } from '@tiptap/core';
 import { CellSelection } from '@tiptap/pm/tables';
+import { ySyncPluginKey } from '@tiptap/y-tiptap';
 import { TABLE_LIMITS, validateDocument, type DocNode } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
 import { clampColwidth, clampSpan, editorExtensions } from './extensions';
@@ -66,6 +67,20 @@ describe('표 명령이 만드는 값 (FR-1322·1323)', () => {
     editor.commands.mergeCells();
     expect(spans(editor)).toEqual([999, 2]);
     expect(validateDocument(editor.getJSON() as DocNode)).toEqual({ ok: true });
+    editor.destroy();
+  });
+
+  it('**남에게서 온 변경은 거르지 않는다** — 걸러 내면 화면이 공유 문서와 갈린다. 거르는 것은 관문이다 (FR-1324, P12 종료 루틴 자체 점검 6)', () => {
+    const editor = open(tableDoc(cell('가')));
+    let pos = -1;
+    editor.state.doc.descendants((n, p) => {
+      if (n.type.name === 'tableCell') pos = p;
+    });
+    const widen = () => editor.state.tr.setNodeMarkup(pos, undefined, { colspan: TABLE_LIMITS.maxSpan + 1, rowspan: 1, colwidth: null });
+    editor.view.dispatch(widen());
+    expect(spans(editor)).toEqual([1]); // 내 편집 — 하지 않는다
+    editor.view.dispatch(widen().setMeta(ySyncPluginKey, { isChangeOrigin: true }));
+    expect(spans(editor)).toEqual([TABLE_LIMITS.maxSpan + 1]); // 공유 문서에서 온 것 — 그대로 그린다
     editor.destroy();
   });
 

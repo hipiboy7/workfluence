@@ -241,6 +241,21 @@ describe('한 프레임의 상한 (P12 FR-1320, 보류 27)', () => {
       warn.mockRestore();
     }
   });
+
+  it('이미 끊은 연결의 늦은 오류는 남기지 않는다 — 강제 종료 뒤에 온 것이 그 사람의 거절로 남지 않게 (P12 종료 루틴 자체 점검 6)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const { socket } = await attach();
+      bus.revoke(userId);
+      socket.emit('error', Object.assign(new RangeError('Max payload size exceeded'), { code: 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' }));
+      expect(eventLines(warn).filter((l) => l.event === 'collab.frame_too_large')).toHaveLength(0);
+      await gw.onModuleDestroy();
+      const rows = await db.execute(sql`SELECT 1 FROM audit_events WHERE action = 'page.collab.reject'`);
+      expect(rows.rows).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe('마지막 퇴장 저장 (FR-710)', () => {
@@ -952,6 +967,37 @@ describe('멘션을 만든 사람 (P8 FR-900~908)', () => {
       await vi.waitFor(async () =>
         expect(await rejections()).toEqual([{ actor_id: otherId, target_id: pageId, rule: 'owner', reason: '남의 클라이언트 ID로 쓴 조각', ip: '10.0.0.8' }]),
       );
+    });
+
+    it('**관문의 복제본이 서버 문서를 따라간다** — 받은 변경 뒤에는 같고, 받지 않으면 버리고, 다시 만든 것으로 다음 거절도 맞다 (P12 종료 루틴 자체 점검 1)', async () => {
+      const scratch = (): Y.Doc | null => (room as unknown as { scratch: Y.Doc | null }).scratch;
+      const sv = (d: Y.Doc): string => Buffer.from(Y.encodeStateVector(d)).toString('hex');
+      const el = (name: string, ...c: (Y.XmlElement | Y.XmlText)[]): Y.XmlElement => {
+        const e = new Y.XmlElement(name);
+        e.insert(0, c);
+        return e;
+      };
+      // 목록은 끝에서 둘째다 — 뒤에 목록 밖 문단을 하나 더한다
+      const listAt = (f: Y.XmlFragment): Y.XmlElement => f.get(f.length - 2) as Y.XmlElement;
+      const u = await enter(userId);
+      act(u, (f) => f.insert(f.length, [el('bulletList', el('listItem', el('paragraph', new Y.XmlText('U의 항목'))))]));
+      expect(refusedCode(u)).toBeUndefined();
+      expect(scratch()).not.toBeNull();
+      act(u, (f) => newPara(f, '목록 밖 글')); // 흉내 없이 받은 변경도 복제본이 따라 받는다
+      expect(sv(scratch()!)).toBe(sv(room.doc));
+
+      const x = await enter(otherId);
+      act(x, (f) => (listAt(f).get(0) as Y.XmlElement).insert(0, [el('blockquote', el('paragraph', new Y.XmlText('조작')))]));
+      expect(refusedCode(x)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(scratch()).toBeNull();
+
+      act(u, (f) => listAt(f).insert(1, [el('listItem', el('paragraph', new Y.XmlText('둘째 항목')), el('bulletList', el('listItem', el('paragraph', new Y.XmlText('중첩')))))]));
+      expect(refusedCode(u)).toBeUndefined();
+      expect(sv(scratch()!)).toBe(sv(room.doc));
+      const y = await enter(otherId);
+      act(y, (f) => (listAt(f).get(1) as Y.XmlElement).delete(0, 1)); // 첫 문단만 — 중첩 목록이 첫 자식이 된다
+      expect(refusedCode(y)).toBe(COLLAB_CLOSE_REFUSED);
+      expect(JSON.stringify(docFromYDoc(room.doc))).toContain('둘째 항목');
     });
 
     it('**주인 없는 클라이언트를 이어 쓴 사람이 그 주인이 된다** — 정본에서 만든 서버 클라이언트처럼. 다음 사람은 받지 않는다 (D.4)', async () => {
