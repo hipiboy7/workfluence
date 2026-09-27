@@ -1,0 +1,285 @@
+name: Windows 체험
+
+# 인터넷이 되는 Windows에서 이 앱을 띄워 써 볼 수 있는지 **실제 Windows Server VM**(GitHub이 주는 windows-latest)에서 확인한다.
+# 확인하는 길은 "Node로 직접 띄우기" 하나다 — docs/운영가이드_윈도우체험.md 2~6절. 이 러너는 Linux 컨테이너를 돌리지 못해
+# compose 길(같은 문서 7절)은 여기서 볼 수 없다. 운영(폐쇄망 Linux compose)을 대신하지 않고, 기존 CI(ci.yml, Linux)는 그대로다.
+# 결과는 같은 문서 9.2절에 적는다.
+#
+# 명령은 체험 문서에 적은 순서·모양 그대로 친다 (CLAUDE.md 4.1절). 다른 것은 셋이다
+#   - `.env`를 메모장 대신 스크립트로 고친다. 비밀 값은 **실행마다 무작위로 만들고 로그에서 가린다** (CLAUDE.md 12.3절)
+#   - 브라우저로 하는 로그인을 API 호출로 본다. 화면은 Playwright(E2E)가 본다
+#   - E2E는 모의 사내 로그인·LLM 키를 켜야 전부 돈다. 체험 설정으로 확인을 마친 뒤 그 둘을 더해 다시 띄운다
+#
+# **run 블록 안에는 ASCII만 쓴다.** 러너는 스크립트를 BOM 없는 UTF-8로 쓰고, Windows PowerShell 5.1은 BOM 없는 파일을
+# 시스템 코드 페이지로 읽는다 — 한글 바이트가 따옴표 문자로 읽혀 구문이 깨질 수 있다. 설명은 이렇게 블록 밖 주석에 둔다.
+on:
+  push:
+    branches: [exp/windows]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  trial:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        # Windows Server에 처음부터 있는 셸은 Windows PowerShell 5.1이다(PowerShell 7은 따로 깐다). 체험하는 사람과 같은 셸로 친다
+        shell: powershell
+    env:
+      # corepack이 pnpm을 내려받을 때 묻지 않게 한다
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      # 운영 이미지(node:24-bookworm-slim)와 같은 판 (CLAUDE.md 8.1절)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      # 관리자 권한(elevated) 여부를 남긴다 — PostgreSQL 서버는 관리자 권한으로 직접 띄우면 기동을 거부한다
+      - name: 러너 환경 기록
+        run: |
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          $os = Get-CimInstance Win32_OperatingSystem
+          "os: $($os.Caption) $($os.Version)"
+          "powershell: $($PSVersionTable.PSVersion)"
+          "node: $(node --version)"
+          "user: $env:USERNAME"
+          $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $admin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          "elevated administrator: $admin"
+          "workspace: $PWD"
+          "system drive: $env:SystemDrive"
+          "vcruntime140.dll: $(Test-Path "$env:SystemRoot\System32\vcruntime140.dll")  msvcp140.dll: $(Test-Path "$env:SystemRoot\System32\msvcp140.dll")"
+          Get-ExecutionPolicy -List | Format-Table -AutoSize | Out-String
+          "core.autocrlf: $(git config --get core.autocrlf)"
+          git ls-files --eol package.json .env.example deploy/entrypoint.sh deploy/Dockerfile
+
+      # 체험 문서 3.2 — corepack이 package.json의 packageManager(pnpm 12.4.1)를 따라 붙인다
+      - name: pnpm 준비 (corepack)
+        run: |
+          corepack enable
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "pnpm: $(pnpm --version)"
+          (Get-Command pnpm.cmd).Source
+
+      - name: 의존성 설치 (pnpm install --frozen-lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # 체험 문서 4.2 — `.env`를 만든다
+      - name: .env 만들기 (pnpm setup:env)
+        run: pnpm setup:env
+
+      # 체험 문서 4.2 — 사람이 메모장으로 고치는 세 줄을 스크립트로 고친다. 값은 실행마다 무작위고 로그에 나오지 않는다
+      - name: .env 고치기 (무작위 비밀, 한 프로세스 실행)
+        run: |
+          $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+          function New-Hex([int]$n) { $b = New-Object byte[] $n; $rng.GetBytes($b); ($b | ForEach-Object { $_.ToString('x2') }) -join '' }
+          $session = New-Hex 32
+          $rootPw = 'Wf-' + (New-Hex 12)
+          $key = New-Object byte[] 32; $rng.GetBytes($key); $llm = [Convert]::ToBase64String($key)
+          Write-Output "::add-mask::$session"
+          Write-Output "::add-mask::$rootPw"
+          Write-Output "::add-mask::$llm"
+          $path = (Resolve-Path .env).Path
+          $text = [IO.File]::ReadAllText($path)
+          $text = $text -replace '(?m)^WF_SERVE_WEB=.*$', 'WF_SERVE_WEB=true'
+          $text = $text -replace '(?m)^WF_SESSION_SECRET=.*$', "WF_SESSION_SECRET=$session"
+          $text = $text -replace '(?m)^WF_ROOT_PASSWORD=.*$', "WF_ROOT_PASSWORD=$rootPw"
+          [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding $false))
+          Add-Content -Path $env:GITHUB_ENV -Value "TRIAL_ROOT_PASSWORD=$rootPw"
+          Add-Content -Path $env:GITHUB_ENV -Value "TRIAL_LLM_KEY=$llm"
+          Select-String -Path $path -Pattern '^WF_(ENV|SERVE_WEB|PORT|DATABASE_URL)=' | ForEach-Object { $_.Line }
+
+      - name: 빌드 (pnpm build)
+        run: pnpm build
+
+      # 고치기 전 방식(embedded-postgres가 postgres.exe를 직접 띄운다)이 이 러너에서 어떻게 되는지 남긴다 — 체험 문서 6절 셋째 줄의 근거.
+      # 이 러너는 관리자 권한에 UAC가 꺼져 있다. 실패해도 다음으로 간다
+      - name: 참고 - postgres.exe를 직접 띄우면 (고치기 전 방식)
+        run: |
+          $ErrorActionPreference = 'Continue'
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          $exe = @(Resolve-Path 'node_modules\.pnpm\@embedded-postgres+windows-x64@*\node_modules\@embedded-postgres\windows-x64\native\bin\postgres.exe')[0].Path
+          "postgres.exe: $exe"
+          $o = Join-Path $env:RUNNER_TEMP 'postgres-direct.out.log'
+          $e = Join-Path $env:RUNNER_TEMP 'postgres-direct.err.log'
+          $p = Start-Process -FilePath $exe -ArgumentList @('-D', (Join-Path $env:RUNNER_TEMP 'no-such-data'), '-p', '5439') -RedirectStandardOutput $o -RedirectStandardError $e -PassThru -Wait -WindowStyle Hidden
+          "exit code: $($p.ExitCode)"
+          Get-Content -Encoding UTF8 $e
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- postgres.exe started directly (before the fix): exit code $($p.ExitCode)"
+          exit 0
+
+      # 체험 문서 4.3 — 창 하나에서 `pnpm dev:db`를 띄워 둔다. 여기서는 뒤에서 띄우고 `[dev-db] READY`를 기다린다
+      - name: 임베디드 PostgreSQL 띄우기 (pnpm dev:db)
+        run: |
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          function Read-Shared([string]$p) { try { $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite'); try { (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $fs.Dispose() } } catch { '' } }
+          $out = Join-Path $env:RUNNER_TEMP 'dev-db.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'dev-db.err.log'
+          $p = Start-Process -FilePath (Get-Command pnpm.cmd).Source -ArgumentList 'dev:db' -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+          Add-Content -Path $env:GITHUB_ENV -Value "DEV_DB_PID=$($p.Id)"
+          $ready = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 2
+            if ((Read-Shared $out) -match '\[dev-db\] READY') { $ready = $true; break }
+            if ($p.HasExited) { break }
+          }
+          '--- dev:db stdout ---'; Read-Shared $out
+          '--- dev:db stderr ---'; Read-Shared $err
+          if (-not $ready) { throw 'dev:db did not reach READY' }
+
+      - name: 표 만들기 (pnpm db:migrate)
+        run: pnpm db:migrate
+
+      - name: 최초 관리자 만들기 (pnpm db:seed)
+        run: pnpm db:seed
+
+      - name: 환경 확인 (pnpm check:env)
+        run: pnpm check:env
+
+      # 체험 문서 4.5 — 한 프로세스(`pnpm start`, WF_SERVE_WEB=true)로 화면과 API를 함께 준다
+      - name: 앱 띄우기 (pnpm start)
+        run: |
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          function Read-Shared([string]$p) { try { $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite'); try { (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $fs.Dispose() } } catch { '' } }
+          $out = Join-Path $env:RUNNER_TEMP 'app.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'app.err.log'
+          $p = Start-Process -FilePath (Get-Command pnpm.cmd).Source -ArgumentList 'start' -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+          Add-Content -Path $env:GITHUB_ENV -Value "APP_PID=$($p.Id)"
+          $ok = $null
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 2
+            try { $ok = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3000/api/health' -TimeoutSec 5; break } catch { if ($p.HasExited) { break } }
+          }
+          '--- app stdout ---'; Read-Shared $out
+          '--- app stderr ---'; Read-Shared $err
+          if (-not $ok) { throw 'app did not answer /api/health' }
+
+      - name: 헬스체크 (/api/health 200)
+        run: |
+          $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3000/api/health'
+          "HTTP $($r.StatusCode) $($r.Content)"
+          if ($r.StatusCode -ne 200) { throw 'health is not 200' }
+          $spa = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3000/login'
+          "GET /login -> HTTP $($spa.StatusCode) $($spa.Headers['Content-Type'])"
+          try {
+            $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress
+            $viaIp = Invoke-WebRequest -UseBasicParsing -Uri "http://${ip}:3000/api/health" -TimeoutSec 10
+            "via own IPv4 (not loopback): HTTP $($viaIp.StatusCode)"
+          } catch { "via own IPv4 (not loopback): failed - $($_.Exception.Message)" }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- health: HTTP $($r.StatusCode) ``$($r.Content)``"
+
+      # 체험 문서 5.1 — 브라우저 로그인과 같은 일을 API로 한다. **쿠키가 오고 http에서 다시 보낼 수 있는가**(Secure가 없는가)가 핵심이다
+      - name: root 로그인 (세션 쿠키가 오는가)
+        run: |
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          $base = 'http://127.0.0.1:3000'
+          $h = @{ 'x-workfluence-request' = '1' }
+          $body = @{ username = 'root'; password = $env:TRIAL_ROOT_PASSWORD } | ConvertTo-Json -Compress
+          $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$base/api/auth/login" -Headers $h -ContentType 'application/json' -Body $body -SessionVariable s
+          $cookie = [string]$r.Headers['Set-Cookie']
+          $attrs = ($cookie -split ';' | Select-Object -Skip 1 | ForEach-Object { $_.Trim() }) -join '; '
+          "login: HTTP $($r.StatusCode) $($r.Content)"
+          "Set-Cookie: wf.sid=(hidden); $attrs"
+          if ($cookie -notmatch '^wf\.sid=') { throw 'no wf.sid session cookie' }
+          if ($cookie -match '(?i);\s*secure') { throw 'session cookie is Secure: a browser will not send it back over http' }
+          $me = Invoke-WebRequest -UseBasicParsing -Uri "$base/api/auth/me" -WebSession $s
+          "me: HTTP $($me.StatusCode) $($me.Content)"
+          $newPw = 'Wf-New-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
+          Write-Output "::add-mask::$newPw"
+          $cp = @{ currentPassword = $env:TRIAL_ROOT_PASSWORD; newPassword = $newPw } | ConvertTo-Json -Compress
+          $c = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$base/api/auth/change-password" -Headers $h -ContentType 'application/json' -Body $cp -WebSession $s
+          "change-password (forced on first login): HTTP $($c.StatusCode) $($c.Content)"
+          $sp = Invoke-WebRequest -UseBasicParsing -Uri "$base/api/spaces" -WebSession $s
+          "spaces (needs a changed password): HTTP $($sp.StatusCode) $($sp.Content)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- login: HTTP $($r.StatusCode), cookie attributes ``$attrs``, me HTTP $($me.StatusCode), change-password HTTP $($c.StatusCode), spaces HTTP $($sp.StatusCode)"
+
+      # CI(Linux)와 같게 WF_ENV=test로 돈다. 시험 DB는 `.env`의 WF_DATABASE_URL_TEST — 같은 임베디드 서버의 workfluence_test다
+      - name: 단위·통합 시험 (pnpm test)
+        env:
+          WF_ENV: test
+        run: pnpm test
+
+      # E2E는 모의 사내 로그인(auth.spec)과 LLM 키 저장(llm.spec)을 켜야 전부 돈다 — 프로세스 환경으로만 더한다(`.env`는 체험 설정 그대로)
+      - name: E2E 준비 (앱을 모의 사내 로그인·LLM 키와 함께 다시 띄운다)
+        run: |
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          function Read-Shared([string]$p) { try { $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite'); try { (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $fs.Dispose() } } catch { '' } }
+          $ErrorActionPreference = 'Continue'
+          taskkill /PID $env:APP_PID /T /F
+          $ErrorActionPreference = 'Stop'
+          Start-Sleep -Seconds 3
+          $env:WF_OIDC_ENABLED = 'true'
+          $env:WF_OIDC_MOCK = 'true'
+          $env:WF_LLM_MASTER_KEY = $env:TRIAL_LLM_KEY
+          $out = Join-Path $env:RUNNER_TEMP 'app-e2e.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'app-e2e.err.log'
+          $p = Start-Process -FilePath (Get-Command pnpm.cmd).Source -ArgumentList 'start' -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+          Add-Content -Path $env:GITHUB_ENV -Value "APP_PID=$($p.Id)"
+          $ok = $null
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 2
+            try { $ok = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3000/api/health' -TimeoutSec 5; break } catch { if ($p.HasExited) { break } }
+          }
+          if (-not $ok) { Read-Shared $out; Read-Shared $err; throw 'app (e2e) did not answer /api/health' }
+          $cfg = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3000/api/auth/config'
+          "auth config: $($cfg.Content)"
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD '.local\ms-playwright'
+          pnpm exec playwright install chromium
+          exit $LASTEXITCODE
+
+      - name: E2E (pnpm test:e2e, chromium)
+        env:
+          E2E_BASE_URL: http://127.0.0.1:3000
+        run: pnpm test:e2e
+
+      # 개발 실행(`pnpm dev`)도 도는가 — 화면은 Vite(5173)가, API는 3000이 준다. WF_SERVE_WEB은 이 실행에서만 끈다
+      - name: 개발 실행 (pnpm dev)
+        if: ${{ !cancelled() }}
+        run: |
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          function Read-Shared([string]$p) { try { $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite'); try { (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $fs.Dispose() } } catch { '' } }
+          $ErrorActionPreference = 'Continue'
+          if ($env:APP_PID) { taskkill /PID $env:APP_PID /T /F }
+          $ErrorActionPreference = 'Stop'
+          Start-Sleep -Seconds 3
+          $env:WF_SERVE_WEB = 'false'
+          $out = Join-Path $env:RUNNER_TEMP 'dev.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'dev.err.log'
+          $p = Start-Process -FilePath (Get-Command pnpm.cmd).Source -ArgumentList 'dev' -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+          $results = @{}
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 2
+            foreach ($u in @('http://localhost:5173/', 'http://127.0.0.1:5173/', 'http://localhost:5173/api/health')) {
+              if (-not $results[$u]) { try { $r = Invoke-WebRequest -UseBasicParsing -Uri $u -TimeoutSec 5; $results[$u] = "HTTP $($r.StatusCode)" } catch { } }
+            }
+            if ($results['http://localhost:5173/api/health']) { break }
+            if ($p.HasExited) { break }
+          }
+          foreach ($u in @('http://localhost:5173/', 'http://127.0.0.1:5173/', 'http://localhost:5173/api/health')) { "$u -> $(if ($results[$u]) { $results[$u] } else { 'no answer' })" }
+          '--- dev stdout (tail) ---'; (Read-Shared $out) -split "`n" | Select-Object -Last 40
+          '--- dev stderr (tail) ---'; (Read-Shared $err) -split "`n" | Select-Object -Last 40
+          $ErrorActionPreference = 'Continue'
+          taskkill /PID $p.Id /T /F | Out-Null
+          $ErrorActionPreference = 'Stop'
+          if (-not $results['http://localhost:5173/api/health']) { throw 'pnpm dev did not serve the screen and the API proxy' }
+
+      - name: 로그 올리기
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-trial-logs
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/*.log
+            .local/tmp/playwright
+            .local/logs
