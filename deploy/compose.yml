@@ -45,6 +45,8 @@ services:
       # "네트워크는 된다"고 오판하기 쉽다. 값은 셸 환경에서 받아 오므로 저장소에
       # 사내 주소가 남지 않고, 프록시가 없는 폐쇄망 반입 서버에서는 빈 값이라 무해하다.
       args:
+        # 빌드한 커밋 — 이미지의 라벨이 된다. 반입 묶음이 지금 커밋으로 빌드된 이미지인지 이것으로 본다 (P13 FR-1404)
+        GIT_SHA: ${GIT_SHA:-unknown}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}

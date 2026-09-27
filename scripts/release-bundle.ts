@@ -30,6 +30,27 @@ function composeImages(): string[] {
 
 const COMPOSE_ARGS = ['compose', '-f', 'deploy/compose.yml', '--env-file', 'deploy/.env'] as const;
 
+/** 앱 이미지의 커밋 라벨 (Dockerfile의 `GIT_SHA`) */
+const REVISION_LABEL = 'org.opencontainers.image.revision';
+
+/**
+ * **앱 이미지가 지금 커밋으로 빌드됐는가** (P13 FR-1404). 예전에는 `MANIFEST`의 gitSha가 저장소 HEAD일 뿐 이미지와 묶여 있지 않아, 다른
+ * 커밋으로 빌드된 `latest`를 담아도 검사가 알아채지 못했다. 이미지에 붙은 커밋 라벨과 HEAD를 견주고, 다르면 묶지 않는다
+ */
+function assertAppImageIsHead(images: string[]): void {
+  const app = images.find((i) => i.startsWith('workfluence-app'));
+  if (!app) throw new Error(`compose의 이미지 가운데 앱 이미지(workfluence-app)가 없다 — ${images.join(', ')}`);
+  const head = sh('git', ['rev-parse', 'HEAD'], true);
+  const label = sh('docker', ['inspect', '-f', `{{ index .Config.Labels "${REVISION_LABEL}" }}`, app], true);
+  if (label !== head) {
+    throw new Error(
+      `앱 이미지(${app})는 커밋 ${label || '(라벨 없음)'}로 빌드됐다 — 지금은 ${head}다. 지금 커밋으로 다시 빌드한다: ` +
+        'GIT_SHA=$(git rev-parse HEAD) docker compose -f deploy/compose.yml --env-file deploy/.env build api',
+    );
+  }
+  console.log(`[release] 앱 이미지 ${app} = 커밋 ${head.slice(0, 7)}`);
+}
+
 const sh = (cmd: string, args: string[], capture = false): string => {
   const r = execFileSync(cmd, args, { maxBuffer: 1024 * 1024 * 1024, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
   return capture ? r.toString().trim() : '';
@@ -45,12 +66,17 @@ function main(): void {
   // 이미지를 **하나의 tar로** 묶는다. 따로 두면 하나만 빠뜨린 채 반입된다
   const images = composeImages();
   if (images.length === 0) throw new Error('compose가 요구하는 이미지를 하나도 찾지 못했다');
+  assertAppImageIsHead(images);
   console.log(`[release] 이미지 저장 중… (${images.join(', ')})`);
   sh('docker', ['save', '-o', join(out, 'images.tar'), ...images]);
 
   copyFileSync('deploy/compose.yml', join(out, 'compose.yml'));
   copyFileSync('deploy/nginx.conf', join(out, 'nginx.conf'));
   copyFileSync('docs/운영가이드_반입.md', join(out, '반입절차.md'));
+  // **운영 문서** (P13 FR-1402). 폐쇄망에서는 저장소를 열 수 없다 — 반입 가이드가 운영 가이드의 절을 가리킨다. 원래 이름으로 `docs/`에 둔다:
+  // 문서끼리의 상대 링크가 묶음 안에서도 이어진다. 목록은 `RELEASE_REQUIRED_FILES`에서 읽는다 — 한 곳에만 적는다
+  mkdirSync(join(out, 'docs'), { recursive: true });
+  for (const f of RELEASE_REQUIRED_FILES.filter((x) => x.startsWith('docs/'))) copyFileSync(f, join(out, f));
   // **사내 CA 자리** (P11 D.7) — 안내 파일만 넣어 `ca/`가 풀린 사람의 것으로 생기게 한다. 묶음에 없으면 첫 기동에서 도커가 root 소유로
   // 만들어, 현장에서 인증서를 넣을 때 일반 계정은 `Permission denied`다. **인증서는 넣지 않는다** — 현장의 것이다(`certs`와 같다)
   mkdirSync(join(out, 'ca'), { recursive: true });
