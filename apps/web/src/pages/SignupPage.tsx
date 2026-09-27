@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
+import { usePasswordRuleText } from '../components/usePasswordRules';
 
 /** 가입 요청 (FR-200, FR-242). 승인 전에는 로그인되지 않는다는 것을 화면이 먼저 말한다 */
 export function SignupPage() {
+  const ruleText = usePasswordRuleText();
   const [form, setForm] = useState({ username: '', displayName: '', email: '', password: '' });
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export function SignupPage() {
         <input id="su-email" type="email" value={form.email} onChange={set('email')} required />
         <label htmlFor="su-pw">비밀번호</label>
         <input id="su-pw" type="password" value={form.password} onChange={set('password')} autoComplete="new-password" required />
-        <p className="muted small">8자 이상, 영문 대·소문자·숫자·특수문자 중 2종 이상</p>
+        <p className="muted small">{ruleText}</p>
         {error && <p className="badge fail" role="alert">{error}</p>}
         <button type="submit" disabled={busy}>{busy ? '보내는 중…' : '가입 요청'}</button>
         <p className="muted small"><Link to="/login">로그인 화면으로</Link></p>

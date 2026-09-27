@@ -24,6 +24,7 @@ import { UsersService } from '../users/users.service';
 import { safeDisplayName } from './domain/display-name';
 import { mapGroupsToRole } from './domain/claims';
 import { idpFailureKind } from './domain/idp-failure';
+import { KeyedSerial } from './domain/keyed-serial';
 import { OIDC_PROVIDER, type OidcClaims, type OidcProvider, type PkcePair } from './oidc/oidc.provider';
 
 /** 로그인 실패는 **사유를 구분하지 않는다** (FR-206). 이 문구 하나만 나간다. */
@@ -42,12 +43,23 @@ export function toMeView(u: UserRow): MeView {
     role: u.role as Role,
     mustChangePassword: u.mustChangePassword,
     grants: grantsForRole(u.role as Role, u.grants),
+    hasPassword: u.passwordHash !== null,
   };
+}
+
+/** 사내 계정 로그인에서 정지된 계정을 만났다 — 트랜잭션을 되돌리고 감사를 남기려고 던진다 (P13 FR-1443) */
+class SuspendedAccount extends Error {
+  constructor(readonly userId: string) {
+    super('정지된 계정');
+  }
 }
 
 @Injectable()
 export class AuthService {
   private readonly log = new Logger('Auth');
+
+  /** 한 계정씩 로그인을 줄 세운다 (P13 FR-1431) — 프로세스에 하나. 앱 서버는 한 대다 */
+  private readonly loginSerial = new KeyedSerial();
 
   constructor(
     private readonly users: UsersService,
@@ -63,30 +75,45 @@ export class AuthService {
   /**
    * FR-202·205·206. 실패해도 감사로그는 남긴다.
    *
-   * **실패 횟수 갱신과 기록을 같은 트랜잭션에 둔다** (FR-236). 따로 두면 한쪽만 반영돼
+   * **비밀번호 확인은 트랜잭션 밖에서 한다** (P13 FR-1430, 보류 16). 연결을 쥔 채 argon2를 돌리면 로그인이 몰릴 때 연결 풀이 모두
+   * "idle in transaction"이 되어 남의 요청이 기다렸다. **잠금과 기록은 같은 트랜잭션에 둔다** (FR-236) — 따로 두면 한쪽만 반영돼
    * "잠겼는데 기록이 없다" 또는 그 반대가 생긴다.
    */
-  async login(dto: LoginDto, ip?: string): Promise<UserRow> {
-    const result = await this.db.transaction(async (tx) => {
-      const r = await this.users.verifyCredentials(dto.username, dto.password, new Date(), tx);
-      if (!r.ok) {
-        await this.audit.record(
-          // 사유는 응답에 쓰지 않는다. 운영자가 나중에 볼 수 있게 기록에만 남긴다
-          { action: 'auth.login.failure', targetType: 'username', targetId: dto.username, detail: { reason: r.reason }, ip },
-          tx,
-        );
-      } else {
-        await this.audit.record({ action: 'auth.login.success', actorId: r.user.id, detail: { method: 'local' }, ip }, tx);
-      }
-      return r;
+  /**
+   * 로컬 로그인. `begin`은 **세션을 만드는 일**이다 — 들어왔을 때 줄 안에서 부른다(병합 전 검토). 비밀번호 변경이 같은 줄에 서므로, 변경은
+   * 이 세션이 생긴 뒤에 돌아 그것까지 지운다. 줄 밖에서 만들면 적은 뒤와 만들기 전 사이에 변경이 끼어, 지운 뒤에 세션이 생긴다
+   */
+  async login(dto: LoginDto, ip?: string, begin?: (user: UserRow) => Promise<void>): Promise<UserRow> {
+    // **한 계정씩 줄을 선다** (P13 FR-1431). 확인과 기록이 한 사람씩이라, 동시에 틀린 N건이 와도 확인까지 가는 것은 잠금 기준만큼이다.
+    // 줄에서 기다리는 동안 연결을 쥐지 않는다
+    const result = await this.loginSerial.run(dto.username, async () => {
+      const now = new Date();
+      const check = await this.users.checkCredentials(dto.username, dto.password, now);
+      const settled = await this.db.transaction(async (tx) => {
+        const r = await this.users.settleCredentials(check, now, tx);
+        if (!r.ok) {
+          await this.audit.record(
+            // 사유는 응답에 쓰지 않는다. 운영자가 나중에 볼 수 있게 기록에만 남긴다
+            { action: 'auth.login.failure', targetType: 'username', targetId: dto.username, detail: { reason: r.reason }, ip },
+            tx,
+          );
+        } else {
+          await this.audit.record({ action: 'auth.login.success', actorId: r.user.id, detail: { method: 'local' }, ip }, tx);
+        }
+        return r;
+      });
+      if (settled.ok && begin) await begin(settled.user);
+      return settled;
     });
     if (!result.ok) throw new UnauthorizedException(LOGIN_FAILED);
     return result.user;
   }
 
   async signup(dto: SignupDto, ip?: string): Promise<void> {
+    // 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+    const passwordHash = await this.users.preparePassword(dto.password);
     await this.db.transaction(async (tx) => {
-      const row = await this.users.signup(dto, tx);
+      const row = await this.users.signup(dto, tx, passwordHash);
       await this.audit.record(
         { action: 'user.signup', targetType: 'user', targetId: row.id, detail: { username: row.username, email: dto.email }, ip },
         tx,
@@ -129,9 +156,19 @@ export class AuthService {
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto, ip?: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx);
-      await this.audit.record({ action: 'auth.password.change', actorId: userId, ip }, tx);
+    const user = await this.users.findById(userId);
+    if (!user) throw new NotFoundException('사용자를 찾을 수 없다');
+    // **그 계정의 로그인과 같은 줄에 선다** (병합 전 검토). 줄 밖에서 바꾸면, 옛 비밀번호로 확인 중이던 로그인이 변경이 세션을 모두 지운
+    // 뒤에 세션을 만든다 — 침해를 알아채고 바꾼 비밀번호가 공격자의 세션을 남긴다. 로그인은 아이디가 정확히 같아야 들어오므로 열쇠가 같다
+    await this.loginSerial.run(user.username, async () => {
+      // 지금 비밀번호 확인과 새 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+      const prepared = await this.users.prepareChangePassword(userId, dto.currentPassword, dto.newPassword);
+      await this.db.transaction(async (tx) => {
+        await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx, prepared);
+        await this.audit.record({ action: 'auth.password.change', actorId: userId, ip }, tx);
+      });
+      // **편집 연결에 알리는 것은 커밋한 뒤에** (좁은 자체 점검 5 — 정지·강제 종료와 같다, `UsersService.destroyAllSessions`)
+      this.users.revokeConnections(userId);
     });
   }
 
@@ -199,15 +236,23 @@ export class AuthService {
       throw new UnauthorizedException('이 계정에 부여할 역할이 없다');
     }
 
-    const user = await this.db.transaction(async (tx) => {
-      const { row: u, clearedGrants } = await this.upsertFromClaims(claims, role, tx);
+    let user: UserRow;
+    try {
+      user = await this.db.transaction(async (tx) => {
+        const { row: u, clearedGrants } = await this.upsertFromClaims(claims, role, tx);
       // IdP가 역할을 내려 위임이 사라졌으면 로그인 행에 함께 남긴다 (P11 FR-1205)
-      await this.audit.record(
-        { action: 'auth.login.success', actorId: u.id, detail: { method: 'oidc', ...(clearedGrants.length ? { clearedGrants } : {}) }, ip },
-        tx,
-      );
-      return u;
-    });
+        await this.audit.record(
+          { action: 'auth.login.success', actorId: u.id, detail: { method: 'oidc', ...(clearedGrants.length ? { clearedGrants } : {}) }, ip },
+          tx,
+        );
+        return u;
+      });
+    } catch (e) {
+      if (!(e instanceof SuspendedAccount)) throw e;
+      // 정지된 계정 (P13 FR-1443). IdP가 이 사람을 확인했으므로 까닭을 말해도 계정이 새지 않는다 — 그 사람 자신의 계정이다
+      await this.audit.record({ action: 'auth.login.failure', actorId: e.userId, targetType: 'oidc_sub', targetId: claims.sub, detail: { reason: 'suspended' }, ip });
+      throw new UnauthorizedException('이 계정은 정지돼 있다 — 관리자에게 문의한다');
+    }
     return user;
   }
 
@@ -228,6 +273,9 @@ export class AuthService {
     const email = await this.freeEmail(claims.email, existing?.id, tx);
 
     if (existing) {
+      // **정지된 계정은 되살리지 않는다** (P13 FR-1443). 예전에는 사내 계정으로 로그인할 때마다 상태를 활성으로 덮어써, 정지해도
+      // IdP로 다시 들어오면 되살아났다
+      if (existing.status === 'suspended') throw new SuspendedAccount(existing.id);
       const before = grantsForRole(existing.role as Role, existing.grants);
       const grants = grantsForRole(role, before);
       const [row] = await tx

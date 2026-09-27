@@ -33,6 +33,8 @@ export type SessionUser = {
   role: Role;
   mustChangePassword: boolean;
   grants: DelegableAction[];
+  /** 비밀번호로 로그인하는 계정인가 — 사내 계정은 아니다 (P13 FR-1471) */
+  hasPassword: boolean;
 };
 
 declare module 'express-session' {
@@ -105,6 +107,7 @@ export class AuthGuard implements CanActivate {
       mustChangePassword: user.mustChangePassword,
       // **요청마다 사용자 행에서 읽는다** — 위임을 거두면 다음 요청부터 먹는다 (P11 A.1-5)
       grants: grantsForRole(user.role as Role, user.grants),
+      hasPassword: user.passwordHash !== null,
     };
     // 그 뒤의 로그 줄에 사용자가 실린다 (P11 FR-1211)
     setRequestUser(user.id);

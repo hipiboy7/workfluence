@@ -14,7 +14,11 @@ import { extractText, validateDocument, type DocNode } from '@workfluence/shared
 
 export type SaveDecision =
   | { save: true; text: string }
-  | { save: false; reason: string; errors: string[] };
+  /**
+   * `unchanged`는 **바뀐 것이 없어** 안 만든 것이다 — 이미 남아 있다. 화면의 "저장하고 보기로"는 이것을 저장된 것으로 본다(P13 FR-1462).
+   * 문장(`reason`)으로 가리면 문구가 바뀔 때 조용히 깨진다
+   */
+  | { save: false; reason: string; errors: string[]; unchanged?: true };
 
 /**
  * 왜 지금 판정하는가. **`force` 하나로 묶으면 안 된다** (P6 코드 리뷰 8).
@@ -136,7 +140,7 @@ export function shouldSaveVersion(input: SaveInput): SaveDecision {
   // 가만히 보고만 있어도 버전이 쌓인다 (FR-707). **강제 저장도 예외가 아니다**
   const titleChanged = input.nextTitle !== undefined && input.previousTitle !== undefined && input.nextTitle !== input.previousTitle;
   if (input.previous && !titleChanged && fingerprint(input.next) === fingerprint(input.previous)) {
-    return { save: false, reason: '내용이 그대로', errors: [] };
+    return { save: false, reason: '내용이 그대로', errors: [], unchanged: true };
   }
 
   const text = extractText(input.next).trim();

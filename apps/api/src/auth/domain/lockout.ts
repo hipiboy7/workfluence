@@ -19,20 +19,16 @@ export function remainingLockMs(state: LockoutState, now: Date): number {
   return state.lockedUntil!.getTime() - now.getTime();
 }
 
-/**
- * 로그인 실패를 반영한 다음 상태.
- *
- * 잠긴 상태에서 또 실패하면 잠금이 **지금부터 다시** 걸린다. 잠긴 동안 계속 두드리는 것이
- * 공격 신호이고, 그때 잠금이 원래대로 풀리면 두드림이 공짜가 된다.
- */
-export function afterFailure(state: LockoutState, now: Date, policy: LockoutPolicy): LockoutState {
-  const failedAttempts = state.failedAttempts + 1;
-  const lockedUntil =
-    failedAttempts >= policy.lockoutThreshold ? new Date(now.getTime() + policy.lockoutMinutes * 60_000) : state.lockedUntil;
-  return { failedAttempts, lockedUntil };
-}
-
 /** 로그인 성공을 반영한 다음 상태. 누적 실패와 잠금을 모두 지운다. */
 export function afterSuccess(): LockoutState {
   return { failedAttempts: 0, lockedUntil: null };
+}
+
+/**
+ * **틀린 확인 뒤의 잠금** (P13 D.4, FR-1431). 실패 횟수는 DB가 한 문장으로 올리고(`failed_attempts + 1 RETURNING`), 올린 뒤의 수가
+ * 기준에 닿았거나 넘었으면 지금부터 잠근다 — 잠금이 풀린 뒤의 실패도 다시 잠근다(성공하기 전까지 횟수는 지워지지 않는다). 읽고 계산해
+ * 다시 쓰면 동시에 온 요청이 서로를 덮는다(측정 S3)
+ */
+export function lockAfterFailure(failedAttempts: number, now: Date, policy: LockoutPolicy): Date | null {
+  return failedAttempts >= policy.lockoutThreshold ? new Date(now.getTime() + policy.lockoutMinutes * 60_000) : null;
 }

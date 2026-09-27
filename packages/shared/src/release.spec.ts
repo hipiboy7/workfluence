@@ -87,6 +87,14 @@ describe('필수 파일 목록 (FR-601)', () => {
     expect(RELEASE_REQUIRED_FILES.length).toBeGreaterThan(5);
   });
 
+  it('**운영 문서가 묶음에 있다** — 폐쇄망에서는 저장소를 열 수 없고, 반입 가이드가 운영 가이드의 절을 가리킨다 (P13 FR-1402)', () => {
+    for (const doc of ['docs/운영가이드_반입.md', 'docs/운영가이드_운영이관.md', 'docs/운영가이드_장애대응.md', 'docs/사용자가이드_사용법.md', 'docs/학습가이드_시스템이해.md']) {
+      expect(RELEASE_REQUIRED_FILES, doc).toContain(doc);
+    }
+    // 맨 위의 반입 절차는 그대로 — 받는 사람이 처음 여는 파일이다
+    expect(RELEASE_REQUIRED_FILES).toContain('반입절차.md');
+  });
+
   it('**사내 CA 자리(`ca/README.md`)가 묶음에 있다** — 없으면 첫 기동에서 도커가 `ca/`를 root 소유로 만들어, 현장에서 인증서를 넣을 때 `Permission denied`다 (P11 검토)', () => {
     expect(RELEASE_REQUIRED_FILES).toContain('ca/README.md');
   });

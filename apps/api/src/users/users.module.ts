@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Global, Inject, Module, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import { createUserDto, listLimitDto, updateUserRoleDto, userGrantsDto, type UserGrantsDto, type UserView } from '@workfluence/shared';
+import { createUserDto, updateUserRoleDto, userGrantsDto, type UserGrantsDto, type UserView, listUsersDto, type ListUsersDto, type UserListView } from '@workfluence/shared';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
+import { RevocationBus } from '../common/revocation.bus';
 import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { DB, type Db } from '../db/db.module';
@@ -18,12 +19,13 @@ export class UsersController {
     private readonly audit: AuditService,
     private readonly spaces: SpacesService,
     @Inject(DB) private readonly db: Db,
+    private readonly revocation: RevocationBus,
   ) {}
 
   @Get()
   @RequireAction('user.manage')
-  list(@Query(new ZodPipe(listLimitDto)) q: { limit: number }): Promise<UserView[]> {
-    return this.users.list(q.limit);
+  list(@Query(new ZodPipe(listUsersDto)) q: ListUsersDto): Promise<UserListView> {
+    return this.users.list(q);
   }
 
   @Post()
@@ -33,8 +35,10 @@ export class UsersController {
     @CurrentUser() actor: SessionUser,
     @Req() req: Request,
   ): Promise<UserView> {
+    // 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+    const passwordHash = await this.users.preparePassword(dto.password);
     return this.db.transaction(async (tx) => {
-      const row = await this.users.create(dto, actor, tx);
+      const row = await this.users.create(dto, actor, tx, passwordHash);
       // 관리자가 만든 계정도 바로 활성이다. 승인 경로를 거치지 않으므로 여기서도 만든다 (FR-309)
       await this.spaces.ensurePersonalSpace(row.id, row.displayName, tx);
       await this.audit.record(
@@ -47,7 +51,7 @@ export class UsersController {
 
   @Post(':id/approve')
   @RequireAction('user.manage')
-  async approve(@Param('id') id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
+  async approve(@Param('id', UuidPipe) id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
     return this.db.transaction(async (tx) => {
       const row = await this.users.approve(id, actor, tx);
       // **승인과 같은 트랜잭션에서** 개인 스페이스를 만든다 (FR-309).
@@ -60,7 +64,7 @@ export class UsersController {
 
   @Post(':id/unlock')
   @RequireAction('user.manage')
-  async unlock(@Param('id') id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
+  async unlock(@Param('id', UuidPipe) id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
     return this.db.transaction(async (tx) => {
       const row = await this.users.unlock(id, actor, tx);
       await this.audit.record({ action: 'user.unlock', actorId: actor.id, targetType: 'user', targetId: id, ip: req.ip }, tx);
@@ -68,11 +72,40 @@ export class UsersController {
     });
   }
 
+  /** 정지 (P13 FR-1441~1444) — 세션을 모두 끊고, 열린 편집 연결을 그 자리에서 끊는다 */
+  @Post(':id/suspend')
+  @RequireAction('user.manage')
+  async suspend(@Param('id', UuidPipe) id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
+    const view = await this.db.transaction(async (tx) => {
+      const { row, before } = await this.users.suspend(id, actor, tx);
+      await this.audit.record(
+        { action: 'user.suspend', actorId: actor.id, targetType: 'user', targetId: id, detail: { username: row.username, before }, ip: req.ip },
+        tx,
+      );
+      return toUserView(row);
+    });
+    // **끊는 알림은 커밋한 뒤에** (P13 D.5, 병합 전 검토) — 먼저 울리면 커밋 전 몇 ms 사이에 다시 붙은 연결이 옛 상태(활성)를 읽고 주기
+    // 재판정까지 살아남고, 커밋이 실패하면 정지는 안 됐는데 연결만 끊긴다
+    this.revocation.revoke(id);
+    return view;
+  }
+
+  /** 정지 해제 (P13 FR-1441·1444) */
+  @Post(':id/unsuspend')
+  @RequireAction('user.manage')
+  async unsuspend(@Param('id', UuidPipe) id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
+    return this.db.transaction(async (tx) => {
+      const row = await this.users.unsuspend(id, actor, tx);
+      await this.audit.record({ action: 'user.unsuspend', actorId: actor.id, targetType: 'user', targetId: id, detail: { username: row.username }, ip: req.ip }, tx);
+      return toUserView(row);
+    });
+  }
+
   /** 관리자 강제 종료 (FR-539). 지금 열려 있는 세션을 전부 끊는다 */
   @Post(':id/terminate-sessions')
   @RequireAction('user.manage')
-  async terminateSessions(@Param('id') id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<{ count: number }> {
-    return this.db.transaction(async (tx) => {
+  async terminateSessions(@Param('id', UuidPipe) id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<{ count: number }> {
+    const result = await this.db.transaction(async (tx) => {
       const count = await this.users.terminateSessions(id, actor, tx);
       await this.audit.record(
         { action: 'user.sessions.terminate', actorId: actor.id, targetType: 'user', targetId: id, detail: { count }, ip: req.ip },
@@ -80,27 +113,35 @@ export class UsersController {
       );
       return { count };
     });
+    // 끊는 알림은 커밋한 뒤에 — 정지와 같다
+    this.revocation.revoke(id);
+    return result;
   }
 
   /** 임시 비밀번호는 **이 응답에 한 번만** 실린다. 저장하지 않고 감사로그에도 남기지 않는다 (FR-209, FR-238) */
   @Post(':id/reset-password')
   @RequireAction('user.manage')
   async resetPassword(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @CurrentUser() actor: SessionUser,
     @Req() req: Request,
   ): Promise<{ user: UserView; temporaryPassword: string }> {
-    return this.db.transaction(async (tx) => {
-      const { user, temporaryPassword } = await this.users.resetPassword(id, actor, tx);
+    // 임시 비밀번호의 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+    const prepared = await this.users.prepareTemporaryPassword();
+    const result = await this.db.transaction(async (tx) => {
+      const { user, temporaryPassword } = await this.users.resetPassword(id, actor, tx, prepared);
       await this.audit.record({ action: 'user.password.reset', actorId: actor.id, targetType: 'user', targetId: id, ip: req.ip }, tx);
       return { user: toUserView(user), temporaryPassword };
     });
+    // 끊는 알림은 커밋한 뒤에 — 정지와 같다 (좁은 자체 점검 5)
+    this.revocation.revoke(id);
+    return result;
   }
 
   @Patch(':id/role')
   @RequireAction('user.role.change')
   async changeRole(
-    @Param('id') id: string,
+    @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(updateUserRoleDto)) dto: { role: ReturnType<typeof updateUserRoleDto.parse>['role'] },
     @CurrentUser() actor: SessionUser,
     @Req() req: Request,

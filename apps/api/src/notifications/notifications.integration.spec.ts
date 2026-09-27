@@ -101,6 +101,26 @@ describe('멘션 알림 (FR-500~504)', () => {
     await commentsSvc.create(pid, { body: body('@adm 확인 부탁') }, owner);
     expect(await svc.list(admin, 20)).toHaveLength(1);
   });
+
+  it('**정지된 사람은 불러도 알림이 없다** (P13 FR-1445) — 알림함에도, 메일 받을 사람에도. 풀린 뒤에 부르면 간다', async () => {
+    const owner = await user('owner');
+    const leaver = await user('leaver');
+    await db.update(users).set({ email: 'leaver@example.internal' }).where(eq(users.id, leaver.id));
+    const sp = await team(owner);
+    await spacesSvc.addMember(sp.id, { username: 'leaver', role: 'editor' }, owner);
+    const pid = await page(sp.id, owner.id);
+    const outcomes: { recipients: unknown[] }[] = [];
+
+    await db.update(users).set({ status: 'suspended' }).where(eq(users.id, leaver.id));
+    await commentsSvc.create(pid, { body: body('@leaver 인수인계 부탁') }, owner, undefined, (m) => outcomes.push(m));
+    expect(await svc.list(leaver, 20)).toHaveLength(0);
+    expect(outcomes.flatMap((o) => o.recipients)).toEqual([]);
+
+    await db.update(users).set({ status: 'active' }).where(eq(users.id, leaver.id));
+    await commentsSvc.create(pid, { body: body('@leaver 돌아왔네') }, owner, undefined, (m) => outcomes.push(m));
+    expect(await svc.list(leaver, 20)).toHaveLength(1);
+    expect(outcomes.flatMap((o) => o.recipients)).toHaveLength(1);
+  });
 });
 
 describe('알림함 (FR-505~508)', () => {

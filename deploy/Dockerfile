@@ -1,5 +1,6 @@
 # workfluence app 이미지 — Nest API + 빌드된 SPA를 한 프로세스가 서빙 (CLAUDE.md 0.2절·8.2절)
-# 빌드: Linux 서버에서  docker build -f deploy/Dockerfile -t workfluence-app:<git-sha> .
+# 빌드: Linux 서버의 저장소 맨 위에서  GIT_SHA=$(git rev-parse HEAD) docker compose -f deploy/compose.yml --env-file deploy/.env build api
+#       (GIT_SHA를 빼면 커밋 라벨이 unknown이 되어 반입 묶음이 묶지 않는다 — 운영가이드_리눅스빌드 5절)
 # 실행: deploy/compose.yml
 #
 # 개발과 빌드는 같은 Linux 서버에서 한다 (CLAUDE.md 0.3절, 2026-09-21 통합).
@@ -31,6 +32,10 @@ RUN pnpm build \
 
 # ---------- 2) 런타임 ----------
 FROM node:24-bookworm-slim
+# 빌드한 커밋 (P13 FR-1404). 반입 묶음을 만들 때 이 라벨이 저장소 HEAD와 같은지 본다 — 다른 커밋으로 빌드된 이미지를 담지 않게.
+# 맨 뒤 층에 두지 않는다: 라벨은 층을 만들지 않는다
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$GIT_SHA
 ENV NODE_ENV=production \
     WF_ENV=production \
     WF_SERVE_WEB=true \

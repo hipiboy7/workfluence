@@ -42,9 +42,9 @@ test('가입 요청 → 승인 → 로그인 → 비밀번호 변경', async ({ 
   await page.getByRole('link', { name: '사용자 관리' }).click();
 
   const row = page.getByRole('row').filter({ hasText: member.username });
-  await expect(row.getByText('pending')).toBeVisible();
+  await expect(row.getByText('승인 대기')).toBeVisible();
   await row.getByRole('button', { name: '승인' }).click();
-  await expect(row.getByText('active')).toBeVisible();
+  await expect(row.getByText('활성')).toBeVisible();
 
   // 관리 화면에는 로그아웃 버튼이 없다. 홈으로 돌아가서 누른다
   await page.goto('/');
@@ -109,7 +109,7 @@ test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한�
 
   // 이 계정은 이미 활성이다 (승인 흐름은 위 테스트가 본다)
   const row = page.getByRole('row').filter({ hasText: target.username });
-  await expect(row.getByText('active')).toBeVisible();
+  await expect(row.getByText('활성')).toBeVisible();
 
   // 역할 변경 (PATCH /api/users/:id/role)
   await row.getByRole('combobox').selectOption('admin');
@@ -133,3 +133,43 @@ test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한�
 /** afterAll이 지울 추가 계정 */
 const cleanupExtra: string[] = [];
 test.afterAll(() => cleanup(cleanupExtra));
+
+/**
+ * **계정 정지** (P13 C.5, FR-1441~1443). 퇴사자 처리 — 관리자가 찾아서 정지하면 그 사람은 로그인하지 못하고, 정지를 풀면 그대로 들어온다.
+ * 찾기로 찾는다 — 사람이 100명을 넘으면 목록의 첫 조각에 없을 수 있다(FR-1450)
+ */
+test('관리자가 찾아서 정지하면 로그인되지 않고, 정지를 풀면 된다', async ({ page }) => {
+  const leaver = { username: `e2e-leave-${Date.now()}`, displayName: 'E2E 퇴사자', password: 'E2e-Leaver-2026!' };
+  made.push(leaver.username);
+  await createMember(leaver);
+
+  await page.goto('/login');
+  await page.getByLabel('아이디').fill(ADMIN.username);
+  await page.getByLabel('비밀번호').fill(ADMIN.password);
+  await page.getByRole('button', { name: '로그인' }).click();
+  await page.getByRole('link', { name: '사용자 관리' }).click();
+  await page.getByRole('searchbox').fill(leaver.username);
+  const row = page.getByRole('row').filter({ hasText: leaver.username });
+  await expect(row).toHaveCount(1);
+  await expect(page.getByText(/전체 1명/)).toBeVisible();
+  page.once('dialog', (d) => void d.accept());
+  await row.getByRole('button', { name: '정지', exact: true }).click();
+  // **상태 칸의 뱃지를 본다** — 글자 '정지'는 누르기 전부터 있는 정지 단추에도 걸려 늘 참이었다 (병합 전 자체 점검 10)
+  await expect(row.locator('td .badge').filter({ hasText: /^정지$/ })).toBeVisible();
+  await expect(row.getByRole('button', { name: '정지 해제' })).toBeVisible();
+
+  // 정지된 사람은 맞는 비밀번호로도 못 들어온다 — 응답은 다른 실패와 같다(계정 상태가 새지 않게)
+  const other = await page.context().browser()!.newContext();
+  const leaverPage = await other.newPage();
+  await leaverPage.goto('/login');
+  await leaverPage.getByLabel('아이디').fill(leaver.username);
+  await leaverPage.getByLabel('비밀번호').fill(leaver.password);
+  await leaverPage.getByRole('button', { name: '로그인' }).click();
+  await expect(leaverPage.getByRole('alert')).toContainText('아이디 또는 비밀번호가 올바르지 않다');
+
+  await row.getByRole('button', { name: '정지 해제' }).click();
+  await expect(row.locator('td .badge').filter({ hasText: /^활성$/ })).toBeVisible();
+  await leaverPage.getByRole('button', { name: '로그인' }).click();
+  await expect(leaverPage.getByText(`${leaver.displayName}님`)).toBeVisible();
+  await other.close();
+});

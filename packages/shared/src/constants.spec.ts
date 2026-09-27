@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, REQUEST_ID_PATTERN, TABLE_LIMITS } from './constants';
+import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, RATE_LIMITS, REQUEST_ID_PATTERN, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
 
 /** 설계 고정값 중 **이름의 모양**이 규칙인 것 (P11 D.4, FR-1214·1218) */
 
@@ -53,8 +53,41 @@ describe('상한 (P12 A.1-2·4·5)', () => {
     expect(COLLAB_LIMITS.maxFrameBytes).toBeGreaterThanOrEqual(8 * 2 * 1024 * 1024);
   });
 
+  it('**저장하고 보기로의 스냅숏은 1MiB(base64 글자)까지** — JSON 본문 상한(2MB, `main.ts`)에 제목과 함께 든다. 지운 기록은 한 편집 기간(방이 열려 있는 동안)만 쌓인다 (P13 D.7)', () => {
+    expect(COLLAB_LIMITS.maxFlushSnapshotChars).toBe(1024 * 1024);
+    expect(COLLAB_LIMITS.maxFlushSnapshotChars).toBeLessThan(2 * 1024 * 1024);
+  });
+
   it('표 칸의 합치는 수는 HTML 표준이 읽는 상한(1000)까지, 열 너비는 10000px까지', () => {
     expect(TABLE_LIMITS).toEqual({ maxSpan: 1000, maxColWidthPx: 10_000 });
   });
 });
 
+describe('사용자 상태와 감사 종류 — P13 계정 정지 (FR-1440·1444)', () => {
+  it('정지(`suspended`)가 사용자 상태에 있다 — 승인 대기·활성과 같은 축이다', () => {
+    expect(USER_STATUSES).toEqual(['pending', 'active', 'suspended']);
+  });
+
+  it('정지·정지 해제가 감사 종류에 있다', () => {
+    expect(AUDIT_ACTIONS).toContain('user.suspend');
+    expect(AUDIT_ACTIONS).toContain('user.unsuspend');
+  });
+
+  it('**실시간 편집의 제목 바꾸기가 감사 종류에 있다** — 바꾼 사람을 남긴다. 뒤에 다른 사람이 치면 저장의 작성자는 그 사람이 된다 (병합 전 보안 검토 L2)', () => {
+    expect(AUDIT_ACTIONS).toContain('page.collab.title');
+  });
+
+  it('사용자 목록은 한 번에 100명 — 서버의 기본값과 화면의 "더 보기"가 같은 값을 쓴다 (병합 전 자체 점검 14)', () => {
+    expect(USER_LIST_PAGE).toBe(100);
+  });
+
+  it('**한 번에 받을 수 있는 상한은 300명 규모를 한 번에 담는다** — 조치 뒤에 보던 만큼 다시 읽는다 (병합 전 코드 리뷰 10)', () => {
+    expect(USER_LIST_MAX).toBeGreaterThanOrEqual(3 * USER_LIST_PAGE);
+  });
+});
+
+describe('RATE_LIMITS — IP별 요청 제한', () => {
+  it('**비밀번호 변경도 센다 — 분당 5건** (P13 좁은 자체 점검 6). 변경은 그 계정의 로그인과 같은 줄에 서서(D.4), 제한이 없으면 세션을 쥔 사람이 틀린 현재 비밀번호로 그 계정의 로그인과 변경을 뒤로 민다. 성공은 돌려준다(로그인과 같다)', () => {
+    expect(RATE_LIMITS.changePassword).toEqual({ max: 5, windowSec: 60 });
+  });
+});

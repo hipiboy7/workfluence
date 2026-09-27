@@ -110,7 +110,7 @@ export function PageHistoryPage() {
             </li>
           ))}
         </ul>
-        <p className="muted small">복원해도 이력은 지워지지 않는다. 그 내용으로 **새 버전**이 하나 더 생긴다.</p>
+        <p className="muted small">복원해도 이력은 지워지지 않는다. 그 내용으로 <strong>새 버전</strong>이 하나 더 생긴다.</p>
       </section>
       {preview && (
         <section className="card">
