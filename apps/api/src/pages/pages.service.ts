@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  PAGE_POSITION_GAP,
   PAGE_TREE_MAX_DEPTH,
   diffDocs,
   extractText,
@@ -22,7 +23,8 @@ import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
 import { pageVersions, pages, spaces, users, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
-import { checkMove, type TreeNode } from './domain/tree';
+import { checkMove, placeAt, type TreeNode } from './domain/tree';
+import { lockTree } from './tree-lock';
 
 /**
  * 페이지·버전 (P2_설계서_Page 3절). B등급 — 실제 PostgreSQL로 통합 테스트한다.
@@ -44,6 +46,9 @@ export function toPageSummary(p: PageRow): PageSummary {
     updatedAt: p.updatedAt.toISOString(),
   };
 }
+
+/** 옮기기의 한쪽 끝 — 감사(`page.move`)가 어디서 어디로를 적는다 */
+type MoveEnd = { parentId: string | null; position: number };
 
 @Injectable()
 export class PagesService {
@@ -92,11 +97,20 @@ export class PagesService {
   }
 
   async create(dto: CreatePageDto, principal: Principal, tx: Db = this.db, onMentions?: (m: MentionOutcome) => void): Promise<PageView> {
+    // 권한 없는 사람은 줄에 서지 않는다 — 잠그기 전에 한 번 보고, 잠근 뒤 다시 본다(기다리는 사이 바뀌었을 수 있다 — 반영분 점검 12, 보안 검토 3)
+    await this.spaces.assertWrite(dto.spaceId, principal, tx);
+    // 본문을 읽는 일(글자 뽑기)은 잠그기 전에 한다 — 잠금은 커밋까지 쥔다
+    const text = extractText(dto.content);
+    // 저장 직전에 버전을 찍는다. 편집기는 이 값을 만들지 않는다 (shared의 stampSchemaVersion 주석)
+    const content = stampSchemaVersion(dto.content);
+    // **트리를 바꾸는 일은 줄을 선다** (P14 D.1 — `lockTree`). 옮기기와 엇갈리면 깊이 한도를 넘거나 자리가 겹친다
+    await lockTree(tx, dto.spaceId);
     await this.spaces.assertWrite(dto.spaceId, principal, tx);
     if (dto.parentId) await this.assertParent(tx, dto.parentId, dto.spaceId, null);
 
+    // 형제의 맨 뒤 + 간격 — 옮기기가 이웃 사이에 끼울 틈을 남긴다 (P14 D.1, `PAGE_POSITION_GAP`)
     const [{ next }] = await tx
-      .select({ next: sql<number>`coalesce(max(${pages.position}), -1) + 1` })
+      .select({ next: sql<number>`coalesce(max(${pages.position}), ${-PAGE_POSITION_GAP}) + ${PAGE_POSITION_GAP}` })
       .from(pages)
       .where(
         and(
@@ -106,9 +120,6 @@ export class PagesService {
         ),
       );
 
-    const text = extractText(dto.content);
-    // 저장 직전에 버전을 찍는다. 편집기는 이 값을 만들지 않는다 (shared의 stampSchemaVersion 주석)
-    const content = stampSchemaVersion(dto.content);
     const [page] = await tx
       .insert(pages)
       .values({
@@ -336,20 +347,68 @@ export class PagesService {
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
-  async move(id: string, dto: MovePageDto, principal: Principal, tx: Db): Promise<PageSummary> {
+  /**
+   * 옮기기 (FR-346, P14_설계서_Spaces D.1). **자리(`position`)는 새 부모 아래 형제 가운데 몇 번째(0부터)다** — 형제를 화면과 같은 순서로 읽어
+   * 끼운다(`placeAt`, A등급). 예전에는 받은 값을 그대로 적어 같은 자리가 여럿 생겼고, 순서가 만든 시각으로 갈려 "이 페이지 다음"을 지킬 수 없었다.
+   *
+   * - **보통 옮긴 한 줄만 고친다** — 자리 값에 틈(`PAGE_POSITION_GAP`)을 두고 이웃 사이의 가운데를 잡는다. 틈이 없을 때만 형제의 자리를 **한
+   *   문장으로** 다시 매긴다. 형제마다 다시 쓰면 줄마다 검색 색인까지 다시 써서, 본문이 큰 형제 300개 아래로 옮기는 데 1.2초였다(병합 전 보안 검토 1)
+   * - **잠근 뒤에 페이지를 다시 읽고 권한과 부모를 본다** (FR-1503, `lockTree`) — 기다리는 사이 누가 지웠거나 옮겼거나(반영분 점검 1), 스페이스가
+   *   중지되거나 Crew에서 빠진 것까지(병합 전 보안 검토 3). 권한은 잠그기 전에도 한 번 본다 — 권한 없는 사람은 줄에 서지 않는다
+   * - 형제의 줄은 자리만 고친다 — 내용이 바뀐 것이 아니라 "최근에 고친 문서"에 올리지 않는다. 옛 부모 아래의 틈은 그대로 둔다(순서는 같다)
+   *
+   * 감사(`page.move`)에 적을 **어디서 어디로**를 함께 돌려준다 — 요청한 값만 적으면 실제로 놓인 자리와 옛 부모를 되짚을 수 없었다(병합 전 검토)
+   */
+  async move(id: string, dto: MovePageDto, principal: Principal, tx: Db): Promise<{ page: PageSummary; from: MoveEnd; to: MoveEnd & { index: number } }> {
+    const found = await this.row(id, tx);
+    await this.spaces.assertWrite(found.spaceId, principal, tx);
+    await lockTree(tx, found.spaceId);
+    // 잠근 뒤 다시 읽는다 — 그 사이 지웠으면 404, 옮겼으면 그 자리가 "어디서"다. 스페이스는 바뀌지 않는다(다른 스페이스로 옮기지 않는다)
     const page = await this.row(id, tx);
     await this.spaces.assertWrite(page.spaceId, principal, tx);
     if (dto.parentId) await this.assertParent(tx, dto.parentId, page.spaceId, id);
+    const siblings = await tx
+      .select({ id: pages.id, position: pages.position })
+      .from(pages)
+      .where(
+        and(
+          eq(pages.spaceId, page.spaceId),
+          dto.parentId ? eq(pages.parentId, dto.parentId) : isNull(pages.parentId),
+          isNull(pages.deletedAt),
+        ),
+      )
+      .orderBy(asc(pages.position), asc(pages.createdAt));
+    const placed = placeAt(siblings, id, dto.position);
+    if (placed.renumber) {
+      const was = new Map(siblings.map((s) => [s.id, s.position]));
+      const changed = placed.renumber.filter((r) => r.id !== id && was.get(r.id) !== r.position);
+      if (changed.length) {
+        const values = sql.join(
+          changed.map((r) => sql`(${r.id}::uuid, ${r.position}::int)`),
+          sql`, `,
+        );
+        await tx.execute(sql`UPDATE pages AS p SET position = v.pos FROM (VALUES ${values}) AS v(id, pos) WHERE p.id = v.id`);
+      }
+    }
     const [row] = await tx
       .update(pages)
-      .set({ parentId: dto.parentId, position: dto.position, updatedBy: principal.id, updatedAt: sql`now()` })
+      .set({ parentId: dto.parentId, position: placed.position, updatedBy: principal.id, updatedAt: sql`now()` })
       .where(eq(pages.id, id))
       .returning();
-    return toPageSummary(row);
+    const index = Math.max(0, Math.min(Math.trunc(dto.position), siblings.filter((s) => s.id !== id).length));
+    return {
+      page: toPageSummary(row),
+      from: { parentId: page.parentId, position: page.position },
+      to: { parentId: dto.parentId, position: placed.position, index },
+    };
   }
 
   /** 삭제 (FR-329, FR-330). 하위가 있으면 막는다 — 고아 페이지를 만들지 않는다 */
   async softDelete(id: string, principal: Principal, tx: Db): Promise<PageRow> {
+    const found = await this.row(id, tx);
+    await this.spaces.assertWrite(found.spaceId, principal, tx);
+    // 트리를 바꾸는 일은 줄을 선다 (P14 D.1) — 지우는 부모 아래로 누가 옮기면 고아가 생긴다. 잠근 뒤 다시 읽는다(그 사이 누가 지웠을 수 있다)
+    await lockTree(tx, found.spaceId);
     const page = await this.row(id, tx);
     await this.spaces.assertWrite(page.spaceId, principal, tx);
     const children = await tx.select({ id: pages.id }).from(pages).where(and(eq(pages.parentId, id), isNull(pages.deletedAt)));
@@ -376,7 +435,8 @@ export class PagesService {
     const r = checkMove({ selfId, spaceId, ancestors, maxDepth: PAGE_TREE_MAX_DEPTH, subtreeHeight });
     if (r.ok) return;
     if (r.reason === 'cycle') throw new BadRequestException('페이지를 자기 자신이나 자손 아래로 옮길 수 없다');
-    if (r.reason === 'cross-space') throw new BadRequestException('다른 스페이스의 페이지를 부모로 둘 수 없다');
+    // **다른 스페이스의 페이지는 없는 것과 같게 답한다** (P14 병합 전 보안 검토 4) — 따로 답하면 아는 페이지 id가 살아 있는지를 알려 준다
+    if (r.reason === 'cross-space') throw new NotFoundException('부모 페이지를 찾을 수 없다');
     throw new BadRequestException(`페이지 트리 깊이는 ${PAGE_TREE_MAX_DEPTH}를 넘을 수 없다`);
   }
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
   DELEGABLE_ACTIONS,
+  LIST_SEARCH_MAX,
   ROLES,
   USER_LIST_FILTERS,
   USER_LIST_MAX,
@@ -18,16 +19,13 @@ import {
 } from '@workfluence/shared';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
+import { SEARCH_DELAY_MS } from '../../timing';
 
 /** 위임할 수 있는 행위의 이름 — 목록이 늘면 타입이 여기를 채우라고 한다 (P11 D.1) */
 const GRANT_LABELS: Record<DelegableAction, string> = { 'llm.manage': 'LLM 연결 관리' };
 
 /** 상태의 이름 (P13 C.6) — 예전에는 저장값(`active` 등)을 그대로 보였다 */
 const STATUS_LABELS: Record<UserStatusView, string> = { pending: '승인 대기', active: '활성', locked: '잠김', suspended: '정지' };
-
-
-/** 입력을 멈추고 이만큼 뒤에 찾는다 */
-const SEARCH_DELAY_MS = 300;
 
 /** 관리할 수 없는 행의 조치에 붙는 설명 */
 const CANNOT_MANAGE = '이 사용자를 관리할 권한이 없다 — 시스템 관리자에게 맡긴다';
@@ -143,7 +141,7 @@ export function AdminUsersPage() {
       <form className="card row" role="search" onSubmit={(e) => e.preventDefault()}>
         <label>
           찾기{' '}
-          <input type="search" value={q} placeholder="아이디·이름·email" onChange={(e) => setQ(e.target.value)} />
+          <input type="search" value={q} placeholder="아이디·이름·email" maxLength={LIST_SEARCH_MAX} onChange={(e) => setQ(e.target.value)} />
         </label>
         <label>
           상태{' '}

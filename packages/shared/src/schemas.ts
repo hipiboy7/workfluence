@@ -3,10 +3,13 @@ import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
   COLLAB_LIMITS,
+  LIST_PAGE_LIMIT,
+  LIST_SEARCH_MAX,
   LLM_LIMITS,
   REQUEST_ID_PATTERN,
   ROLES,
   SPACE_KINDS,
+  SPACE_LIST_MAX,
   SPACE_MEMBER_ROLES,
   SPACE_STATUSES,
   USER_LIST_MAX,
@@ -59,6 +62,13 @@ export const displayNameSchema = z
   .refine((v) => !/[\r\n]/.test(v), { message: '표시 이름에 줄바꿈을 넣을 수 없다' });
 
 // ---- 인증·계정 ----
+
+/**
+ * **식별자 칸** — uuid 모양이면 대문자도 받고 **소문자로 돌려준다** (P14 반영분 점검 2). DB가 돌려주는 uuid는 소문자라, 받은 값을 그대로 두면
+ * JS 비교·잠금 이름·방 이름에서 같은 것이 다른 값이 된다 — 대문자로 보낸 옮기기가 순환 판정(`checkMove`)을 지나 고리를 만들었다. 경계에서 한 번
+ * 맞추고 안쪽은 소문자만 본다
+ */
+export const idSchema = z.uuid().toLowerCase();
 
 export const loginDto = z.object({
   username: z.string().trim().min(1).max(64),
@@ -117,7 +127,7 @@ export type CreateCategoryDto = z.infer<typeof createCategoryDto>;
 export const createSpaceDto = z.object({
   name: z.string().trim().min(1).max(200),
   kind: z.enum(SPACE_KINDS),
-  categoryId: z.uuid().nullable().default(null),
+  categoryId: idSchema.nullable().default(null),
   description: z.string().trim().max(2000).default(''),
 });
 export type CreateSpaceDto = z.infer<typeof createSpaceDto>;
@@ -125,7 +135,7 @@ export type CreateSpaceDto = z.infer<typeof createSpaceDto>;
 export const updateSpaceDto = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   description: z.string().trim().max(2000).optional(),
-  categoryId: z.uuid().nullable().optional(),
+  categoryId: idSchema.nullable().optional(),
 });
 export type UpdateSpaceDto = z.infer<typeof updateSpaceDto>;
 
@@ -141,9 +151,20 @@ export type AddMemberDto = z.infer<typeof addMemberDto>;
 export const updateMemberRoleDto = z.object({ role: z.enum(ASSIGNABLE_MEMBER_ROLES) });
 export type UpdateMemberRoleDto = z.infer<typeof updateMemberRoleDto>;
 
+/**
+ * 스페이스 목록의 조건. `q`는 이름·키의 부분 일치, `status`는 상태 — **서버가 찾고 거른다** (P14 FR-1514, P4 FR-537 상한 + 검색). 화면에서만 거르면
+ * 상한 밖의 스페이스를 찾지 못한다(T-051). 빈 찾기는 찾지 않는 것이다
+ */
 export const spaceListQueryDto = z.object({
   scope: z.enum(['personal', 'team', 'all']).default('personal'),
-  limit: z.coerce.number().int().min(1).max(500).default(200),
+  limit: z.coerce.number().int().min(1).max(SPACE_LIST_MAX).default(LIST_PAGE_LIMIT),
+  q: z
+    .string()
+    .trim()
+    .max(LIST_SEARCH_MAX)
+    .optional()
+    .transform((v) => (v ? v : undefined)),
+  status: z.enum(SPACE_STATUSES).optional(),
 });
 export type SpaceListQueryDto = z.infer<typeof spaceListQueryDto>;
 
@@ -155,7 +176,7 @@ export type SpaceListQueryDto = z.infer<typeof spaceListQueryDto>;
 export const auditQueryDto = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
   action: z.string().trim().max(60).optional(),
-  actorId: z.uuid().optional(),
+  actorId: idSchema.optional(),
   /** 포함. 날짜만 주면 그날 00:00부터 */
   from: z.coerce.date().optional(),
   /** 제외. 날짜만 주면 그날 00:00까지 */
@@ -170,8 +191,8 @@ export const listLimitDto = z.object({ limit: z.coerce.number().int().min(1).max
 // ---- 페이지 ----
 
 export const createPageDto = z.object({
-  spaceId: z.uuid(),
-  parentId: z.uuid().nullable().default(null),
+  spaceId: idSchema,
+  parentId: idSchema.nullable().default(null),
   title: z.string().trim().min(1).max(300),
   content: documentSchema,
 });
@@ -185,15 +206,16 @@ export const updatePageDto = z.object({
 });
 export type UpdatePageDto = z.infer<typeof updatePageDto>;
 
+/** 옮기기 (P2 FR-346). `position`은 **새 부모 아래 형제 가운데 몇 번째**(0부터)다 — 서버가 새 자리 값을 정한다(틈이 없을 때만 형제를 다시 매긴다). 형제 수보다 크면 맨 뒤 (P14 FR-1502) */
 export const movePageDto = z.object({
-  parentId: z.uuid().nullable(),
+  parentId: idSchema.nullable(),
   position: z.number().int().min(0),
 });
 export type MovePageDto = z.infer<typeof movePageDto>;
 
 /** 댓글 (P3_설계서_Content 5절, FR-420·421). 본문은 페이지와 같은 문서 검증을 쓴다 */
 export const createCommentDto = z.object({
-  parentId: z.uuid().nullable().optional(),
+  parentId: idSchema.nullable().optional(),
   body: documentSchema,
 });
 export type CreateCommentDto = z.infer<typeof createCommentDto>;
@@ -230,6 +252,14 @@ export function isUuid(v: unknown): v is string {
 }
 
 /**
+ * **경로의 식별자** — 모양이 아니면 `null`, 맞으면 소문자(`idSchema`). 서버의 경로 검증(`UuidPipe`)과 실시간 편집의 방 이름이 쓴다
+ */
+export function parseId(v: unknown): string | null {
+  const r = idSchema.safeParse(v);
+  return r.success ? r.data : null;
+}
+
+/**
  * 라벨 이름. **`.`·`..`은 받지 않는다** — 라벨 페이지는 이름을 API 경로에 넣고(`/api/labels/{이름}/pages`), `encodeURIComponent`는
  * 점을 싸지 않아 URL 해석이 그 조각을 점 조각으로 읽는다(다른 API를 가리킨다). 화면의 `api()`도 그런 경로를 보내지 않는다 (P10 종료 루틴)
  */
@@ -255,7 +285,7 @@ export type UserGrantsDto = z.infer<typeof userGrantsDto>;
 
 export const searchQueryDto = z.object({
   q: z.string().trim().min(1).max(200),
-  spaceId: z.uuid().optional(),
+  spaceId: idSchema.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 export type SearchQueryDto = z.infer<typeof searchQueryDto>;
@@ -288,7 +318,7 @@ export type UserListFilter = (typeof USER_LIST_FILTERS)[number];
 
 /** 사용자 목록의 찾기·거르기·나누기 (P13 C.6, FR-1450~1452) — 기본 100명에서 조용히 끊겼다 */
 export const listUsersDto = z.object({
-  q: z.string().trim().max(100).optional(),
+  q: z.string().trim().max(LIST_SEARCH_MAX).optional(),
   status: z.enum(USER_LIST_FILTERS).optional(),
   limit: z.coerce.number().int().min(1).max(USER_LIST_MAX).default(USER_LIST_PAGE),
   offset: z.coerce.number().int().min(0).default(0),
@@ -545,9 +575,9 @@ export type UpdateLlmPromptDto = z.infer<typeof updateLlmPromptDto>;
  */
 export const llmAskDto = z
   .object({
-    providerId: z.uuid(),
-    conversationId: z.uuid().optional(),
-    promptId: z.uuid().optional(),
+    providerId: idSchema,
+    conversationId: idSchema.optional(),
+    promptId: idSchema.optional(),
     question: z.string().trim().min(1).max(LLM_LIMITS.questionMaxChars).refine(noNul, { message: NUL_MESSAGE }),
   })
   .refine((v) => !(v.conversationId && v.promptId), {

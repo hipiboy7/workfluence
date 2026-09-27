@@ -105,6 +105,8 @@ export async function cleanup(usernames: string[]): Promise<void> {
     await c.query('DELETE FROM pages WHERE created_by = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);
     await c.query('DELETE FROM space_members WHERE user_id = ANY($1) OR space_id IN (SELECT id FROM spaces WHERE created_by = ANY($1))', [ids]);
     await c.query('DELETE FROM spaces WHERE created_by = ANY($1)', [ids]);
+    // Phase 14 — 분류도 users를 참조한다(만든 사람). 그 사람이 만든 분류 가운데 스페이스가 쓰지 않는 것을 지운다 — 쓰는 것은 FK가 막는다
+    await c.query('DELETE FROM space_categories WHERE created_by = ANY($1) AND NOT EXISTS (SELECT 1 FROM spaces s WHERE s.category_id = space_categories.id)', [ids]);
     // Phase 4에서 users를 참조하는 것이 둘 늘었다. 알림은 지우고, 설정은 "누가 바꿨나"만 지운다 —
     // 정책값 자체는 이 실행이 만든 것이 아니므로 남긴다
     await c.query('UPDATE settings SET updated_by = NULL WHERE updated_by = ANY($1)', [ids]);

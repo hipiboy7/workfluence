@@ -36,7 +36,7 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
   await page.getByLabel('이름').fill(spaceName);
   await page.getByRole('button', { name: '만들기' }).click();
   await page.getByRole('link', { name: spaceName }).click();
-  await page.getByLabel('아이디로 Crew 추가 (editor)').fill(MATE.username);
+  await page.getByLabel('아이디로 Crew 추가').fill(MATE.username);
   await page.getByRole('button', { name: '추가' }).click();
   await expect(page.getByText(MATE.displayName)).toBeVisible();
 

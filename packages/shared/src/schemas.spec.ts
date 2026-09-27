@@ -11,6 +11,7 @@ import {
   flushCollabDto,
   listUsersDto,
   createCategoryDto,
+  createCommentDto,
   createPageDto,
   createSpaceDto,
   createTemplateDto,
@@ -21,6 +22,7 @@ import {
   llmAskDto,
   loginDto,
   movePageDto,
+  parseId,
   updateTemplateDto,
   recoverPasswordDto,
   searchQueryDto,
@@ -31,7 +33,7 @@ import {
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
-import { COLLAB_LIMITS, LLM_LIMITS, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
+import { COLLAB_LIMITS, LIST_SEARCH_MAX, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -94,6 +96,19 @@ describe('카테고리·스페이스 DTO', () => {
     expect(addMemberDto.safeParse({ username: 'kim', role: 'owner' }).success).toBe(false);
     expect(spaceListQueryDto.parse({})).toEqual({ scope: 'personal', limit: 200 });
     expect(spaceListQueryDto.parse({ scope: 'all', limit: '5' })).toEqual({ scope: 'all', limit: 5 });
+  });
+
+  /** **모든 스페이스는 서버가 찾고 거른다** (P14 FR-1514, P4 FR-537 상한 + 검색). 화면에서만 거르면 상한 밖의 스페이스를 찾지 못한다(T-051) */
+  it('spaceListQueryDto — 찾기(`q`)와 상태(`status`)', () => {
+    expect(spaceListQueryDto.parse({ scope: 'all', q: '  운영팀  ', status: 'suspended' })).toEqual({ scope: 'all', limit: 200, q: '운영팀', status: 'suspended' });
+    expect(spaceListQueryDto.parse({ scope: 'all', q: 'x'.repeat(LIST_SEARCH_MAX) }).q).toHaveLength(LIST_SEARCH_MAX);
+    expect(spaceListQueryDto.safeParse({ q: 'x'.repeat(LIST_SEARCH_MAX + 1) }).success).toBe(false);
+    expect(spaceListQueryDto.safeParse({ status: 'deleted' }).success).toBe(false);
+    // 빈 찾기는 찾지 않는 것이다 — 모두 보인다
+    expect(spaceListQueryDto.parse({ q: '   ' })).toEqual({ scope: 'personal', limit: 200 });
+    // 상한은 공유 상수 하나다 — 관리 화면이 그 값으로 "찾기로 좁힌다"를 말한다
+    expect(spaceListQueryDto.parse({ limit: SPACE_LIST_MAX }).limit).toBe(SPACE_LIST_MAX);
+    expect(spaceListQueryDto.safeParse({ limit: SPACE_LIST_MAX + 1 }).success).toBe(false);
   });
 });
 
@@ -216,6 +231,38 @@ describe('LLM DTO — PostgreSQL이 받지 않는 글자와 키의 모양', () =
     for (const bad of ['k\u200b', '키값', 'k\u0000', 'a b', 'k\t1']) {
       expect(createLlmProviderDto.safeParse({ ...base, apiKey: bad }).success).toBe(false);
     }
+  });
+});
+
+describe('식별자는 소문자로 맞춘다 (P14 반영분 점검 2)', () => {
+  // DB가 돌려주는 uuid는 소문자다. 대문자로 받은 값을 그대로 두면 JS 비교·잠금 이름·방 이름에서 같은 페이지가 다른 값이 된다 — 자기 아래로
+  // 옮기는 순환 판정이 지나 고리가 생기고(`checkMove`의 `a.id === selfId`), 대문자 스페이스 id로 만들면 트리 잠금이 다른 이름이 됐다
+  const U = '0F6B2C3D-1234-4ABC-8DEF-0123456789AB';
+  const L = U.toLowerCase();
+  const body = emptyDocument();
+
+  it('**대문자도 받되 소문자로 돌려준다** — 본문·쿼리의 식별자 칸 전부', () => {
+    expect(createPageDto.parse({ spaceId: U, parentId: U, title: 't', content: body })).toMatchObject({ spaceId: L, parentId: L });
+    expect(movePageDto.parse({ parentId: U, position: 0 }).parentId).toBe(L);
+    expect(createCommentDto.parse({ parentId: U, body }).parentId).toBe(L);
+    expect(createSpaceDto.parse({ name: 'n', kind: 'team', categoryId: U }).categoryId).toBe(L);
+    expect(updateSpaceDto.parse({ categoryId: U }).categoryId).toBe(L);
+    expect(auditQueryDto.parse({ actorId: U }).actorId).toBe(L);
+    expect(searchQueryDto.parse({ q: '회의', spaceId: U }).spaceId).toBe(L);
+    expect(llmAskDto.parse({ providerId: U, question: 'q' }).providerId).toBe(L);
+    expect(llmAskDto.parse({ providerId: U, conversationId: U, question: 'q' }).conversationId).toBe(L);
+    expect(llmAskDto.parse({ providerId: U, promptId: U, question: 'q' }).promptId).toBe(L);
+    // 없음·null은 그대로
+    expect(createPageDto.parse({ spaceId: L, title: 't', content: body }).parentId).toBeNull();
+    expect(movePageDto.parse({ parentId: null, position: 0 }).parentId).toBeNull();
+  });
+
+  it('**`parseId`** — 경로의 식별자(`UuidPipe`, 실시간 편집의 방 이름)가 쓴다. 모양이 아니면 `null`, 맞으면 소문자', () => {
+    expect(parseId(U)).toBe(L);
+    expect(parseId(L)).toBe(L);
+    for (const bad of ['', 'x', `${L}/labels/x`, undefined, null, 7]) expect(parseId(bad), String(bad)).toBeNull();
+    // 모양 판정은 `isUuid`와 같다 — 대문자도 식별자다
+    expect(isUuid(U)).toBe(true);
   });
 });
 

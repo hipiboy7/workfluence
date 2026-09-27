@@ -1,8 +1,9 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { can, type Principal, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
+import { PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, can, type Principal, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
 import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { pages, spaces, users, type PageRow, type SpaceRow } from '../db/schema';
+import { lockTree } from '../pages/tree-lock';
 import { SpacesService } from '../spaces/spaces.service';
 
 /**
@@ -65,16 +66,26 @@ export class TrashService {
    *
    * **부모가 아직 지워져 있으면 최상위로 올린다** (FR-512). 없는 부모를 가리킨 채로 살리면
    * 트리 어디에도 안 보이는 페이지가 된다 — 되살렸는데 찾을 수 없는 상태가 가장 나쁘다.
+   * **제자리가 깊이 한도를 넘게 됐어도 최상위로 올린다** (P14 병합 전 코드 리뷰 7) — 지운 뒤 부모가 더 깊이 옮겨졌을 수 있다(옮기기의 깊이
+   * 판정은 지운 자식을 세지 않는다). 지운 페이지 아래에는 살아 있는 페이지가 없으므로(지우기·만들기·옮기기가 막는다) 되살린 페이지 하나만 센다.
    */
   async restorePage(id: string, principal: Principal, tx: Db = this.db): Promise<{ page: PageRow; movedToRoot: boolean }> {
-    const row = await tx.query.pages.findFirst({ where: and(eq(pages.id, id), isNotNull(pages.deletedAt)) });
+    const inTrash = () => tx.query.pages.findFirst({ where: and(eq(pages.id, id), isNotNull(pages.deletedAt)) });
+    const found = await inTrash();
+    if (!found) throw new NotFoundException('휴지통에서 찾을 수 없다');
+    // 권한 없는 사람은 줄에 서지 않는다 — 잠그기 전에 한 번, 잠근 뒤 다시 본다
+    await this.spaces.assertWrite(found.spaceId, principal, tx);
+    // 트리를 바꾸는 일은 줄을 선다 (P14 D.1 — `lockTree`). 부모를 보는 사이 누가 그 부모를 지우거나 옮기면 어긋난다. **잠근 뒤 다시 읽는다** —
+    // 두 번 누르면 뒤의 것은 앞의 되살리기를 보고 404다(반영분 점검 1)
+    await lockTree(tx, found.spaceId);
+    const row = await inTrash();
     if (!row) throw new NotFoundException('휴지통에서 찾을 수 없다');
     await this.spaces.assertWrite(row.spaceId, principal, tx);
 
     let movedToRoot = false;
     if (row.parentId) {
       const parent = await tx.query.pages.findFirst({ where: and(eq(pages.id, row.parentId), isNull(pages.deletedAt)) });
-      if (!parent) movedToRoot = true;
+      if (!parent || (await this.depthOf(tx, parent.id)) + 1 > PAGE_TREE_MAX_DEPTH) movedToRoot = true;
     }
     // 최상위로 올릴 때는 **자리도 다시 잡는다.** 예전 형제들 사이의 번호를 그대로 들고 오면
     // 최상위의 다른 페이지와 번호가 겹쳐 순서가 뒤죽박죽이 된다 — "찾을 수 있게 한다"는
@@ -82,10 +93,11 @@ export class TrashService {
     let position = row.position;
     if (movedToRoot) {
       const [{ maxPos }] = await tx
-        .select({ maxPos: sql<number>`coalesce(max(${pages.position}), -1)::int` })
+        .select({ maxPos: sql<number>`coalesce(max(${pages.position}), ${-PAGE_POSITION_GAP})::int` })
         .from(pages)
         .where(and(eq(pages.spaceId, row.spaceId), isNull(pages.parentId), isNull(pages.deletedAt)));
-      position = maxPos + 1;
+      // 맨 뒤 + 간격 — 새 페이지와 같다 (P14 D.1)
+      position = maxPos + PAGE_POSITION_GAP;
     }
     const [next] = await tx
       .update(pages)
@@ -93,6 +105,16 @@ export class TrashService {
       .where(eq(pages.id, id))
       .returning();
     return { page: next, movedToRoot };
+  }
+
+  /** 그 페이지의 단수 — 맨 위가 1이다. 순환된 데이터가 있어도 한도에서 멈춘다 */
+  private async depthOf(tx: Db, id: string): Promise<number> {
+    let depth = 0;
+    for (let cursor: string | null = id; cursor && depth <= PAGE_TREE_MAX_DEPTH; depth++) {
+      const up: { parentId: string | null } | undefined = await tx.query.pages.findFirst({ columns: { parentId: true }, where: eq(pages.id, cursor) });
+      cursor = up?.parentId ?? null;
+    }
+    return depth;
   }
 
   /** 지운 스페이스는 관리자만 본다 (FR-513) */

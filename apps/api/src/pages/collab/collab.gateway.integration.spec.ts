@@ -178,7 +178,8 @@ beforeEach(async () => {
 
   const space = await spaces.create({ name: '협업방', kind: 'personal', categoryId: null, description: '' }, { id: userId, role: 'admin' });
   spaceId = space.id;
-  const page = await pagesSvc.create({ spaceId, parentId: null, title: '문서', content: doc('처음') }, { id: userId, role: 'admin' });
+  // 만들기는 트리 잠금을 쓴다 — 트랜잭션 안에서 부른다 (P14 D.1)
+  const page = await db.transaction((tx) => pagesSvc.create({ spaceId, parentId: null, title: '문서', content: doc('처음') }, { id: userId, role: 'admin' }, tx));
   pageId = page.id;
 });
 

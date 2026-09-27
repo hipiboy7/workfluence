@@ -2,7 +2,7 @@
 
 금융 폐쇄망 내부용 위키·문서 협업 시스템 (Confluence 대체).
 
-**현재 단계**: Phase 13까지 완료 (반입 준비, 2026-09-27 — 설치 가이드를 적힌 그대로 따라 빈 서버에 설치하면 root로 로그인되고, 첫 백업·월간 작업·되살리기가 컨테이너만으로 돈다. 앱은 표를 만들 권한이 없는 계정으로 DB에 붙고 감사로그는 쌓기만 한다. 관리자가 사용자를 찾아 정지할 수 있고, 로그인이 몰려도 남의 조회가 연결을 기다리지 않는다). Phase 12에서 답을 기다리는 표시·문서 모양의 한계(LLM에 물으면 기다린 초를 보이고, 실시간 편집은 받는 편집기가 지우는 모양과 너무 큰 편집을 받지 않는다)가 들어왔다. Phase 11에서 운영 로그·LLM 관리 위임(요청 번호로 로그를 잇고, 관리자 한 사람씩 LLM 연결 관리를 맡긴다)이 들어왔다. Phase 10에서 사내 LLM 질문(시스템 관리자가 등록한 LLM에 메뉴에서 묻고, 대화는 기간·개수만큼 남는다)이 들어왔다. Phase 6에서 실시간 동시 편집·버전 비교·HTML 내보내기·템플릿·멘션 메일이 들어왔고, PDF 내보내기와 Confluence 가져오기는 하지 않기로 닫았다.
+**현재 단계**: Phase 14까지 완료 (페이지 트리와 스페이스를 화면에서, 2026-09-28 — 문서 보기에서 하위 페이지를 만들고 옮기면 트리가 그 자리와 들여쓰기로 그려지고, 한 공간의 트리를 바꾸는 일은 차례로 한다. 공간의 주인과 관리자가 화면에서 이름·분류를 바꾸고 중지·지우며, 관리자는 모든 공간을 찾고 분류를 관리한다). Phase 13에서 반입 준비(2026-09-27 — 설치 가이드를 적힌 그대로 따라 빈 서버에 설치하면 root로 로그인되고, 첫 백업·월간 작업·되살리기가 컨테이너만으로 돈다. 앱은 표를 만들 권한이 없는 계정으로 DB에 붙고 감사로그는 쌓기만 한다. 관리자가 사용자를 찾아 정지할 수 있고, 로그인이 몰려도 남의 조회가 연결을 기다리지 않는다)가 들어왔다. Phase 12에서 답을 기다리는 표시·문서 모양의 한계(LLM에 물으면 기다린 초를 보이고, 실시간 편집은 받는 편집기가 지우는 모양과 너무 큰 편집을 받지 않는다)가 들어왔다. Phase 11에서 운영 로그·LLM 관리 위임(요청 번호로 로그를 잇고, 관리자 한 사람씩 LLM 연결 관리를 맡긴다)이 들어왔다. Phase 10에서 사내 LLM 질문(시스템 관리자가 등록한 LLM에 메뉴에서 묻고, 대화는 기간·개수만큼 남는다)이 들어왔다. Phase 6에서 실시간 동시 편집·버전 비교·HTML 내보내기·템플릿·멘션 메일이 들어왔고, PDF 내보내기와 Confluence 가져오기는 하지 않기로 닫았다.
 
 ## 처음 온 사람이 읽는 순서
 
@@ -26,7 +26,7 @@
 | 리눅스 서버에서 이미지를 만들고 반입 묶음을 싼다 | [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md) |
 | 새 기능을 넣고 싶다 | [`docs/기능백로그.md`](docs/기능백로그.md) |
 | 이 오류 본 적 있나 | [`docs/internal/검토서_트러블슈팅.md`](docs/internal/검토서_트러블슈팅.md) |
-| 무엇을 어떻게 검증했나 | Phase별 검증기록 — [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) · [`docs/P1_검증기록_Auth.md`](docs/P1_검증기록_Auth.md) · [`docs/P2_검증기록_Page.md`](docs/P2_검증기록_Page.md) · [`docs/P3_검증기록_Content.md`](docs/P3_검증기록_Content.md) · [`docs/P4_검증기록_Admin.md`](docs/P4_검증기록_Admin.md) · [`docs/P5_검증기록_Release.md`](docs/P5_검증기록_Release.md) · [`docs/P6_검증기록_Collab.md`](docs/P6_검증기록_Collab.md) · [`docs/P7_검증기록_Hardening.md`](docs/P7_검증기록_Hardening.md) · [`docs/P8_검증기록_Mention.md`](docs/P8_검증기록_Mention.md) · [`docs/P9_검증기록_Gate.md`](docs/P9_검증기록_Gate.md) · [`docs/P10_검증기록_Llm.md`](docs/P10_검증기록_Llm.md) · [`docs/P11_검증기록_Ops.md`](docs/P11_검증기록_Ops.md) · [`docs/P12_검증기록_Limits.md`](docs/P12_검증기록_Limits.md) |
+| 무엇을 어떻게 검증했나 | Phase별 검증기록 — [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) · [`docs/P1_검증기록_Auth.md`](docs/P1_검증기록_Auth.md) · [`docs/P2_검증기록_Page.md`](docs/P2_검증기록_Page.md) · [`docs/P3_검증기록_Content.md`](docs/P3_검증기록_Content.md) · [`docs/P4_검증기록_Admin.md`](docs/P4_검증기록_Admin.md) · [`docs/P5_검증기록_Release.md`](docs/P5_검증기록_Release.md) · [`docs/P6_검증기록_Collab.md`](docs/P6_검증기록_Collab.md) · [`docs/P7_검증기록_Hardening.md`](docs/P7_검증기록_Hardening.md) · [`docs/P8_검증기록_Mention.md`](docs/P8_검증기록_Mention.md) · [`docs/P9_검증기록_Gate.md`](docs/P9_검증기록_Gate.md) · [`docs/P10_검증기록_Llm.md`](docs/P10_검증기록_Llm.md) · [`docs/P11_검증기록_Ops.md`](docs/P11_검증기록_Ops.md) · [`docs/P12_검증기록_Limits.md`](docs/P12_검증기록_Limits.md) · [`docs/P13_검증기록_Readiness.md`](docs/P13_검증기록_Readiness.md) · [`docs/P14_검증기록_Spaces.md`](docs/P14_검증기록_Spaces.md) |
 | 왜 이런 작업 방식인가 | [`docs/internal/검토서_방법론개정.md`](docs/internal/검토서_방법론개정.md) |
 
 ## 구조
