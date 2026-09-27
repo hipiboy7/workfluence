@@ -3,17 +3,27 @@
  * 최초 실행 시 initdb + 데이터베이스 생성. Ctrl+C로 종료. 데이터는 유지된다.
  *
  * 주의
- * - PostgreSQL은 관리자 권한(Windows elevated / Linux root) 셸에서 기동을 거부한다.
+ * - PostgreSQL 서버는 관리자 권한으로 **직접** 띄우면 기동을 거부한다 (Linux root · Windows 관리자 권한 창).
+ *   Windows는 그래서 서버를 `pg_ctl`로 띄운다 — 아래 `startOnWindows`. Linux는 root 셸에서 여전히 거부된다.
  * - 이전 프로세스를 Ctrl+C가 아닌 방식으로 죽이면 `postmaster.pid`가 남아 다음 기동이 실패한다.
  *   그 경우 남은 프로세스가 실제로 없을 때만 잠금 파일을 치운다 (살아 있으면 건드리지 않는다).
  */
 import EmbeddedPostgres from 'embedded-postgres';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { Client } from 'pg';
 import { parseDotenv } from '../packages/shared/src/env';
 
 const root = resolve(__dirname, '..');
+const isWindows = process.platform === 'win32';
+
+/** Windows 종료 상태 0xC0000135 — 실행 파일에 필요한 DLL이 없다. 이때 프로세스는 **아무 출력 없이** 끝난다 */
+const WINDOWS_DLL_NOT_FOUND = 0xc0000135;
+/** Windows에서 서버가 살아 있는지 보는 주기 (아래 `main`) */
+const WINDOWS_WATCH_MS = 5_000;
 
 
 /** 남은 잠금 파일 정리. 그 PID가 살아 있으면 손대지 않고 그대로 알린다. */
@@ -58,6 +68,38 @@ async function ensureDatabases(port: number, password: string, names: string[]):
   }
 }
 
+/**
+ * Windows는 서버를 `pg_ctl`로 띄우고 끈다 (`docs/운영가이드_윈도우체험.md` 6절).
+ *
+ * `embedded-postgres`는 `postgres.exe`를 직접 띄우는데, PostgreSQL은 관리자 그룹이 살아 있는 권한으로 직접 뜨기를 거부한다
+ * ("Execution of PostgreSQL by a user with administrative permissions is not permitted"). **클라우드 VM의 내장
+ * Administrator 계정은 모든 창이 그 권한이다**(UAC 기본값). GitHub의 Windows 러너도 그렇다. `pg_ctl`은 관리자 그룹을 뺀
+ * 제한된 토큰으로 `postgres.exe`를 띄우므로 어느 창에서든 뜬다. `initdb`는 스스로 같은 일을 하므로 초기화는 그대로 둔다.
+ *
+ * 바이너리 패키지는 루트의 직접 의존성이 아니라 `embedded-postgres`의 선택 의존성이다 — 그 옆에서 찾는다.
+ * `stop`은 **동기로 끈다** — 같은 신호를 받은 `embedded-postgres`의 종료 훅이 프로세스를 먼저 끝내기 전에.
+ */
+async function startOnWindows(databaseDir: string, port: number): Promise<{ pid: number; logFile: string; stop: () => void }> {
+  const fromEmbedded = createRequire(createRequire(__filename).resolve('embedded-postgres'));
+  const entry = fromEmbedded.resolve('@embedded-postgres/windows-x64');
+  const { pg_ctl: pgCtl } = (await import(pathToFileURL(entry).href)) as { pg_ctl: string };
+  const logFile = resolve(root, '.local', 'logs', 'dev-db-postgres.log');
+  mkdirSync(dirname(logFile), { recursive: true });
+  // -w: 접속을 받을 때까지 기다린다 · -l: 서버 로그는 파일로 간다(이 창에는 이 스크립트의 줄만 나온다)
+  const started = spawnSync(pgCtl, ['start', '-D', databaseDir, '-o', `-p ${port}`, '-l', logFile, '-w', '-t', '120'], { stdio: 'inherit' });
+  if (started.error) throw started.error;
+  if (started.status !== 0) throw new Error(`pg_ctl start가 실패했다 (종료 코드 ${started.status}). 서버 로그: ${logFile}`);
+  console.log(`[dev-db] 서버 로그: ${logFile}`);
+  const pid = Number(readFileSync(resolve(databaseDir, 'postmaster.pid'), 'utf8').split(/\r?\n/)[0]);
+  return {
+    pid,
+    logFile,
+    stop: () => {
+      spawnSync(pgCtl, ['stop', '-D', databaseDir, '-m', 'fast', '-w'], { stdio: 'inherit' });
+    },
+  };
+}
+
 async function main(): Promise<void> {
   const env = { ...readDotenv(resolve(root, '.env')), ...process.env } as Record<string, string>;
   const databaseDir = resolve(root, env.WF_PG_EMBEDDED_DIR || '.local/pgdata');
@@ -80,7 +122,8 @@ async function main(): Promise<void> {
     console.log(`[dev-db] initdb → ${databaseDir}`);
     await pg.initialise();
   }
-  await pg.start();
+  const onWindows = isWindows ? await startOnWindows(databaseDir, port) : undefined;
+  if (!onWindows) await pg.start();
   console.log(`[dev-db] PostgreSQL 기동: 127.0.0.1:${port} (데이터 ${databaseDir})`);
 
   await ensureDatabases(port, password, ['workfluence', 'workfluence_test']);
@@ -88,14 +131,39 @@ async function main(): Promise<void> {
 
   const stop = async () => {
     console.log('\n[dev-db] 종료 중...');
-    await pg.stop();
+    if (onWindows) onWindows.stop();
+    else await pg.stop();
     process.exit(0);
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  if (onWindows) {
+    // 창을 닫으면 SIGHUP이 오고 조금 뒤 강제로 끝난다 — 그 사이에 서버를 끈다. 안 끄면 서버가 남아 다음 기동이 막힌다 (T-009).
+    // Ctrl+Break는 SIGBREAK다
+    process.on('SIGHUP', stop);
+    process.on('SIGBREAK', stop);
+    // **pg_ctl이 띄운 서버는 이 프로세스의 자식이 아니다.** 붙잡을 것이 없으면 Node가 READY 직후 끝나 창이 닫힌 것처럼 보이고
+    // Ctrl+C로 끌 수도 없다(Linux는 embedded-postgres가 자식 프로세스로 붙잡는다). 서버가 살아 있는지 보면서 이 창을 붙잡아 둔다
+    setInterval(() => {
+      try {
+        process.kill(onWindows.pid, 0);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ESRCH') return;
+        console.error(`[dev-db] PostgreSQL 서버가 멈췄다 (PID ${onWindows.pid}). 서버 로그: ${onWindows.logFile}`);
+        process.exit(1);
+      }
+    }, WINDOWS_WATCH_MS);
+  }
 }
 
 main().catch((e: unknown) => {
-  console.error('[dev-db] 실패:', e instanceof Error ? e.message : e);
+  const message = e instanceof Error ? e.message : e;
+  console.error('[dev-db] 실패:', message);
+  // DLL이 없으면 initdb·pg_ctl이 말없이 이 코드로 끝난다. PostgreSQL 실행 파일은 VC++ 런타임(VCRUNTIME140·MSVCP140)을 쓰는데 묶음에 없다
+  // 종료 코드를 부호 없는 수(3221225781)로 찍는지 부호 있는 수(-1073741515)로 찍는지는 부른 쪽에 달려 있어 둘 다 본다
+  const dllMissing = [WINDOWS_DLL_NOT_FOUND, WINDOWS_DLL_NOT_FOUND - 2 ** 32].some((code) => String(message).includes(String(code)));
+  if (isWindows && dllMissing) {
+    console.error('[dev-db] PostgreSQL 실행 파일이 쓰는 DLL이 없다 — Microsoft Visual C++ 재배포 가능 패키지(x64)를 깐다. docs/운영가이드_윈도우체험.md 6절');
+  }
   process.exit(1);
 });
