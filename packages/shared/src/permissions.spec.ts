@@ -9,6 +9,7 @@ import {
   countCharClasses,
   grantsForRole,
   isAdminRole,
+  passwordRuleText,
   spaceAccess,
   suspendProblem,
   unsuspendProblem,
@@ -226,5 +227,23 @@ describe('suspendProblem / unsuspendProblem (P13 FR-1441)', () => {
     expect(unsuspendProblem(admin, target('member', 'suspended'))).toBeNull();
     expect(unsuspendProblem(admin, target('member', 'active'))).toBe('정지된 계정이 아니다');
     expect(unsuspendProblem(admin, target('root', 'suspended'))).toBe('이 사용자를 관리할 권한이 없다');
+  });
+});
+
+/**
+ * **비밀번호 안내문** (P13 FR-1472). 가입·변경 화면의 안내문이 고정 문자열이라, 관리자가 운영 설정에서 규칙을 바꿔도 따라 바뀌지 않았다.
+ * 규칙 값으로 만든다 — 판정(`checkPasswordPolicy`)과 같은 말을 쓴다
+ */
+describe('passwordRuleText (P13 FR-1472)', () => {
+  it('기본 규칙 — 8자·2종', () => {
+    expect(passwordRuleText(PASSWORD_POLICY)).toBe('8자 이상, 영문 대·소문자·숫자·특수문자 중 2종 이상, 공백 없이');
+  });
+
+  it('**운영이 바꾼 값을 따른다**', () => {
+    expect(passwordRuleText({ minLength: 12, minCharClasses: 3 })).toBe('12자 이상, 영문 대·소문자·숫자·특수문자 중 3종 이상, 공백 없이');
+  });
+
+  it('종류가 1이면 종류는 말하지 않는다 — 어떤 글자든 된다', () => {
+    expect(passwordRuleText({ minLength: 10, minCharClasses: 1 })).toBe('10자 이상, 공백 없이');
   });
 });
