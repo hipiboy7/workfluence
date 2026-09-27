@@ -1,6 +1,6 @@
 /**
  * 마이그레이션 적용 (CLAUDE.md 6절). drizzle/ 폴더의 SQL을 순서대로, 적용된 것은 건너뛴다(멱등).
- * - pnpm db:migrate — 배포 절차의 명시적 단계
+ * - 배포 절차의 명시적 단계 — 운영은 compose의 `tools`로 `node dist/db/migrate.js`(소유 계정 — 앱 계정과 권한도 준다), 개발은 `pnpm db:migrate`
  * - WF_DB_AUTO_MIGRATE=true — 개발에서만 기동 시 자동 (env.ts가 운영에서는 거부)
  */
 import { drizzle } from 'drizzle-orm/node-postgres';

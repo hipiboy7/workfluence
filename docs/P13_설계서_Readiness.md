@@ -66,12 +66,14 @@ Phase 13은 "지금 만든 것으로 배포하고 운영할 수 있는가"를 �
 | FR-1402 | 반입 묶음에 **운영 문서**를 넣는다 — 반입·운영이관·장애대응·사용자 가이드·학습가이드를 묶음의 `docs/` 아래. 검사(`RELEASE_REQUIRED_FILES`)가 있는지 본다 | 폐쇄망에서는 저장소를 열 수 없다. 반입 가이드가 두 운영 가이드의 절을 12곳에서 가리킨다 |
 | FR-1403 | 빌드 가이드를 지금 코드로 다시 쓴다 — main을 받는다, `deploy/.env`의 필수 키, 빌드, 묶음 만들기·검사·tar로 묶기 | 가이드가 `impl-phase0`을 받게 하고, 묶음 절차가 없다 |
 | FR-1404 | 앱 이미지에 빌드한 커밋을 라벨로 달고, 묶기 전에 라벨이 HEAD와 같은지 본다. 다르면 묶지 않고 까닭을 말한다 | A.1-9 |
-| FR-1405 | 가이드의 자잘한 오류를 고치고, **버전 갱신(두 번째 반입)** 절차를 둔다 | 접속 주소의 포트, 폐쇄망에 없는 pnpm 명령, 호스트에서 닿지 않는 health 명령 등(검증기록 1절 표) |
+| FR-1405 | 가이드의 자잘한 오류를 고치고, **버전 갱신(두 번째 반입)** 절차를 둔다 | 접속 주소의 포트, 폐쇄망에 없는 pnpm 명령, 호스트에서 닿지 않는 health 명령 등(검증기록 1절) |
 | FR-1406 | `pnpm backup:restore`가 빈 볼륨에 **Phase 13 뒤의 백업**을 되살린다 — 권한 줄은 붓지 않고, 대조가 끝나면 표 만들기가 앱 계정과 권한을 다시 준다 | 덤프에 앱 계정의 `GRANT`가 들어가 새 클러스터에서는 첫 줄에서 멈추고 전체가 롤백됐다(재현했다 — 표 0개). 계정을 먼저 만들려고 표를 만들면 "비어 있지 않다"에 걸렸다 |
 | FR-1407 | 묶기 전에 **커밋하지 않은 변경**이 없는지, 앱 이미지 이름이 **폐쇄망의 compose가 찾는 이름**인지 본다. 다르면 묶지 않고 까닭을 말한다 | 라벨은 커밋 번호만 적어 내용이 다른 이미지가 같은 라벨을 단다. `WF_APP_IMAGE`로 다른 태그를 묶으면 폐쇄망의 `up -d`가 "이미지 없음"으로 죽는다 |
 | FR-1408 | 빌드 문맥에 **비밀값을 넣지 않는다** — `deploy/.env`와 TLS 개인키 | `.dockerignore`의 `.env`가 맨 위의 파일만 막아 둘이 빌드 단계로 복사됐다(반입되는 최종 이미지에는 없고 빌드 캐시에 남는다) |
 
 ### C.2 월간 작업을 컨테이너에서 (FR-1410 ~ FR-1412)
+
+달마다 하는 것은 휴지통·감사로그 정리다. 검색 재색인은 같은 방식으로 돌지만 검색이 이상할 때 한다(운영이관 10.2절).
 
 | # | 요구사항 | 근거 |
 |---|---|---|
@@ -116,7 +118,7 @@ Phase 13은 "지금 만든 것으로 배포하고 운영할 수 있는가"를 �
 
 | # | 요구사항 | 근거 |
 |---|---|---|
-| FR-1450 | 사용자 관리 목록에 **찾기**(아이디·이름·email 부분 일치)와 **상태 거르기**(전체·승인 대기·활성·정지)를 둔다 | 300명 규모(`CLAUDE.md` 0.1) |
+| FR-1450 | 사용자 관리 목록에 **찾기**(아이디·이름·email 부분 일치)와 **상태 거르기**(전체·승인 대기·활성·잠김·정지)를 둔다 | 300명 규모(`CLAUDE.md` 0.1) |
 | FR-1451 | 목록은 나눠 받는다 — 한 번에 100명, **더 보기**. 전체 수를 보인다 | 기본 100에서 조용히 끊겼다 |
 | FR-1452 | 서버가 찾기·거르기·나누기를 한다(`GET /api/users`) | 화면에서 거르면 100명 밖을 못 찾는다 |
 
@@ -160,8 +162,8 @@ Phase 13은 "지금 만든 것으로 배포하고 운영할 수 있는가"를 �
 
 - 반입 가이드: 5절(표 만들기)과 5-1절(root 계정)을 `tools`로 친다. 7절의 접속 주소에 포트(`WF_HTTPS_PORT`, 기본 8443)를 적는다.
   8절 첫 백업과 운영이관 10절은 `tools`의 tar를 쓴다. 새 절로 **버전 갱신**(새 묶음 → 이미지 올리기 → 표 만들기 → 다시 띄우기 → 사후 검증).
-- 빌드 가이드: 머리말·3~5절을 지금 코드로 — main, `deploy/.env`의 필수 키(`WF_PG_PASSWORD`·`WF_PG_APP_PASSWORD`·`WF_SESSION_SECRET`·
-  `WF_ROOT_PASSWORD`), 커밋 라벨을 단 빌드, `pnpm release:bundle` → `pnpm release:verify` → tar.
+- 빌드 가이드: 머리말·3~5절을 지금 코드로 — main, `deploy/.env`의 필수 키 셋(`WF_PG_PASSWORD`·`WF_PG_APP_PASSWORD`·`WF_SESSION_SECRET` —
+  compose가 강제한다)과 첫 root의 `WF_ROOT_PASSWORD`(시드만 쓴다), 커밋 라벨을 단 빌드, `pnpm release:bundle` → `pnpm release:verify` → tar.
 - 묶음: 문서 다섯을 `docs/` 아래에 원래 이름으로 넣는다 — 문서끼리의 상대 링크가 묶음 안에서도 이어진다. `반입절차.md`는 맨 위에 그대로 둔다.
 - 커밋 라벨: Dockerfile에 빌드 인자로 커밋을 받아 `org.opencontainers.image.revision` 라벨을 단다. 묶기 전에 `docker inspect`의 라벨과
   `git rev-parse HEAD`를 견준다. 같은 자리에서 `git status --porcelain`이 비었는지, 앱 이미지 이름이 `WF_APP_IMAGE`를 비운 compose의
@@ -264,10 +266,10 @@ Phase 13은 "지금 만든 것으로 배포하고 운영할 수 있는가"를 �
 | 반입 목록 | `packages/shared/src/release.ts` | **A** | 묶음의 문서 다섯 |
 | 잠금 판정 | `apps/api/src/auth/domain/lockout.ts` | **A** | 올린 뒤의 실패 횟수로 잠글지(D.4) |
 | 계정별 줄 | `apps/api/src/auth/domain/keyed-serial.ts` | **A** | 한 계정의 로그인을 하나씩(D.4) |
-| argon2 줄 | `apps/api/src/auth/domain/concurrency-gate.ts` · `apps/api/src/users/password.ts` | **A** · B | 동시 실행 상한, 해시·확인·더미 확인 |
+| argon2 줄 | `apps/api/src/auth/domain/concurrency-gate.ts` · `apps/api/src/auth/domain/argon-slots.ts` · `apps/api/src/users/password.ts` | **A** · **A** · B | 동시 실행 상한(코어 수와 작업 스레드 풀 가운데 작은 쪽), 해시·확인·더미 확인 |
 | 로그인·사용자 | `apps/api/src/auth/auth.service.ts` · `apps/api/src/users/users.service.ts` | B | D.4·D.5·D.6 |
-| 권한 적용 | apps/api/src/db 아래 새 파일 · `apps/api/src/db/migrate.ts` | B | D.3 |
-| 월간 작업 | apps/api/src/cli 아래 새 파일 셋 | B | D.2 |
+| 권한 적용 | `apps/api/src/db/app-role.ts` · `apps/api/src/db/migrate.ts` · `apps/api/src/common/domain/scram.ts`(**A** — 평문 대신 SCRAM 확인값) | B | D.3 |
+| 월간 작업 | `apps/api/src/cli/trash-purge.ts` · `apps/api/src/cli/audit-purge.ts` · `apps/api/src/cli/reindex.ts` | B | D.2 |
 | 실시간 편집 | `apps/api/src/pages/collab/collab.gateway.ts` | B | D.7 |
 | 배포 | `deploy/compose.yml` · `deploy/Dockerfile` · `scripts/release-bundle.ts` | — | D.1·D.3 |
 | 부하 측정 | `scripts/load-test.ts` | — | 몰린 로그인(NFR-131) |

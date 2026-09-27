@@ -563,7 +563,53 @@ describe('비밀번호를 확인하는 동안 DB 연결을 쥐지 않는다 (P13
     });
     return { atVerify, release, restore: () => spy.mockRestore() };
   }
+  /** 해시를 만드는 순간에 멈춘다 — 그때 빌린 연결이 있으면 트랜잭션 안에서 해싱한 것이다 */
+  function holdHash() {
+    const original = password.hashPassword;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const atHash = new Promise<void>((r) => (reached = r));
+    const spy = vi.spyOn(password, 'hashPassword').mockImplementation(async (pw) => {
+      reached();
+      await held;
+      return original(pw);
+    });
+    return { atHash, release, restore: () => spy.mockRestore() };
+  }
   const borrowed = () => pool.totalCount - pool.idleCount;
+
+  /** **가입·관리자 생성·초기화도 해시를 트랜잭션 밖에서** (FR-1434, 병합 전 자체 점검 9 — 호출부가 준비를 빼먹어도 서비스가 트랜잭션 안에서 해시해 초록이었다) */
+  /**
+   * 해시하는 순간에 멈춰 빌린 연결을 센다. **실패해도 풀고 끝까지 기다린다** — 붙잡힌 채 남거나 뒤에서 돌면 열린 트랜잭션이 다음 시험의
+   * 표 초기화를 막거나 그 시험이 세는 연결에 잡힌다
+   */
+  async function borrowedWhileHashing(run: () => Promise<unknown>): Promise<number> {
+    const h = holdHash();
+    const job = run();
+    try {
+      await h.atHash;
+      return borrowed();
+    } finally {
+      h.release();
+      await job.catch(() => undefined);
+      h.restore();
+    }
+  }
+
+  it('가입 — 해시를 만드는 동안 빌린 연결이 없다', async () => {
+    expect(await borrowedWhileHashing(() => auth.signup({ ...SIGNUP, username: 'hash-check', email: 'hash-check@example.internal' }))).toBe(0);
+    expect(await usersSvc.findByUsername('hash-check')).toBeTruthy();
+  });
+
+  it('관리자 생성·비밀번호 초기화 — 컨트롤러가 해시를 트랜잭션을 열기 전에 만든다', async () => {
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    const req = { ip: '127.0.0.1' } as never;
+    const dto = { username: 'made-by-admin', displayName: '관리자가 만듦', email: 'made@example.internal', password: 'Made-pw-2026', role: 'member' as const };
+    expect(await borrowedWhileHashing(() => ctrl.create(dto, ROOT as never, req))).toBe(0);
+    const target = (await usersSvc.findByUsername('made-by-admin'))!;
+    expect(await borrowedWhileHashing(() => ctrl.resetPassword(target.id, ROOT as never, req))).toBe(0);
+  });
 
   it('로그인 — 확인이 도는 동안 풀에서 빌린 연결이 없다', async () => {
     await approvedAlice();

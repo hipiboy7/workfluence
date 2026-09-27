@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 11까지 구현 완료** (2026-09-26). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 12까지 구현 완료, Phase 13 진행 중** (2026-09-27). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -56,14 +56,17 @@ workfluence/
 │   ├── api/                      NestJS
 │   │   ├── src/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
-│   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드 / [P10] order.ts (이름 정렬 — `COLLATE "C"`, T-046)
+│   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드 / [P10] order.ts (이름 정렬 — `COLLATE "C"`, T-046) /
+│   │   │   │                     [P13] app-role.ts (앱 DB 계정과 권한 — 마이그레이션이 준다)
+│   │   │   ├── cli/              [P13] 월간 작업의 본문(휴지통·감사로그 정리·재색인) — 앱 이미지 안에서 `tools`로 돈다
 │   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts /
 │   │   │   │                     [P10] error-text.ts (로그에 적는 오류 한 줄 — drizzle 문장의 매개변수를 싣지 않는다) /
 │   │   │   │                     [P11] request-context.ts · request-log.middleware.ts · log-line.ts · domain/{request-id,access-log}.ts
-│   │   │   │                     (요청 번호·요청 문맥·접근 로그·event 줄)
+│   │   │   │                     (요청 번호·요청 문맥·접근 로그·event 줄) / [P13] like.ts · domain/scram.ts (SCRAM 확인값)
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
-│   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드
-│   │   │   ├── users/            [P1] 가입·승인·초기화·역할
+│   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드 / [P13] domain/{keyed-serial,concurrency-gate,argon-slots}.ts
+│   │   │   │                     (한 계정씩 줄 세우기·argon2 동시 실행 상한)
+│   │   │   ├── users/            [P1] 가입·승인·초기화·역할 / [P13] password.ts (해시·확인을 트랜잭션 밖에서) · 정지·찾기
 │   │   │   ├── audit/            [P1] append-only 기록·조회
 │   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 정책값 (세 겹 출처 · 캐시)
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
@@ -94,7 +97,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P10]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P13]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -137,7 +140,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 테이블 | 핵심 컬럼 | 도입 | 비고 |
 |---|---|---|---|
 | `settings` | `key` PK, `value` jsonb, `updated_by`, `updated_at` | **P0** | 운영 조절값 (`CLAUDE.md` 5절 세 번째 분류) |
-| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by`, `grants`(P11 — root가 준 행위) | P1 | `status`: `pending`/`active`. **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
+| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by`, `grants`(P11 — root가 준 행위) | P1 | `status`: `pending`/`active`/`suspended`(P13 — 정지). **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
 | `sessions` | (connect-pg-simple 관리) | P1 | 서버측 세션 |
 | `space_categories` | `id`, `name` uq, `created_by` | P2 | |
 | `spaces` | `id`, `key` uq(자동), `name`, `description`, `kind`, `status`, `category_id`, `created_by`, `suspended_at/by`, `deleted_at` | P2 | `kind`: `personal`/`team`, `status`: `active`/`suspended` |
@@ -161,9 +164,9 @@ shared  ←  api(config → db → common → 기능 모듈)
 - 모든 시각은 UTC `timestamptz`. 표시만 KST로 변환한다. 서버가 여러 대가 되거나 서머타임 지역이 섞여도 비교가 깨지지 않는다.
 - 식별자는 `uuid` (`gen_random_uuid()`). 순번 노출을 피하고 병합·이관이 쉽다.
 - 삭제는 `deleted_at` soft delete. 물리 삭제는 보존 기간 뒤 배치로, 감사로그에 남긴다.
-- **append-only 강제는 지금 트리거 한 겹이다.** 계정 분리(앱 계정에 `UPDATE`/`DELETE`를 주지 않는 것)는 아직 하지 않았다 — Phase 1이 Phase 5로 넘겼는데 Phase 5도 받지 않고 반입 후로 다시 미뤘다 (보류 12, `P5_검증기록_Release` 10절).
+- **append-only 강제는 두 겹이다** — 트리거와 권한. 기동 중인 앱은 앱 계정(`workfluence_app`)으로 붙고, 그 계정에는 `audit_events`의 `UPDATE`·`DELETE`·`TRUNCATE`가 없다(Phase 13 — 보류 12 닫음. 두 번 미뤘다가 반입 전에 했다). 보존 정리는 소유 계정의 `tools`만 한다.
 - **`page_versions`는 UPDATE만 막는다.** DELETE는 허용한다 — 페이지가 물리 삭제되면 버전도 함께 사라져야 한다. `audit_events`(UPDATE·DELETE 모두 차단, 보존 정리만 예외)와 뜻이 다르다 (`0006_constraints`).
-- 파생 데이터(`search_text`)는 언제든 재생성 가능해야 한다. 재생성은 `pnpm search:reindex`다. **무엇을 골라 무엇을 쓰는지는 `apps/api/src/pages/reindex.ts` 한 곳에 있고**, 앱(`PagesService.reindexAll`)과 스크립트(`scripts/reindex.ts`)가 그것을 쓴다 — 실행 방법만 둘이다.
+- 파생 데이터(`search_text`)는 언제든 재생성 가능해야 한다. 재생성은 `pnpm search:reindex`다. **무엇을 골라 무엇을 쓰는지는 `apps/api/src/pages/reindex.ts` 한 곳에 있고**, 앱(`PagesService.reindexAll`)과 명령(`apps/api/src/cli/reindex.ts` — 개발은 `scripts/reindex.ts`가 감싸 `pnpm search:reindex`, 운영은 `tools`로 `node dist/cli/reindex.js`)이 그것을 쓴다 — 실행 방법만 다르다.
 
 ### 3.3 마이그레이션
 
@@ -172,7 +175,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 환경 | 적용 방법 |
 |---|---|
 | 개발 | `WF_DB_AUTO_MIGRATE=true`면 기동 시 자동 |
-| 운영 | **자동 적용 금지.** 배포 절차의 명시적 단계 (`pnpm db:migrate` 또는 컨테이너에서 `node dist/db/migrate.js`) |
+| 운영 | **자동 적용 금지.** 배포 절차의 명시적 단계 — compose의 `tools`로 `node dist/db/migrate.js`(소유 계정으로 붙어 앱 계정과 권한도 준다). `api` 컨테이너로는 못 한다 — 앱 계정은 DDL이 없다 (Phase 13). 저장소가 있는 곳은 `pnpm db:migrate` |
 
 환경 스키마가 운영에서 `WF_DB_AUTO_MIGRATE=true`를 **거부**한다. 설정 실수로 운영 DB가 조용히 바뀌는 것을 막는다.
 
@@ -188,7 +191,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 
 - **가드는 판정하지 않는다.** 데이터를 모아 공유 함수에 넘기고 결과만 쓴다. 판정 규칙이 한 곳에 있어야 화면과 서버가 어긋나지 않는다.
 - 응답의 스페이스 객체에 `access`를 실어 보낸다. 화면이 같은 규칙을 다시 구현하지 않고 버튼 노출을 결정한다.
-- 기본 거부. **로그인은 언제나 요구한다** — 예외는 `@Public`을 명시한 핸들러(로그인·가입·계정 찾기)뿐이다.
+- 기본 거부. **로그인은 언제나 요구한다** — 예외는 `@Public`을 명시한 핸들러(로그인·가입·계정 찾기·화면 설정(`config`)·비밀번호 규칙(`password-rules`, P13))뿐이다.
 - 그 위에 `@RequireAction`으로 행위를 선언하면 `can()`으로 한 번 더 건다. **행위를 선언하지 않은 핸들러는 "로그인한 사람이면 누구나"의 뜻이다** — 데이터 범위를 스스로 좁히는 핸들러(`/api/auth/me` 등)가 여기 해당한다. 남의 데이터를 다루는 핸들러에 선언을 빼면 그것은 결함이다.
 
 ## 5. 문서(본문) 계약
@@ -258,7 +261,9 @@ shared  ←  api(config → db → common → 기능 모듈)
                                       [반입 절차] ──▶ 폐쇄망
                                                         │ docker load
                                                         │ .env 작성
-                                                        │ db:migrate (명시적 단계)
+                                                        │ up -d postgres
+                                                        │ tools: migrate (명시적 단계 — 앱 계정·권한도)
+                                                        │ tools: seed (첫 root — 빠뜨리면 아무도 로그인 못 함)
                                                         │ docker compose up -d
                                                         ▼
                                                    사후 검증 체크리스트

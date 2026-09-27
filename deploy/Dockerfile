@@ -1,5 +1,6 @@
 # workfluence app 이미지 — Nest API + 빌드된 SPA를 한 프로세스가 서빙 (CLAUDE.md 0.2절·8.2절)
-# 빌드: Linux 서버에서  docker build -f deploy/Dockerfile -t workfluence-app:<git-sha> .
+# 빌드: Linux 서버의 저장소 맨 위에서  GIT_SHA=$(git rev-parse HEAD) docker compose -f deploy/compose.yml --env-file deploy/.env build api
+#       (GIT_SHA를 빼면 커밋 라벨이 unknown이 되어 반입 묶음이 묶지 않는다 — 운영가이드_리눅스빌드 5절)
 # 실행: deploy/compose.yml
 #
 # 개발과 빌드는 같은 Linux 서버에서 한다 (CLAUDE.md 0.3절, 2026-09-21 통합).

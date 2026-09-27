@@ -185,7 +185,8 @@ function main(): void {
 
   const bytes = present.reduce((n, f) => n + statSync(join(out, f)).size, 0);
   console.log(`[release] 완료 — ${present.length}개 파일 · ${(bytes / 1024 / 1024).toFixed(0)}MB`);
-  console.log(`[release] 반입 직전·직후에 'pnpm release:verify ${out}'를 돌린다`);
+  // 폐쇄망에는 pnpm이 없다 — 받는 쪽은 묶음 안의 지문을 `sha256sum -c`로 본다(반입 가이드 1절). 이 검사는 싸기 직전에 한다
+  console.log(`[release] 싸기 전에 'pnpm release:verify ${out}'를 돌린다. 폐쇄망에서는 묶음 안의 SHA256SUMS를 sha256sum -c로 본다(반입 가이드 1절)`);
 }
 
 main();

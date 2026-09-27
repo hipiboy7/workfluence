@@ -31,6 +31,7 @@ model: fable
 4. docs/P0_*.md
 5. docs/P1_*.md …          ← Phase가 늘면 Glob으로 docs/P*_*.md 전부
 6. docs/학습가이드_시스템이해.md   ← 개발 용어 없이 쓴 설명. Phase마다 갱신되는 필수 문서
+6-1. docs/사용자가이드_사용법.md   ← 화면을 쓰는 사람의 순서(Phase 13). 화면 문구가 바뀌면 함께 바뀐다
 7. docs/운영가이드_장애대응.md     ← 증상에서 조치로. Phase마다 갱신되는 필수 문서
 8. docs/*.md               ← 기능백로그·배포가이드·운영이관 가이드 등
 9. docs/internal/*.md      ← 검토서(트러블슈팅·SelfReview·방법론개정)·에이전트 설계

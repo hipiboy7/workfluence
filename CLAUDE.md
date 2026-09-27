@@ -243,6 +243,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 ### 4.1 문서에 적은 명령은 적은 그대로 실행해 확인한다
 
 - **문서의 모든 실행 명령은 `pnpm <script>` 형태로만 적는다.** 구현은 TypeScript(`tsx`)로 두 OS에서 같게 동작하게 한다. `.sh`는 `deploy/`(Linux 전용)에만 둔다.
+  **예외는 저장소가 없는 곳에서 치는 명령이다** — 폐쇄망 서버와 컨테이너 안(`docker …`, 앱 이미지 안의 `node dist/…`)에는 pnpm이 없어 그대로 적는다(8.3절, Phase 13).
 - 편집기에서 복사한 명령을 터미널에 그대로 붙여 실행한다. 오류 메시지는 실제 출력을 복사한다.
 - 기계가 검사한다: `pnpm verify:docs` — pnpm 스크립트 존재, 백틱 경로가 **저장소에 커밋돼 있는지**(대소문자까지), 마크다운 링크, 표 열 수, `deploy/*.sh` 실행 비트, **nginx `client_max_body_size`와 `WF_UPLOAD_MAX_MB`의 대조**, **로그 event 코드(`LOG_EVENTS`)가 장애대응 가이드에 모두 있는지**. `pnpm check`에 포함된다.
 - 아직 만들지 않은 산출물을 백틱 경로로 쓰지 않는다. 검사가 잡는다.
@@ -257,12 +258,10 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `pnpm test` / `pnpm test:cov` | A·B 테스트 / 커버리지 |
 | `pnpm test:e2e` | Playwright |
 | `pnpm search:reindex` | 검색 인덱스(`pages.search_text`) 재생성 |
-| `pnpm trash:purge` / `pnpm audit:purge` | 보존 기간이 지난 휴지통·감사기록 물리 삭제 |
+| `pnpm trash:purge` / `pnpm audit:purge` | 보존 기간이 지난 휴지통·감사기록 물리 삭제 (감사기록 정리는 append-only의 좁은 예외 — 소유 계정만) |
 | `pnpm backup:create` / `pnpm backup:restore` | 백업(DB 덤프+첨부) 만들기 / 되살리기 |
 | `pnpm release:bundle` / `pnpm release:verify` | 반입 묶음 만들기 / 검사 |
 | `pnpm load:test` | 부하 측정 (동시 N세션) |
-| `pnpm trash:purge` | 보존 기간을 넘긴 휴지통 항목 물리 삭제 |
-| `pnpm audit:purge` | 보존 기간을 넘긴 감사로그 삭제 (append-only의 좁은 예외) |
 | `pnpm verify:docs` | 문서 검사 |
 | `pnpm check` | lint + typecheck + test + verify:docs (CI와 같은 검사) |
 | `pnpm build` | api·web 빌드 |
@@ -295,7 +294,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 | 항목 | 규칙 |
 |---|---|
-| 마이그레이션 | **손으로 쓴 SQL 파일**을 커밋한다 (보류 17 판정 2026-09-22 — `pnpm db:generate`는 스냅샷 사슬이 끊겨 이미 있는 표를 다시 만드는 파일을 낸다). forward-only. 운영에서는 기동 시 자동 적용하지 않고 배포 절차의 명시적 단계(`pnpm db:migrate`). 개발만 `WF_DB_AUTO_MIGRATE=true` 허용 |
+| 마이그레이션 | **손으로 쓴 SQL 파일**을 커밋한다 (보류 17 판정 2026-09-22 — `pnpm db:generate`는 스냅샷 사슬이 끊겨 이미 있는 표를 다시 만드는 파일을 낸다). forward-only. 운영에서는 기동 시 자동 적용하지 않고 배포 절차의 명시적 단계다 — 운영은 compose의 `tools`로 `node dist/db/migrate.js`(앱 계정과 권한도 이 단계가 준다, 8.3절), 개발은 `pnpm db:migrate`. 개발만 `WF_DB_AUTO_MIGRATE=true` 허용 |
 | 시드 | 멱등. 두 번 실행해도 결과가 같다. "있으면 건너뜀"으로 끝내지 않고 **빠진 필드를 채우는 것**까지 포함 |
 | 페이지 본문 | ProseMirror JSON. `packages/shared`의 스키마로 서버가 검증. 문서에 `schemaVersion` 포함. 검증 실패는 400 |
 | 페이지 버전 | `page_versions`는 **고쳐 쓰지 않는다**(트리거가 UPDATE를 막는다). 수정은 새 버전 추가. 저장 시 클라이언트가 기준 버전을 보내고 불일치면 409. **DELETE는 막지 않는다** — 페이지가 물리 삭제되면 버전도 함께 사라져야 한다. `audit_events`의 append-only와 다른 점이 이것이다 (`0006_constraints`) |
@@ -315,11 +314,11 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 영역 | 규칙 |
 |---|---|
 | 외부 자원 | 런타임에 인터넷 자원을 **하나도** 참조하지 않는다. 폰트·아이콘·Swagger UI 자산 전부 번들. CI에서 빌드 산출물의 외부 URL 참조를 검사한다 |
-| 세션 | 서버측 세션(PG). 쿠키 `HttpOnly; Secure; SameSite=Lax`. 유휴 30분 · 절대 12시간 기본. 로그아웃·비밀번호 변경·관리자 강제 종료 시 서버측 파기 |
+| 세션 | 서버측 세션(PG). 쿠키 `HttpOnly; Secure; SameSite=Lax`. 유휴 30분 · 절대 12시간 기본. 로그아웃·비밀번호 변경·관리자 강제 종료·정지 시 서버측 파기 |
 | CSRF | SameSite + 상태 변경 요청에 커스텀 헤더 요구. **화면은 경로에 `.`·`..` 조각이 든 API 요청을 보내지 않고**(`apps/web/src/api.ts`), **주소의 id가 식별자 모양일 때만 그 화면을 그린다**(`apps/web/src/components/RequireUuidParam.tsx`) — 주소의 id(`%2F`가 풀려 들어온다)로 다른 API를 부르게 하면 연 사람의 세션과 헤더로 나간다(Phase 10 보안 검토·종료 루틴) |
 | 로컬 계정 | argon2id. 기본 정책 **8자 이상, 영문 대·소문자·숫자·특수 중 2종** (사용자 결정 2026-09-15). 5회 실패 시 15분 잠금. 로그인·가입·계정 복구는 IP별 rate limit |
-| 계정 생명주기 | 가입 요청 → `승인 대기` → 관리자 승인 → `활성`. 임시 비밀번호는 화면에 1회 표시, 다음 로그인에서 변경 강제. ID 찾기는 email과 이름이 일치할 때 **마스킹된 ID만** (계정 열거 방지) |
-| 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여. **root는 관리자 한 사람에게 행위를 위임한다** — 위임할 수 있는 것은 `DELEGABLE_ACTIONS`(지금은 LLM 연결 관리 하나)뿐, 관리자만 받고, 관리자가 아니게 되면 사라진다. 다시 위임하지 못한다. **자기에게 없는 위임을 가진 관리자는 관리하지 못한다**(승인·비밀번호 초기화·역할·잠금 해제·세션 종료 — root와 같은 위임을 가진 관리자만. 초기화로 그 계정을 넘겨받는 길을 막는다)(Phase 11). 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
+| 계정 생명주기 | 가입 요청 → `승인 대기` → 관리자 승인 → `활성`. 관리자가 `정지`하면 로그인하지 못하고 세션·편집 연결이 그 자리에서 끊긴다 — 내용·Crew 소속·감사는 남고, 풀면 `활성`으로(Phase 13 — 퇴사자 처리). 임시 비밀번호는 화면에 1회 표시, 다음 로그인에서 변경 강제. ID 찾기는 email과 이름이 일치할 때 **마스킹된 ID만** (계정 열거 방지) |
+| 역할 | `root`(시스템) ⊃ `admin`(사용자·스페이스 관리) ⊃ `member`. root만 root 부여. **root는 관리자 한 사람에게 행위를 위임한다** — 위임할 수 있는 것은 `DELEGABLE_ACTIONS`(지금은 LLM 연결 관리 하나)뿐, 관리자만 받고, 관리자가 아니게 되면 사라진다. 다시 위임하지 못한다. **자기에게 없는 위임을 가진 관리자는 관리하지 못한다**(승인·비밀번호 초기화·역할·잠금 해제·세션 종료·정지 — root와 같은 위임을 가진 관리자만. 초기화로 그 계정을 넘겨받는 길을 막는다)(Phase 11). 스페이스는 `개인`/`팀`, 팀은 Crew(owner·editor·viewer)만 접근. 판정은 `packages/shared/src/permissions.ts` 한 곳 |
 | 권한 | 기본 거부. 모든 엔드포인트에 가드. 가드는 판정하지 않고 데이터를 모아 공유 함수에 넘긴다 |
 | 입력 | 모든 요청 본문·쿼리는 zod 검증. 문서는 JSON만. 링크는 `http(s)`·내부 경로만, 이미지 출처는 내부 첨부 URL만. **실시간 편집의 변경도 적용하기 전에 같은 허용 목록으로 본다** — 어긋나면 받지 않고 끊는다(P9 관문). 편집기 스키마와 허용 목록은 대조 테스트로 같게 둔다 |
 | 응답 헤더 | CSP(`default-src 'self'` 기준), `X-Content-Type-Options`, `frame-ancestors 'none'`, HSTS. HTML·API는 `Cache-Control: no-store`, **해시 파일명 정적 자산은 immutable 캐시 허용** |
@@ -327,7 +326,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 사내 LLM | 등록·삭제는 root와, root가 위임한 관리자. API 키는 `WF_LLM_MASTER_KEY`로 암호화(AES-256-GCM, **행 id와 주소**를 AAD로 — 주소만 바꿔도 풀리지 않는다)해 두고 **응답·로그·감사로그에 다시 내보내지 않는다.** LLM 서버의 문장이 키를 되읊으면 가린다. 브라우저는 LLM에 가지 않고 서버만 부른다. 주소는 `http(s)`만, 사용자 정보·질의를 받지 않고 넘겨주기(redirect)를 따르지 않는다. http 주소면 등록 화면이 무엇이 평문으로 가는지 알린다. **세션을 끊으면 받던 답도 멈춘다**(실시간 편집과 같은 버스). 답은 평문으로 그린다(HTML로 그리지 않는다) |
 | TLS | 검증을 끄지 않는다. 사내 CA는 `NODE_EXTRA_CA_CERTS`로 신뢰. nginx가 종단 |
 | 의존성 | lockfile 고정(`--frozen-lockfile`). 허용 라이선스 MIT·Apache-2.0·BSD·ISC·0BSD. GPL·AGPL·SSPL·상용은 승인 없이 금지. TipTap은 npm 공개 MIT 확장만. `pnpm audit`·라이선스 검사·gitleaks를 CI 관문으로. 반입 번들에 SBOM과 라이선스 목록 포함 |
-| 컨테이너 | non-root, 불필요 패키지 없음, 헬스체크, `restart: unless-stopped`. 시크릿은 이미지에 넣지 않고 `.env`·파일 마운트로 |
+| 컨테이너 | non-root, 불필요 패키지 없음, 헬스체크, `restart: unless-stopped`(늘 떠 있는 서비스 — 부를 때만 도는 `tools`는 빼고). 시크릿은 이미지에 넣지 않고 `.env`·파일 마운트로 — 빌드 문맥에도 넣지 않는다(`.dockerignore`) |
 
 ## 8. 실행 환경·Docker·반입
 
@@ -361,14 +360,14 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 - 빌드 전 `df -h /`를 확인한다. 여유 5GB 미만이면 빌드하지 않고 정리한다. 디스크 풀은 **옆 컨테이너(DB)의 쓰기 실패**로 번진다.
 - 멀티스테이지 Dockerfile. 베이스 `node:24-bookworm-slim`. 런타임 스테이지에는 산출물과 production 의존성만.
 - 이미지 크기 예산은 app **400MB 이하**다. 실측을 검증기록에 적는다.
-- 태그는 `workfluence-app:<git-sha>`와 `:<version>`. `docker save`로 tar를 만들고 SHA-256 체크섬을 동반한다.
-- `.dockerignore`에 `node_modules`·`.env`·`.local`·`e2e`·`docs`.
+- 묶음에 담는 것은 `workfluence-app:latest`다 — 폐쇄망의 compose가 찾는 이름이고, 다른 이름이면 묶지 않는다. 어느 커밋으로 빌드했는지는 이미지의 라벨(`org.opencontainers.image.revision`)이 말하고, 묶기 전에 HEAD·작업 폴더와 견준다(Phase 13). 확인용으로 짧은 sha 태그를 더 붙인다. `docker save`로 tar를 만들고 SHA-256 체크섬을 동반한다.
+- `.dockerignore`에 `node_modules`·`.env`·`.local`·`e2e`·`docs`. **`.env`는 어느 깊이에서든**(`**/.env`) 막고 TLS 키 자리도 뺀다 — 맨 위만 막으면 `deploy/.env`가 빌드 캐시에 남는다(T-058).
 
 ### 8.3 운영 (폐쇄망)
 
 - 반입 묶음의 **구성 목록은 `packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`가 단일 출처다** — 문서가 아니라 코드가 들고, `pnpm release:verify`가 그것으로 판정한다. 이미지는 `docker save`가 만든 **tar 하나**에 세 개가 함께 들어간다(따로 두면 하나만 빠뜨린 채 반입된다). 반입 당일의 절차는 [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md)다.
 - `docker load` → `.env` 작성 → 표 만들기(`run --rm tools node dist/db/migrate.js` — 앱 DB 계정과 권한도 만든다) → 첫 root 계정(`run --rm tools node dist/db/seed.js`) → `docker compose up -d` → 사후 검증. 폐쇄망에는 Node가 없다 — 마이그레이션·시드·월간 작업은 compose의 `tools`(Phase 13)로 앱 이미지 안에서 돈다. 절차는 반입 가이드다.
-- 모든 서비스 `restart: unless-stopped` + 헬스체크. 재부팅 후 자동 기동을 실제로 확인한다.
+- 늘 떠 있는 서비스(postgres·api·nginx)는 `restart: unless-stopped` + 헬스체크. 재부팅 후 자동 기동을 실제로 확인한다. `tools`는 부를 때만 도는 한 번짜리 칸이다(`restart: "no"`, profile).
 - nginx는 TLS를 종단하고 `absolute_redirect off`, `X-Forwarded-*` 전달, WebSocket `Upgrade` 프록시를 둔다. `client_max_body_size`는 첨부 상한과 일치시킨다. 요청 번호(`X-Request-Id`)를 만들어 넘기고 접근 로그는 JSON 한 줄(질의 문자열 없음)이다.
 - 로그는 compose가 서비스마다 순환한다(`WF_LOG_MAX_SIZE` × `WF_LOG_MAX_FILES`, 기본 20MB × 5). 사내 CA는 compose 옆 `ca/ca.pem` 하나 — 있으면 앱이 믿는다(compose를 고치지 않는다).
 - 볼륨은 `postgres_data`와 `attachments`다. 백업은 `pg_dump` + 첨부 디렉토리. 복원 리허설은 Phase 5 완료 기준.
@@ -405,11 +404,11 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `docs/학습가이드_시스템이해.md` | 개발 용어 없이 읽는 시스템 설명과 직접 확인 명령 | **매 Phase 필수** |
 | `docs/사용자가이드_사용법.md` | 화면을 쓰는 사람의 "이것은 어떻게 하나" — 모든 사용자·관리자·자주 묻는 것 (Phase 13) | 화면의 메뉴·단추·안내문이 바뀔 때 |
 | `docs/운영가이드_장애대응.md` | 증상에서 확인, 조치로 가는 표 | **매 Phase 필수** |
-| `docs/운영가이드_리눅스빌드.md` | 리눅스 서버에서 이미지를 빌드하고 기동을 확인하는 절차 | 빌드·배포 구성이 바뀔 때 |
+| `docs/운영가이드_리눅스빌드.md` | 리눅스 서버에서 이미지를 빌드하고 기동을 확인하고 반입 묶음을 만드는 절차 | 빌드·배포 구성이 바뀔 때 |
 | `docs/기능백로그.md` | 들어온 기능 요청과 그 처리 상태 | 요청이 올 때마다 |
 | `docs/P{N}_설계서_<Topic>.md` | 착수 쟁점 + 요구사항 표 + 설계 + 기능 Phase면 Confluence 대조 | Phase 시작 |
 | `docs/P{N}_검증기록_<Topic>.md` | 실측·실호출·확인 못 한 것 | Phase 종료 |
-| [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md) | 폐쇄망 반입 당일의 순서와 사후 검증 | 반입 구성이 바뀔 때 |
+| [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md) | 폐쇄망 반입 당일의 순서와 사후 검증, 새 버전 들여오기 | 반입 구성이 바뀔 때 |
 | [`docs/운영가이드_운영이관.md`](docs/운영가이드_운영이관.md) | 날마다·주마다·달마다 하는 일, 하지 말 것, 연락 경로 | 운영 절차가 바뀔 때 |
 
 ### 10.2 `docs/internal/` — 작업 기록 (운영 담당자는 안 읽어도 된다)
