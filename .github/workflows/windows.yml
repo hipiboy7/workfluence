@@ -18,6 +18,8 @@ name: Windows 체험
 on:
   push:
     branches: [exp/windows]
+    # 문서만 바뀐 push는 돌리지 않는다 — 결과를 적는 커밋이 30분짜리 실행을 또 부른다. 필요하면 손으로 돌린다(workflow_dispatch)
+    paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:
 
 concurrency:
