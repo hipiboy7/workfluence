@@ -29,6 +29,23 @@ describe('shouldSaveVersion — 안 만드는 쪽 (FR-707·708)', () => {
     expect(why(d)).toBe('내용이 그대로');
   });
 
+  it('**"바뀐 것 없음"을 따로 알린다** — 자동 저장이 이미 남긴 것을 "저장하고 보기로"가 실패로 읽지 않게 (P13 FR-1462)', () => {
+    const d = shouldSaveVersion({ next: doc('같은 내용'), previous: doc('같은 내용'), idleMs: 60_000, idleThresholdMs: 5_000, trigger: 'manual' });
+    expect(d).toMatchObject({ save: false, unchanged: true });
+    // 다른 까닭으로 안 만드는 것은 바뀐 것 없음이 아니다 — 화면은 그대로 "저장되지 않았다"를 보여야 한다
+    const typing = shouldSaveVersion({ next: doc('새 내용'), previous: doc('옛 내용'), idleMs: 1_000, idleThresholdMs: 5_000, trigger: 'idle' });
+    expect(typing).toMatchObject({ save: false });
+    expect('unchanged' in typing && typing.unchanged).toBeFalsy();
+    const bad = shouldSaveVersion({
+      next: { type: 'doc', attrs: { schemaVersion: DOCUMENT_SCHEMA_VERSION }, content: [{ type: 'iframe' }] } as DocNode,
+      previous: doc('옛 내용'),
+      idleMs: 60_000,
+      idleThresholdMs: 5_000,
+      trigger: 'manual',
+    });
+    expect('unchanged' in bad && bad.unchanged).toBeFalsy();
+  });
+
   it('속성 순서만 달라도 같다고 본다', () => {
     // 속성이 둘인 허용 노드로 본다 (P9에서 `textAlign`이 허용 목록에서 빠졌다)
     const cell = (attrs: Record<string, unknown>): DocNode => ({
