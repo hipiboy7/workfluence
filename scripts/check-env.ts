@@ -11,8 +11,10 @@ import { parseEnv, parseDotenv } from '../packages/shared/src/env';
 
 const root = resolve(__dirname, '..');
 const MIGRATIONS_DIR = resolve(root, 'apps', 'api', 'drizzle');
-const results: { name: string; ok: boolean; detail: string }[] = [];
+const results: { name: string; ok: boolean; detail: string; warnOnly?: boolean }[] = [];
 const check = (name: string, ok: boolean, detail: string) => results.push({ name, ok, detail });
+/** 알리기만 하고 READY를 막지 않는다 — 어긋나도 쓰는 데 지장이 없는 것 */
+const warn = (name: string, ok: boolean, detail: string) => results.push({ name, ok, detail, warnOnly: true });
 
 /** `.env`를 읽는다. 파싱은 shared의 `parseDotenv` 한 곳에서 한다 (CLAUDE.md 1.3절) */
 function readDotenv(path: string): Record<string, string> {
@@ -54,10 +56,13 @@ async function main(): Promise<void> {
   // "`.local`이 저장소 안인가"는 경로를 그렇게 조립했으니 항상 참이라 검사가 아니다. 실제로 확인할 것은 드라이브다.
   // Linux 작업 서버(2026-09-21~)는 볼륨이 하나뿐이라 이 검사에 대응물이 없다. 거기서 실제로 위험한 것은
   // 도커와 같은 디스크를 나눠 쓴다는 점이고, 그것은 아래 여유 공간 검사가 본다.
+  // **경고로 낮췄다 (2026-09-27, `exp/windows`).** 그 규칙은 C:가 좁던 옛 Windows 개발 서버의 것이다. 체험용 Windows는 대개
+  // C: 하나뿐이고(GitHub의 windows-latest도 그렇다), Azure VM의 D:는 VM을 멈추면 지워질 수 있는 임시 디스크다 — 막으면
+  // 데이터를 잃는 쪽으로 보낸다 (`docs/운영가이드_윈도우체험.md` 6절). 실제로 막아야 하는 것(여유 공간)은 아래가 본다
   if (process.platform === 'win32') {
     const systemDrive = (process.env.SystemDrive ?? 'C:').toLowerCase();
     const projectDrive = parse(root).root.replace(/[\\/]+$/, '').toLowerCase();
-    check('데이터가 시스템 드라이브가 아닌 곳에 있음', projectDrive !== systemDrive, `프로젝트 ${projectDrive} / 시스템 ${systemDrive}`);
+    warn('데이터가 시스템 드라이브가 아닌 곳에 있음', projectDrive !== systemDrive, `프로젝트 ${projectDrive} / 시스템 ${systemDrive}${projectDrive === systemDrive ? ' — 체험에는 지장이 없다' : ''}`);
   }
 
   try {
@@ -95,8 +100,8 @@ async function main(): Promise<void> {
     }
   }
 
-  for (const r of results) console.log(`${r.ok ? 'OK  ' : 'FAIL'} ${r.name} — ${r.detail}`);
-  const failed = results.filter((r) => !r.ok);
+  for (const r of results) console.log(`${r.ok ? 'OK  ' : r.warnOnly ? 'WARN' : 'FAIL'} ${r.name} — ${r.detail}`);
+  const failed = results.filter((r) => !r.ok && !r.warnOnly);
   if (failed.length) {
     console.log(`\nNOT READY (${failed.length}건 실패)`);
     process.exit(1);
