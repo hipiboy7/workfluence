@@ -654,6 +654,15 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
   });
 });
 
+describe('비밀번호가 있는 계정인가 (P13 FR-1471)', () => {
+  it('로컬 계정은 참, 사내 계정은 거짓 — 화면이 **비밀번호 변경**을 보일지 정한다', async () => {
+    const alice = await approvedAlice();
+    expect(toMeView(alice).hasPassword).toBe(true);
+    const idp = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: 's' }, { state: 's', nonce: 'n' });
+    expect(toMeView(idp).hasPassword).toBe(false);
+  });
+});
+
 describe('동시 로그인이 연결 풀을 잠그지 않는다 (T-026)', () => {
   const CONCURRENT = TEST_POOL_MAX * 2;
 

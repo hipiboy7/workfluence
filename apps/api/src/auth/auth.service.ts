@@ -43,6 +43,7 @@ export function toMeView(u: UserRow): MeView {
     role: u.role as Role,
     mustChangePassword: u.mustChangePassword,
     grants: grantsForRole(u.role as Role, u.grants),
+    hasPassword: u.passwordHash !== null,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   recoverPasswordDto,
   signupDto,
   type MeView,
+  type PasswordRulesView,
 } from '@workfluence/shared';
 import type { Request } from 'express';
 import 'express-session';
@@ -15,6 +16,7 @@ import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { RateLimit, RateLimitGuard, RateLimitStore } from '../common/rate-limit.guard';
 import { ZodPipe } from '../common/zod.pipe';
 import { UsersModule } from '../users/users.module';
+import { SettingsService } from '../settings/settings.service';
 import { AllowPendingPasswordChange, AuthGuard, CurrentUser, Public, type SessionUser } from './auth.guard';
 import { AuthService, toMeView } from './auth.service';
 import { HttpOidcProvider } from './oidc/http.provider';
@@ -39,6 +41,7 @@ export class AuthController {
     // 여기서 가드를 받으면 요청을 센 인스턴스와 다른 것이 온다 — 환불이 조용히 사라진다 (T-027)
     private readonly rateLimit: RateLimitStore,
     private readonly revocation: RevocationBus,
+    private readonly settings: SettingsService,
   ) {}
 
   @Post('login')
@@ -80,6 +83,17 @@ export class AuthController {
     // 실시간 편집 여부를 화면이 알아야 한다 (FR-711). 꺼져 있으면 단독 편집기를 띄운다 —
     // 화면이 모르면 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다
     return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED };
+  }
+
+  /**
+   * **비밀번호 규칙** — 로그인 전에도 읽는다 (P13 FR-1472). 가입 화면은 로그인 전이라 운영 설정(`/api/settings/policy`)을 못 읽어 안내문을
+   * 고정 문자열로 두었다. 길이와 문자 종류 수만 준다 — 잠금 기준·세션 시간은 잠금 회피 간격을 계산할 수 있는 값이라 주지 않는다(P4 자체 점검 11)
+   */
+  @Get('password-rules')
+  @Public()
+  async passwordRules(): Promise<PasswordRulesView> {
+    const p = await this.settings.get();
+    return { minLength: p.passwordMinLength, minCharClasses: p.passwordMinCharClasses };
   }
 
   @Post('signup')

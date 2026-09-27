@@ -34,7 +34,7 @@ const user = (over: Partial<UserView>): UserView => ({
 
 beforeEach(() => {
   calls = [];
-  me = { id: 'r1', username: 'root', displayName: '시스템 관리자', role: 'root', mustChangePassword: false, grants: [] };
+  me = { id: 'r1', username: 'root', displayName: '시스템 관리자', role: 'root', mustChangePassword: false, grants: [], hasPassword: true };
   rows = [user({ id: 'a1', username: 'boss', role: 'admin' }), user({ id: 'm1', username: 'alice' })];
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
     const method = init?.method ?? 'GET';

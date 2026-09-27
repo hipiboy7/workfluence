@@ -218,6 +218,17 @@ export function checkPasswordPolicy(
   return reasons;
 }
 
+/**
+ * **비밀번호 안내문** (P13 FR-1472) — 규칙 값으로 만든다. 가입·변경 화면의 안내문이 고정 문자열이라 관리자가 운영 설정에서 규칙을 바꿔도
+ * 따라 바뀌지 않았다. 판정(`checkPasswordPolicy`)과 같은 말을 쓴다
+ */
+export function passwordRuleText(policy: { minLength: number; minCharClasses: number }): string {
+  const parts = [`${policy.minLength}자 이상`];
+  if (policy.minCharClasses > 1) parts.push(`영문 대·소문자·숫자·특수문자 중 ${policy.minCharClasses}종 이상`);
+  parts.push('공백 없이');
+  return parts.join(', ');
+}
+
 export function countCharClasses(password: string): number {
   return [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((re) => re.test(password)).length;
 }

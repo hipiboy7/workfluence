@@ -303,7 +303,12 @@ export type MeView = {
   mustChangePassword: boolean;
   /** root가 준 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1) */
   grants: DelegableAction[];
+  /** 비밀번호로 로그인하는 계정인가 — 사내 계정은 아니다. 화면이 **비밀번호 변경**을 보일지 정한다 (P13 FR-1471) */
+  hasPassword: boolean;
 };
+
+/** 로그인 전에도 읽는 비밀번호 규칙 — 길이와 문자 종류 수만 (P13 FR-1472). 잠금 기준·세션 시간은 주지 않는다 */
+export type PasswordRulesView = { minLength: number; minCharClasses: number };
 
 export type CategoryView = { id: string; name: string; createdAt: string };
 
