@@ -8,6 +8,7 @@ import {
   userGrantsDto,
   changePasswordDto,
   collabTitleDto,
+  flushCollabDto,
   listUsersDto,
   createCategoryDto,
   createPageDto,
@@ -289,5 +290,22 @@ describe('collabTitleDto (P13 FR-1460)', () => {
     expect(() => collabTitleDto.parse({ title: '   ' })).toThrow();
     expect(() => collabTitleDto.parse({ title: 'x'.repeat(301) })).toThrow();
     expect(() => collabTitleDto.parse({})).toThrow();
+  });
+});
+
+/**
+ * **저장하고 보기로의 상태 벡터** (병합 전 자체 점검 8). 화면이 자기 문서의 상태 벡터(Yjs가 "누구의 몇 번째까지 가졌나"를 적는 값)를
+ * 함께 보내면 서버가 그만큼 받았는지 본다 — 끊긴 줄 모르는 연결에서 누르면 "이미 남아 있다"로 보기로 넘어가 보내지 못한 입력이 사라졌다
+ */
+describe('flushCollabDto — 상태 벡터 (병합 전 자체 점검 8)', () => {
+  it('base64로 온다 — 없어도 된다(옛 화면)', () => {
+    expect(flushCollabDto.parse({ sv: 'AQKGAQE=' })).toEqual({ sv: 'AQKGAQE=' });
+    expect(flushCollabDto.parse({})).toEqual({});
+    expect(flushCollabDto.parse({ title: '제목', sv: '' })).toEqual({ title: '제목', sv: '' });
+  });
+
+  it('base64가 아니거나 너무 길면 받지 않는다', () => {
+    for (const bad of ['not base64!', 'AQ==AQ', '*'.repeat(8)]) expect(() => flushCollabDto.parse({ sv: bad }), bad).toThrow();
+    expect(() => flushCollabDto.parse({ sv: 'A'.repeat(65_537) })).toThrow();
   });
 });
