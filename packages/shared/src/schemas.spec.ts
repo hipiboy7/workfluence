@@ -95,6 +95,16 @@ describe('카테고리·스페이스 DTO', () => {
     expect(spaceListQueryDto.parse({})).toEqual({ scope: 'personal', limit: 200 });
     expect(spaceListQueryDto.parse({ scope: 'all', limit: '5' })).toEqual({ scope: 'all', limit: 5 });
   });
+
+  /** **모든 스페이스는 서버가 찾고 거른다** (P14 FR-1514, P4 FR-537 상한 + 검색). 화면에서만 거르면 상한 밖의 스페이스를 찾지 못한다(T-051) */
+  it('spaceListQueryDto — 찾기(`q`)와 상태(`status`)', () => {
+    expect(spaceListQueryDto.parse({ scope: 'all', q: '  운영팀  ', status: 'suspended' })).toEqual({ scope: 'all', limit: 200, q: '운영팀', status: 'suspended' });
+    expect(spaceListQueryDto.parse({ scope: 'all', q: 'x'.repeat(100) }).q).toHaveLength(100);
+    expect(spaceListQueryDto.safeParse({ q: 'x'.repeat(101) }).success).toBe(false);
+    expect(spaceListQueryDto.safeParse({ status: 'deleted' }).success).toBe(false);
+    // 빈 찾기는 찾지 않는 것이다 — 모두 보인다
+    expect(spaceListQueryDto.parse({ q: '   ' })).toEqual({ scope: 'personal', limit: 200 });
+  });
 });
 
 describe('페이지·검색 DTO', () => {
