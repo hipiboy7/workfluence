@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PASSWORD_POLICY } from '@workfluence/shared';
-import { admitAttempt, afterFailure, afterSuccess, isLocked, lockAfterFailure, lockExpiredReserveCount, remainingLockMs } from './lockout';
+import { afterFailure, afterSuccess, isLocked, lockAfterFailure, remainingLockMs } from './lockout';
 
 /** A등급 (P1_설계서_Auth 0절). 테스트를 먼저 썼다. 시계는 주입한다. */
 
@@ -76,43 +76,22 @@ describe('remainingLockMs — 관리자 화면 표시용', () => {
 });
 
 /**
- * **확인하기 전에 센다** (P13 D.4, FR-1431). 실패 횟수는 DB가 한 문장으로 올리고(자리 잡기), 판정은 여기서 한다. 동시에 N건이 와도
- * 확인까지 가는 것은 기준 횟수만큼이다 — 확인 뒤에 세면 동시에 온 추측이 모두 확인까지 가서, 5회 잠금이 약 20배 느슨했다(측정 S3)
+ * **틀린 확인 뒤의 잠금** (P13 D.4, FR-1431). 실패 횟수는 DB가 한 문장으로 올리고(`failed_attempts + 1 RETURNING`), 올린 뒤의 수로
+ * 잠글지 정한다 — 읽고 계산해 다시 쓰면 동시에 온 요청이 서로를 덮는다(측정 S3). 규칙은 `afterFailure`와 같다
  */
-describe('admitAttempt — 자리를 잡은 뒤 확인할지 (P13 FR-1431)', () => {
-  it('잡은 수가 기준 이하면 확인한다', () => {
-    expect(admitAttempt(1, policy)).toBe('verify');
-    expect(admitAttempt(policy.lockoutThreshold, policy)).toBe('verify');
-  });
-
-  it('**기준을 넘은 자리는 확인하지 않고 잠김으로 답한다** — 동시에 온 여섯째부터', () => {
-    expect(admitAttempt(policy.lockoutThreshold + 1, policy)).toBe('locked');
-    expect(admitAttempt(policy.lockoutThreshold + 50, policy)).toBe('locked');
-  });
-
-  it('자리를 못 잡았으면(지금 잠겨 있다) 잠김이다', () => {
-    expect(admitAttempt(null, policy)).toBe('locked');
-  });
-});
-
-describe('lockAfterFailure — 틀린 확인 뒤 잠글지 (P13 FR-1431)', () => {
-  it('잡은 수가 기준에 닿으면 지금부터 잠근다', () => {
+describe('lockAfterFailure — 올린 뒤의 실패 횟수로 잠글지 (P13 FR-1431)', () => {
+  it('기준에 닿으면 지금부터 잠근다', () => {
     expect(lockAfterFailure(policy.lockoutThreshold, T0, policy)).toEqual(at(policy.lockoutMinutes * MIN));
+  });
+
+  it('**기준을 넘어서도 잠근다** — 잠금이 풀린 뒤의 실패는 다시 잠근다(`afterFailure`와 같다)', () => {
+    expect(lockAfterFailure(policy.lockoutThreshold + 3, T0, policy)).toEqual(at(policy.lockoutMinutes * MIN));
+    const after = afterFailure({ failedAttempts: policy.lockoutThreshold + 2, lockedUntil: at(-1) }, T0, policy);
+    expect(lockAfterFailure(policy.lockoutThreshold + 3, T0, policy)).toEqual(after.lockedUntil);
   });
 
   it('기준 전이면 잠그지 않는다', () => {
     expect(lockAfterFailure(policy.lockoutThreshold - 1, T0, policy)).toBeNull();
     expect(lockAfterFailure(1, T0, policy)).toBeNull();
-  });
-});
-
-describe('lockExpiredReserveCount — 잠금이 풀린 뒤의 자리 (P13 D.4)', () => {
-  it('**풀린 뒤에는 한 번만 확인한다** — 틀리면 다시 잠긴다(예전과 같다). 그래서 잡는 수는 기준과 같다', () => {
-    const n = lockExpiredReserveCount(policy);
-    expect(n).toBe(policy.lockoutThreshold);
-    expect(admitAttempt(n, policy)).toBe('verify');
-    expect(lockAfterFailure(n, T0, policy)).not.toBeNull();
-    // 동시에 온 둘째는 기준을 넘는다
-    expect(admitAttempt(n + 1, policy)).toBe('locked');
   });
 });
