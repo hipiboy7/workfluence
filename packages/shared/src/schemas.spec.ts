@@ -31,7 +31,7 @@ import {
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
-import { COLLAB_LIMITS, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
+import { COLLAB_LIMITS, LIST_SEARCH_MAX, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -99,8 +99,8 @@ describe('카테고리·스페이스 DTO', () => {
   /** **모든 스페이스는 서버가 찾고 거른다** (P14 FR-1514, P4 FR-537 상한 + 검색). 화면에서만 거르면 상한 밖의 스페이스를 찾지 못한다(T-051) */
   it('spaceListQueryDto — 찾기(`q`)와 상태(`status`)', () => {
     expect(spaceListQueryDto.parse({ scope: 'all', q: '  운영팀  ', status: 'suspended' })).toEqual({ scope: 'all', limit: 200, q: '운영팀', status: 'suspended' });
-    expect(spaceListQueryDto.parse({ scope: 'all', q: 'x'.repeat(100) }).q).toHaveLength(100);
-    expect(spaceListQueryDto.safeParse({ q: 'x'.repeat(101) }).success).toBe(false);
+    expect(spaceListQueryDto.parse({ scope: 'all', q: 'x'.repeat(LIST_SEARCH_MAX) }).q).toHaveLength(LIST_SEARCH_MAX);
+    expect(spaceListQueryDto.safeParse({ q: 'x'.repeat(LIST_SEARCH_MAX + 1) }).success).toBe(false);
     expect(spaceListQueryDto.safeParse({ status: 'deleted' }).success).toBe(false);
     // 빈 찾기는 찾지 않는 것이다 — 모두 보인다
     expect(spaceListQueryDto.parse({ q: '   ' })).toEqual({ scope: 'personal', limit: 200 });

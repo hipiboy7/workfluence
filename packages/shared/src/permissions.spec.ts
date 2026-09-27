@@ -117,6 +117,10 @@ describe('spaceAccess', () => {
   it('삭제: 생성자는 Crew가 본인뿐일 때, 관리자는 중지 상태일 때만', () => {
     expect(spaceAccess(member, team, 'owner', 1).canDelete).toBe(true);
     expect(spaceAccess(member, team, 'owner', 2).canDelete).toBe(false);
+    // **'중지'하게 되면 admin만 삭제할 수 있어야 해** (prompts/prototype-v2.md — P14 병합 전 보안 검토 5). 주인은 활성일 때만, 개인 스페이스도
+    expect(spaceAccess(member, { ...team, status: 'suspended' }, 'owner', 1).canDelete).toBe(false);
+    expect(spaceAccess(member, { ...personal, status: 'suspended' }, 'owner', 0).canDelete).toBe(false);
+    expect(spaceAccess(member, personal, 'owner', 0).canDelete).toBe(true);
     expect(spaceAccess(admin, team, null, 5).canDelete).toBe(false);
     expect(spaceAccess(admin, suspendedTeam, null, 5).canDelete).toBe(true);
     expect(spaceAccess(root, suspendedTeam, null, 5).canDelete).toBe(true);
