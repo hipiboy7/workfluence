@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Inject, Module, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import {
+  collabTitleDto,
   createPageDto,
   flushCollabDto,
   movePageDto,
@@ -135,6 +136,21 @@ export class PagesController {
    * 동작이 어긋난다. 남길 것이 없으면(방이 없거나 내용이 그대로) 그냥 `saved: false`다 —
    * 오류가 아니다.
    */
+  /**
+   * **실시간 편집의 제목** (P13 FR-1460). 화면이 입력을 멈추면 부른다 — 방이 그것을 변경으로 적어 유휴 저장에 싣는다. 예전에는 "저장하고
+   * 보기로"를 누를 때만 제목이 갔다. 쓰기 권한을 본다(flush와 같다). 방이 없으면 `applied: false`
+   */
+  @Post(':id/collab/title')
+  async collabTitle(
+    @Param('id', UuidPipe) id: string,
+    @Body(new ZodPipe(collabTitleDto)) dto: ReturnType<typeof collabTitleDto.parse>,
+    @CurrentUser() me: SessionUser,
+  ): Promise<{ applied: boolean }> {
+    const page = await this.pages.get(id, me);
+    await this.spaces.assertWrite(page.spaceId, me);
+    return { applied: this.collab.setTitle(id, dto.title, me.id) };
+  }
+
   @Post(':id/collab/flush')
   async flush(
     @Param('id', UuidPipe) id: string,

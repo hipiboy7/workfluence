@@ -101,6 +101,10 @@ type Member = {
   revoked: boolean;
   lastCheckedAt: number;
   /**
+   * 이 사람이 **마지막으로 실제로 문서를 바꾼 시각**(0 = 아직). 편집 중 세션 연장이 이것을 본다 — 자동 저장이 지우지 않는다 (P13 FR-1461)
+   */
+  lastChangedAt: number;
+  /**
    * 지금 적용 중인 변경에 든 조각·삭제 구간. `Y.applyUpdate` 동안만 채워진다.
    * 트랜잭션 관찰자가 이것과 "실제로 일어난 것"을 맞춰, 그 변경을 믿을지 정한다 (P8 C.2절)
    */
@@ -457,6 +461,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (!origin || typeof origin !== 'object' || !('principal' in origin)) return;
       room.lastChangeAt = Date.now();
       room.lastActor = (origin as Member).principal.id;
+      // **사람마다 적는다** (P13 FR-1461). 방의 시각은 자동 저장이 0으로 지운다 — 그것으로 세션 연장을 판정하면 띄엄띄엄 쓰는 사람은
+      // 거의 연장을 받지 못해 30분 유휴에 걸려 끊겼다
+      (origin as Member).lastChangedAt = room.lastChangeAt;
     });
 
     /**
@@ -551,6 +558,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       own: new Set(),
       ip,
       presenceBound: [],
+      lastChangedAt: 0,
     };
     room.members.add(member);
     room.emptyAt = null;
@@ -847,7 +855,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
         // 유휴 만료에 걸려 **작업 중에 쫓겨난다** (P7 자체 점검 13).
         // **열어만 둔 탭은 이어 주지 않는다** — 그러면 유휴 타임아웃이 뜻을 잃는다.
         // 직전 주기 안에 이 사람이 실제로 문서를 바꿨을 때만이다
-        const typing = room.lastActor === m.principal.id && now - room.lastChangeAt < this.env.WF_COLLAB_RECHECK_MS;
+        const typing = m.lastChangedAt > 0 && now - m.lastChangedAt < this.env.WF_COLLAB_RECHECK_MS;
         if (typing) {
           const idleMs = (await this.settings.get()).sessionIdleMinutes * 60_000;
           await this.db.execute(
@@ -1033,7 +1041,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
    *
    * **저장이 끝난 뒤에 돌아온다.** 그래야 호출부가 읽는 버전 번호가 실제와 맞는다.
    */
-  async flush(pageId: string, title?: string): Promise<{ saved: boolean; reason: string }> {
+  async flush(pageId: string, title?: string): Promise<{ saved: boolean; reason: string; unchanged?: true }> {
     const room = this.rooms.get(pageId);
     if (!room) return { saved: false, reason: '편집 중인 사람이 없다' };
     // **제목도 함께 남긴다.** 협업 모드에서도 제목은 평범한 입력칸이고, 그것을 안 보내면
@@ -1046,6 +1054,23 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     // **"방이 있었다"를 "남겼다"로 답하면 안 된다.** 검증에 실패했는데 화면이 보기로
     // 넘어가면 사람은 저장됐다고 믿는다 (P7 자체 점검 3)
     if (!d) return { saved: false, reason: '남길 것이 없다' };
-    return d.save ? { saved: true, reason: '' } : { saved: false, reason: d.reason };
+    if (d.save) return { saved: true, reason: '' };
+    // **바뀐 것이 없으면 이미 남아 있다** — 자동 저장이 먼저 남겼다. 실패로 답하면 화면이 넘어가지 않았다 (P13 FR-1462)
+    if (d.unchanged) return { saved: true, reason: '', unchanged: true };
+    return { saved: false, reason: d.reason };
+  }
+
+  /**
+   * **실시간 편집의 제목** (P13 FR-1460). 예전에는 "저장하고 보기로"를 누를 때만 제목이 방에 갔다 — 제목만 고치고 창을 닫으면 사라졌다.
+   * 화면이 입력을 멈추면 이것을 부르고, 방은 그것을 변경으로 적어 유휴 저장에 싣는다(누가 바꿨는지도 — 다음 버전의 작성자다).
+   * 방이 없으면(편집 중인 사람이 없다) `false` — 제목은 REST 저장 경로로 간다. 동료 화면의 제목 칸은 바뀌지 않는다(설계서 A.1-8)
+   */
+  setTitle(pageId: string, title: string, actorId: string): boolean {
+    const room = this.rooms.get(pageId);
+    if (!room) return false;
+    room.title = title;
+    room.lastChangeAt = Date.now();
+    room.lastActor = actorId;
+    return true;
   }
 }

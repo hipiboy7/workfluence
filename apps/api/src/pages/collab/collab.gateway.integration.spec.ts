@@ -405,6 +405,93 @@ describe('flush — 화면의 저장 버튼 (P6 코드 리뷰 11)', () => {
   });
 });
 
+describe('실시간 편집의 결함 셋 (P13 C.7, FR-1460~1462)', () => {
+  const titleNow = async () => (await db.execute<{ title: string }>(sql`SELECT title FROM pages WHERE id = ${pageId}`)).rows[0].title;
+  const idle = () => new Promise((r) => setTimeout(r, 5));
+
+  it('**자동 저장이 먼저 남겼으면 "저장하고 보기로"는 저장된 것으로 답한다** — "남길 것이 없다"로 멈추지 않는다 (FR-1462)', async () => {
+    const { room } = await attach();
+    const sock = [...room.members][0] as { socket: FakeSocket };
+    sock.socket.emit('message', editUpdate(room.doc, '자동 저장될 글'));
+    const before = await currentVersion();
+    await idle();
+    await inner.sweep();
+    await vi.waitFor(async () => expect(await currentVersion()).toBe(before + 1));
+    expect(await gw.flush(pageId)).toEqual({ saved: true, reason: '', unchanged: true });
+    expect(await currentVersion()).toBe(before + 1);
+  });
+
+  it('**제목만 바꿔도 유휴 저장이 싣는다** — 창을 닫아도 남고, 바꾼 사람이 작성자다 (FR-1460)', async () => {
+    await attach();
+    const before = await currentVersion();
+    expect(gw.setTitle(pageId, '방에 알린 제목', otherId)).toBe(true);
+    await idle();
+    await inner.sweep();
+    await vi.waitFor(async () => expect(await titleNow()).toBe('방에 알린 제목'));
+    expect(await currentVersion()).toBe(before + 1);
+    const v = await db.execute<{ by: string }>(sql`SELECT created_by AS by FROM page_versions WHERE page_id = ${pageId} ORDER BY version_no DESC LIMIT 1`);
+    expect(v.rows[0].by).toBe(otherId);
+  });
+
+  it('방이 없으면 제목을 받지 않는다 — REST 저장 경로로 간다', () => {
+    expect(gw.setTitle(pageId, '받을 곳 없음', userId)).toBe(false);
+  });
+
+  /**
+   * **편집 중 세션 연장** (FR-1461). 연장은 "직전 주기 안에 실제로 문서를 바꿨는가"로 판정하는데, 예전에는 그 시각을 방에 두어 자동 저장이
+   * 0으로 지웠다 — 띄엄띄엄 쓰는 사람은 거의 연장을 받지 못해 30분 유휴에 걸려 끊겼다. 사람마다 둔다
+   */
+  describe('편집 중 세션 연장 (FR-1461)', () => {
+    async function withRecheckGateway() {
+      const saved = env;
+      env = { ...env, WF_COLLAB_RECHECK_MS: 60_000 };
+      const g = build();
+      env = saved;
+      g.onModuleInit();
+      const gi = g as unknown as Internals;
+      const r = await gi.room(pageId, await currentVersion());
+      const socket = fakeSocket();
+      gi.join(pageId, r, socket, { id: userId, role: 'admin' }, 'tester', sid, spaceId);
+      return { g, gi, r, socket };
+    }
+    const secondsLeft = async () =>
+      Number((await db.execute<{ s: number }>(sql`SELECT extract(epoch FROM expire - now())::int AS s FROM sessions WHERE sid = ${sid}`)).rows[0].s);
+    const dueNow = (r: { members: Set<unknown> }) => {
+      for (const m of r.members) (m as { lastCheckedAt: number }).lastCheckedAt = 0;
+    };
+
+    it('**자동 저장이 지난 뒤의 재판정에서도 연장된다**', async () => {
+      const { g, gi, r, socket } = await withRecheckGateway();
+      try {
+        socket.emit('message', editUpdate(r.doc, '조금 쓴다'));
+        const before = await currentVersion();
+        await idle();
+        await gi.sweep();
+        await vi.waitFor(async () => expect(await currentVersion()).toBe(before + 1));
+        await db.execute(sql`UPDATE sessions SET expire = now() + interval '1 minute' WHERE sid = ${sid}`);
+        dueNow(r);
+        await gi.sweep();
+        expect(await secondsLeft()).toBeGreaterThan(20 * 60);
+        expect(socket.closed).toBeNull();
+      } finally {
+        await g.onModuleDestroy();
+      }
+    });
+
+    it('열어만 둔 탭은 연장하지 않는다 — 유휴 타임아웃이 뜻을 잃지 않게', async () => {
+      const { g, gi, r } = await withRecheckGateway();
+      try {
+        await db.execute(sql`UPDATE sessions SET expire = now() + interval '1 minute' WHERE sid = ${sid}`);
+        dueNow(r);
+        await gi.sweep();
+        expect(await secondsLeft()).toBeLessThanOrEqual(60);
+      } finally {
+        await g.onModuleDestroy();
+      }
+    });
+  });
+});
+
 describe('정본이 앞선 방 (자체 점검 7)', () => {
   it('그 사이 REST로 저장됐으면 협업 상태를 버리고 연결을 끊는다', async () => {
     const { socket, room } = await attach();

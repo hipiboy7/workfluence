@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import type { DocNode, PageView } from '@workfluence/shared';
 import { ApiError, api } from '../api';
@@ -14,6 +14,9 @@ type Conflict = { currentVersionNo: number; baseVersionNo: number; message: stri
  * **충돌하면 안내만 하고 덮어쓰기 버튼을 주지 않는다.** 한 번 허용하면 남의 저장을 지우는
  * 것이 정상 동작이 된다. 최신을 불러와 다시 편집하게 한다.
  */
+/** 실시간 편집에서 제목 입력을 멈추고 이만큼 뒤에 방에 알린다 (P13 FR-1460) */
+const TITLE_SEND_DELAY_MS = 1000;
+
 export function PageEditorPage() {
   const { id = '' } = useParams();
   const nav = useNavigate();
@@ -53,6 +56,19 @@ export function PageEditorPage() {
       .then((c) => setCollab(c.collabEnabled))
       .catch(() => setCollab(false)); // 못 물어보면 단독 편집으로 간다 — 못 쓰는 것보다 낫다
   }, []);
+  // **실시간 편집에서는 제목도 방에 알린다** (P13 FR-1460) — 입력을 멈추고 잠시 뒤. 예전에는 "저장하고 보기로"를 눌러야만 서버에 가서,
+  // 제목만 고치고 창을 닫으면 사라졌다. 처음 불러온 제목은 보내지 않는다. 실패해도 "저장하고 보기로"가 제목을 다시 보낸다
+  const sentTitle = useRef<string | null>(null);
+  useEffect(() => {
+    if (!collab || !page) return;
+    const t = title.trim();
+    if (!t || t === (sentTitle.current ?? page.title)) return;
+    const timer = setTimeout(() => {
+      sentTitle.current = t;
+      void api(`/api/pages/${id}/collab/title`, { method: 'POST', json: { title: t } }).catch(() => undefined);
+    }, TITLE_SEND_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [collab, page, title, id]);
   const onPeers = useCallback((names: string[]) => setPeers(names), []);
   const onState = useCallback((s: CollabState) => setLink(s), []);
   const onSaveBlocked = useCallback((r: string | null) => setSaveBlocked(r), []);
