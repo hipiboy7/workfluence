@@ -7,6 +7,8 @@ import {
   isUuid,
   userGrantsDto,
   changePasswordDto,
+  collabTitleDto,
+  listUsersDto,
   createCategoryDto,
   createPageDto,
   createSpaceDto,
@@ -254,3 +256,38 @@ describe('위임 목록 DTO (P11 F절)', () => {
   });
 });
 
+/**
+ * **사용자 목록의 찾기·거르기·나누기** (P13 C.6, FR-1450~1452). 기본 100에서 조용히 끊겨 300명 규모에서 200명을 화면에서 관리하지
+ * 못했다. 서버가 찾고 거르고 나눈다
+ */
+describe('listUsersDto (P13 FR-1450~1452)', () => {
+  it('비면 처음 100명', () => {
+    expect(listUsersDto.parse({})).toEqual({ limit: 100, offset: 0 });
+  });
+
+  it('찾는 말은 앞뒤를 잘라 100자까지', () => {
+    expect(listUsersDto.parse({ q: '  앨리스  ' }).q).toBe('앨리스');
+    expect(() => listUsersDto.parse({ q: 'x'.repeat(101) })).toThrow();
+  });
+
+  it('상태는 승인 대기·활성·잠김·정지만', () => {
+    for (const status of ['pending', 'active', 'locked', 'suspended']) expect(listUsersDto.parse({ status }).status).toBe(status);
+    expect(() => listUsersDto.parse({ status: 'deleted' })).toThrow();
+  });
+
+  it('쿼리 문자열의 숫자를 읽는다 — 한 번에 500명까지, 건너뛰기는 0 이상', () => {
+    expect(listUsersDto.parse({ limit: '50', offset: '100' })).toMatchObject({ limit: 50, offset: 100 });
+    expect(() => listUsersDto.parse({ limit: '501' })).toThrow();
+    expect(() => listUsersDto.parse({ offset: '-1' })).toThrow();
+  });
+});
+
+/** **실시간 편집의 제목** (P13 FR-1460) — 입력을 멈추면 방에 알린다. 제목 칸과 같은 규칙이다 */
+describe('collabTitleDto (P13 FR-1460)', () => {
+  it('앞뒤를 자르고 1~300자', () => {
+    expect(collabTitleDto.parse({ title: '  회의록  ' })).toEqual({ title: '회의록' });
+    expect(() => collabTitleDto.parse({ title: '   ' })).toThrow();
+    expect(() => collabTitleDto.parse({ title: 'x'.repeat(301) })).toThrow();
+    expect(() => collabTitleDto.parse({})).toThrow();
+  });
+});
