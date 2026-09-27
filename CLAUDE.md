@@ -8,6 +8,7 @@
 | 무엇을·왜 만드는가 | [`docs/scope-definition.md`](docs/scope-definition.md) |
 | 어떻게 만들었는가 | [`docs/설계서_Architecture.md`](docs/설계서_Architecture.md) |
 | 개발을 몰라도 읽히는 설명 | [`docs/학습가이드_시스템이해.md`](docs/학습가이드_시스템이해.md) |
+| 화면에서 이것은 어떻게 하나 | [`docs/사용자가이드_사용법.md`](docs/사용자가이드_사용법.md) |
 | 새 기능을 넣고 싶다 | [`docs/기능백로그.md`](docs/기능백로그.md)와 1.4절 |
 | 장애가 났다 | [`docs/운영가이드_장애대응.md`](docs/운영가이드_장애대응.md) |
 | 리눅스 서버에서 빌드한다 | [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md) |
@@ -268,7 +269,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 부분 치환은 같은 뜻의 다른 표현을 놓친다. 본문은 고쳤는데 표·완료 기준·다른 Phase 문서·절 번호 참조가 옛 상태로 남는다. 기계 검사는 "이 문장대로 하면 되는가"만 보고 "두 문장이 서로 반대말인가"는 못 본다.
 
-읽는 순서: `CLAUDE.md` → `docs/scope-definition.md` → `docs/설계서_Architecture.md` → `docs/P0_*` → `docs/P1_*` → 그 뒤 Phase 문서 → `docs/학습가이드_시스템이해.md` → `docs/운영가이드_장애대응.md` → `docs/internal/*.md` → `README.md` → `docs/prompts/` 최신본.
+읽는 순서: `CLAUDE.md` → `docs/scope-definition.md` → `docs/설계서_Architecture.md` → `docs/P0_*` → `docs/P1_*` → 그 뒤 Phase 문서 → `docs/학습가이드_시스템이해.md` → `docs/사용자가이드_사용법.md` → `docs/운영가이드_장애대응.md` → `docs/internal/*.md` → `README.md` → `docs/prompts/` 최신본.
 
 전체 재독은 `doc-consistency` 에이전트에 맡길 수 있다 (13절). 처음 2~3회는 메인이 결과를 독립 재검토한다.
 
@@ -400,6 +401,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `docs/scope-definition.md` | 무엇을·왜. 기능 범위, Phase 인수 기준, 비기능 목표, 확정된 결정 | 범위·결정이 바뀔 때 |
 | `docs/설계서_Architecture.md` | 전체 구조, 데이터 모델, 교체 가능 축, 확장점(11절) | 구조가 바뀔 때 |
 | `docs/학습가이드_시스템이해.md` | 개발 용어 없이 읽는 시스템 설명과 직접 확인 명령 | **매 Phase 필수** |
+| `docs/사용자가이드_사용법.md` | 화면을 쓰는 사람의 "이것은 어떻게 하나" — 모든 사용자·관리자·자주 묻는 것 (Phase 13) | 화면의 메뉴·단추·안내문이 바뀔 때 |
 | `docs/운영가이드_장애대응.md` | 증상에서 확인, 조치로 가는 표 | **매 Phase 필수** |
 | `docs/운영가이드_리눅스빌드.md` | 리눅스 서버에서 이미지를 빌드하고 기동을 확인하는 절차 | 빌드·배포 구성이 바뀔 때 |
 | `docs/기능백로그.md` | 들어온 기능 요청과 그 처리 상태 | 요청이 올 때마다 |
