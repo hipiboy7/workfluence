@@ -2,6 +2,11 @@ node_modules
 **/node_modules
 .local
 .env
+# 맨 위의 .env만 막으면 deploy/.env(DB·세션 비밀값)와 TLS 개인키가 빌드 단계로 복사된다(`COPY . .`). 반입되는 최종 이미지에는
+# 없어도 이 서버의 빌드 캐시에 남는다 (P13 검토)
+**/.env
+deploy/certs
+deploy/ca/*.pem
 .git
 e2e
 docs

@@ -1,8 +1,10 @@
 # 단일 호스트 compose (개발 Linux 서버·폐쇄망 운영 공용). CLAUDE.md 8.3절.
-# 기동 순서: docker compose -f deploy/compose.yml --env-file .env up -d
-# 마이그레이션(명시적 단계): docker compose -f deploy/compose.yml --env-file .env run --rm tools node dist/db/migrate.js
-# 시드(최초 1회):            docker compose -f deploy/compose.yml --env-file .env run --rm tools node dist/db/seed.js
-# 월간 작업:                 docker compose -f deploy/compose.yml --env-file .env run --rm tools node dist/cli/<작업>.js
+# 아래 명령은 저장소의 맨 위에서 친다 — 환경 파일은 deploy/.env다(맨 위의 .env는 개발용). 폐쇄망에서는 묶음을 푼 디렉토리에서
+# `-f compose.yml --env-file .env`로 친다(docs/운영가이드_반입.md).
+# 기동 순서: docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+# 마이그레이션(명시적 단계): docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/migrate.js
+# 시드(최초 1회):            docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/seed.js
+# 월간 작업:                 docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/cli/<작업>.js
 # **DB 계정이 둘이다** (P13_설계서_Readiness D.3, 보류 12). 기동 중인 api는 앱 계정(workfluence_app — DDL 없음, 감사로그는 쌓기만)으로,
 # tools는 소유 계정(workfluence)으로 붙는다. 앱 계정과 권한은 마이그레이션이 만든다(멱등).
 # 로그 순환 (P11_설계서_Ops D.6, FR-1216) — 디스크가 하나라 로그가 쌓이면 DB 쓰기부터 깨진다(CLAUDE.md 0.3절).

@@ -81,8 +81,12 @@ export function PageEditorPage() {
       // 유휴를 기다리게 하면 눌러도 아무 일이 없는 것처럼 보인다
       setBusy(true);
       setSaveError(null);
+      // **제목은 이 화면에서 고쳤을 때만 보낸다** (P13 검토). 동료가 먼저 바꾼 제목은 이 화면의 제목 칸에 옛 제목으로 남아 있다
+      // (제목 칸은 동료의 화면에 곧바로 바뀌지 않는다 — 설계서 A.1-8). 늘 보내면 누르는 순간 새 제목을 옛 제목으로 되돌렸다.
+      // 보내지 않으면 방의 제목(동료가 정한 것)이 그대로 남는다
+      const edited = page !== null && title.trim() !== page.title;
       try {
-        const r = await api<{ saved: boolean; reason: string }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
+        const r = await api<{ saved: boolean; reason: string }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: edited ? { title } : {} });
         // **저장되지 않았으면 넘어가지 않는다.** 연결이 끊긴 채 누르거나 문서가 검증을
         // 통과하지 못하면 `saved: false`가 오는데, 전에는 그 값을 보지도 않고 보기로
         // 넘어갔다 — 사용자는 저장됐다고 믿고 화면에는 옛 내용이 뜬다 (P6 코드 리뷰 5a).

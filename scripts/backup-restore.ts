@@ -21,6 +21,8 @@ import { join, resolve } from 'node:path';
  * 근거가 아니다.
  */
 const COMPOSE = ['compose', '-f', 'deploy/compose.yml', '--env-file', 'deploy/.env'];
+/** 표 만들기 — 앱 계정과 권한도 만든다(`apps/api/src/db/app-role.ts`). 반입 가이드 5절과 같은 명령이다 */
+const MIGRATE = [...COMPOSE, 'run', '--rm', 'tools', 'node', 'dist/db/migrate.js'];
 
 function dc(args: string[], input?: Buffer, capture = false): string {
   const r = execFileSync('docker', [...COMPOSE, ...args], {
@@ -86,8 +88,15 @@ function main(): void {
   // **`--single-transaction --exit-on-error`.** 도중에 실패하면 **아무것도 들어가지 않는다.**
   // 없으면 절반만 들어간 채로 끝나고, 그 뒤에는 "비어 있지 않다" 검사가 재시도를 막는다 —
   // 되살릴 수 있었던 백업을 못 쓰게 만드는 길이다 (코드 리뷰 8)
+  //
+  // **권한 줄은 붓지 않는다(`--no-privileges`)** (P13 검토). Phase 13부터 덤프에 `GRANT … TO workfluence_app`이 들어가는데, 빈
+  // 볼륨의 새 클러스터에는 그 계정이 없어 첫 GRANT에서 멈추고 **전체가 롤백됐다**(표 0개). 계정을 먼저 만들려고 표 만들기를 치면
+  // 이번에는 "비어 있지 않다"에 걸린다 — 빈 볼륨으로는 되살릴 길이 없었다. 권한은 대조가 끝난 뒤 표 만들기가 다시 준다(아래)
   dc(
-    ['exec', '-T', 'postgres', 'pg_restore', '-U', 'workfluence', '-d', 'workfluence', '--no-owner', '--single-transaction', '--exit-on-error'],
+    [
+      'exec', '-T', 'postgres', 'pg_restore', '-U', 'workfluence', '-d', 'workfluence',
+      '--no-owner', '--no-privileges', '--single-transaction', '--exit-on-error',
+    ],
     readFileSync(join(dir, 'dump.pgc')),
   );
   inAttachments(['tar', '-xf', '-', '-C', '/data'], readFileSync(join(dir, 'attachments.tar')));
@@ -135,7 +144,8 @@ function main(): void {
   if (expectedMigrations !== null && restoredMigrations !== expectedMigrations) {
     throw new Error(
       `스키마 버전이 다르다: 백업은 마이그레이션 ${expectedMigrations}개, 복원 후 ${restoredMigrations}개. ` +
-        `옛 백업을 새 스키마에 부으면 행 수는 맞는데 앱이 없는 컬럼을 찾는다 — 'pnpm db:migrate'로 맞추고 다시 확인한다`,
+        `옛 백업을 새 스키마에 부으면 행 수는 맞는데 앱이 없는 컬럼을 찾는다 — 표 만들기로 맞추고(앱 계정의 권한도 그것이 준다) 다시 확인한다: ` +
+        `docker ${MIGRATE.join(' ')}`,
     );
   }
   if (files < blobs) {
@@ -155,7 +165,10 @@ function main(): void {
     console.log(`[restore] 참고: 백업 도중 들어온 쓰기 — ${extra.map(([t, n]) => `${t} ${n} → ${after[t]}`).join(', ')}`);
   }
 
-  console.log(`[restore] 완료 — 대조한 표 ${Object.keys(meta.counts).length}개의 행 수를 모두 채웠다`);
+  // **앱 계정과 권한을 다시 준다** — 위에서 권한 줄을 붓지 않았다. 표 만들기(`tools`, 소유 계정)가 계정을 만들고 권한을 맞춘다(멱등,
+  // 마이그레이션은 이미 같은 수라 새로 적용되는 것이 없다). 이것이 없으면 앱이 `permission denied`를 낸다(장애대응 7.30절)
+  dc(MIGRATE.slice(COMPOSE.length));
+  console.log(`[restore] 완료 — 대조한 표 ${Object.keys(meta.counts).length}개의 행 수를 모두 채웠고, 앱 계정의 권한을 맞췄다`);
 }
 
 main();
