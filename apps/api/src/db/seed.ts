@@ -7,7 +7,10 @@
  * 스키마가 늘어난 뒤 기존 행이 비어 있는 상태를 시드가 고쳐야 한다.
  *
  * **비밀번호는 덮어쓰지 않는다.** 사람이 바꿔 둔 것을 시드가 되돌리면 그 자체가 사고다.
- * 계정이 이미 있으면 WF_ROOT_PASSWORD는 무시된다.
+ * 계정이 이미 있으면 WF_ROOT_PASSWORD는 무시된다 — **새로 만들 때만 필요하다**(P13 FR-1422: 기동 중인 앱에는 넘기지 않는 값이라 선택이다).
+ *
+ * **정지된 계정은 되살리지 않는다** (P13 C.5). 버전 갱신 때 시드를 다시 돌려도, 일부러 정지해 둔 최초 계정이 조용히 활성으로 돌아오지
+ * 않게 한다. 승인 대기만 활성으로 고친다.
  */
 import * as argon2 from 'argon2';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -29,6 +32,9 @@ async function main(): Promise<void> {
     const spaces = new SpacesService(db as never);
 
     if (!existing) {
+      if (!env.WF_ROOT_PASSWORD) {
+        throw new Error('WF_ROOT_PASSWORD가 없다 — 최초 root 계정을 만들려면 필요하다(개발은 .env, 운영은 compose의 tools 서비스)');
+      }
       const [created] = await db.insert(schema.users).values({
         username,
         displayName: '시스템 관리자',
@@ -56,7 +62,8 @@ async function main(): Promise<void> {
       // (위임받은 관리자로 내려가 있던 계정. P11 코드 리뷰 2)
       if (existing.grants.length > 0) fixes.grants = [];
     }
-    if (existing.status !== 'active') fixes.status = 'active';
+    if (existing.status === 'pending') fixes.status = 'active';
+    if (existing.status === 'suspended') console.log(`[seed] root 계정이 정지돼 있다: ${username} — 되살리지 않는다(관리 화면의 정지 해제로)`);
     if (!existing.approvedAt) fixes.approvedAt = sql`now()`;
 
     if (Object.keys(fixes).length === 0) {

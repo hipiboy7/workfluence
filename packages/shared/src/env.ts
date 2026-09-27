@@ -80,7 +80,12 @@ export const envSchema = z
     WF_SESSION_IDLE_MINUTES: intString(1, 1440, 30),
     WF_SESSION_ABSOLUTE_HOURS: intString(1, 720, 12),
     WF_ROOT_USERNAME: z.string().min(1).default('root'),
-    WF_ROOT_PASSWORD: z.string().min(1),
+    // **선택이다** (P13 FR-1422, 보류 12). 시드만 쓴다 — 기동 중인 앱이 최초 계정 비밀번호를 쥐지 않게 한다. 없으면 시드가 멈춘다
+    WF_ROOT_PASSWORD: z.string().min(1).optional(),
+    // --- Phase 13: 앱 DB 계정 (P13 D.3, FR-1421) — 마이그레이션이 만들고 권한을 준다. 둘 다 있거나 둘 다 없다 ---
+    // 이름은 SQL 식별자로 쓴다(따옴표를 치지만, 모양을 먼저 좁힌다 — 대문자·공백·따옴표가 들어간 이름은 실수다)
+    WF_DB_APP_ROLE: z.string().regex(/^[a-z_][a-z0-9_]{0,62}$/, '소문자·숫자·밑줄, 63자까지(첫 글자는 숫자가 아니다)').optional(),
+    WF_DB_APP_PASSWORD: z.string().min(1).optional(),
 
     // --- Phase 1: OIDC (FR-210~219) ---
     WF_OIDC_ENABLED: bool(false),
@@ -192,6 +197,9 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
       problems.push('WF_OIDC_ROLE_MAP: 비어 있으면 모든 IdP 사용자가 로그인 거부된다 (FR-218)');
     }
   }
+  // 앱 계정은 이름과 비밀번호가 함께 있어야 만든다. 하나만 있으면 "계정을 나눴다"고 믿는데 실제로는 안 나뉜 상태가 된다
+  if (env.WF_DB_APP_ROLE && !env.WF_DB_APP_PASSWORD) problems.push('WF_DB_APP_PASSWORD: WF_DB_APP_ROLE이 있으면 값이 있어야 한다');
+  if (env.WF_DB_APP_PASSWORD && !env.WF_DB_APP_ROLE) problems.push('WF_DB_APP_ROLE: WF_DB_APP_PASSWORD가 있으면 값이 있어야 한다');
   if (problems.length) throw new EnvValidationError(problems);
   return env;
 }

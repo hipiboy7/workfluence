@@ -36,3 +36,28 @@ export function afterFailure(state: LockoutState, now: Date, policy: LockoutPoli
 export function afterSuccess(): LockoutState {
   return { failedAttempts: 0, lockedUntil: null };
 }
+
+/**
+ * **확인하기 전에 센다** (P13 D.4, FR-1431). DB가 실패 횟수를 한 문장으로 먼저 올리고(자리 잡기), 잡은 뒤의 수로 이번 시도를 확인할지
+ * 정한다. 자리를 못 잡았으면(`null` — 지금 잠겨 있다) 잠김이다. 기준 이하의 자리만 확인한다 — 동시에 N건이 와도 확인까지 가는 것은
+ * 기준 횟수만큼이다. 확인 뒤에 세면 동시에 온 추측이 모두 확인까지 가서, 5회 잠금이 약 20배 느슨했다(P13 측정 S3)
+ */
+export function admitAttempt(reserved: number | null, policy: LockoutPolicy): 'verify' | 'locked' {
+  if (reserved === null) return 'locked';
+  return reserved <= policy.lockoutThreshold ? 'verify' : 'locked';
+}
+
+/**
+ * **틀린 확인 뒤의 잠금** (P13 D.4). 잡은 자리가 기준에 닿았으면 지금부터 잠근다. 횟수는 자리를 잡을 때 이미 올랐다
+ */
+export function lockAfterFailure(reserved: number, now: Date, policy: LockoutPolicy): Date | null {
+  return reserved >= policy.lockoutThreshold ? new Date(now.getTime() + policy.lockoutMinutes * 60_000) : null;
+}
+
+/**
+ * **잠금이 풀린 뒤의 첫 자리** (P13 D.4). 예전처럼 풀린 뒤에는 한 번만 확인하고, 틀리면 다시 잠근다 — 그래서 자리 잡기가 풀린 잠금을
+ * 보면 횟수를 이 값으로 둔다(확인은 되고, 틀리면 기준에 닿아 잠긴다). 동시에 온 둘째는 기준을 넘어 확인하지 않는다
+ */
+export function lockExpiredReserveCount(policy: LockoutPolicy): number {
+  return policy.lockoutThreshold;
+}

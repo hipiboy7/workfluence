@@ -8,7 +8,8 @@ export const ROLES = ['root', 'admin', 'member'] as const;
 export type Role = (typeof ROLES)[number];
 
 /** 사용자 상태. '잠김'은 저장하지 않고 locked_until로 파생한다 */
-export const USER_STATUSES = ['pending', 'active'] as const;
+/** 사용자 상태. **정지**(`suspended`)는 퇴사자 처리다 — 로그인 불가, 내용·소속은 남는다 (P13 C.5, FR-1440) */
+export const USER_STATUSES = ['pending', 'active', 'suspended'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
 export const SPACE_KINDS = ['personal', 'team'] as const;
@@ -47,6 +48,9 @@ export const AUDIT_ACTIONS = [
   'user.sessions.terminate',
   'user.role.change',
   'user.grants.change',
+  // P13 계정 정지 (FR-1444)
+  'user.suspend',
+  'user.unsuspend',
   'category.create',
   'space.create',
   'space.update',

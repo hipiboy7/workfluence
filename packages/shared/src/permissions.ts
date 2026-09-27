@@ -1,4 +1,4 @@
-import type { Role, SpaceKind, SpaceMemberRole, SpaceStatus } from './constants';
+import type { Role, SpaceKind, SpaceMemberRole, SpaceStatus, UserStatus } from './constants';
 
 /**
  * 권한 판정 순수 함수 (CLAUDE.md 7절 "권한 판정은 shared 순수 함수로 한 곳에서").
@@ -115,6 +115,29 @@ export function canManageUser(actor: Principal, target: { role: Role; grants?: r
   if (actor.role === 'root') return true;
   const mine = grantsForRole(actor.role, actor.grants ?? []);
   return grantsForRole(target.role, target.grants ?? []).every((g) => mine.includes(g));
+}
+
+/** 정지·해제의 대상 (P13 C.5) */
+export type UserTarget = { id: string; role: Role; status: UserStatus; grants?: readonly string[] };
+
+/**
+ * **정지할 수 없는 까닭** (P13 FR-1441). 없으면 `null`. 관리할 수 있는 사람만(P11 관리의 우열 — `canManageUser`), 자기 자신은 못 한다
+ * (스스로 잠그면 되살릴 길이 다른 사람뿐이다), 활성 계정만, **마지막 활성 root는 못 한다** — 되살릴 사람이 없다. `activeRoots`는
+ * 대상을 포함한 활성 root의 수다. 호출부는 그 수를 **판정한 행을 잠근 채** 센다(P11 마지막 root 강등과 같은 경합)
+ */
+export function suspendProblem(actor: Principal, target: UserTarget, activeRoots: number): string | null {
+  if (!canManageUser(actor, target)) return '이 사용자를 관리할 권한이 없다';
+  if (actor.id === target.id) return '자기 자신은 정지할 수 없다';
+  if (target.status !== 'active') return '활성 계정만 정지할 수 있다';
+  if (target.role === 'root' && activeRoots <= 1) return '마지막 root는 정지할 수 없다';
+  return null;
+}
+
+/** **정지를 풀 수 없는 까닭** (P13 FR-1441). 해제하면 활성으로 돌아간다 */
+export function unsuspendProblem(actor: Principal, target: UserTarget): string | null {
+  if (!canManageUser(actor, target)) return '이 사용자를 관리할 권한이 없다';
+  if (target.status !== 'suspended') return '정지된 계정이 아니다';
+  return null;
 }
 
 export type SpaceLike = {
