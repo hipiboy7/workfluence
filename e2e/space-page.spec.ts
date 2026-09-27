@@ -40,7 +40,7 @@ test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원',
   await page.getByRole('link', { name: spaceName }).click();
 
   // 2) Crew를 넣는다
-  await page.getByLabel('아이디로 Crew 추가 (editor)').fill(mate.username);
+  await page.getByLabel('아이디로 Crew 추가').fill(mate.username);
   await page.getByRole('button', { name: '추가' }).click();
   await expect(page.getByText(mate.displayName)).toBeVisible();
 
