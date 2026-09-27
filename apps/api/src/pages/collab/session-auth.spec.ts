@@ -48,6 +48,10 @@ describe('readPageId', () => {
     expect(readPageId(`/api/ws/pages/${id}?v=1`)).toBe(id);
   });
 
+  it('**대문자로 붙어도 같은 방이다** — 소문자로 맞춘다. 그대로 두면 같은 페이지에 방이 하나 더 생긴다 (P14 반영분 점검 2)', () => {
+    expect(readPageId(`/api/ws/pages/${id.toUpperCase()}`)).toBe(id);
+  });
+
   it('**uuid가 아니면 거부한다** — 이 값이 질의에 들어간다', () => {
     for (const bad of [`/api/ws/pages/../../etc`, `/api/ws/pages/1`, `/api/ws/pages/${id}x`, '/api/ws/pages/', '/other', undefined]) {
       expect(readPageId(bad)).toBeNull();

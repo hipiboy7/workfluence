@@ -1,4 +1,5 @@
 import { unsign } from 'cookie-signature';
+import { parseId } from '@workfluence/shared';
 
 /**
  * WebSocket **연결 시점**에 세션을 읽는다 (P6_설계서_Collab FR-703).
@@ -54,14 +55,17 @@ export function readSessionId(cookieHeader: string | undefined, secret: string):
   return value === false ? null : value;
 }
 
-/** 경로에서 페이지 id를 꺼낸다. uuid가 아니면 `null` — 그 값이 질의에 들어가기 때문이다 */
+/**
+ * 경로에서 페이지 id를 꺼낸다. uuid가 아니면 `null` — 그 값이 질의에 들어가기 때문이다. **소문자로 맞춘다**(`parseId`) — 방은 이 값으로 찾는다.
+ * 대문자로 붙으면 같은 페이지에 방이 하나 더 생겨, 두 방이 서로의 편집을 모른 채 번갈아 버전을 남겼다 (P14 반영분 점검 2)
+ */
 const WS_PATH = /^\/api\/ws\/pages\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 export function readPageId(url: string | undefined): string | null {
   if (!url) return null;
   // 쿼리와 해시를 떼고 본다. `?x=1`이 붙었다고 거부할 이유는 없다
   const path = url.split(/[?#]/)[0];
-  return WS_PATH.exec(path)?.[1] ?? null;
+  return parseId(WS_PATH.exec(path)?.[1]);
 }
 
 /**

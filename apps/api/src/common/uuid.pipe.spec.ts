@@ -18,6 +18,10 @@ describe('UuidPipe (CLAUDE.md 7절)', () => {
     expect(pipe.transform(id)).toBe(id);
   });
 
+  it('**대문자는 소문자로 돌려준다** — DB의 uuid는 소문자다. 그대로 넘기면 서비스의 순환 판정과 잠금 이름이 어긋난다 (P14 반영분 점검 2)', () => {
+    expect(pipe.transform('3A1CBFB8-82BC-4923-A4D5-CF3BDF359845')).toBe('3a1cbfb8-82bc-4923-a4d5-cf3bdf359845');
+  });
+
   it('**uuid가 아닌 것은 400으로 거부한다** — DB까지 보내면 500이 된다', () => {
     for (const bad of ['', 'abc', '3a1cbfb8-82bc-4923-a4d5', `3a1cbfb8-82bc-4923-a4d5-cf3bdf359845 or 1=1`]) {
       expect(() => pipe.transform(bad)).toThrow(BadRequestException);
