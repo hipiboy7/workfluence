@@ -10,7 +10,7 @@ import { PageEditorPage } from './PageEditorPage';
 /**
  * 컴포넌트 시험 — 실시간 편집의 **제목 보내기와 저장하고 보기로** (P13 FR-1460·1463, 병합 전 검토). 제목 칸은 동료의 화면에 곧바로 바뀌지
  * 않는다(설계서 A.1-8). 그래서 이 화면이 방에 이미 준 제목을 다시 보내면 동료가 그 뒤에 바꾼 제목을 되돌린다. 입력을 멈추기 전에 떠나면
- * 제목이 가지 않았다. 저장하고 보기로는 화면 문서의 상태 벡터를 싣는다(끊긴 줄 모르는 연결).
+ * 제목이 가지 않았다. 저장하고 보기로는 화면 문서의 스냅숏(상태 벡터 + 지운 기록)을 싣는다(끊긴 줄 모르는 연결 — P13 D.7).
  * 실시간 편집기(WebSocket)는 가짜로 둔다 — 문서만 실제 Yjs로 만들어 넘긴다. 서버는 가짜 `fetch`다
  */
 vi.mock('../components/CollabEditor', async () => {
@@ -21,6 +21,7 @@ vi.mock('../components/CollabEditor', async () => {
       useEffect(() => {
         const d = new Yjs.Doc();
         d.getText('t').insert(0, '화면에서 친 글');
+        d.getText('t').delete(0, 2); // 지우기도 했다 — 스냅숏의 지운 기록에 남는다
         onDoc?.(d);
         return () => onDoc?.(null);
       }, [onDoc]);
@@ -31,9 +32,11 @@ vi.mock('../components/CollabEditor', async () => {
 
 const me: MeView = { id: 'u1', username: 'bob', displayName: '밥', role: 'member', mustChangePassword: false, grants: [], hasPassword: true };
 const doc = { type: 'doc', attrs: { schemaVersion: 1 }, content: [{ type: 'paragraph' }] };
-let flushed: { title?: string; sv?: string }[] = [];
+let flushed: { title?: string; snapshot?: string }[] = [];
 let titles: { title: string; keepalive: boolean }[] = [];
 let applied = true;
+let flushAnswer: { saved: boolean; reason: string } = { saved: true, reason: '' };
+let flushDelayMs = 0;
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
 
@@ -41,14 +44,17 @@ beforeEach(() => {
   flushed = [];
   titles = [];
   applied = true;
+  flushAnswer = { saved: true, reason: '' };
+  flushDelayMs = 0;
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
     const url = String(input);
     if (url === '/api/auth/me') return Promise.resolve(json(200, me));
     if (url === '/api/auth/config') return Promise.resolve(json(200, { collabEnabled: true }));
     if (url === '/api/pages/p1') return Promise.resolve(json(200, { id: 'p1', title: '옛 제목', content: doc, currentVersionNo: 3 }));
     if (url === '/api/pages/p1/collab/flush') {
-      flushed.push(JSON.parse(String(init?.body)) as { title?: string; sv?: string });
-      return Promise.resolve(json(201, { saved: true, reason: '', unchanged: false, currentVersionNo: 4 }));
+      flushed.push(JSON.parse(String(init?.body)) as { title?: string; snapshot?: string });
+      const answer = json(201, { ...flushAnswer, unchanged: false, currentVersionNo: 4 });
+      return new Promise((r) => setTimeout(() => r(answer), flushDelayMs));
     }
     if (url === '/api/pages/p1/collab/title') {
       titles.push({ title: (JSON.parse(String(init?.body)) as { title: string }).title, keepalive: init?.keepalive === true });
@@ -128,12 +134,42 @@ describe('PageEditorPage — 실시간 편집의 저장하고 보기로', () => 
     await waitFor(() => expect(titles).toEqual([{ title: '떠나기 직전에 친 제목', keepalive: true }]));
   });
 
-  it('**화면 문서의 상태 벡터를 싣는다** — 서버가 그만큼 받았는지 본다 (병합 전 자체 점검 8)', async () => {
+  it('**화면 문서의 스냅숏을 싣는다 — 넣은 것과 지운 것** — 서버가 그만큼 받았는지 본다 (P13 D.7, 좁은 자체 점검 2)', async () => {
     renderPage();
     await screen.findByText('실시간 편집기');
     save();
     await waitFor(() => expect(flushed).toHaveLength(1));
-    const sv = Y.decodeStateVector(Uint8Array.from(atob(flushed[0].sv!), (c) => c.charCodeAt(0)));
-    expect([...sv.values()]).toEqual(['화면에서 친 글'.length]); // 가짜 편집기가 친 글자 수만큼
+    expect(flushed[0]).not.toHaveProperty('sv');
+    const snap = Y.decodeSnapshot(Uint8Array.from(atob(flushed[0].snapshot!), (c) => c.charCodeAt(0)));
+    expect([...snap.sv.values()]).toEqual(['화면에서 친 글'.length]); // 가짜 편집기가 친 글자 수만큼
+    // 지운 두 글자 — 상태 벡터만으로는 보이지 않는다
+    expect([...snap.ds.clients.values()].flat().map(({ clock, len }) => [clock, len])).toEqual([[0, 2]]);
+  });
+
+  it('**제목을 실어 보내면 기다리던 타이머를 끈다** — 저장이 1초를 넘겨도 같은 제목이 또 가지 않는다 (좁은 자체 점검 4)', async () => {
+    flushDelayMs = 1500;
+    renderPage();
+    await screen.findByText('실시간 편집기');
+    fireEvent.change(titleBox(), { target: { value: '저장이 싣는 제목' } });
+    save();
+    await waitFor(() => expect(flushed).toHaveLength(1));
+    expect(flushed[0].title).toBe('저장이 싣는 제목');
+    await new Promise((r) => setTimeout(r, 1300)); // 타이머(1초)가 울릴 때를 지난다
+    expect(titles).toEqual([]);
+    await screen.findByText('보기 화면', undefined, { timeout: 3000 });
+    expect(titles).toEqual([]); // 떠날 때도 다시 보내지 않는다 — 저장이 실었다
+  });
+
+  it('**저장되지 않았으면 실었던 제목을 다시 기다린다** — 서버는 제목을 적용하기 전에 답한다. 떠날 때 보낸다 (좁은 자체 점검 4)', async () => {
+    flushAnswer = { saved: false, reason: '이 화면의 입력이 아직 서버에 닿지 않았다' };
+    renderPage();
+    await screen.findByText('실시간 편집기');
+    fireEvent.change(titleBox(), { target: { value: '저장되지 않은 제목' } });
+    save();
+    await screen.findByText(/저장되지 않았다: 이 화면의 입력이/);
+    expect(titles).toEqual([]);
+    fireEvent.click(screen.getByRole('link', { name: '← 보기로' }));
+    await screen.findByText('보기 화면');
+    await waitFor(() => expect(titles).toEqual([{ title: '저장되지 않은 제목', keepalive: true }]));
   });
 });

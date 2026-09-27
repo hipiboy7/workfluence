@@ -2,6 +2,7 @@ import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
+  COLLAB_LIMITS,
   LLM_LIMITS,
   REQUEST_ID_PATTERN,
   ROLES,
@@ -364,12 +365,14 @@ export type PageVersionView = {
 };
 /** 실시간 편집을 **지금 바로** 버전으로 남긴다 (P6_설계서_Collab). 제목도 함께 온다 */
 /**
- * 저장하고 보기로 (P6, P13 FR-1462·1463). `sv`는 화면 문서의 **상태 벡터**(base64) — 서버가 그만큼 받았는지 본다(병합 전 자체 점검 8). 끊긴 줄
- * 모르는 연결에서 누르면 서버는 "이미 남아 있다"로 답하고 화면은 보기로 넘어가, 보내지 못한 입력이 사라졌다. 없으면 보지 않는다(옛 화면)
+ * 저장하고 보기로 (P6, P13 D.7 · FR-1462·1463). `snapshot`은 화면 문서의 **스냅숏**(`Y.encodeSnapshot` — 상태 벡터와 지운 기록, base64)이다 —
+ * 서버가 그만큼 받았는지 본다. 끊긴 줄 모르는 연결에서 누르면 서버는 "이미 남아 있다"로 답하고 화면은 보기로 넘어가, 보내지 못한 입력이
+ * 사라졌다(병합 전 자체 점검 8). 처음에는 상태 벡터(`sv`)만 실었는데 지우기는 상태 벡터를 올리지 않아 **지우기만 한 입력**을 놓쳤다(좁은
+ * 자체 점검 2) — `sv`는 더 읽지 않는다. 없으면 보지 않는다
  */
 export const flushCollabDto = z.object({
   title: z.string().trim().min(1).max(300).optional(),
-  sv: z.string().max(65_536).regex(/^[A-Za-z0-9+/]*={0,2}$/, 'base64가 아니다').optional(),
+  snapshot: z.string().max(COLLAB_LIMITS.maxFlushSnapshotChars).regex(/^[A-Za-z0-9+/]*={0,2}$/, 'base64가 아니다').optional(),
 });
 /** 실시간 편집의 제목 — 입력을 멈추면 방에 알린다 (P13 FR-1460). 제목 칸과 같은 규칙이다 */
 export const collabTitleDto = z.object({ title: z.string().trim().min(1).max(300) });

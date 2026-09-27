@@ -17,7 +17,7 @@ type Props = {
   onState?: (s: CollabState) => void;
   /** 서버가 이 문서의 자동 저장이 멈췄다고(까닭), 또는 풀렸다고(`null`) 알렸다 (P9 FR-1011) */
   onSaveBlocked?: (reason: string | null) => void;
-  /** 이 편집기의 Yjs 문서 — 만들 때 넘기고 놓을 때 `null`. 저장하고 보기로가 상태 벡터를 싣는다 (병합 전 자체 점검 8) */
+  /** 이 편집기의 Yjs 문서 — 만들 때 넘기고 놓을 때 `null`. 저장하고 보기로가 그 스냅숏을 싣는다 (P13 D.7) */
   onDoc?: (doc: Y.Doc | null) => void;
 };
 

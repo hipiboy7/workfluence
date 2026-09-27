@@ -254,6 +254,11 @@ export const RATE_LIMITS = {
   findId: { max: 5, windowSec: 60 },
   recoverPassword: { max: 3, windowSec: 600 },
   login: { max: 20, windowSec: 60 },
+  /**
+   * 비밀번호 변경 — 로그인한 사람만 부르지만 센다 (P13 좁은 자체 점검 6). 변경은 그 계정의 로그인과 같은 줄에 선다(P13 D.4) — 세지 않으면
+   * 세션을 쥔 사람이 틀린 현재 비밀번호를 거듭 보내 그 계정의 로그인과 변경을 뒤로 민다. 성공은 돌려준다(로그인과 같다)
+   */
+  changePassword: { max: 5, windowSec: 60 },
 } as const;
 
 /**
@@ -341,6 +346,11 @@ export const LLM_TIMINGS = {
  */
 export const COLLAB_LIMITS = {
   maxFrameBytes: 16 * 1024 * 1024,
+  /**
+   * 저장하고 보기로가 싣는 **스냅숏**(base64 글자 수, P13 D.7). 상태 벡터에 지운 기록이 더해져 편집할수록 자란다 — 다만 방이 열려 있는
+   * 동안만이다(모두 나가면 정본에서 다시 시작한다). JSON 본문 상한(2MB, `main.ts`)에 제목과 함께 든다. 넘으면 화면이 싣지 않는다(판정을 건너뛴다)
+   */
+  maxFlushSnapshotChars: 1024 * 1024,
 } as const;
 
 /**

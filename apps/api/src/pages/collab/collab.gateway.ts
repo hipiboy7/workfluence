@@ -35,6 +35,7 @@ import {
   type Site,
 } from '../domain/makers';
 import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/liveness';
+import { screenIsAhead } from '../domain/received';
 import { cloneDoc, inspectUpdate, type GateRule } from '../domain/gate';
 import { MAX_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence } from '../domain/presence';
 import { readClientIp, readPageId, readSessionId } from './session-auth';
@@ -83,25 +84,12 @@ export const SAVE_FAILED_REASON = '서버가 버전을 남기지 못했다 — �
 const EMPTY_ROOM_TTL_MS = 60_000;
 
 /**
- * **저장하고 보기로가 화면의 입력을 다 받았는가** (병합 전 자체 점검 8). 화면이 보낸 상태 벡터가 방의 문서보다 앞서면 그 화면이 친 글자가
- * 아직 오지 않았다 — 막 친 글자는 WebSocket으로 오는 중일 수 있어 이만큼 기다린다. 그래도 앞서면 끊긴 줄 모르는 연결에서 누른 것이다
+ * **저장하고 보기로가 화면의 입력을 다 받았는가** (P13 D.7 — 판정은 `screenIsAhead`, A등급). 화면이 보낸 스냅숏이 방의 문서보다 앞서면 그
+ * 화면이 친 것이 아직 오지 않았다 — 막 친 글자는 WebSocket으로 오는 중일 수 있어 이만큼 기다린다. 그래도 앞서면 끊긴 줄 모르는 연결에서 누른 것이다
  */
 const FLUSH_CATCH_UP_MS = 1_500;
 const FLUSH_CATCH_UP_STEP_MS = 50;
 const NOT_RECEIVED = '이 화면의 입력이 아직 서버에 닿지 않았다 — 연결이 끊겼을 수 있다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다';
-
-/** 화면의 상태 벡터에 방의 문서가 아직 받지 못한 것이 있는가. 읽지 못하는 값은 보지 않는다 — 그 사람의 저장 판정만 흐려진다 */
-function screenIsAhead(doc: Y.Doc, screenSv: Uint8Array): boolean {
-  let screen: Map<number, number>;
-  try {
-    screen = Y.decodeStateVector(screenSv);
-  } catch {
-    return false;
-  }
-  const server = Y.decodeStateVector(Y.encodeStateVector(doc));
-  for (const [client, clock] of screen) if (clock > (server.get(client) ?? 0)) return true;
-  return false;
-}
 
 type Member = {
   socket: WebSocket;
@@ -1051,6 +1039,13 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   private async finish(pageId: string, room: Room): Promise<void> {
     // 저장하는 사이에 누가 들어왔거나, 들어오는 중이다
     if (room.members.size > 0 || room.joining > 0) return;
+    // **저장하는 사이에 들어온 것이 있으면 닫지 않고 한 번 더 남긴다** (P13 D.7, 좁은 자체 점검 1). 사람이 없는 방에 오는 것은 제목뿐이다 —
+    // 떠나며 보낸 제목(`keepalive`)은 연결이 닫힌 뒤에 닿는다. 여기서 닫으면 그 제목은 받았다고 답하고도(감사에도 남고) 버전에 없다.
+    // 저장이 끝날 때 `lastChangeAt`은 그 저장이 담은 변경이면 0이다(`runSave`) — 0이 아니면 그 뒤에 온 것이다
+    if (room.lastChangeAt) {
+      this.track(this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(logLine('collab.save_failed', '퇴장 저장 실패', { pageId, trigger: 'leave' }, e))));
+      return;
+    }
     this.drop(pageId, room);
     await this.db.delete(pageRealtime).where(eq(pageRealtime.pageId, pageId));
   }
@@ -1064,15 +1059,16 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
    *
    * **저장이 끝난 뒤에 돌아온다.** 그래야 호출부가 읽는 버전 번호가 실제와 맞는다.
    */
-  async flush(pageId: string, title?: string, screenSv?: Uint8Array): Promise<{ saved: boolean; reason: string; unchanged?: true }> {
+  async flush(pageId: string, title?: string, screen?: Uint8Array): Promise<{ saved: boolean; reason: string; unchanged?: true }> {
     const room = this.rooms.get(pageId);
     if (!room) return { saved: false, reason: '편집 중인 사람이 없다' };
-    // **화면이 친 것을 다 받았는지 본다** (위 `FLUSH_CATCH_UP_MS`). 못 받았는데 "이미 남아 있다"로 답하면 화면은 보기로 넘어가 그 입력을 잃는다
-    if (screenSv) {
+    // **화면이 친 것을 다 받았는지 본다** — 넣은 것도 지운 것도 (위 `FLUSH_CATCH_UP_MS`, 스냅숏). 못 받았는데 "이미 남아 있다"로 답하면 화면은
+    // 보기로 넘어가 그 입력을 잃는다
+    if (screen) {
       const until = Date.now() + FLUSH_CATCH_UP_MS;
-      while (screenIsAhead(room.doc, screenSv) && Date.now() < until) await new Promise((r) => setTimeout(r, FLUSH_CATCH_UP_STEP_MS));
+      while (screenIsAhead(room.doc, screen) && Date.now() < until) await new Promise((r) => setTimeout(r, FLUSH_CATCH_UP_STEP_MS));
       if (this.rooms.get(pageId) !== room) return { saved: false, reason: '편집 중인 사람이 없다' };
-      if (screenIsAhead(room.doc, screenSv)) return { saved: false, reason: NOT_RECEIVED };
+      if (screenIsAhead(room.doc, screen)) return { saved: false, reason: NOT_RECEIVED };
     }
     // **제목도 함께 남긴다.** 협업 모드에서도 제목은 평범한 입력칸이고, 그것을 안 보내면
     // 사람이 고친 제목이 조용히 버려진다 (자체 점검 3)
@@ -1091,16 +1087,28 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * **실시간 편집의 제목** (P13 FR-1460). 예전에는 "저장하고 보기로"를 누를 때만 제목이 방에 갔다 — 제목만 고치고 창을 닫으면 사라졌다.
-   * 화면이 입력을 멈추면 이것을 부르고, 방은 그것을 변경으로 적어 유휴 저장에 싣는다(누가 바꿨는지도 — 다음 버전의 작성자다).
-   * 방이 없으면(편집 중인 사람이 없다) `false` — 제목은 REST 저장 경로로 간다. 동료 화면의 제목 칸은 바뀌지 않는다(설계서 A.1-8)
+   * **실시간 편집의 제목** (P13 D.7, FR-1460). 예전에는 "저장하고 보기로"를 누를 때만 제목이 방에 갔다 — 제목만 고치고 창을 닫으면 사라졌다.
+   * 화면이 입력을 멈추면(그리고 떠날 때 — `keepalive`) 이것을 부르고, 방은 그것을 변경으로 적어 유휴 저장에 싣는다(누가 바꿨는지도 — 다음
+   * 버전의 작성자다). 동료 화면의 제목 칸은 바뀌지 않는다(설계서 A.1-8).
+   *
+   * **사람이 없는 방이면 곧바로 남긴다 — 방이 없으면 열어서** (좁은 자체 점검 1). 혼자 편집하다 떠나면 화면은 제목과 연결 닫기를 함께 보내는데,
+   * 닫기가 먼저 닿는다(제목은 세션·권한을 거쳐 온다). 퇴장 저장은 제목을 모른 채 방을 닫았고, 뒤에 온 제목은 갈 곳이 없었다. 방은 정본에서
+   * 다시 여는 것이라(`room`) 그 사이 누가 들어와도 같은 방이다. 실시간 편집이 꺼져 있으면 `false`
    */
-  setTitle(pageId: string, title: string, actorId: string): boolean {
-    const room = this.rooms.get(pageId);
-    if (!room) return false;
+  async setTitle(pageId: string, title: string, actorId: string): Promise<boolean> {
+    if (!this.env.WF_COLLAB_ENABLED) return false;
+    let room = this.rooms.get(pageId);
+    if (!room) {
+      const page = await this.db.query.pages.findFirst({ where: and(eq(pages.id, pageId), isNull(pages.deletedAt)) });
+      if (!page) return false;
+      room = await this.room(pageId, page.currentVersionNo);
+    }
     room.title = title;
     room.lastChangeAt = Date.now();
     room.lastActor = actorId;
+    if (room.members.size === 0 && room.joining === 0) {
+      this.track(this.saveIfNeeded(pageId, 'leave').catch((e: unknown) => this.log.error(logLine('collab.save_failed', '퇴장 저장 실패', { pageId, trigger: 'leave' }, e))));
+    }
     return true;
   }
 }

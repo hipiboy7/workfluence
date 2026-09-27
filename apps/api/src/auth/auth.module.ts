@@ -23,9 +23,21 @@ import { HttpOidcProvider } from './oidc/http.provider';
 import { MockOidcProvider } from './oidc/mock.provider';
 import { OIDC_PROVIDER } from './oidc/oidc.provider';
 
-/** 세션에 사용자를 심고 **ID를 재발급**한다 (FR-225 — 세션 고정 공격 방지) */
+/** 세션을 **새로 받는다** — 옛 행은 지우고 새 ID로 (`express-session`의 `regenerate`) */
+function regenerate(req: Request): Promise<void> {
+  return new Promise<void>((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
+}
+
+/**
+ * 세션에 사용자를 심고 **ID를 재발급**한다 (FR-225 — 세션 고정 공격 방지).
+ *
+ * **행은 응답이 끝날 때 한 번 더 쓰인다** (좁은 자체 점검 7). `regenerate`가 준 새 세션은 `express-session`이 저장 여부를 가리는 표시를 달지
+ * 않아, 여기서 저장해도 응답 끝에 같은 행을 다시 쓴다(있으면 고치고 없으면 넣는다). 로그인은 이것을 계정의 줄 안에서 부르지만 그 두 번째 쓰기는
+ * 줄 밖이다 — 지금은 줄에서 기다리던 비밀번호 변경이 세션을 지우기까지 argon2를 두 번 돌아(약 0.3초) 그 쓰기가 늘 먼저 끝난다. **변경의
+ * argon2를 줄 밖으로 빼면 이 틈이 다시 열린다** (`AuthService.login`)
+ */
 async function startSession(req: Request, userId: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
+  await regenerate(req);
   req.session.userId = userId;
   req.session.createdAt = Date.now();
   await new Promise<void>((resolve, reject) => req.session.save((e) => (e ? reject(e) : resolve())));
@@ -121,15 +133,22 @@ export class AuthController {
     return this.auth.recoverPassword(dto, req.ip);
   }
 
-  /** 비밀번호 변경은 변경 강제 상태에서도 되어야 한다 — 아니면 빠져나올 방법이 없다 (FR-207) */
+  /**
+   * 비밀번호 변경은 변경 강제 상태에서도 되어야 한다 — 아니면 빠져나올 방법이 없다 (FR-207).
+   *
+   * **IP별로 센다** (좁은 자체 점검 6). 변경은 그 계정의 로그인과 같은 줄에 선다(`AuthService.changePassword`) — 세지 않으면 세션을 쥔 사람이
+   * 틀린 현재 비밀번호를 거듭 보내 그 계정의 로그인과, 침해를 알아채고 하는 바로 이 변경을 뒤로 민다. 성공은 돌려준다(로그인과 같다)
+   */
   @Post('change-password')
   @AllowPendingPasswordChange()
+  @RateLimit(RATE_LIMITS.changePassword)
   async changePassword(
     @Body(new ZodPipe(changePasswordDto)) dto: ReturnType<typeof changePasswordDto.parse>,
     @CurrentUser() user: SessionUser,
     @Req() req: Request,
   ): Promise<{ ok: true }> {
     await this.auth.changePassword(user.id, dto, req.ip);
+    this.rateLimit.refund(req);
     // 서비스가 그 사용자의 **모든** 세션을 이미 끊었다 (FR-224). 지금 요청만 새 세션으로 다시 심는다
     await startSession(req, user.id);
     return { ok: true };
@@ -137,11 +156,17 @@ export class AuthController {
 
   // ---- OIDC ----
 
+  /**
+   * 사내 IdP로 보낸다. **세션을 새로 받고 거기에 일회용 값을 둔다** (좁은 자체 점검 3). 불러온 세션에 값을 넣고 저장하면, 저장소는 그 행을
+   * "있으면 고치고 없으면 넣는다" — 그 사이 비밀번호 변경·강제 종료·정지가 지운 세션이 사용자 ID째로 되살아났다(훔친 쿠키로 이것을 거듭
+   * 부르면 된다). 새로 받은 세션에는 사용자가 없다 — 로그인한 채 부르면 그 브라우저는 로그아웃된다(새로 로그인하는 길이다)
+   */
   @Get('oidc/start')
   @Public()
   @Redirect()
   async oidcStart(@Req() req: Request): Promise<{ url: string }> {
     const { url, state, nonce, verifier } = await this.auth.oidcStart();
+    await regenerate(req);
     req.session.oidcState = state;
     req.session.oidcNonce = nonce;
     req.session.oidcVerifier = verifier;

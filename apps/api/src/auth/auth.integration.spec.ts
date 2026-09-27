@@ -727,6 +727,40 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
     expect(seen).toEqual([true, true]);
   });
 
+  it('**비밀번호 초기화·변경도 커밋한 뒤에 알린다** — 넘겨받은 트랜잭션 안에서는 알리지 않는다. 먼저 울리면 커밋 전 틈에 다시 붙은 연결이 아직 지워지지 않은 세션으로 살아남는다 (좁은 자체 점검 5)', async () => {
+    const alice = await approvedAlice();
+    const revoked: string[] = [];
+    const offInTx = bus.onRevoke((userId) => revoked.push(userId));
+    try {
+      await db.transaction(async (tx) => {
+        await usersSvc.resetPassword(alice.id, ADMIN, tx);
+      });
+    } finally {
+      offInTx();
+    }
+    expect(revoked).toEqual([]);
+
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    let committed = false;
+    const realTx = db.transaction.bind(db);
+    const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
+      const r = await realTx(...args);
+      committed = true;
+      return r;
+    }) as typeof db.transaction);
+    const seen: boolean[] = [];
+    const off = bus.onRevoke(() => seen.push(committed));
+    try {
+      const { temporaryPassword } = await ctrl.resetPassword(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+      committed = false;
+      await auth.changePassword(alice.id, { currentPassword: temporaryPassword, newPassword: 'Alice-new-2026' });
+    } finally {
+      off();
+      txSpy.mockRestore();
+    }
+    expect(seen).toEqual([true, true]);
+  });
+
   it('**정지된 root는 강등할 수 있다** — 활성 root가 한 명뿐이어도 그 수는 줄지 않는다. 마지막 활성 root는 여전히 못 내린다 (병합 전 검토 — 코드 리뷰 5)', async () => {
     const [a] = await db.insert(users).values({ username: 'root-a', displayName: 'A', passwordHash: 'x', role: 'root', status: 'active' }).returning();
     const [b] = await db.insert(users).values({ username: 'root-b', displayName: 'B', passwordHash: 'x', role: 'root', status: 'suspended' }).returning();

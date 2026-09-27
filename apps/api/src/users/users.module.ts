@@ -128,11 +128,14 @@ export class UsersController {
   ): Promise<{ user: UserView; temporaryPassword: string }> {
     // 임시 비밀번호의 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
     const prepared = await this.users.prepareTemporaryPassword();
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const { user, temporaryPassword } = await this.users.resetPassword(id, actor, tx, prepared);
       await this.audit.record({ action: 'user.password.reset', actorId: actor.id, targetType: 'user', targetId: id, ip: req.ip }, tx);
       return { user: toUserView(user), temporaryPassword };
     });
+    // 끊는 알림은 커밋한 뒤에 — 정지와 같다 (좁은 자체 점검 5)
+    this.revocation.revoke(id);
+    return result;
   }
 
   @Patch(':id/role')

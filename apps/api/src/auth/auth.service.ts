@@ -167,6 +167,8 @@ export class AuthService {
         await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx, prepared);
         await this.audit.record({ action: 'auth.password.change', actorId: userId, ip }, tx);
       });
+      // **편집 연결에 알리는 것은 커밋한 뒤에** (좁은 자체 점검 5 — 정지·강제 종료와 같다, `UsersService.destroyAllSessions`)
+      this.users.revokeConnections(userId);
     });
   }
 

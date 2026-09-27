@@ -173,11 +173,17 @@ export class UsersService {
    * `req.session.regenerate()`는 지금 요청의 세션 하나만 바꾼다. 다른 기기·다른 브라우저에
    * 남아 있는 세션은 그대로 살아 있어서, 침해를 알아채고 비밀번호를 바꿔도 공격자의 세션이
    * 만료될 때까지 끊기지 않는다. 비밀번호가 바뀌면 **전부** 끊는다.
+   *
+   * **열린 편집 연결에 알리는 것은 커밋한 뒤다** (`revokeConnections`, P13 D.5). 세션 행을 지우는 것만으로는 부족하다 — 이미 열려 있는
+   * 편집용 WebSocket은 그 행을 다시 읽지 않는다(P6 보안 검토 발견 1). 그런데 트랜잭션 안에서 알리면 커밋 전 몇 ms 사이에 다시 붙은 연결이
+   * 아직 지워지지 않은 행을 읽고 주기 재판정까지 살아남고, 감사 기록이 실패해 되돌려지면 비밀번호는 그대로인데 연결만 끊긴다 (좁은 자체 점검 5)
    */
   async destroyAllSessions(userId: string, tx: Db = this.db): Promise<void> {
     await tx.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${userId}`);
-    // **세션 행을 지우는 것만으로는 부족하다.** 이미 열려 있는 편집용 WebSocket은
-    // 그 행을 다시 읽지 않아 계속 살아 있다 (P6 보안 검토 발견 1). 버스로 알린다
+  }
+
+  /** 그 사람의 열린 편집 연결을 끊으라고 알린다 — **세션을 지운 트랜잭션이 커밋한 뒤에** 부른다 (`destroyAllSessions`) */
+  revokeConnections(userId: string): void {
     this.revocation.revoke(userId);
   }
 
@@ -302,9 +308,13 @@ export class UsersService {
     return { temporaryPassword, hash: await hashPassword(temporaryPassword) };
   }
 
-  /** 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다 */
+  /**
+   * 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다. 트랜잭션을 넘겨받으면 편집 연결에 알리는 것은 커밋한 호출부가
+   * 한다 — 정지와 같다 (`destroyAllSessions`)
+   */
   async resetPassword(id: string, actor: Principal, tx: Db = this.db, prepared?: TemporaryPassword): Promise<{ user: UserRow; temporaryPassword: string }> {
-    return this.inTx(tx, async (t) => {
+    const opened = tx === this.db;
+    const result = await this.inTx(tx, async (t) => {
       const target = await this.getManaged(id, actor, t);
       // IdP 계정에 비밀번호를 붙이면 IdP가 강제하던 인증(사내 MFA·정책)을 건너뛰는 옆문이 생긴다.
       // FR-217이 "IdP 계정은 비밀번호로 로그인할 수 없다"고 한 것을 초기화가 뚫으면 안 된다.
@@ -313,6 +323,8 @@ export class UsersService {
       }
       return this.applyTemporaryPassword(id, t, prepared ?? (await this.prepareTemporaryPassword()));
     });
+    if (opened) this.revokeConnections(id);
+    return result;
   }
 
   private async applyTemporaryPassword(id: string, tx: Db, prepared: TemporaryPassword): Promise<{ user: UserRow; temporaryPassword: string }> {
@@ -500,6 +512,7 @@ export class UsersService {
     return { readHash: user.passwordHash, nextHash: await hashPassword(newPassword) };
   }
 
+  /** 비밀번호 변경. 트랜잭션을 넘겨받으면 편집 연결에 알리는 것은 커밋한 호출부가 한다 (`destroyAllSessions`) */
   async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db, prepared?: PreparedPasswordChange): Promise<void> {
     const p = prepared ?? (await this.prepareChangePassword(id, currentPassword, newPassword));
     // **읽은 해시가 그대로일 때만** 바꾼다 — 확인과 쓰기 사이에 관리자 초기화나 다른 변경이 끼면 옛 비밀번호로 확인한 것이 된다
@@ -511,6 +524,7 @@ export class UsersService {
     if (done.length === 0) throw new ConflictException('그 사이 비밀번호가 바뀌었다 — 다시 시도한다');
     // 비밀번호가 바뀌면 그 사용자의 세션을 전부 끊는다. 호출부가 자기 세션은 다시 만든다
     await this.destroyAllSessions(id, tx);
+    if (tx === this.db) this.revokeConnections(id);
   }
 
   /**

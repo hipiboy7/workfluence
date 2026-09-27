@@ -38,6 +38,11 @@ describe('screenIsAhead — 화면이 서버보다 앞섰나', () => {
     expect(screenIsAhead(server, snap(screen))).toBe(true);
     sync(screen, server);
     expect(screenIsAhead(server, snap(screen))).toBe(false);
+    // 서버가 아직 모르는 사람(처음 붙어 쓴 화면)이 넣은 것도
+    const newcomer = new Y.Doc();
+    sync(server, newcomer);
+    newcomer.getText('t').insert(0, '새로 온 사람의 ');
+    expect(screenIsAhead(server, snap(newcomer))).toBe(true);
   });
 
   it('**지우기만 한 것이 닿지 않아도 앞선다** — 상태 벡터는 그대로다 (좁은 자체 점검 2)', () => {
