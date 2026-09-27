@@ -28,11 +28,14 @@ const LOGIN_CHUNK = Number(process.env.LOAD_LOGIN_CHUNK ?? 5);
 /**
  * **몰린 로그인** (보류 16, P13 측정). 0이면 던지지 않는다(기본 — 보류 6의 측정 그대로다).
  *
- * 로그인은 트랜잭션을 연 채 argon2를 돌린다 — 연결을 쥐고 해싱한다. 재려는 것은 로그인 자체의 속도보다 **그동안 남의 읽기가 풀을
- * 기다리는가**다. 그래서 따로 재지 않고, 보류 6의 읽기를 한 번 잰 뒤 **같은 세션들이 계속 읽는 동안** 로그인을 이만큼 던져 둘을 견준다.
+ * 재려는 것은 로그인 자체의 속도보다 **그동안 남의 읽기가 풀을 기다리는가**다(보류 16 — 예전에는 로그인이 트랜잭션을 연 채 argon2를
+ * 돌려, 몰린 동안 연결이 모두 idle in transaction이 됐다. Phase 13이 확인을 트랜잭션 밖으로 뺐다). 그래서 따로 재지 않고, 보류 6의 읽기를
+ * 한 번 잰 뒤 **같은 세션들이 계속 읽는 동안** 로그인을 이만큼 던져 둘을 견준다. **판정은 읽기로 한다** — 몰린 로그인 자체의 지연은 CPU에
+ * 묶인다(코어 수 × 약 5건/초, P13 측정). 로그인 수치는 따로 보인다.
  *
- * 계정은 `LOAD_USER` 하나를 되풀이한다. 성공 경로는 사용자 행을 잠그지도 고치지도 않아(실패 횟수가 0이면 갱신이 없다) 서로 다른
- * 계정 N명과 같게 돈다 — P13 실측에서 같은 계정 10건 동시와 다른 계정 10건 동시가 같은 모양으로 끝났다(0.6~1.8초, 넷씩 세 물결).
+ * **계정** — `LOAD_LOGIN_STORM_USER_PREFIX`를 주면 `<접두>1`…`<접두>N`(비밀번호는 `LOAD_PASSWORD`)을 하나씩 쓴다 — 여러 사람이 몰리는
+ * 모양이다. 주지 않으면 `LOAD_USER` 하나를 되풀이한다 — **Phase 13부터 한 계정의 로그인은 차례로 처리되므로**(P13 FR-1431) 그때 재는 것은
+ * 한 사람이 동시에 여러 번 로그인하는 모양이다.
  *
  * **한 주소에서 20건을 넘겨 동시에 띄우면 넘는 몫은 곧바로 429다.** 로그인 제한(`RATE_LIMITS.login` — IP별 20건/60초, 성공은
  * 돌려받는다)이 제 일을 하는 것이다. 제한을 끄거나 주소를 꾸미지 않는다 — 그러면 재는 것이 보안 장치를 비켜 간 앱이 된다.
@@ -40,6 +43,8 @@ const LOGIN_CHUNK = Number(process.env.LOAD_LOGIN_CHUNK ?? 5);
 const STORM = Number(process.env.LOAD_LOGIN_STORM ?? 0);
 /** 몰린 로그인이 한꺼번에 떠 있는 수. 기본은 전부(= 한꺼번에). 작게 주면 앞의 것이 끝나는 대로 다음을 보낸다 — 쉬지 않고 몰리는 아침이다 */
 const STORM_CONCURRENCY = Number(process.env.LOAD_LOGIN_STORM_CONCURRENCY ?? STORM);
+/** 몰린 로그인에 쓸 서로 다른 계정의 접두(위). 비면 `LOAD_USER`를 되풀이한다 */
+const STORM_USER_PREFIX = process.env.LOAD_LOGIN_STORM_USER_PREFIX ?? '';
 
 type Sample = { step: string; ms: number; ok: boolean; at: number };
 type LoginResult = { ms: number; status: number };
@@ -120,7 +125,7 @@ async function loginStorm(username: string, password: string): Promise<{ results
     Array.from({ length: Math.max(1, Math.min(STORM_CONCURRENCY, STORM)) }, async () => {
       while (sent < STORM) {
         sent++;
-        results.push(await stormLogin(username, password));
+        results.push(await stormLogin(STORM_USER_PREFIX ? `${STORM_USER_PREFIX}${sent}` : username, password));
       }
     }),
   );
@@ -165,10 +170,11 @@ async function stormPhase(username: string, password: string, cookies: string[])
   if (limited) console.log('[load] 429는 IP별 로그인 제한이 돌려보낸 것이다 — 한 주소에서 20건을 넘겨 띄웠다. 서로 다른 주소에서 오는 사람들은 걸리지 않는다');
 
   const target = TARGET_P95_MS;
-  const pass = worstP95 < target && errors === 0 && p(0.95) < target && failed === 0;
+  // **판정은 읽기로 한다** (위 머리말). 로그인 실패(429 말고)는 여전히 실패다 — 풀을 못 얻어 500이 났다는 뜻이다
+  const pass = worstP95 < target && errors === 0 && failed === 0;
   console.log(
-    `[load] 판정 (보류 16): 몰린 로그인 중 가장 느린 읽기 p95 ${worstP95.toFixed(0)}ms · 로그인 p95 ${p(0.95).toFixed(0)}ms ` +
-      `(목표 ${target}ms) · 오류 읽기 ${errors}·로그인 ${failed} → ${pass ? '목표 안' : '목표 밖 — 몰린 로그인이 남의 읽기를 밀었다'}`,
+    `[load] 판정 (보류 16): 몰린 로그인 중 가장 느린 읽기 p95 ${worstP95.toFixed(0)}ms (목표 ${target}ms) · 오류 읽기 ${errors}·로그인 ${failed} → ` +
+      `${pass ? '목표 안' : '목표 밖 — 몰린 로그인이 남의 읽기를 밀었다'}. 로그인 p95 ${p(0.95).toFixed(0)}ms는 CPU에 묶인다(판정에 넣지 않는다)`,
   );
   return pass;
 }

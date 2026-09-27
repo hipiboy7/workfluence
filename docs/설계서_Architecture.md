@@ -285,6 +285,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 10 | 사내 LLM 질문 — `llm/` 모듈(등록 root만·키 암호화·NDJSON 중계·보관 규칙·한 시간마다 만료 정리), 표 넷(`0009_llm`), 정책값 셋(`llmRetentionDays`·`llmConversationMax`·`llmPinnedMax`), 환경변수 둘(`WF_LLM_MASTER_KEY`·`WF_LLM_TIMEOUT_MS`), 감사 종류 넷, 공유 계약 `llm.ts`·`markdown.ts`, 교체 축 `LLM_CLIENT`, 화면 셋과 페이지 복사 버튼, web 컴포넌트 시험 틀(`happy-dom`, 보류 28) |
 | 11 | 운영 로그·위임·반입 설정 — 요청 번호(nginx `$request_id` → `X-Request-Id`)·요청 문맥(`AsyncLocalStorage`)·앱 접근 로그·event 코드(`LOG_EVENTS`, 장애대응 가이드와 대조)·감사 `request_id`, `users.grants`와 `can()`의 위임(`llm.manage`), compose 로그 순환·nginx JSON 로그·사내 CA 시작 스크립트(`0010_ops`) |
 | 12 | 답을 기다리는 표시·문서 모양의 한계 — LLM 질문 화면의 기다린 초와 "답변이 늦어지고 있습니다."(흐름 상태 기계 `waitingSince`), 편집기 스키마의 순서·개수 규칙(`NON_EMPTY_NODES`·`FIRST_CHILD` — 정본 검증과 실시간 상태의 변환, 대조 시험이 증명. 목록 항목의 첫 자식은 관문 `gate.ts`가 적용한 뒤로 본다), 실시간 편집 프레임 16MiB(`COLLAB_LIMITS`, 넘으면 1009와 감사)·표 칸 값의 범위(`TABLE_LIMITS`, 편집기가 붙여 넣은 값을 줄이고 범위를 넘는 표 명령은 하지 않는다) |
+| 13 | 반입 준비 — 로그인 경로(한 계정씩 줄 `KeyedSerial`, 비밀번호 확인·해시는 트랜잭션 밖 · 프로세스의 argon2 동시 실행 상한 `ConcurrencyGate`, 실패 횟수는 한 문장으로), 계정 정지(`users.status` = `suspended`, 정지하면 세션·편집 연결을 끊는다), 사용자 목록의 찾기·거르기·나누기, DB 계정 둘(앱 `workfluence_app` — 마이그레이션이 만들고 권한을 준다 `apps/api/src/db/app-role.ts`), compose `tools`(마이그레이션·시드·월간 작업 `apps/api/src/cli`), 반입 묶음의 운영 문서와 이미지의 커밋 라벨 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
