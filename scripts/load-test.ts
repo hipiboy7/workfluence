@@ -26,6 +26,15 @@ const SESSIONS = Number(process.env.LOAD_SESSIONS ?? 50);
 const ROUNDS = Number(process.env.LOAD_ROUNDS ?? 10);
 const LOGIN_CHUNK = Number(process.env.LOAD_LOGIN_CHUNK ?? 5);
 /**
+ * **쉬어 가며 읽기** (P13 NFR-131). 0이면 쉬지 않는다(기본 — 보류 6의 측정 그대로다).
+ *
+ * 쉬지 않으면 세션마다 늘 한 건이 떠 있어, 지연이 **떠 있는 수 ÷ 처리량**으로 정해진다 — 몰린 로그인의 argon2가 CPU를 나눠 가져
+ * 처리량이 줄면, 풀을 기다리지 않아도 같은 수가 떠 있으므로 지연이 그만큼 는다. 사람은 읽고 나서 쉰다. 값을 주면 세션마다 한 단계를
+ * 읽은 뒤 이 값의 0.5~1.5배를 쉬고, 세션의 시작을 고르게 어긋내며, 세션끼리 회를 맞추지 않는다(`read` — 50개가 같은 순간 같은 단계를
+ * 치지 않게). 보류 16의 판정(NFR-131)은 이 모양으로 쟀다
+ */
+const THINK_MS = Number(process.env.LOAD_THINK_MS ?? 0);
+/**
  * **몰린 로그인** (보류 16, P13 측정). 0이면 던지지 않는다(기본 — 보류 6의 측정 그대로다).
  *
  * 재려는 것은 로그인 자체의 속도보다 **그동안 남의 읽기가 풀을 기다리는가**다(보류 16 — 예전에는 로그인이 트랜잭션을 연 채 argon2를
@@ -72,17 +81,50 @@ async function timed(step: string, cookie: string, path: string, out: Sample[]):
   out.push({ step, ms: performance.now() - t, ok, at: t });
 }
 
-/** 세션마다 네 단계를 차례로 한 번 — 한 "회"다 */
-async function readRound(cookies: string[], samples: Sample[]): Promise<void> {
-  await Promise.all(
-    cookies.map(async (c) => {
-      await timed('스페이스 목록', c, '/api/spaces?scope=all&limit=50', samples);
-      await timed('검색(한글 2글자)', c, `/api/search?q=${encodeURIComponent('회의')}&limit=20`, samples);
-      await timed('알림 수', c, '/api/notifications/unread-count', samples);
-      await timed('감사로그', c, '/api/audit?limit=50', samples);
+const READ_STEPS: [step: string, path: string][] = [
+  ['스페이스 목록', '/api/spaces?scope=all&limit=50'],
+  ['검색(한글 2글자)', `/api/search?q=${encodeURIComponent('회의')}&limit=20`],
+  ['알림 수', '/api/notifications/unread-count'],
+  ['감사로그', '/api/audit?limit=50'],
+];
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * 세션들이 `more(회)`가 참인 동안 읽는다. 한 회는 세션마다 네 단계를 차례로 한 번이다. 돌아오는 값은 가장 많이 돈 세션의 회 수다.
+ *
+ * **쉬지 않으면 회마다 모두를 기다린다** — P5(보류 6)의 측정 그대로다. **쉬어 가며 읽으면 세션마다 제 박자로 돈다** — 시작만 고르게
+ * 어긋내고 회마다 서로를 기다리지 않는다. 기다리면 회가 시작될 때마다 모든 세션이 첫 단계(가장 무거운 스페이스 목록)를 1초 안에
+ * 한꺼번에 쳐서 사람이 쓰는 모양이 아니게 된다(P13 측정 — 몰린 동안 그 단계만 p50 180ms, 나머지 단계는 10ms 안팎이었다)
+ */
+async function read(cookies: string[], samples: Sample[], more: (round: number) => boolean): Promise<number> {
+  if (!THINK_MS) {
+    let round = 0;
+    for (; more(round); round++) {
+      await Promise.all(
+        cookies.map(async (c) => {
+          for (const [step, path] of READ_STEPS) await timed(step, c, path, samples);
+        }),
+      );
+    }
+    return round;
+  }
+  const rounds = await Promise.all(
+    cookies.map(async (c, k) => {
+      await sleep((k * THINK_MS) / cookies.length);
+      let round = 0;
+      for (; more(round); round++) {
+        for (const [step, path] of READ_STEPS) {
+          await timed(step, c, path, samples);
+          await sleep(THINK_MS * (0.5 + Math.random()));
+        }
+      }
+      return round;
     }),
   );
+  return Math.max(...rounds);
 }
+
+const paced = () => (THINK_MS ? ` (단계마다 약 ${THINK_MS}ms 쉼)` : '');
 
 function report(samples: Sample[], title: string): { worstP95: number; errors: number } {
   const steps = [...new Set(samples.map((s) => s.step))];
@@ -142,11 +184,8 @@ async function stormPhase(username: string, password: string, cookies: string[])
     state.done = true;
   });
   const samples: Sample[] = [];
-  let rounds = 0;
-  do {
-    await readRound(cookies, samples);
-    rounds++;
-  } while (!state.done);
+  // 적어도 한 회, 그 뒤로는 로그인이 끝날 때까지
+  const rounds = await read(cookies, samples, (r) => r === 0 || !state.done);
   const { results, startedAt, endedAt } = await storm;
 
   const during = samples.filter((s) => s.at >= startedAt && s.at <= endedAt);
@@ -155,7 +194,7 @@ async function stormPhase(username: string, password: string, cookies: string[])
     console.log('\n[load] 판정 (보류 16): 몰린 로그인이 떠 있던 동안 시작한 읽기가 없다 — 잰 것이 없다');
     return false;
   }
-  const { worstP95, errors } = report(during, `몰린 로그인 중 — 동시 ${SESSIONS}세션 × ${rounds}회`);
+  const { worstP95, errors } = report(during, `몰린 로그인 중 — 동시 ${SESSIONS}세션 × ${rounds}회${paced()}`);
 
   const ok = results.filter((r) => r.status === 201).map((r) => r.ms).sort((a, b) => a - b);
   const limited = results.filter((r) => r.status === 429).length;
@@ -198,9 +237,9 @@ async function main(): Promise<void> {
   console.log(`[load] 세션 ${cookies.length}개 열림 (${LOGIN_CHUNK}개씩)`);
 
   const samples: Sample[] = [];
-  for (let round = 0; round < ROUNDS; round++) await readRound(cookies, samples);
+  await read(cookies, samples, (r) => r < ROUNDS);
 
-  const { worstP95, errors } = report(samples, `동시 ${SESSIONS}세션 × ${ROUNDS}회`);
+  const { worstP95, errors } = report(samples, `동시 ${SESSIONS}세션 × ${ROUNDS}회${paced()}`);
   const target = TARGET_P95_MS;
   const pass = worstP95 < target && errors === 0;
   console.log(

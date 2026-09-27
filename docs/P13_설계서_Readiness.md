@@ -275,6 +275,7 @@ Phase 13은 "지금 만든 것으로 배포하고 운영할 수 있는가"를 �
 | `LOAD_LOGIN_STORM` | `0` | `pnpm load:test` | 몰린 로그인 건수(0이면 끔) |
 | `LOAD_LOGIN_STORM_CONCURRENCY` | 건수와 같음 | `pnpm load:test` | 동시에 떠 있는 로그인 수 |
 | `LOAD_LOGIN_STORM_USER_PREFIX` | (없음) | `pnpm load:test` | 몰린 로그인에 쓸 서로 다른 계정의 접두(`<접두>1`…). 비면 `LOAD_USER`를 되풀이한다 — 한 계정의 로그인은 차례로 처리되므로(FR-1431) 여러 사람을 재려면 준다 |
+| `LOAD_THINK_MS` | `0` | `pnpm load:test` | 읽기 세션이 단계마다 쉬는 시간(0.5~1.5배로 흔든다). 0이면 쉬지 않는다 — 보류 6의 모양. NFR-131은 쉬어 가며 읽는 판으로 판정한다(쉬지 않으면 지연이 "떠 있는 수 ÷ 처리량"이라 CPU 몫이 줄기만 해도 는다) |
 
 ## J. 보류 결정 처리
 
