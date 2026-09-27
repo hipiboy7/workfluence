@@ -9,9 +9,13 @@ import { Attachments } from '../components/Attachments';
 import { Comments } from '../components/Comments';
 import { CopyButtons } from '../components/CopyButtons';
 import { Labels } from '../components/Labels';
+import { MovePage } from '../components/MovePage';
 import { Editor } from '../components/Editor';
 
-/** 페이지 보기 */
+/**
+ * 페이지 보기. 쓸 수 있으면 **하위 페이지 만들기**(→ 스페이스 화면의 새 페이지 칸, 부모를 골라 둔 채)와 **옮기기**(P14 FR-1500·1501·1505) —
+ * 보이는 조건은 응답의 `access`다(P2 FR-345)
+ */
 export function PageViewPage() {
   const { me } = useAuth();
   const { id = '' } = useParams();
@@ -20,6 +24,7 @@ export function PageViewPage() {
   const [page, setPage] = useState<PageView | null>(null);
   const [space, setSpace] = useState<SpaceView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
 
   useEffect(() => {
     api<PageView>(`/api/pages/${id}`)
@@ -52,6 +57,16 @@ export function PageViewPage() {
         {space?.access.canWrite && (
           <>
             {' · '}
+            <Link to={`/spaces/${page.spaceId}?parent=${encodeURIComponent(id)}#new-page`}>하위 페이지 만들기</Link>
+            {' · '}
+            <button type="button" className="linklike" aria-expanded={moving} onClick={() => setMoving((v) => !v)}>
+              옮기기
+            </button>
+          </>
+        )}
+        {space?.access.canWrite && (
+          <>
+            {' · '}
             <button
               type="button"
               className="linklike"
@@ -66,6 +81,9 @@ export function PageViewPage() {
           </>
         )}
       </p>
+      {moving && space?.access.canWrite && (
+        <MovePage page={page} onMoved={() => nav(`/spaces/${page.spaceId}`)} onCancel={() => setMoving(false)} />
+      )}
       <section className="card">
         <Editor value={page.content} editable={false} />
       </section>

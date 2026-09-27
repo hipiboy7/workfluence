@@ -19,6 +19,7 @@ import { SignupPage } from './pages/SignupPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
 import { AdminLlmPage } from './pages/admin/AdminLlmPage';
 import { AdminPolicyPage } from './pages/admin/AdminPolicyPage';
+import { AdminSpacesPage } from './pages/admin/AdminSpacesPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 
 /**
@@ -38,6 +39,7 @@ export function App() {
           <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
           <Route path="/admin/users" element={<RequireAuth><AdminUsersPage /></RequireAuth>} />
           <Route path="/admin/audit" element={<RequireAuth><AdminAuditPage /></RequireAuth>} />
+          <Route path="/admin/spaces" element={<RequireAuth><AdminSpacesPage /></RequireAuth>} />
           <Route path="/search" element={<RequireAuth><SearchPage /></RequireAuth>} />
           <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
           <Route path="/trash" element={<RequireAuth><TrashPage /></RequireAuth>} />
