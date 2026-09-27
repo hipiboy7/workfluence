@@ -97,6 +97,12 @@ export class PagesService {
   }
 
   async create(dto: CreatePageDto, principal: Principal, tx: Db = this.db, onMentions?: (m: MentionOutcome) => void): Promise<PageView> {
+    // 권한 없는 사람은 줄에 서지 않는다 — 잠그기 전에 한 번 보고, 잠근 뒤 다시 본다(기다리는 사이 바뀌었을 수 있다 — 반영분 점검 12, 보안 검토 3)
+    await this.spaces.assertWrite(dto.spaceId, principal, tx);
+    // 본문을 읽는 일(글자 뽑기)은 잠그기 전에 한다 — 잠금은 커밋까지 쥔다
+    const text = extractText(dto.content);
+    // 저장 직전에 버전을 찍는다. 편집기는 이 값을 만들지 않는다 (shared의 stampSchemaVersion 주석)
+    const content = stampSchemaVersion(dto.content);
     // **트리를 바꾸는 일은 줄을 선다** (P14 D.1 — `lockTree`). 옮기기와 엇갈리면 깊이 한도를 넘거나 자리가 겹친다
     await lockTree(tx, dto.spaceId);
     await this.spaces.assertWrite(dto.spaceId, principal, tx);
@@ -114,9 +120,6 @@ export class PagesService {
         ),
       );
 
-    const text = extractText(dto.content);
-    // 저장 직전에 버전을 찍는다. 편집기는 이 값을 만들지 않는다 (shared의 stampSchemaVersion 주석)
-    const content = stampSchemaVersion(dto.content);
     const [page] = await tx
       .insert(pages)
       .values({
@@ -350,14 +353,18 @@ export class PagesService {
    *
    * - **보통 옮긴 한 줄만 고친다** — 자리 값에 틈(`PAGE_POSITION_GAP`)을 두고 이웃 사이의 가운데를 잡는다. 틈이 없을 때만 형제의 자리를 **한
    *   문장으로** 다시 매긴다. 형제마다 다시 쓰면 줄마다 검색 색인까지 다시 써서, 본문이 큰 형제 300개 아래로 옮기는 데 1.2초였다(병합 전 보안 검토 1)
-   * - **잠근 뒤에 권한과 부모를 본다** (FR-1503, `lockTree`) — 기다리는 사이 스페이스가 중지되거나 Crew에서 빠진 것까지(병합 전 보안 검토 3)
+   * - **잠근 뒤에 페이지를 다시 읽고 권한과 부모를 본다** (FR-1503, `lockTree`) — 기다리는 사이 누가 지웠거나 옮겼거나(반영분 점검 1), 스페이스가
+   *   중지되거나 Crew에서 빠진 것까지(병합 전 보안 검토 3). 권한은 잠그기 전에도 한 번 본다 — 권한 없는 사람은 줄에 서지 않는다
    * - 형제의 줄은 자리만 고친다 — 내용이 바뀐 것이 아니라 "최근에 고친 문서"에 올리지 않는다. 옛 부모 아래의 틈은 그대로 둔다(순서는 같다)
    *
    * 감사(`page.move`)에 적을 **어디서 어디로**를 함께 돌려준다 — 요청한 값만 적으면 실제로 놓인 자리와 옛 부모를 되짚을 수 없었다(병합 전 검토)
    */
   async move(id: string, dto: MovePageDto, principal: Principal, tx: Db): Promise<{ page: PageSummary; from: MoveEnd; to: MoveEnd & { index: number } }> {
+    const found = await this.row(id, tx);
+    await this.spaces.assertWrite(found.spaceId, principal, tx);
+    await lockTree(tx, found.spaceId);
+    // 잠근 뒤 다시 읽는다 — 그 사이 지웠으면 404, 옮겼으면 그 자리가 "어디서"다. 스페이스는 바뀌지 않는다(다른 스페이스로 옮기지 않는다)
     const page = await this.row(id, tx);
-    await lockTree(tx, page.spaceId);
     await this.spaces.assertWrite(page.spaceId, principal, tx);
     if (dto.parentId) await this.assertParent(tx, dto.parentId, page.spaceId, id);
     const siblings = await tx
@@ -398,9 +405,11 @@ export class PagesService {
 
   /** 삭제 (FR-329, FR-330). 하위가 있으면 막는다 — 고아 페이지를 만들지 않는다 */
   async softDelete(id: string, principal: Principal, tx: Db): Promise<PageRow> {
+    const found = await this.row(id, tx);
+    await this.spaces.assertWrite(found.spaceId, principal, tx);
+    // 트리를 바꾸는 일은 줄을 선다 (P14 D.1) — 지우는 부모 아래로 누가 옮기면 고아가 생긴다. 잠근 뒤 다시 읽는다(그 사이 누가 지웠을 수 있다)
+    await lockTree(tx, found.spaceId);
     const page = await this.row(id, tx);
-    // 트리를 바꾸는 일은 줄을 선다 (P14 D.1) — 지우는 부모 아래로 누가 옮기면 고아가 생긴다
-    await lockTree(tx, page.spaceId);
     await this.spaces.assertWrite(page.spaceId, principal, tx);
     const children = await tx.select({ id: pages.id }).from(pages).where(and(eq(pages.parentId, id), isNull(pages.deletedAt)));
     if (children.length) throw new BadRequestException('하위 페이지가 있는 페이지는 삭제할 수 없다. 하위를 먼저 옮기거나 삭제한다');

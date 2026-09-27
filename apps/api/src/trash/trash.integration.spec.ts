@@ -1,5 +1,6 @@
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PAGE_TREE_MAX_DEPTH, type Principal } from '@workfluence/shared';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { pages, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
@@ -45,7 +46,7 @@ describe('페이지 휴지통 (FR-510~512)', () => {
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ id: pid, title: '회의록', spaceName: '팀' });
 
-    await svc.restorePage(pid, me);
+    await db.transaction((tx) => svc.restorePage(pid, me, tx));
     expect(await svc.listPages(me, 50)).toHaveLength(0);
     const back = await db.query.pages.findFirst({ where: eq(pages.id, pid) });
     expect(back?.deletedAt).toBeNull();
@@ -59,7 +60,7 @@ describe('페이지 휴지통 (FR-510~512)', () => {
     await drop(pid);
 
     expect(await svc.listPages(outsider, 50)).toHaveLength(0);
-    await expect(svc.restorePage(pid, outsider)).rejects.toThrow(/찾을 수 없다/);
+    await expect(db.transaction((tx) => svc.restorePage(pid, outsider, tx))).rejects.toThrow(/찾을 수 없다/);
   });
 
   it('viewer는 보지도 되살리지도 못한다 — 되살리기는 쓰기다 (FR-511)', async () => {
@@ -71,7 +72,7 @@ describe('페이지 휴지통 (FR-510~512)', () => {
     await drop(pid);
 
     expect(await svc.listPages(viewer, 50)).toHaveLength(0);
-    await expect(svc.restorePage(pid, viewer)).rejects.toThrow(/쓸 권한/);
+    await expect(db.transaction((tx) => svc.restorePage(pid, viewer, tx))).rejects.toThrow(/쓸 권한/);
   });
 
   it('**부모가 아직 지워져 있으면 최상위로 올린다** (FR-512)', async () => {
@@ -82,7 +83,7 @@ describe('페이지 휴지통 (FR-510~512)', () => {
     await drop(child);
     await drop(parent);
 
-    const { movedToRoot } = await svc.restorePage(child, me);
+    const { movedToRoot } = await db.transaction((tx) => svc.restorePage(child, me, tx));
     expect(movedToRoot).toBe(true);
     expect((await db.query.pages.findFirst({ where: eq(pages.id, child) }))?.parentId).toBeNull();
   });
@@ -114,6 +115,54 @@ describe('페이지 휴지통 (FR-510~512)', () => {
     expect((await db.query.pages.findFirst({ where: eq(pages.id, child) }))?.parentId).toBe(parent);
   });
 
+  it('**되살리기도 트리 잠금을 쓴다** — 앞의 트리 작업을 2초 넘게 기다리면 409 (P14 FR-1503, 반영분 점검 7)', { timeout: 30_000 }, async () => {
+    const me = await user('me');
+    const sp = await team(me);
+    const pid = await page(sp.id, me.id);
+    await drop(pid);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockedNow = new Promise<void>((r) => (locked = r));
+    const holder = db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`page-tree:${sp.id}`}))`);
+      locked();
+      await held;
+    });
+    await lockedNow;
+    try {
+      await expect(db.transaction((tx) => svc.restorePage(pid, me, tx))).rejects.toThrow(ConflictException);
+    } finally {
+      release();
+      await holder;
+    }
+  });
+
+  it('**두 번 눌러도 한 번이다** — 잠근 뒤 다시 읽어, 뒤의 것은 앞의 되살리기를 보고 404 (반영분 점검 1)', { timeout: 30_000 }, async () => {
+    const me = await user('me');
+    const sp = await team(me);
+    const pid = await page(sp.id, me.id);
+    await drop(pid);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let restored!: () => void;
+    const restoredNow = new Promise<void>((r) => (restored = r));
+    const first = db.transaction(async (tx) => {
+      await svc.restorePage(pid, me, tx);
+      restored();
+      await held;
+    });
+    await restoredNow;
+    const second = db.transaction((tx) => svc.restorePage(pid, me, tx)).then(
+      () => 'ok',
+      (e: unknown) => e,
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await first;
+    expect(await second).toBeInstanceOf(NotFoundException);
+  });
+
   it('부모가 살아 있으면 제자리로 돌아간다', async () => {
     const me = await user('me');
     const sp = await team(me);
@@ -121,7 +170,7 @@ describe('페이지 휴지통 (FR-510~512)', () => {
     const child = await page(sp.id, me.id, '자식', parent);
     await drop(child);
 
-    const { movedToRoot } = await svc.restorePage(child, me);
+    const { movedToRoot } = await db.transaction((tx) => svc.restorePage(child, me, tx));
     expect(movedToRoot).toBe(false);
     expect((await db.query.pages.findFirst({ where: eq(pages.id, child) }))?.parentId).toBe(parent);
   });

@@ -224,9 +224,14 @@ export class CategoriesController {
     @Req() req: Request,
   ): Promise<CategoryView> {
     return this.db.transaction(async (tx) => {
-      const dup = await tx.query.spaceCategories.findFirst({ where: eq(spaceCategories.name, dto.name) });
-      if (dup) return { id: dup.id, name: dup.name, createdAt: dup.createdAt.toISOString() };
-      const [row] = await tx.insert(spaceCategories).values({ name: dto.name, createdBy: me.id }).returning();
+      // **같은 이름이면 있던 것을 돌려준다**(FR-308, 멱등). 먼저 찾고 넣으면 두 번 누른 두 요청이 둘 다 "없다"를 보고 둘째가 유일 제약에 걸려 500이었다
+      // (P14 반영분 점검 11) — 넣기를 제약에 맡기고, 넣지 못했으면 있던 것을 읽는다
+      const [row] = await tx.insert(spaceCategories).values({ name: dto.name, createdBy: me.id }).onConflictDoNothing({ target: spaceCategories.name }).returning();
+      if (!row) {
+        const dup = await tx.query.spaceCategories.findFirst({ where: eq(spaceCategories.name, dto.name) });
+        if (!dup) throw new ConflictException('같은 이름의 분류를 방금 누가 바꿨다 — 다시 한다');
+        return { id: dup.id, name: dup.name, createdAt: dup.createdAt.toISOString() };
+      }
       await this.audit.record({ action: 'category.create', actorId: me.id, targetType: 'category', targetId: row.id, detail: dto, ip: req.ip }, tx);
       return { id: row.id, name: row.name, createdAt: row.createdAt.toISOString() };
     });

@@ -1,14 +1,16 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DOCUMENT_SCHEMA_VERSION, PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, documentSchemaVersion, spaceListQueryDto, type DocNode, type Principal } from '@workfluence/shared';
+import { DOCUMENT_SCHEMA_VERSION, PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, createPageDto, documentSchemaVersion, movePageDto, spaceListQueryDto, type DocNode, type Principal } from '@workfluence/shared';
 import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
+import { UuidPipe } from '../common/uuid.pipe';
 import { pageVersions, pages, spaceCategories, spaces, users } from '../db/schema';
 import { PagesController } from '../pages/pages.module';
 import { PagesService } from '../pages/pages.service';
+import { lockTree } from '../pages/tree-lock';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { SpacesController } from './spaces.module';
+import { CategoriesController, SpacesController } from './spaces.module';
 import { SpacesService } from './spaces.service';
 
 /** B등급 통합 테스트 (P2_설계서_Page 6절). **실제 PostgreSQL**을 쓴다. */
@@ -19,6 +21,27 @@ let pagesSvc: PagesService;
 
 const doc = (text: string): DocNode =>
   ({ type: 'doc', schemaVersion: DOCUMENT_SCHEMA_VERSION, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }) as DocNode;
+
+type Tx = Parameters<Parameters<TestDb['transaction']>[0]>[0];
+
+/** 트랜잭션 하나를 `fn`까지 하고 **커밋하지 않은 채 붙잡아 둔다** — `release()`하면 커밋한다. 뒤의 일이 그 잠금을 기다리는지 본다 */
+async function holdOpen(fn: (tx: Tx) => Promise<unknown>): Promise<{ release: () => void; done: Promise<void> }> {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let ready!: () => void;
+  const readyNow = new Promise<void>((r) => (ready = r));
+  const done = db.transaction(async (tx) => {
+    await fn(tx);
+    ready();
+    await held;
+  });
+  await Promise.race([readyNow, done]);
+  return { release, done };
+}
+/** 끝난 결과를 값으로 — 성공이면 `'ok'`, 실패면 그 오류 */
+const settle = (p: Promise<unknown>): Promise<unknown> => p.then(() => 'ok', (e: unknown) => e);
+/** 뒤의 일이 잠금 앞에 설 때까지 기다린다 — 잠금 대기 상한(2초)보다 짧게 */
+const queued = () => new Promise((r) => setTimeout(r, 300));
 
 async function user(username: string, role: 'root' | 'admin' | 'member' = 'member'): Promise<Principal> {
   const [u] = await db
@@ -336,7 +359,17 @@ describe('페이지 트리 (FR-326~330)', () => {
     const made = [];
     for (let i = 0; i < TEST_POOL_MAX * 2; i++) made.push(await mk(`P${i}`, null));
     await db.update(pages).set({ position: 0 }).where(eq(pages.spaceId, space.id)); // 다시 매기는 길로 겹치게 한다
-    await Promise.all(made.map((p, i) => move(p.id, null, (i * 5) % made.length, owner)));
+    // 409(잠금을 2초 넘게 기다렸다)면 사람처럼 다시 한다 — 시험 DB를 다른 실행과 나눠 쓰면 늦을 수 있다(반영분 점검 15)
+    const again = async (id: string, position: number): Promise<unknown> => {
+      for (let i = 0; ; i++) {
+        try {
+          return await move(id, null, position, owner);
+        } catch (e) {
+          if (!(e instanceof ConflictException) || i >= 5) throw e;
+        }
+      }
+    };
+    await Promise.all(made.map((p, i) => again(p.id, (i * 5) % made.length)));
     const got = (await pagesSvc.tree(space.id, owner)).map((p) => p.position);
     expect(new Set(got).size).toBe(made.length);
   });
@@ -389,6 +422,115 @@ describe('페이지 트리 (FR-326~330)', () => {
     expect(((await settled) as Error).message).toBe('페이지를 자기 자신이나 자손 아래로 옮길 수 없다');
     const rows = await db.select({ id: pages.id, parentId: pages.parentId }).from(pages).where(inArray(pages.id, [x.id, y.id]));
     expect(Object.fromEntries(rows.map((r) => [r.id, r.parentId]))).toEqual({ [x.id]: y.id, [y.id]: null });
+  });
+
+  it('**잠근 뒤 다시 읽는다** — 옮기려는 페이지를 앞사람이 지웠으면 404다. 휴지통의 페이지를 옮겨 "지운 사람"을 바꾸지 않는다 (반영분 점검 1)', { timeout: 30_000 }, async () => {
+    const { owner, mk } = await setup();
+    const a = await mk('A', null);
+    const m = await mk('M', null);
+    const first = await holdOpen((tx) => pagesSvc.softDelete(m.id, owner, tx));
+    const second = settle(move(m.id, a.id, 0, owner));
+    await queued();
+    first.release();
+    await first.done;
+    expect(await second).toBeInstanceOf(NotFoundException);
+    const row = await db.query.pages.findFirst({ where: eq(pages.id, m.id) });
+    expect([row?.parentId, row?.deletedAt === null]).toEqual([null, false]);
+  });
+
+  it('**두 번 지워도 한 번이다** — 잠근 뒤 다시 읽어, 뒤의 지우기는 앞의 것을 보고 404 (반영분 점검 1)', { timeout: 30_000 }, async () => {
+    const { owner, mk } = await setup();
+    const m = await mk('M', null);
+    const first = await holdOpen((tx) => pagesSvc.softDelete(m.id, owner, tx));
+    const second = settle(db.transaction((tx) => pagesSvc.softDelete(m.id, owner, tx)));
+    await queued();
+    first.release();
+    await first.done;
+    expect(await second).toBeInstanceOf(NotFoundException);
+  });
+
+  it('**권한 없는 사람은 줄에 서지 않는다** — 트리 잠금이 잡혀 있어도 곧바로 거절된다(2초를 기다려 409가 아니라 — 반영분 점검 12)', { timeout: 30_000 }, async () => {
+    const { space, mk } = await setup();
+    const a = await mk('A', null);
+    const outsider = await user('outsider');
+    const holder = await holdOpen((tx) => lockTree(tx, space.id));
+    try {
+      const started = Date.now();
+      await expect(db.transaction((tx) => pagesSvc.create({ spaceId: space.id, parentId: null, title: 'N', content: doc('N') }, outsider, tx))).rejects.toThrow(NotFoundException);
+      await expect(move(a.id, null, 0, outsider)).rejects.toThrow(NotFoundException);
+      await expect(db.transaction((tx) => pagesSvc.softDelete(a.id, outsider, tx))).rejects.toThrow(NotFoundException);
+      expect(Date.now() - started).toBeLessThan(1000);
+    } finally {
+      holder.release();
+      await holder.done;
+    }
+  });
+
+  it('**옮긴 곳의 "어디서"는 잠근 뒤의 자리다** — 앞사람이 먼저 옮겼으면 그 결과에서 옮긴 것으로 적힌다 (반영분 점검 1)', { timeout: 30_000 }, async () => {
+    const { owner, mk } = await setup();
+    const a = await mk('A', null);
+    const b = await mk('B', null);
+    const m = await mk('M', null);
+    const first = await holdOpen((tx) => pagesSvc.move(m.id, { parentId: a.id, position: 0 }, owner, tx));
+    const second = move(m.id, b.id, 0, owner);
+    await queued();
+    first.release();
+    await first.done;
+    expect((await second).from.parentId).toBe(a.id);
+  });
+
+  it('**만들기도 잠근 뒤 맨 뒤를 읽는다** — 앞사람이 만들고 커밋하기 전에 만들어도 자리가 겹치지 않는다 (반영분 점검 7)', { timeout: 30_000 }, async () => {
+    const { owner, space, mk } = await setup();
+    await mk('A', null);
+    const make = (title: string) => (tx: Tx) => pagesSvc.create({ spaceId: space.id, parentId: null, title, content: doc(title) }, owner, tx);
+    const first = await holdOpen(make('B'));
+    const second = db.transaction(make('C'));
+    await queued();
+    first.release();
+    await first.done;
+    await second;
+    const got = await pagesSvc.tree(space.id, owner);
+    expect(got.map((p) => p.title)).toEqual(['A', 'B', 'C']);
+    expect(new Set(got.map((p) => p.position)).size).toBe(3);
+  });
+
+  it('**지우기도 잠근 뒤 자식을 센다** — 앞사람이 그 아래로 옮기는 중이면 뒤의 지우기는 "하위 페이지가 있다"로 막힌다(고아를 만들지 않는다 — 반영분 점검 7)', { timeout: 30_000 }, async () => {
+    const { owner, mk } = await setup();
+    const p = await mk('P', null);
+    const x = await mk('X', null);
+    const first = await holdOpen((tx) => pagesSvc.move(x.id, { parentId: p.id, position: 0 }, owner, tx));
+    const second = settle(db.transaction((tx) => pagesSvc.softDelete(p.id, owner, tx)));
+    await queued();
+    first.release();
+    await first.done;
+    const r = await second;
+    expect(r).toBeInstanceOf(BadRequestException);
+    expect((r as Error).message).toMatch(/하위 페이지가 있는 페이지는 삭제할 수 없다/);
+  });
+
+  it('**대문자 식별자로 보내도 자기 아래로는 못 옮기고, 대문자 스페이스로 만들어도 부모를 찾는다** — 경계(`UuidPipe`·DTO)가 소문자로 맞춘다 (반영분 점검 2)', async () => {
+    const { owner, space, mk } = await setup();
+    const m = await mk('M', null);
+    const c = await mk('C', m.id);
+    const id = new UuidPipe().transform(m.id.toUpperCase());
+    await expect(
+      db.transaction((tx) => pagesSvc.move(id, movePageDto.parse({ parentId: c.id.toUpperCase(), position: 0 }), owner, tx)),
+    ).rejects.toThrow('페이지를 자기 자신이나 자손 아래로 옮길 수 없다');
+    const made = await db.transaction((tx) =>
+      pagesSvc.create(createPageDto.parse({ spaceId: space.id.toUpperCase(), parentId: m.id.toUpperCase(), title: 'D', content: doc('D') }), owner, tx),
+    );
+    expect(made.parentId).toBe(m.id);
+  });
+
+  it('**트리 잠금은 트랜잭션 밖에서 부르면 막는다** — 밖에서는 잠금이 그 문장으로 끝나 줄 세우기가 오류 없이 사라진다. 잠근 뒤 잠금 대기 한도는 원래대로 (반영분 점검 10)', async () => {
+    const { space } = await setup();
+    await expect(lockTree(db, space.id)).rejects.toThrow('lockTree는 트랜잭션 안에서 부른다');
+    const after = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL lock_timeout = '7s'`);
+      await lockTree(tx, space.id);
+      return (await tx.execute<{ lock_timeout: string }>(sql`SELECT current_setting('lock_timeout') AS lock_timeout`)).rows[0].lock_timeout;
+    });
+    expect(after).toBe('7s');
   });
 
   it('**트리 잠금은 오래 기다리지 않는다** — 옮기기·만들기·지우기가 잠금을 기다리다 한도를 넘으면 409 (보안 검토 1, 코드 리뷰 6)', { timeout: 30_000 }, async () => {
@@ -571,18 +713,57 @@ describe('스페이스 목록의 찾기·상태 (P14 FR-1514)', () => {
     const admin = await user('boss', 'admin');
     const owner = await user('owner');
     for (const name of ['가', '나', '다']) await spacesSvc.create({ name, kind: 'team', categoryId: null, description: '' }, owner);
-    // 결과는 JS로 잘라도 같다 — **줄마다의 조회(`toView`)를 상한만큼만 돌리는지**를 센다
-    const toView = vi.spyOn(spacesSvc as unknown as { toView: (...a: unknown[]) => unknown }, 'toView');
+    // 결과는 JS로 잘라도 같다 — **보기를 상한만큼만 만드는지**를 센다(한 번에, 두 줄)
+    const toViews = vi.spyOn(spacesSvc as unknown as { toViews: (rows: unknown[], ...a: unknown[]) => unknown }, 'toViews');
     try {
       expect((await spacesSvc.list(admin, 'all', 2)).map((v) => v.name)).toEqual(['가', '나']);
-      expect(toView).toHaveBeenCalledTimes(2);
+      expect(toViews).toHaveBeenCalledTimes(1);
+      expect(toViews.mock.calls[0][0]).toHaveLength(2);
     } finally {
-      toView.mockRestore();
+      toViews.mockRestore();
+    }
+  });
+
+  it('**보기는 한꺼번에 만든다** — 줄 수와 무관하게 한 번(질의 넷). 줄마다의 Crew 수·내 자리·분류·만든 사람이 섞이지 않는다 (반영분 점검 8)', async () => {
+    const owner = await user('owner');
+    const mate = await user('mate');
+    const [cat] = await db.insert(spaceCategories).values({ name: '운영', createdBy: owner.id }).returning();
+    const a = await spacesSvc.create({ name: '가팀', kind: 'team', categoryId: cat.id, description: '' }, owner);
+    await spacesSvc.create({ name: '나팀', kind: 'team', categoryId: null, description: '' }, mate);
+    await spacesSvc.addMember(a.id, { username: 'mate', role: 'viewer' }, owner);
+    const toViews = vi.spyOn(spacesSvc as unknown as { toViews: (...a: unknown[]) => unknown }, 'toViews');
+    try {
+      const views = await spacesSvc.list(mate, 'team', 200);
+      expect(toViews).toHaveBeenCalledTimes(1);
+      expect(views.map((v) => [v.name, v.memberCount, v.myRole, v.categoryName, v.createdByUsername, v.access.canWrite])).toEqual([
+        ['가팀', 2, 'viewer', '운영', 'owner', false],
+        ['나팀', 1, 'owner', null, 'mate', true],
+      ]);
+    } finally {
+      toViews.mockRestore();
     }
   });
 });
 
 describe('분류 관리 (FR-532)', () => {
+  it('**같은 새 이름을 동시에 만들어도 하나다** — 앞사람이 넣고 커밋하기 전에 만들면 그 분류를 돌려받는다. 먼저 찾고 넣으면 뒤의 것이 유일 제약에 걸려 500이었다 (FR-308, 반영분 점검 11)', { timeout: 30_000 }, async () => {
+    const admin = await user('catadm', 'admin');
+    const ctrl = new CategoriesController(new AuditService(db), db);
+    // 앞사람의 만들기 — 넣었지만 아직 커밋하지 않았다(두 번 누른 앞의 요청)
+    const first = await holdOpen((tx) => tx.insert(spaceCategories).values({ name: '새 분류', createdBy: admin.id }));
+    // 값이나 오류를 그대로 받는다 — 옛 코드는 유일 제약 위반을 던졌다
+    const second = ctrl.create({ name: '새 분류' }, admin as never, { ip: '127.0.0.1' } as never).then(
+      (v) => v,
+      (e: unknown) => e,
+    );
+    await queued();
+    first.release();
+    await first.done;
+    const got = await second;
+    const [row] = await db.select().from(spaceCategories).where(eq(spaceCategories.name, '새 분류'));
+    expect(got).toMatchObject({ id: row.id, name: '새 분류' });
+  });
+
   it('**쓰는 스페이스가 있으면 지우지 못한다** — 조용히 NULL로 만들면 복구할 수 없다', async () => {
     const admin = await user('catadm', 'admin');
     const [cat] = await db.insert(spaceCategories).values({ name: '재무', createdBy: admin.id }).returning();

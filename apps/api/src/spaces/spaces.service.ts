@@ -67,31 +67,59 @@ export class SpacesService {
   }
 
   private async toView(row: SpaceRow, principal: Principal, tx: Db = this.db): Promise<SpaceView> {
-    const mine = await tx.query.spaceMembers.findFirst({
-      where: and(eq(spaceMembers.spaceId, row.id), eq(spaceMembers.userId, principal.id)),
+    return (await this.toViews([row], principal, tx))[0];
+  }
+
+  /**
+   * 줄마다 보기를 만든다 — **줄 수와 무관하게 질의 넷**(내 자리·Crew 수·만든 사람·분류). 줄마다 넷을 치면 개인 스페이스만 수백 개인 모든
+   * 스페이스 목록 한 번에 질의 천여 개가 연결 풀로 몰렸다(P14 반영분 점검 8, 코드 리뷰 3)
+   */
+  private async toViews(rows: readonly SpaceRow[], principal: Principal, tx: Db = this.db): Promise<SpaceView[]> {
+    if (!rows.length) return [];
+    const ids = rows.map((r) => r.id);
+    const mine = await tx
+      .select({ spaceId: spaceMembers.spaceId, role: spaceMembers.role })
+      .from(spaceMembers)
+      .where(and(inArray(spaceMembers.spaceId, ids), eq(spaceMembers.userId, principal.id)));
+    const counts = await tx
+      .select({ spaceId: spaceMembers.spaceId, n: count() })
+      .from(spaceMembers)
+      .where(inArray(spaceMembers.spaceId, ids))
+      .groupBy(spaceMembers.spaceId);
+    const creators = await tx
+      .select({ id: users.id, username: users.username })
+      .from(users)
+      .where(inArray(users.id, [...new Set(rows.map((r) => r.createdBy))]));
+    const categoryIds = [...new Set(rows.flatMap((r) => (r.categoryId ? [r.categoryId] : [])))];
+    const categories = categoryIds.length
+      ? await tx.select({ id: spaceCategories.id, name: spaceCategories.name }).from(spaceCategories).where(inArray(spaceCategories.id, categoryIds))
+      : [];
+    const roleOf = new Map(mine.map((m) => [m.spaceId, m.role as SpaceMemberRole]));
+    const countOf = new Map(counts.map((c) => [c.spaceId, c.n]));
+    const usernameOf = new Map(creators.map((u) => [u.id, u.username]));
+    const categoryOf = new Map(categories.map((c) => [c.id, c.name]));
+    return rows.map((row) => {
+      const membership = roleOf.get(row.id) ?? null;
+      const n = countOf.get(row.id) ?? 0;
+      return {
+        id: row.id,
+        key: row.key,
+        name: row.name,
+        description: row.description,
+        kind: row.kind as SpaceView['kind'],
+        status: row.status as SpaceView['status'],
+        categoryId: row.categoryId,
+        categoryName: (row.categoryId && categoryOf.get(row.categoryId)) ?? null,
+        createdBy: row.createdBy,
+        createdByUsername: usernameOf.get(row.createdBy) ?? '',
+        memberCount: n,
+        myRole: membership,
+        // 화면이 규칙을 다시 구현하지 않도록 판정 결과를 실어 보낸다 (FR-304)
+        access: spaceAccess(principal, asSpaceLike(row), membership, n),
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      };
     });
-    const [{ n }] = await tx.select({ n: count() }).from(spaceMembers).where(eq(spaceMembers.spaceId, row.id));
-    const creator = await tx.query.users.findFirst({ where: eq(users.id, row.createdBy) });
-    const category = row.categoryId ? await tx.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, row.categoryId) }) : undefined;
-    const membership = (mine?.role as SpaceMemberRole | undefined) ?? null;
-    return {
-      id: row.id,
-      key: row.key,
-      name: row.name,
-      description: row.description,
-      kind: row.kind as SpaceView['kind'],
-      status: row.status as SpaceView['status'],
-      categoryId: row.categoryId,
-      categoryName: category?.name ?? null,
-      createdBy: row.createdBy,
-      createdByUsername: creator?.username ?? '',
-      memberCount: n,
-      myRole: membership,
-      // 화면이 규칙을 다시 구현하지 않도록 판정 결과를 실어 보낸다 (FR-304)
-      access: spaceAccess(principal, asSpaceLike(row), membership, n),
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-    };
   }
 
   /**
@@ -134,10 +162,10 @@ export class SpacesService {
       .from(spaces)
       .where(and(visible, found, filter.status ? eq(spaces.status, filter.status) : undefined))
       .orderBy(byName(spaces.name));
-    // **모든 스페이스는 SQL에서 자른다** (P14 병합 전 검토) — 관리자에게는 `canRead`가 늘 참이라 걸러질 것이 없다. 자르기 전에 줄마다 `toView`(질의
-    // 서너 개)를 돌리면 스페이스 수백 개에 질의 천여 개가 연결 풀로 몰렸다. 다른 범위는 볼 수 없는 것을 먼저 빼고 자른다(아래)
+    // **모든 스페이스는 SQL에서 자른다** (P14 병합 전 검토) — 관리자에게는 `canRead`가 늘 참이라 걸러질 것이 없다. 다른 범위는 볼 수 없는 것을
+    // 먼저 빼고 자른다(아래). 보기는 한꺼번에 만든다(`toViews` — 질의 넷)
     const rows = scope === 'all' ? await query.limit(limit) : await query;
-    const views = await Promise.all(rows.map((r) => this.toView(r, principal)));
+    const views = await this.toViews(rows, principal);
     // 볼 수 없는 것을 먼저 빼고 자른다. 자르고 거르면 결과가 조용히 비는 수가 있다
     return views.filter((v) => v.access.canRead).slice(0, limit);
   }

@@ -58,8 +58,8 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('휴지통 정리 (trash-purge)', () => {
   it('**보존 기간을 넘긴 것만 지운다** — 첨부 파일까지, 감사로그에 남긴다', async () => {
-    const old = await pages.create({ spaceId, parentId: null, title: '오래 지운 문서', content: doc('옛') }, { id: userId, role: 'admin' });
-    const recent = await pages.create({ spaceId, parentId: null, title: '막 지운 문서', content: doc('새') }, { id: userId, role: 'admin' });
+    const old = await db.transaction((tx) => pages.create({ spaceId, parentId: null, title: '오래 지운 문서', content: doc('옛') }, { id: userId, role: 'admin' }, tx));
+    const recent = await db.transaction((tx) => pages.create({ spaceId, parentId: null, title: '막 지운 문서', content: doc('새') }, { id: userId, role: 'admin' }, tx));
     await db.execute(sql`UPDATE pages SET deleted_at = now() - interval '40 days' WHERE id = ${old.id}`);
     await db.execute(sql`UPDATE pages SET deleted_at = now() - interval '5 days' WHERE id = ${recent.id}`);
     const sha = 'a'.repeat(64);
@@ -93,7 +93,7 @@ describe('감사로그 정리 (audit-purge)', () => {
 
 describe('검색 재색인 (reindex)', () => {
   it('상한 검색 본문을 정본에서 다시 만든다', async () => {
-    const p = await pages.create({ spaceId, parentId: null, title: '재색인 문서', content: doc('다시 찾아질 글') }, { id: userId, role: 'admin' });
+    const p = await db.transaction((tx) => pages.create({ spaceId, parentId: null, title: '재색인 문서', content: doc('다시 찾아질 글') }, { id: userId, role: 'admin' }, tx));
     await db.execute(sql`UPDATE pages SET search_text = 'stale' WHERE id = ${p.id}`);
 
     await run(searchReindex);

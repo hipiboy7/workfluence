@@ -70,10 +70,16 @@ export class TrashService {
    * 판정은 지운 자식을 세지 않는다). 지운 페이지 아래에는 살아 있는 페이지가 없으므로(지우기·만들기·옮기기가 막는다) 되살린 페이지 하나만 센다.
    */
   async restorePage(id: string, principal: Principal, tx: Db = this.db): Promise<{ page: PageRow; movedToRoot: boolean }> {
-    const row = await tx.query.pages.findFirst({ where: and(eq(pages.id, id), isNotNull(pages.deletedAt)) });
+    const inTrash = () => tx.query.pages.findFirst({ where: and(eq(pages.id, id), isNotNull(pages.deletedAt)) });
+    const found = await inTrash();
+    if (!found) throw new NotFoundException('휴지통에서 찾을 수 없다');
+    // 권한 없는 사람은 줄에 서지 않는다 — 잠그기 전에 한 번, 잠근 뒤 다시 본다
+    await this.spaces.assertWrite(found.spaceId, principal, tx);
+    // 트리를 바꾸는 일은 줄을 선다 (P14 D.1 — `lockTree`). 부모를 보는 사이 누가 그 부모를 지우거나 옮기면 어긋난다. **잠근 뒤 다시 읽는다** —
+    // 두 번 누르면 뒤의 것은 앞의 되살리기를 보고 404다(반영분 점검 1)
+    await lockTree(tx, found.spaceId);
+    const row = await inTrash();
     if (!row) throw new NotFoundException('휴지통에서 찾을 수 없다');
-    // 트리를 바꾸는 일은 줄을 선다 (P14 D.1 — `lockTree`). 부모를 보는 사이 누가 그 부모를 지우거나 옮기면 어긋난다
-    await lockTree(tx, row.spaceId);
     await this.spaces.assertWrite(row.spaceId, principal, tx);
 
     let movedToRoot = false;
