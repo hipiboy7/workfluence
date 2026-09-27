@@ -70,6 +70,31 @@ export class UsersController {
     });
   }
 
+  /** 정지 (P13 FR-1441~1444) — 세션을 모두 끊고, 열린 편집 연결을 그 자리에서 끊는다 */
+  @Post(':id/suspend')
+  @RequireAction('user.manage')
+  async suspend(@Param('id') id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
+    return this.db.transaction(async (tx) => {
+      const { row, before } = await this.users.suspend(id, actor, tx);
+      await this.audit.record(
+        { action: 'user.suspend', actorId: actor.id, targetType: 'user', targetId: id, detail: { username: row.username, before }, ip: req.ip },
+        tx,
+      );
+      return toUserView(row);
+    });
+  }
+
+  /** 정지 해제 (P13 FR-1441·1444) */
+  @Post(':id/unsuspend')
+  @RequireAction('user.manage')
+  async unsuspend(@Param('id') id: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<UserView> {
+    return this.db.transaction(async (tx) => {
+      const row = await this.users.unsuspend(id, actor, tx);
+      await this.audit.record({ action: 'user.unsuspend', actorId: actor.id, targetType: 'user', targetId: id, detail: { username: row.username }, ip: req.ip }, tx);
+      return toUserView(row);
+    });
+  }
+
   /** 관리자 강제 종료 (FR-539). 지금 열려 있는 세션을 전부 끊는다 */
   @Post(':id/terminate-sessions')
   @RequireAction('user.manage')

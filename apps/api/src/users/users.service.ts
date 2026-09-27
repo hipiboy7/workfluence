@@ -6,11 +6,14 @@ import {
   canManageUser,
   generateTemporaryPassword,
   grantsForRole,
+  suspendProblem,
+  unsuspendProblem,
   type CreateUserDto,
   type DelegableAction,
   type Principal,
   type Role,
   type SignupDto,
+  type UserStatus,
   type UserView,
 } from '@workfluence/shared';
 import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -391,6 +394,53 @@ export class UsersService {
     const user = await this.findByUsername(username, tx);
     if (!user || !user.email || user.email !== email.toLowerCase() || user.status !== 'active') return null;
     return user;
+  }
+
+  /**
+   * **정지** (P13 C.5, FR-1441·1442). 퇴사자 처리 — 로그인하지 못하고 내용·Crew 소속·감사 기록은 남는다.
+   *
+   * 판정은 공유 함수(`suspendProblem`)가 한다 — 관리의 우열(P11), 자기 자신, 활성 계정만, 마지막 활성 root. 대상 행을 **잠그고** 읽는다
+   * (`lockForUpdate` — 판정과 쓰기 사이에 위임·역할이 바뀌지 않게). root를 셀 때는 root 강등과 **같은 줄**에 선다(`LAST_ROOT_LOCK`) —
+   * 둘이 동시에 root 둘을 하나씩 정지·강등하면 root가 0명이 된다. 정지하는 순간 세션을 모두 지우고 열린 실시간 편집 연결을 끊는다
+   * (RevocationBus — 강제 종료와 같다). 이전 상태를 돌려준다 — 호출부가 감사에 싣는다
+   */
+  async suspend(id: string, actor: Principal, tx: Db = this.db): Promise<{ row: UserRow; before: UserStatus }> {
+    const result = await this.inTx(tx, async (t) => {
+      const target = await this.lockForUpdate({ id }, t);
+      if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
+      let activeRoots = 0;
+      if (target.role === 'root') {
+        await t.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${LAST_ROOT_LOCK}))`);
+        // **`t`로 센다** — 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하지 않는다 (T-026)
+        [{ n: activeRoots }] = await t.select({ n: count() }).from(users).where(and(eq(users.role, 'root'), eq(users.status, 'active')));
+      }
+      const before = target.status as UserStatus;
+      this.assertAllowed(suspendProblem(actor, { id: target.id, role: target.role as Role, status: before, grants: target.grants }, activeRoots));
+      const [row] = await t.update(users).set({ status: 'suspended', updatedAt: sql`now()` }).where(eq(users.id, id)).returning();
+      await t.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
+      return { row, before };
+    });
+    // 끊는 알림은 지운 뒤에 — 트랜잭션을 여기서 열었으면 커밋된 뒤다. 열린 편집 연결이 그 자리에서 끊긴다 (FR-1442)
+    this.revocation.revoke(id);
+    return result;
+  }
+
+  /** **정지 해제** (P13 FR-1441) — 활성으로 돌아간다. 비밀번호·Crew 소속은 그대로다 */
+  async unsuspend(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
+    return this.inTx(tx, async (t) => {
+      const target = await this.lockForUpdate({ id }, t);
+      if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
+      this.assertAllowed(unsuspendProblem(actor, { id: target.id, role: target.role as Role, status: target.status as UserStatus, grants: target.grants }));
+      const [row] = await t.update(users).set({ status: 'active', updatedAt: sql`now()` }).where(eq(users.id, id)).returning();
+      return row;
+    });
+  }
+
+  /** 판정 함수의 까닭을 응답으로 — 권한이면 403, 나머지는 400 */
+  private assertAllowed(problem: string | null): void {
+    if (!problem) return;
+    if (problem === '이 사용자를 관리할 권한이 없다') throw new ForbiddenException(problem);
+    throw new BadRequestException(problem);
   }
 
   /**

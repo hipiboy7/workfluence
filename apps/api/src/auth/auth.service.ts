@@ -46,6 +46,13 @@ export function toMeView(u: UserRow): MeView {
   };
 }
 
+/** 사내 계정 로그인에서 정지된 계정을 만났다 — 트랜잭션을 되돌리고 감사를 남기려고 던진다 (P13 FR-1443) */
+class SuspendedAccount extends Error {
+  constructor(readonly userId: string) {
+    super('정지된 계정');
+  }
+}
+
 @Injectable()
 export class AuthService {
   private readonly log = new Logger('Auth');
@@ -214,15 +221,23 @@ export class AuthService {
       throw new UnauthorizedException('이 계정에 부여할 역할이 없다');
     }
 
-    const user = await this.db.transaction(async (tx) => {
-      const { row: u, clearedGrants } = await this.upsertFromClaims(claims, role, tx);
+    let user: UserRow;
+    try {
+      user = await this.db.transaction(async (tx) => {
+        const { row: u, clearedGrants } = await this.upsertFromClaims(claims, role, tx);
       // IdP가 역할을 내려 위임이 사라졌으면 로그인 행에 함께 남긴다 (P11 FR-1205)
-      await this.audit.record(
-        { action: 'auth.login.success', actorId: u.id, detail: { method: 'oidc', ...(clearedGrants.length ? { clearedGrants } : {}) }, ip },
-        tx,
-      );
-      return u;
-    });
+        await this.audit.record(
+          { action: 'auth.login.success', actorId: u.id, detail: { method: 'oidc', ...(clearedGrants.length ? { clearedGrants } : {}) }, ip },
+          tx,
+        );
+        return u;
+      });
+    } catch (e) {
+      if (!(e instanceof SuspendedAccount)) throw e;
+      // 정지된 계정 (P13 FR-1443). IdP가 이 사람을 확인했으므로 까닭을 말해도 계정이 새지 않는다 — 그 사람 자신의 계정이다
+      await this.audit.record({ action: 'auth.login.failure', actorId: e.userId, targetType: 'oidc_sub', targetId: claims.sub, detail: { reason: 'suspended' }, ip });
+      throw new UnauthorizedException('이 계정은 정지돼 있다 — 관리자에게 문의한다');
+    }
     return user;
   }
 
@@ -243,6 +258,9 @@ export class AuthService {
     const email = await this.freeEmail(claims.email, existing?.id, tx);
 
     if (existing) {
+      // **정지된 계정은 되살리지 않는다** (P13 FR-1443). 예전에는 사내 계정으로 로그인할 때마다 상태를 활성으로 덮어써, 정지해도
+      // IdP로 다시 들어오면 되살아났다
+      if (existing.status === 'suspended') throw new SuspendedAccount(existing.id);
       const before = grantsForRole(existing.role as Role, existing.grants);
       const grants = grantsForRole(role, before);
       const [row] = await tx

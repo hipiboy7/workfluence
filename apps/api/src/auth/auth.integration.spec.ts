@@ -44,6 +44,7 @@ class StubProvider implements OidcProvider {
 let db: TestDb;
 let pool: Pool;
 let usersSvc: UsersService;
+let bus: RevocationBus;
 let audit: AuditService;
 let auth: AuthService;
 let spacesSvc: SpacesService;
@@ -56,7 +57,8 @@ function makeAuth(provider: OidcProvider | null = new StubProvider()): AuthServi
 
 beforeAll(async () => {
   ({ db, pool } = await openTestDb());
-  usersSvc = new UsersService(db, new SettingsService(db, loadEnv()), new RevocationBus());
+  bus = new RevocationBus();
+  usersSvc = new UsersService(db, new SettingsService(db, loadEnv()), bus);
   spacesSvc = new SpacesService(db);
   audit = new AuditService(db);
   auth = makeAuth();
@@ -562,6 +564,93 @@ describe('비밀번호를 확인하는 동안 DB 연결을 쥐지 않는다 (P13
     const prepared = await usersSvc.prepareChangePassword(alice.id, SIGNUP.password, 'Alice-new-2026');
     await usersSvc.resetPassword(alice.id, ROOT);
     await expect(usersSvc.changePassword(alice.id, SIGNUP.password, 'Alice-new-2026', db, prepared)).rejects.toThrow(/그 사이 비밀번호가 바뀌었다/);
+  });
+});
+
+/**
+ * **계정 정지** (P13 C.5, FR-1440~1446). 퇴사자 처리 — 로그인하지 못하고, 정지하는 순간 세션과 열린 편집 연결이 끊긴다. 로컬 계정은
+ * 비밀번호를 확인한 **뒤에** 거절한다(응답은 같은 401 — 계정 상태가 새지 않게). 사내 계정은 IdP로 다시 들어와도 되살아나지 않는다
+ */
+describe('계정 정지 (P13 FR-1440~1446)', () => {
+  const ADMIN: Principal = { id: '00000000-0000-0000-0000-00000000000a', role: 'admin' };
+  async function reasons(): Promise<string[]> {
+    const rows = await db.select({ detail: auditEvents.detail }).from(auditEvents).where(eq(auditEvents.action, 'auth.login.failure'));
+    return rows.map((r) => (r.detail as { reason: string }).reason);
+  }
+  async function sessionsOf(userId: string): Promise<number> {
+    const r = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM sessions WHERE sess->>'userId' = ${userId}`);
+    return r.rows[0].n;
+  }
+  async function addSession(userId: string, sid: string) {
+    await db.execute(sql`INSERT INTO sessions (sid, sess, expire) VALUES (${sid}, ${JSON.stringify({ userId, cookie: {} })}::json, now() + interval '1 hour')`);
+  }
+
+  it('정지하면 세션이 모두 끊기고 열린 편집 연결에 알린다 — 맞는 비밀번호로도 못 들어오고, 해제하면 다시 들어온다', async () => {
+    const alice = await approvedAlice();
+    await addSession(alice.id, 'sid-a1');
+    await addSession(alice.id, 'sid-a2');
+    const revoked: string[] = [];
+    const off = bus.onRevoke((userId) => revoked.push(userId));
+    try {
+      const { row, before } = await db.transaction((tx) => usersSvc.suspend(alice.id, ADMIN, tx));
+      expect(row.status).toBe('suspended');
+      expect(before).toBe('active');
+    } finally {
+      off();
+    }
+    expect(revoked).toEqual([alice.id]);
+    expect(await sessionsOf(alice.id)).toBe(0);
+    expect(toUserView((await usersSvc.findById(alice.id))!).status).toBe('suspended');
+    await expect(auth.login({ username: 'alice', password: SIGNUP.password })).rejects.toThrow(UnauthorizedException);
+    expect(await reasons()).toContain('suspended');
+    await usersSvc.unsuspend(alice.id, ADMIN);
+    await expect(auth.login({ username: 'alice', password: SIGNUP.password })).resolves.toMatchObject({ id: alice.id });
+  });
+
+  it('**틀린 비밀번호면 정지를 드러내지 않는다** — 확인 뒤에 본다', async () => {
+    const alice = await approvedAlice();
+    await usersSvc.suspend(alice.id, ADMIN);
+    await expect(auth.login({ username: 'alice', password: 'wrong-password' })).rejects.toThrow(UnauthorizedException);
+    expect(await reasons()).toEqual(['wrong']);
+  });
+
+  it('자기 자신·승인 대기·이미 정지된 계정·관리자가 root — 정지하지 못한다', async () => {
+    const alice = await approvedAlice();
+    await expect(usersSvc.suspend(alice.id, { id: alice.id, role: 'admin' })).rejects.toThrow(/자기 자신/);
+    await auth.signup({ ...SIGNUP, username: 'bob', email: 'bob@example.internal' });
+    const bob = (await usersSvc.findByUsername('bob'))!;
+    await expect(usersSvc.suspend(bob.id, ADMIN)).rejects.toThrow(/활성 계정만/);
+    await usersSvc.suspend(alice.id, ADMIN);
+    await expect(usersSvc.suspend(alice.id, ADMIN)).rejects.toThrow(/활성 계정만/);
+    const [r] = await db.insert(users).values({ username: 'root2', displayName: 'root2', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    await expect(usersSvc.suspend(r.id, ADMIN)).rejects.toThrow(ForbiddenException);
+    await expect(usersSvc.unsuspend(bob.id, ADMIN)).rejects.toThrow(/정지된 계정이 아니다/);
+  });
+
+  it('**마지막 활성 root는 정지하지 못한다** — 둘이 서로를 동시에 정지해도 한 명은 남는다', async () => {
+    const [a] = await db.insert(users).values({ username: 'root-a', displayName: 'a', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    const [b] = await db.insert(users).values({ username: 'root-b', displayName: 'b', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    const settled = await Promise.allSettled([
+      usersSvc.suspend(b.id, { id: a.id, role: 'root' }),
+      usersSvc.suspend(a.id, { id: b.id, role: 'root' }),
+    ]);
+    expect(settled.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+    const [{ n }] = (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM users WHERE role = 'root' AND status = 'active'`)).rows;
+    expect(n).toBe(1);
+  });
+
+  it('**사내 계정은 IdP로 다시 들어와도 되살아나지 않는다** — 예전에는 로그인마다 상태를 활성으로 덮었다', async () => {
+    const first = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: 's' }, { state: 's', nonce: 'n' });
+    await usersSvc.suspend(first.id, ROOT);
+    await expect(auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: 's' }, { state: 's', nonce: 'n' })).rejects.toThrow(/정지돼 있다/);
+    expect((await usersSvc.findById(first.id))?.status).toBe('suspended');
+    expect(await reasons()).toContain('suspended');
+  });
+
+  it('정지된 사람은 비밀번호 찾기의 대상이 아니다 — 활성만 본다 (FR-1446)', async () => {
+    const alice = await approvedAlice();
+    await usersSvc.suspend(alice.id, ADMIN);
+    expect(await usersSvc.findRecoveryTarget('alice', SIGNUP.email)).toBeNull();
   });
 });
 
