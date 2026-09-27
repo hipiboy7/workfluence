@@ -215,10 +215,11 @@ describe('Phase 13 — DB 계정과 최초 계정 (P13 FR-1421·1422)', () => {
   });
 
   it('**앱 계정 비밀번호는 16자 이상, 영문·숫자·`._~-`만** — 접속 주소(URL)에 그대로 들어가고, 데이터베이스에 보낼 확인값(SCRAM)을 앱이 만든다 (병합 전 검토 — 평문을 DB 문장에 싣지 않는다)', () => {
-    // 시험 값은 실제 비밀번호 모양(엔트로피가 높은 값)을 흉내 내지 않는다 — gitleaks가 키로 읽는다 (T-045)
-    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'aaaa-bbbb-cccc-dd' }).WF_DB_APP_PASSWORD).toBe('aaaa-bbbb-cccc-dd');
-    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'aaaa.bbbb_cccc~dd' }).WF_DB_APP_PASSWORD).toBe('aaaa.bbbb_cccc~dd');
-    for (const bad of ['aaaa-bbbb-cccc', 'has space inside it', 'slash/in/the/password', 'percent%encoded-value', 'hash#in-the-password', 'dollar$sign-password', '한글이섞인비밀번호0123456789']) {
+    // 시험 값은 실제 비밀번호 모양(엔트로피가 높은 값)을 흉내 내지 않는다 — gitleaks가 키로 읽는다 (T-045, T-060).
+    // **경계를 박는다** — 16자는 받고 15자는 거절, 256자는 받고 257자는 거절(좁은 자체 점검 10 — 17자·14자만 보면 규칙의 16을 15·17로 바꿔도 초록이다)
+    const app = (pw: string) => parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: pw }).WF_DB_APP_PASSWORD;
+    for (const ok of ['aaaa-bbbb-cccc-d', 'aaaa.bbbb_cccc~d', 'a'.repeat(256)]) expect(app(ok), ok).toBe(ok);
+    for (const bad of ['aaaa-bbbb-cccc-', 'a'.repeat(257), 'has space inside it', 'slash/in/the/password', 'percent%encoded-value', 'hash#in-the-password', 'dollar$sign-password', '한글이섞인비밀번호0123456789']) {
       expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: bad }), bad).toThrow(/WF_DB_APP_PASSWORD/);
     }
   });
