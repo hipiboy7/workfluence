@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
+import { applyAppRole } from './app-role';
 
 export const MIGRATIONS_FOLDER = resolve(__dirname, '..', '..', 'drizzle');
 
@@ -21,11 +22,14 @@ if (require.main === module) {
   // CLI 실행: 루트 .env를 읽는다 (config.module과 같은 로더·같은 접속 문자열 선택)
   (async () => {
     const { loadEnv, databaseUrl } = await import('../config/config.module');
-    const url = databaseUrl(loadEnv());
+    const env = loadEnv();
+    const url = databaseUrl(env);
     const pool = new Pool({ connectionString: url });
     try {
       console.log(`[migrate] ${MIGRATIONS_FOLDER} → ${url.replace(/\/\/.*@/, '//***@')}`);
       console.log(`[migrate] ${await runMigrations(pool)}`);
+      // **앱 계정과 권한** (P13 D.3, 보류 12) — 운영(compose의 tools)에서만 값이 있다. 개발·시험은 비어 있어 하지 않는다
+      if (env.WF_DB_APP_ROLE && env.WF_DB_APP_PASSWORD) console.log(`[migrate] ${await applyAppRole(pool, env.WF_DB_APP_ROLE, env.WF_DB_APP_PASSWORD)}`);
     } finally {
       await pool.end();
     }
