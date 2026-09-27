@@ -8,6 +8,7 @@ import {
   SPACE_KINDS,
   SPACE_MEMBER_ROLES,
   SPACE_STATUSES,
+  USER_LIST_PAGE,
   USER_STATUSES,
 } from './constants';
 import { validateDocument, type DocNode } from './document';
@@ -287,7 +288,7 @@ export type UserListFilter = (typeof USER_LIST_FILTERS)[number];
 export const listUsersDto = z.object({
   q: z.string().trim().max(100).optional(),
   status: z.enum(USER_LIST_FILTERS).optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
+  limit: z.coerce.number().int().min(1).max(500).default(USER_LIST_PAGE),
   offset: z.coerce.number().int().min(0).default(0),
 });
 export type ListUsersDto = z.infer<typeof listUsersDto>;

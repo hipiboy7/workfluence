@@ -10,6 +10,8 @@ export type Role = (typeof ROLES)[number];
 /** 사용자 상태. '잠김'은 저장하지 않고 locked_until로 파생한다 */
 /** 사용자 상태. **정지**(`suspended`)는 퇴사자 처리다 — 로그인 불가, 내용·소속은 남는다 (P13 C.5, FR-1440) */
 export const USER_STATUSES = ['pending', 'active', 'suspended'] as const;
+/** 사용자 목록 한 번의 수 (P13 FR-1451). 서버의 기본값과 화면의 "더 보기"가 같은 값을 쓴다 — 300명 규모에서 셋으로 끝까지 닿는다 */
+export const USER_LIST_PAGE = 100;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
 export const SPACE_KINDS = ['personal', 'team'] as const;
@@ -86,6 +88,8 @@ export const AUDIT_ACTIONS = [
   'page.export',
   'page.collab.save',
   'page.collab.flush',
+  // 실시간 편집의 제목 바꾸기 — 바꾼 사람을 남긴다. 저장의 작성자는 마지막으로 친 사람이라, 이것이 없으면 제목을 바꾼 사람이 흐려진다 (병합 전 보안 검토 L2)
+  'page.collab.title',
   'template.create',
   'template.update',
   'template.delete',

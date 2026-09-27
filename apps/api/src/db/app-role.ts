@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import { escapeIdentifier, escapeLiteral, type Pool } from 'pg';
+import { scramSha256Verifier } from '../common/domain/scram';
 
 /**
  * **앱 DB 계정과 권한** (P13_설계서_Readiness D.3, FR-1420·1421, 보류 12). B등급 — 실제 PostgreSQL로 시험한다.
@@ -20,8 +22,11 @@ export async function applyAppRole(pool: Pool, role: string, password: string): 
     await client.query('BEGIN');
     const exists = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role]);
     if (exists.rowCount === 0) await client.query(`CREATE ROLE ${who} LOGIN`);
-    // 속성은 매번 다시 좁힌다 — 누가 손으로 넓혀 둔 계정도 돌아온다
-    await client.query(`ALTER ROLE ${who} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${escapeLiteral(password)}`);
+    // 속성은 매번 다시 좁힌다 — 누가 손으로 넓혀 둔 계정도 돌아온다.
+    // **평문 대신 SCRAM 확인값을 보낸다** (병합 전 검토) — 평문을 실은 문장은 실패하거나 `log_statement`가 켜져 있으면 postgres 로그에
+    // 그대로 남는다(`CLAUDE.md` 7절). PostgreSQL은 이 모양의 값을 계산된 것으로 알아보고 그대로 저장한다
+    const verifier = scramSha256Verifier(password, randomBytes(16));
+    await client.query(`ALTER ROLE ${who} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${escapeLiteral(verifier)}`);
     const { rows } = await client.query<{ db: string }>('SELECT current_database() AS db');
     await client.query(`GRANT CONNECT ON DATABASE ${escapeIdentifier(rows[0].db)} TO ${who}`);
     // DDL을 막는다. PostgreSQL 15부터 PUBLIC에는 CREATE가 없지만, 그 전에 만든 DB라면 PUBLIC을 거쳐 얻는다 — 둘 다 거둔다
