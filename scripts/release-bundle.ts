@@ -21,8 +21,8 @@ import { bundleFiles } from './release-files';
  * 검사가 어긋남을 못 잡는다. 폐쇄망에서 `up -d`가 "이미지 없음"으로 죽고, 거기서는 두 번째
  * 시도가 없다 (코드 리뷰 3). 이제 **compose가 요구하는 것만** 저장된다.
  */
-function composeImages(): string[] {
-  return sh('docker', [...COMPOSE_ARGS, 'config', '--images'], true)
+function composeImages(env: NodeJS.ProcessEnv = process.env): string[] {
+  return sh('docker', [...COMPOSE_ARGS, 'config', '--images'], true, env)
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -30,8 +30,44 @@ function composeImages(): string[] {
 
 const COMPOSE_ARGS = ['compose', '-f', 'deploy/compose.yml', '--env-file', 'deploy/.env'] as const;
 
-const sh = (cmd: string, args: string[], capture = false): string => {
-  const r = execFileSync(cmd, args, { maxBuffer: 1024 * 1024 * 1024, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
+/** 앱 이미지의 커밋 라벨 (Dockerfile의 `GIT_SHA`) */
+const REVISION_LABEL = 'org.opencontainers.image.revision';
+
+/**
+ * **앱 이미지가 지금 커밋으로 빌드됐는가** (P13 FR-1404). 예전에는 `MANIFEST`의 gitSha가 저장소 HEAD일 뿐 이미지와 묶여 있지 않아, 다른
+ * 커밋으로 빌드된 `latest`를 담아도 검사가 알아채지 못했다. 이미지에 붙은 커밋 라벨과 HEAD를 견주고, 다르면 묶지 않는다
+ */
+function assertAppImageIsHead(images: string[]): void {
+  const app = images.find((i) => i.startsWith('workfluence-app'));
+  if (!app) throw new Error(`compose의 이미지 가운데 앱 이미지(workfluence-app)가 없다 — ${images.join(', ')}`);
+  // **폐쇄망의 compose가 찾을 이름으로 묶는다** (P13 검토). 거기서는 `env.template`의 `WF_APP_IMAGE`가 비어 compose의 기본 이름을
+  // 찾는다 — 여기서 `WF_APP_IMAGE`(셸이나 deploy/.env)로 다른 태그를 묶으면 폐쇄망의 `up -d`가 "이미지 없음"으로 죽는다.
+  // 기본 이름은 compose에게 묻는다(값을 비우면 `${WF_APP_IMAGE:-…}`가 기본값이 된다) — 이름을 여기 두 번 적지 않는다
+  const expected = composeImages({ ...process.env, WF_APP_IMAGE: '' }).find((i) => i.startsWith('workfluence-app'));
+  if (app !== expected) {
+    throw new Error(
+      `앱 이미지가 ${app}다 — 폐쇄망의 compose는 ${expected}를 찾는다. WF_APP_IMAGE를 셸과 deploy/.env에서 비우고 다시 묶는다`,
+    );
+  }
+  // **커밋하지 않은 변경이 있으면 묶지 않는다** (P13 검토). 이미지는 작업 폴더에 있는 그대로 만들어지는데(`COPY . .`) 라벨은 커밋
+  // 번호만 적는다 — 라벨은 HEAD와 같아도 내용이 다른 이미지가 반입된다. 무시 목록(`.local` 등)은 여기 나오지 않는다
+  const dirty = sh('git', ['status', '--porcelain'], true);
+  if (dirty) {
+    throw new Error(`커밋하지 않은 변경이 있다 — 커밋한 뒤 다시 빌드하고 묶는다:\n${dirty}`);
+  }
+  const head = sh('git', ['rev-parse', 'HEAD'], true);
+  const label = sh('docker', ['inspect', '-f', `{{ index .Config.Labels "${REVISION_LABEL}" }}`, app], true);
+  if (label !== head) {
+    throw new Error(
+      `앱 이미지(${app})는 커밋 ${label || '(라벨 없음)'}로 빌드됐다 — 지금은 ${head}다. 지금 커밋으로 다시 빌드한다: ` +
+        'GIT_SHA=$(git rev-parse HEAD) docker compose -f deploy/compose.yml --env-file deploy/.env build api',
+    );
+  }
+  console.log(`[release] 앱 이미지 ${app} = 커밋 ${head.slice(0, 7)}`);
+}
+
+const sh = (cmd: string, args: string[], capture = false, env: NodeJS.ProcessEnv = process.env): string => {
+  const r = execFileSync(cmd, args, { env, maxBuffer: 1024 * 1024 * 1024, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
   return capture ? r.toString().trim() : '';
 };
 
@@ -45,12 +81,17 @@ function main(): void {
   // 이미지를 **하나의 tar로** 묶는다. 따로 두면 하나만 빠뜨린 채 반입된다
   const images = composeImages();
   if (images.length === 0) throw new Error('compose가 요구하는 이미지를 하나도 찾지 못했다');
+  assertAppImageIsHead(images);
   console.log(`[release] 이미지 저장 중… (${images.join(', ')})`);
   sh('docker', ['save', '-o', join(out, 'images.tar'), ...images]);
 
   copyFileSync('deploy/compose.yml', join(out, 'compose.yml'));
   copyFileSync('deploy/nginx.conf', join(out, 'nginx.conf'));
   copyFileSync('docs/운영가이드_반입.md', join(out, '반입절차.md'));
+  // **운영 문서** (P13 FR-1402). 폐쇄망에서는 저장소를 열 수 없다 — 반입 가이드가 운영 가이드의 절을 가리킨다. 원래 이름으로 `docs/`에 둔다:
+  // 문서끼리의 상대 링크가 묶음 안에서도 이어진다. 목록은 `RELEASE_REQUIRED_FILES`에서 읽는다 — 한 곳에만 적는다
+  mkdirSync(join(out, 'docs'), { recursive: true });
+  for (const f of RELEASE_REQUIRED_FILES.filter((x) => x.startsWith('docs/'))) copyFileSync(f, join(out, f));
   // **사내 CA 자리** (P11 D.7) — 안내 파일만 넣어 `ca/`가 풀린 사람의 것으로 생기게 한다. 묶음에 없으면 첫 기동에서 도커가 root 소유로
   // 만들어, 현장에서 인증서를 넣을 때 일반 계정은 `Permission denied`다. **인증서는 넣지 않는다** — 현장의 것이다(`certs`와 같다)
   mkdirSync(join(out, 'ca'), { recursive: true });
@@ -144,7 +185,8 @@ function main(): void {
 
   const bytes = present.reduce((n, f) => n + statSync(join(out, f)).size, 0);
   console.log(`[release] 완료 — ${present.length}개 파일 · ${(bytes / 1024 / 1024).toFixed(0)}MB`);
-  console.log(`[release] 반입 직전·직후에 'pnpm release:verify ${out}'를 돌린다`);
+  // 폐쇄망에는 pnpm이 없다 — 받는 쪽은 묶음 안의 지문을 `sha256sum -c`로 본다(반입 가이드 1절). 이 검사는 싸기 직전에 한다
+  console.log(`[release] 싸기 전에 'pnpm release:verify ${out}'를 돌린다. 폐쇄망에서는 묶음 안의 SHA256SUMS를 sha256sum -c로 본다(반입 가이드 1절)`);
 }
 
 main();

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { DocNode, PageView } from '@workfluence/shared';
+import * as Y from 'yjs';
+import { COLLAB_LIMITS, type DocNode, type PageView } from '@workfluence/shared';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { CollabEditor, type CollabState } from '../components/CollabEditor';
@@ -14,6 +15,26 @@ type Conflict = { currentVersionNo: number; baseVersionNo: number; message: stri
  * **충돌하면 안내만 하고 덮어쓰기 버튼을 주지 않는다.** 한 번 허용하면 남의 저장을 지우는
  * 것이 정상 동작이 된다. 최신을 불러와 다시 편집하게 한다.
  */
+/** 실시간 편집에서 제목 입력을 멈추고 이만큼 뒤에 방에 알린다 (P13 FR-1460) */
+const TITLE_SEND_DELAY_MS = 1000;
+
+/** base64로 — 저장하고 보기로가 싣는 스냅숏. 한꺼번에 펼치면 큰 값에서 호출 스택을 넘으므로 나눠 옮긴다 */
+const toBase64 = (bytes: Uint8Array): string => {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+/**
+ * 화면 문서의 **스냅숏**(상태 벡터 + 지운 기록) — 서버가 그만큼 받았는지 본다 (P13 D.7). 상태 벡터만 보내면 지우기만 한 입력을 놓친다(좁은
+ * 자체 점검 2). 상한(`COLLAB_LIMITS.maxFlushSnapshotChars`)을 넘으면 싣지 않는다 — 서버는 판정을 건너뛰고, 저장은 막지 않는다
+ */
+const snapshotOf = (doc: Y.Doc | null): string | undefined => {
+  if (!doc || doc.isDestroyed) return undefined;
+  const b64 = toBase64(Y.encodeSnapshot(Y.snapshot(doc)));
+  return b64.length <= COLLAB_LIMITS.maxFlushSnapshotChars ? b64 : undefined;
+};
+
 export function PageEditorPage() {
   const { id = '' } = useParams();
   const nav = useNavigate();
@@ -53,6 +74,56 @@ export function PageEditorPage() {
       .then((c) => setCollab(c.collabEnabled))
       .catch(() => setCollab(false)); // 못 물어보면 단독 편집으로 간다 — 못 쓰는 것보다 낫다
   }, []);
+  // **실시간 편집에서는 제목도 방에 알린다** (P13 FR-1460) — 입력을 멈추고 잠시 뒤. 예전에는 "저장하고 보기로"를 눌러야만 서버에 가서,
+  // 제목만 고치고 창을 닫으면 사라졌다. 처음 불러온 제목은 보내지 않는다. **방이 받았다고 답해야 보낸 것으로 친다** — 받지 못했으면(방이 없다·
+  // 실패) "저장하고 보기로"가 제목을 싣는다 (병합 전 자체 점검 2)
+  const sentTitle = useRef<string | null>(null);
+  // 입력을 멈추기를 기다리는 제목 — 떠날 때 보낸다(아래)
+  const pendingTitle = useRef<string | null>(null);
+  // 그 제목을 보낼 타이머 — "저장하고 보기로"가 제목을 실으면 끈다. 끄지 않으면 저장이 1초를 넘길 때 같은 제목이 한 번 더 가서 그 사이 동료가
+  // 바꾼 제목을 되돌린다 (좁은 자체 점검 4)
+  const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendTitle = useCallback(
+    (t: string, keepalive = false) => {
+      pendingTitle.current = null;
+      void api<{ applied: boolean }>(`/api/pages/${id}/collab/title`, { method: 'POST', json: { title: t }, keepalive })
+        .then((r) => {
+          if (r?.applied) sentTitle.current = t;
+        })
+        .catch(() => undefined);
+    },
+    [id],
+  );
+  useEffect(() => {
+    if (!collab || !page) return;
+    const t = title.trim();
+    if (!t || t === (sentTitle.current ?? page.title)) {
+      pendingTitle.current = null;
+      return;
+    }
+    pendingTitle.current = t;
+    const timer = setTimeout(() => sendTitle(t), TITLE_SEND_DELAY_MS);
+    titleTimer.current = timer;
+    return () => clearTimeout(timer);
+  }, [collab, page, title, sendTitle]);
+  // **떠나기 전에 보낸다** (병합 전 코드 리뷰 4) — 입력을 멈추고 1초가 되기 전에 "← 보기로"를 누르거나 창을 닫으면 보내지 않았다. 창을 닫을
+  // 때도 가도록 `keepalive`로 보낸다
+  useEffect(() => {
+    const flushPending = () => {
+      const t = pendingTitle.current;
+      if (t) sendTitle(t, true);
+    };
+    window.addEventListener('pagehide', flushPending);
+    return () => {
+      window.removeEventListener('pagehide', flushPending);
+      flushPending();
+    };
+  }, [sendTitle]);
+  // 실시간 편집기의 문서 — 저장하고 보기로가 스냅숏을 싣는다 (P13 D.7)
+  const ydoc = useRef<Y.Doc | null>(null);
+  const onDoc = useCallback((d: Y.Doc | null) => {
+    ydoc.current = d;
+  }, []);
   const onPeers = useCallback((names: string[]) => setPeers(names), []);
   const onState = useCallback((s: CollabState) => setLink(s), []);
   const onSaveBlocked = useCallback((r: string | null) => setSaveBlocked(r), []);
@@ -65,18 +136,40 @@ export function PageEditorPage() {
       // 유휴를 기다리게 하면 눌러도 아무 일이 없는 것처럼 보인다
       setBusy(true);
       setSaveError(null);
+      // **제목은 이 화면에서 고친 것이 아직 방에 가지 않았을 때만 보낸다** (P13 FR-1463, 병합 전 검토). 동료가 먼저 바꾼 제목은 이 화면의
+      // 제목 칸에 옛 제목으로 남아 있다(제목 칸은 동료의 화면에 곧바로 바뀌지 않는다 — 설계서 A.1-8). 늘 보내면 누르는 순간 새 제목을 옛 제목으로
+      // 되돌렸고, 처음 불러온 제목과 견주면 한 번 고쳐 이미 보낸 뒤에도 늘 보냈다 — **마지막으로 방이 받은 제목과 견준다**
+      const t = title.trim();
+      const edited = page !== null && t !== (sentTitle.current ?? page.title);
+      if (edited) {
+        // 이 요청이 싣는다 — 기다리던 제목과 그 타이머를 거둔다
+        pendingTitle.current = null;
+        if (titleTimer.current) clearTimeout(titleTimer.current);
+      }
+      // **화면의 스냅숏을 싣는다** — 서버가 그만큼(넣은 것도 지운 것도) 받지 못했으면 저장했다고 답하지 않는다(끊긴 줄 모르는 연결)
+      const snapshot = snapshotOf(ydoc.current);
+      // 저장되지 않았으면 싣고 간 제목을 다시 기다리게 둔다 — 서버는 그 제목을 적용하기 전에 답한다. 떠날 때 보낸다(위)
+      const keepTitle = () => {
+        if (edited) pendingTitle.current = t;
+      };
       try {
-        const r = await api<{ saved: boolean; reason: string }>(`/api/pages/${id}/collab/flush`, { method: 'POST', json: { title } });
+        const r = await api<{ saved: boolean; reason: string }>(`/api/pages/${id}/collab/flush`, {
+          method: 'POST',
+          json: { ...(edited ? { title: t } : {}), ...(snapshot ? { snapshot } : {}) },
+        });
+        if (r.saved && edited) sentTitle.current = t;
         // **저장되지 않았으면 넘어가지 않는다.** 연결이 끊긴 채 누르거나 문서가 검증을
         // 통과하지 못하면 `saved: false`가 오는데, 전에는 그 값을 보지도 않고 보기로
         // 넘어갔다 — 사용자는 저장됐다고 믿고 화면에는 옛 내용이 뜬다 (P6 코드 리뷰 5a).
         // **왜 안 됐는지도 말한다** — "저장이 안 됐다"만으로는 무엇을 고쳐야 할지 모른다
         if (!r.saved) {
+          keepTitle();
           setSaveError(r.reason ? `저장되지 않았다: ${r.reason}` : '저장되지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다');
           setBusy(false);
           return;
         }
       } catch (e) {
+        keepTitle();
         setSaveError(e instanceof Error ? e.message : String(e));
         setBusy(false);
         return;
@@ -130,7 +223,7 @@ export function PageEditorPage() {
         <label htmlFor="ed-body">본문</label>
         <div id="ed-body">
           {collab && me ? (
-            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} onSaveBlocked={onSaveBlocked} />
+            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} onSaveBlocked={onSaveBlocked} onDoc={onDoc} />
           ) : (
             <Editor value={page.content} onChange={setDoc} />
           )}

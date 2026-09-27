@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Inject, Module, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import {
+  collabTitleDto,
   createPageDto,
   flushCollabDto,
   movePageDto,
@@ -129,23 +130,45 @@ export class PagesController {
   }
 
   /**
+   * **실시간 편집의 제목** (P13 D.7, FR-1460). 화면이 입력을 멈추면(그리고 떠날 때) 부른다 — 방이 그것을 변경으로 적어 유휴 저장에 싣는다. 예전에는
+   * "저장하고 보기로"를 누를 때만 제목이 갔다. 쓰기 권한을 본다(flush와 같다). 사람이 없는 방이면 곧바로 남기고, 방이 없으면 열어서 남긴다
+   * (`CollabGateway.setTitle`). 실시간 편집이 꺼져 있으면 `applied: false`
+   */
+  @Post(':id/collab/title')
+  async collabTitle(
+    @Param('id', UuidPipe) id: string,
+    @Body(new ZodPipe(collabTitleDto)) dto: ReturnType<typeof collabTitleDto.parse>,
+    @CurrentUser() me: SessionUser,
+  ): Promise<{ applied: boolean }> {
+    const page = await this.pages.get(id, me);
+    await this.spaces.assertWrite(page.spaceId, me);
+    const applied = await this.collab.setTitle(id, dto.title, me.id);
+    // **바꾼 사람을 남긴다** (병합 전 보안 검토 L2). 저장의 작성자는 마지막으로 친 사람이라, 뒤에 다른 사람이 치면 제목을 바꾼 사람이
+    // 이력과 감사로그에서 사라진다 — flush의 `page.collab.flush`(P7 보안 검토 F3)와 같은 까닭이다
+    if (applied) {
+      await this.audit.record({ action: 'page.collab.title', actorId: me.id, targetType: 'page', targetId: id, detail: { title: dto.title } });
+    }
+    return { applied };
+  }
+
+  /**
    * 실시간 편집 중인 문서를 **지금 바로** 버전으로 남긴다 (FR-706의 사람 쪽 문).
    *
-   * 화면의 저장 버튼이 이것을 부른다. 유휴를 기다리게 하면 "지금 저장한다"는 약속과
-   * 동작이 어긋난다. 남길 것이 없으면(방이 없거나 내용이 그대로) 그냥 `saved: false`다 —
-   * 오류가 아니다.
+   * 화면의 저장 버튼이 이것을 부른다. 유휴를 기다리게 하면 "지금 저장한다"는 약속과 동작이 어긋난다. 방이 없으면 `saved: false`다 — 오류가
+   * 아니다. 자동 저장이 이미 남겼으면 `saved: true, unchanged: true`다(P13 FR-1462). 화면이 보낸 스냅숏(`snapshot` — 넣은 것과 지운 것)만큼
+   * 받지 못했으면 `saved: false`다 — 끊긴 줄 모르는 연결에서 누른 것이다(P13 D.7)
    */
   @Post(':id/collab/flush')
   async flush(
     @Param('id', UuidPipe) id: string,
     @Body(new ZodPipe(flushCollabDto)) dto: ReturnType<typeof flushCollabDto.parse>,
     @CurrentUser() me: SessionUser,
-  ): Promise<{ saved: boolean; reason: string; currentVersionNo: number }> {
+  ): Promise<{ saved: boolean; reason: string; unchanged: boolean; currentVersionNo: number }> {
     // **쓰기 권한을 본다.** WebSocket을 거치지 않고 부를 수 있는 경로이고,
     // 읽기만 되는 사람이 강제 저장을 일으키면 유휴 묶음(FR-707)이 무력해진다 (자체 점검 16)
     const page = await this.pages.get(id, me);
     await this.spaces.assertWrite(page.spaceId, me);
-    const result = await this.collab.flush(id, dto.title);
+    const result = await this.collab.flush(id, dto.title, dto.snapshot ? new Uint8Array(Buffer.from(dto.snapshot, 'base64')) : undefined);
     // **누가 눌렀는지 남긴다** (P7 보안 검토 F3). 저장되는 버전의 작성자는 **실제로 글자를
     // 바꾼 사람**(FR-802)이라, 이것이 없으면 "B가 A의 문서를 B가 정한 제목으로 남겼는데
     // 이력과 감사로그에는 A만 보이는" 상태가 된다 — 사후 조사가 엉뚱한 사람을 가리킨다
@@ -154,10 +177,11 @@ export class PagesController {
       actorId: me.id,
       targetType: 'page',
       targetId: id,
-      detail: { saved: result.saved, reason: result.reason, titleGiven: dto.title ?? null },
+      // **새로 남겼나, 이미 있었나를 가른다** (병합 전 코드 리뷰 7) — 고칠 수 없는 기록에서 둘이 같은 `saved: true`로 보였다
+      detail: { saved: result.saved, unchanged: result.unchanged ?? false, reason: result.reason, titleGiven: dto.title ?? null },
     });
     const after = await this.pages.get(id, me);
-    return { saved: result.saved, reason: result.reason, currentVersionNo: after.currentVersionNo };
+    return { saved: result.saved, reason: result.reason, unchanged: result.unchanged ?? false, currentVersionNo: after.currentVersionNo };
   }
 
   /** 두 버전의 차이 (FR-720). 읽을 수 있으면 볼 수 있다 */

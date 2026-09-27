@@ -2,12 +2,15 @@ import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
+  COLLAB_LIMITS,
   LLM_LIMITS,
   REQUEST_ID_PATTERN,
   ROLES,
   SPACE_KINDS,
   SPACE_MEMBER_ROLES,
   SPACE_STATUSES,
+  USER_LIST_MAX,
+  USER_LIST_PAGE,
   USER_STATUSES,
 } from './constants';
 import { validateDocument, type DocNode } from './document';
@@ -279,6 +282,22 @@ export type UserView = {
   createdAt: string;
 };
 
+/** 사용자 목록에서 거를 수 있는 상태 — 잠김은 저장값이 아니라 파생값이다(FR-230) */
+export const USER_LIST_FILTERS = ['pending', 'active', 'locked', 'suspended'] as const;
+export type UserListFilter = (typeof USER_LIST_FILTERS)[number];
+
+/** 사용자 목록의 찾기·거르기·나누기 (P13 C.6, FR-1450~1452) — 기본 100명에서 조용히 끊겼다 */
+export const listUsersDto = z.object({
+  q: z.string().trim().max(100).optional(),
+  status: z.enum(USER_LIST_FILTERS).optional(),
+  limit: z.coerce.number().int().min(1).max(USER_LIST_MAX).default(USER_LIST_PAGE),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type ListUsersDto = z.infer<typeof listUsersDto>;
+
+/** 목록 한 조각과 전체 수 */
+export type UserListView = { items: UserView[]; total: number };
+
 export type MeView = {
   id: string;
   username: string;
@@ -287,7 +306,12 @@ export type MeView = {
   mustChangePassword: boolean;
   /** root가 준 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1) */
   grants: DelegableAction[];
+  /** 비밀번호로 로그인하는 계정인가 — 사내 계정은 아니다. 화면이 **비밀번호 변경**을 보일지 정한다 (P13 FR-1471) */
+  hasPassword: boolean;
 };
+
+/** 로그인 전에도 읽는 비밀번호 규칙 — 길이와 문자 종류 수만 (P13 FR-1472). 잠금 기준·세션 시간은 주지 않는다 */
+export type PasswordRulesView = { minLength: number; minCharClasses: number };
 
 export type CategoryView = { id: string; name: string; createdAt: string };
 
@@ -340,7 +364,19 @@ export type PageVersionView = {
   createdAt: string;
 };
 /** 실시간 편집을 **지금 바로** 버전으로 남긴다 (P6_설계서_Collab). 제목도 함께 온다 */
-export const flushCollabDto = z.object({ title: z.string().trim().min(1).max(300).optional() });
+/**
+ * 저장하고 보기로 (P6, P13 D.7 · FR-1462·1463). `snapshot`은 화면 문서의 **스냅숏**(`Y.encodeSnapshot` — 상태 벡터와 지운 기록, base64)이다 —
+ * 서버가 그만큼 받았는지 본다. 끊긴 줄 모르는 연결에서 누르면 서버는 "이미 남아 있다"로 답하고 화면은 보기로 넘어가, 보내지 못한 입력이
+ * 사라졌다(병합 전 자체 점검 8). 처음에는 상태 벡터(`sv`)만 실었는데 지우기는 상태 벡터를 올리지 않아 **지우기만 한 입력**을 놓쳤다(좁은
+ * 자체 점검 2) — `sv`는 더 읽지 않는다. 없으면 보지 않는다
+ */
+export const flushCollabDto = z.object({
+  title: z.string().trim().min(1).max(300).optional(),
+  snapshot: z.string().max(COLLAB_LIMITS.maxFlushSnapshotChars).regex(/^[A-Za-z0-9+/]*={0,2}$/, 'base64가 아니다').optional(),
+});
+/** 실시간 편집의 제목 — 입력을 멈추면 방에 알린다 (P13 FR-1460). 제목 칸과 같은 규칙이다 */
+export const collabTitleDto = z.object({ title: z.string().trim().min(1).max(300) });
+export type CollabTitleDto = z.infer<typeof collabTitleDto>;
 export type FlushCollabDto = z.infer<typeof flushCollabDto>;
 
 /** 페이지 템플릿 (P6_설계서_Collab FR-740) */

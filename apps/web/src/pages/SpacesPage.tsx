@@ -55,7 +55,8 @@ export function SpacesPage() {
         {can(principal, 'settings.manage') && <> · <Link to="/admin/policy">운영 설정</Link></>}
         {/* LLM 연결 관리 — root, 그리고 root가 위임한 관리자 (P11_설계서_Ops D.1). 판정은 서버의 가드와 같은 `can()` */}
         {can(principal, 'llm.manage') && <> · <Link to="/admin/llm">LLM 연결</Link></>}
-        {' · '}<Link to="/change-password">비밀번호 변경</Link>
+        {/* 사내 계정은 비밀번호가 없다 — IdP에서 바꾼다 (P13 FR-1471) */}
+        {me.hasPassword && <>{' · '}<Link to="/change-password">비밀번호 변경</Link></>}
         {' · '}<button type="button" className="linklike" onClick={() => void logout()}>로그아웃</button>
       </p>
       {error && <p className="badge fail" role="alert">{error}</p>}

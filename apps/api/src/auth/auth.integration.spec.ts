@@ -8,6 +8,7 @@ import { auditEvents, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { loadEnv } from '../config/config.module';
 import { SettingsService } from '../settings/settings.service';
+import { UsersController } from '../users/users.module';
 import { UsersService, toUserView } from '../users/users.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { AuthService, toMeView } from './auth.service';
@@ -15,6 +16,8 @@ import { DEV_IDENTITY, encodeMockCode } from './oidc/mock.provider';
 import type { OidcProvider } from './oidc/oidc.provider';
 import { RevocationBus } from '../common/revocation.bus';
 import { isLogLine, type LogLine } from '../common/log-line';
+import type { Pool } from 'pg';
+import * as password from '../users/password';
 
 /**
  * B등급 통합 테스트 (P1_설계서_Auth 10절). **실제 PostgreSQL**을 쓴다.
@@ -40,7 +43,9 @@ class StubProvider implements OidcProvider {
 }
 
 let db: TestDb;
+let pool: Pool;
 let usersSvc: UsersService;
+let bus: RevocationBus;
 let audit: AuditService;
 let auth: AuthService;
 let spacesSvc: SpacesService;
@@ -52,8 +57,9 @@ function makeAuth(provider: OidcProvider | null = new StubProvider()): AuthServi
 }
 
 beforeAll(async () => {
-  ({ db } = await openTestDb());
-  usersSvc = new UsersService(db, new SettingsService(db, loadEnv()), new RevocationBus());
+  ({ db, pool } = await openTestDb());
+  bus = new RevocationBus();
+  usersSvc = new UsersService(db, new SettingsService(db, loadEnv()), bus);
   spacesSvc = new SpacesService(db);
   audit = new AuditService(db);
   auth = makeAuth();
@@ -390,6 +396,53 @@ describe('비밀번호가 바뀌면 그 사용자의 모든 세션이 끊긴다 
     expect(await countFor(alice.id)).toBe(0);
     expect(await countFor(bob.id)).toBe(1);
   });
+
+  /**
+   * **확인과 기록 사이의 변경** (병합 전 검토 — 보안 L1·코드 리뷰 2·자체 점검 3). 확인(argon2)은 연결 없이 도는데, 그 사이 본인이 비밀번호를
+   * 바꾸면 변경이 세션을 모두 지운 뒤에 옛 비밀번호의 로그인이 세션을 만들었다 — 침해를 알아채고 바꾼 비밀번호가 공격자의 세션을 남긴다
+   */
+  it('**맞는 비밀번호로 확인하는 사이 비밀번호가 바뀌면 들이지 않는다**', async () => {
+    const alice = await approvedAlice();
+    const check = await usersSvc.checkCredentials('alice', SIGNUP.password);
+    expect(check.kind).toBe('match');
+    await auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'Alice-new-2026' });
+    await expect(usersSvc.settleCredentials(check, new Date())).resolves.toEqual({ ok: false, reason: 'changed' });
+  });
+
+  it('확인하는 사이 정지되면 들이지 않는다 — 읽어 둔 행이 아니라 지금의 상태로 판정한다', async () => {
+    const alice = await approvedAlice();
+    const check = await usersSvc.checkCredentials('alice', SIGNUP.password);
+    await usersSvc.suspend(alice.id, ROOT);
+    await expect(usersSvc.settleCredentials(check, new Date())).resolves.toEqual({ ok: false, reason: 'suspended' });
+  });
+
+  it('**비밀번호 변경은 그 계정의 로그인과 줄을 선다** — 확인을 마친 로그인이 세션까지 만든 뒤에 바꿔, 그 세션도 지운다', async () => {
+    const alice = await approvedAlice();
+    let letIn!: () => void;
+    const held = new Promise<void>((r) => (letIn = r));
+    let reached!: () => void;
+    const atSession = new Promise<void>((r) => (reached = r));
+    // 로그인이 기록을 마치고 세션을 만들기 **직전에** 멈춘다 — 줄 밖이던 때는 이 틈에 변경이 모두 지우고 끝났다
+    const login = auth.login({ username: 'alice', password: SIGNUP.password }, undefined, async (u) => {
+      reached();
+      await held;
+      await sessionRow('made-while-changing', u.id);
+    });
+    await atSession;
+    const prepare = vi.spyOn(usersSvc, 'prepareChangePassword');
+    try {
+      const change = auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'Alice-new-2026' });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(prepare).not.toHaveBeenCalled(); // 줄에서 기다린다
+      letIn();
+      await login;
+      await change;
+      expect(prepare).toHaveBeenCalledTimes(1);
+    } finally {
+      prepare.mockRestore();
+    }
+    expect(await countFor(alice.id)).toBe(0);
+  });
 });
 
 describe('역할 (FR-232, FR-233)', () => {
@@ -405,6 +458,369 @@ describe('역할 (FR-232, FR-233)', () => {
   it('자기 자신의 역할은 바꿀 수 없다', async () => {
     const alice = await approvedAlice();
     await expect(usersSvc.changeRole(alice.id, 'admin', { id: alice.id, role: 'root' })).rejects.toThrow(/자기 자신/);
+  });
+});
+
+/**
+ * **한 계정씩 줄을 서서 확인한다** (P13 FR-1431, 측정 S3). 확인 뒤에 읽고 계산해 쓰던 때는 동시에 틀린 10건이 1회로 세졌다 — 서로가 읽은
+ * 값을 덮었다. 줄 안에서 잠금을 새로 읽고 실패 횟수는 한 문장으로 올리므로, 기준이 5면 넷은 '틀림', 다섯째는 그 실패로 잠가 '잠김',
+ * 나머지는 확인하지 않고 '잠김'이다(처음 정한 "확인하기 전에 센다"는 같은 계정의 맞는 동시 로그인까지 잠가서 거뒀다 — A.1-6).
+ * **잠긴 계정·없는 계정도 argon2를 한 번 돈다** (FR-1432) — 잠긴 계정만 5ms에 답하면 응답 시간으로 계정이 드러난다(측정 S0b)
+ */
+describe('잠금 — 동시에 틀려도 잠기고, 잠긴 계정도 같은 시간을 쓴다 (P13 FR-1431·1432)', () => {
+  const T = PASSWORD_POLICY.lockoutThreshold;
+  const N = T * 2;
+  async function failureReasons(): Promise<string[]> {
+    const rows = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(sql`${auditEvents.action} = 'auth.login.failure' AND ${auditEvents.targetId} = 'alice'`);
+    return rows.map((r) => (r.detail as { reason: string }).reason);
+  }
+
+  it('**동시에 틀린 N건** — 확인은 기준 횟수까지, 계정은 잠기고, 맞는 비밀번호도 막힌다', async () => {
+    const alice = await approvedAlice();
+    const verify = vi.spyOn(password, 'verifyPassword');
+    try {
+      const settled = await Promise.allSettled(Array.from({ length: N }, () => auth.login({ username: 'alice', password: 'wrong-password' })));
+      expect(settled.every((r) => r.status === 'rejected')).toBe(true);
+      expect(verify).toHaveBeenCalledTimes(T);
+    } finally {
+      verify.mockRestore();
+    }
+    expect((await usersSvc.findById(alice.id))?.lockedUntil).not.toBeNull();
+    const reasons = await failureReasons();
+    expect(reasons.filter((r) => r === 'wrong')).toHaveLength(T - 1);
+    expect(reasons.filter((r) => r === 'locked')).toHaveLength(N - (T - 1));
+    await expect(auth.login({ username: 'alice', password: SIGNUP.password })).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('**잠긴 계정은 확인하지 않지만 더미 해시로 한 번 돈다**', async () => {
+    const alice = await approvedAlice();
+    await db.update(users).set({ failedAttempts: T, lockedUntil: new Date(Date.now() + 60_000) }).where(eq(users.id, alice.id));
+    const burn = vi.spyOn(password, 'burnPasswordCheck');
+    const verify = vi.spyOn(password, 'verifyPassword');
+    try {
+      await expect(auth.login({ username: 'alice', password: SIGNUP.password })).rejects.toThrow(UnauthorizedException);
+      expect(burn).toHaveBeenCalledTimes(1);
+      expect(verify).not.toHaveBeenCalled();
+    } finally {
+      burn.mockRestore();
+      verify.mockRestore();
+    }
+  });
+
+  it('없는 계정과 비밀번호 없는 계정(사내 계정)도 한 번 돈다', async () => {
+    await db.insert(users).values({ username: 'idp-only', displayName: 'idp', passwordHash: null, role: 'member', status: 'active', oidcSub: 'sub-idp-only' });
+    const burn = vi.spyOn(password, 'burnPasswordCheck');
+    try {
+      await expect(auth.login({ username: 'nobody', password: 'whatever-1A' })).rejects.toThrow(UnauthorizedException);
+      await expect(auth.login({ username: 'idp-only', password: 'whatever-1A' })).rejects.toThrow(UnauthorizedException);
+      expect(burn).toHaveBeenCalledTimes(2);
+    } finally {
+      burn.mockRestore();
+    }
+  });
+
+  it('잠금이 풀린 뒤에는 **한 번** 확인하고, 틀리면 다시 잠긴다 — 동시에 온 둘째는 확인하지 않는다', async () => {
+    const alice = await approvedAlice();
+    await db.update(users).set({ failedAttempts: T, lockedUntil: new Date(Date.now() - 1_000) }).where(eq(users.id, alice.id));
+    const verify = vi.spyOn(password, 'verifyPassword');
+    try {
+      const settled = await Promise.allSettled([1, 2].map(() => auth.login({ username: 'alice', password: 'wrong-password' })));
+      expect(settled.every((r) => r.status === 'rejected')).toBe(true);
+      expect(verify).toHaveBeenCalledTimes(1);
+    } finally {
+      verify.mockRestore();
+    }
+    expect((await usersSvc.findById(alice.id))?.lockedUntil?.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('풀린 뒤에 맞으면 들어가고 횟수가 0이 된다', async () => {
+    const alice = await approvedAlice();
+    await db.update(users).set({ failedAttempts: T, lockedUntil: new Date(Date.now() - 1_000) }).where(eq(users.id, alice.id));
+    await expect(auth.login({ username: 'alice', password: SIGNUP.password })).resolves.toMatchObject({ id: alice.id });
+    expect(await usersSvc.findById(alice.id)).toMatchObject({ failedAttempts: 0, lockedUntil: null });
+  });
+});
+
+/**
+ * **비밀번호를 확인하는 동안 연결을 쥐지 않는다** (P13 FR-1430, 보류 16). 예전에는 트랜잭션을 연 채 argon2를 돌려, 로그인이 몰리면
+ * 연결이 모두 "idle in transaction"이 되고 남의 조회가 풀을 기다렸다(측정 S2 — 읽기 p95 0.01~0.27초 → 2~4초). 확인을 붙잡아 두고
+ * 그동안 풀을 본다
+ */
+describe('비밀번호를 확인하는 동안 DB 연결을 쥐지 않는다 (P13 FR-1430·1434, 보류 16)', () => {
+  function holdVerify() {
+    const original = password.verifyPassword;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const atVerify = new Promise<void>((r) => (reached = r));
+    const spy = vi.spyOn(password, 'verifyPassword').mockImplementation(async (h, p) => {
+      reached();
+      await held;
+      return original(h, p);
+    });
+    return { atVerify, release, restore: () => spy.mockRestore() };
+  }
+  /** 해시를 만드는 순간에 멈춘다 — 그때 빌린 연결이 있으면 트랜잭션 안에서 해싱한 것이다 */
+  function holdHash() {
+    const original = password.hashPassword;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const atHash = new Promise<void>((r) => (reached = r));
+    const spy = vi.spyOn(password, 'hashPassword').mockImplementation(async (pw) => {
+      reached();
+      await held;
+      return original(pw);
+    });
+    return { atHash, release, restore: () => spy.mockRestore() };
+  }
+  const borrowed = () => pool.totalCount - pool.idleCount;
+
+  /** **가입·관리자 생성·초기화도 해시를 트랜잭션 밖에서** (FR-1434, 병합 전 자체 점검 9 — 호출부가 준비를 빼먹어도 서비스가 트랜잭션 안에서 해시해 초록이었다) */
+  /**
+   * 해시하는 순간에 멈춰 빌린 연결을 센다. **실패해도 풀고 끝까지 기다린다** — 붙잡힌 채 남거나 뒤에서 돌면 열린 트랜잭션이 다음 시험의
+   * 표 초기화를 막거나 그 시험이 세는 연결에 잡힌다
+   */
+  async function borrowedWhileHashing(run: () => Promise<unknown>): Promise<number> {
+    const h = holdHash();
+    const job = run();
+    try {
+      await h.atHash;
+      return borrowed();
+    } finally {
+      h.release();
+      await job.catch(() => undefined);
+      h.restore();
+    }
+  }
+
+  it('가입 — 해시를 만드는 동안 빌린 연결이 없다', async () => {
+    expect(await borrowedWhileHashing(() => auth.signup({ ...SIGNUP, username: 'hash-check', email: 'hash-check@example.internal' }))).toBe(0);
+    expect(await usersSvc.findByUsername('hash-check')).toBeTruthy();
+  });
+
+  it('관리자 생성·비밀번호 초기화 — 컨트롤러가 해시를 트랜잭션을 열기 전에 만든다', async () => {
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    const req = { ip: '127.0.0.1' } as never;
+    const dto = { username: 'made-by-admin', displayName: '관리자가 만듦', email: 'made@example.internal', password: 'Made-pw-2026', role: 'member' as const };
+    expect(await borrowedWhileHashing(() => ctrl.create(dto, ROOT as never, req))).toBe(0);
+    const target = (await usersSvc.findByUsername('made-by-admin'))!;
+    expect(await borrowedWhileHashing(() => ctrl.resetPassword(target.id, ROOT as never, req))).toBe(0);
+  });
+
+  it('로그인 — 확인이 도는 동안 풀에서 빌린 연결이 없다', async () => {
+    await approvedAlice();
+    const h = holdVerify();
+    try {
+      const login = auth.login({ username: 'alice', password: SIGNUP.password });
+      await h.atVerify;
+      expect(borrowed()).toBe(0);
+      h.release();
+      await expect(login).resolves.toMatchObject({ username: 'alice' });
+    } finally {
+      h.restore();
+    }
+  });
+
+  it('비밀번호 변경 — 지금 비밀번호를 확인하는 동안도 같다', async () => {
+    const alice = await approvedAlice();
+    const h = holdVerify();
+    try {
+      const change = auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'Alice-new-2026' });
+      await h.atVerify;
+      expect(borrowed()).toBe(0);
+      h.release();
+      await change;
+    } finally {
+      h.restore();
+    }
+    await expect(auth.login({ username: 'alice', password: 'Alice-new-2026' })).resolves.toMatchObject({ id: alice.id });
+  });
+
+  it('**확인과 쓰기 사이에 비밀번호가 바뀌면 바꾸지 않는다** — 옛 비밀번호로 확인한 것이 된다', async () => {
+    const alice = await approvedAlice();
+    const prepared = await usersSvc.prepareChangePassword(alice.id, SIGNUP.password, 'Alice-new-2026');
+    await usersSvc.resetPassword(alice.id, ROOT);
+    await expect(usersSvc.changePassword(alice.id, SIGNUP.password, 'Alice-new-2026', db, prepared)).rejects.toThrow(/그 사이 비밀번호가 바뀌었다/);
+  });
+});
+
+/**
+ * **계정 정지** (P13 C.5, FR-1440~1446). 퇴사자 처리 — 로그인하지 못하고, 정지하는 순간 세션과 열린 편집 연결이 끊긴다. 로컬 계정은
+ * 비밀번호를 확인한 **뒤에** 거절한다(응답은 같은 401 — 계정 상태가 새지 않게). 사내 계정은 IdP로 다시 들어와도 되살아나지 않는다
+ */
+describe('계정 정지 (P13 FR-1440~1446)', () => {
+  const ADMIN: Principal = { id: '00000000-0000-0000-0000-00000000000a', role: 'admin' };
+  async function reasons(): Promise<string[]> {
+    const rows = await db.select({ detail: auditEvents.detail }).from(auditEvents).where(eq(auditEvents.action, 'auth.login.failure'));
+    return rows.map((r) => (r.detail as { reason: string }).reason);
+  }
+  async function sessionsOf(userId: string): Promise<number> {
+    const r = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM sessions WHERE sess->>'userId' = ${userId}`);
+    return r.rows[0].n;
+  }
+  async function addSession(userId: string, sid: string) {
+    await db.execute(sql`INSERT INTO sessions (sid, sess, expire) VALUES (${sid}, ${JSON.stringify({ userId, cookie: {} })}::json, now() + interval '1 hour')`);
+  }
+
+  it('정지하면 세션이 모두 끊기고 열린 편집 연결에 알린다 — 맞는 비밀번호로도 못 들어오고, 해제하면 다시 들어온다', async () => {
+    const alice = await approvedAlice();
+    await addSession(alice.id, 'sid-a1');
+    await addSession(alice.id, 'sid-a2');
+    const revoked: string[] = [];
+    const off = bus.onRevoke((userId) => revoked.push(userId));
+    try {
+      // 트랜잭션을 넘기지 않는다 — 서비스가 열고 커밋한 뒤에 알린다(넘기면 커밋한 호출부가 알린다 — 아래)
+      const { row, before } = await usersSvc.suspend(alice.id, ADMIN);
+      expect(row.status).toBe('suspended');
+      expect(before).toBe('active');
+    } finally {
+      off();
+    }
+    expect(revoked).toEqual([alice.id]);
+    expect(await sessionsOf(alice.id)).toBe(0);
+    expect(toUserView((await usersSvc.findById(alice.id))!).status).toBe('suspended');
+    await expect(auth.login({ username: 'alice', password: SIGNUP.password })).rejects.toThrow(UnauthorizedException);
+    expect(await reasons()).toContain('suspended');
+    await usersSvc.unsuspend(alice.id, ADMIN);
+    await expect(auth.login({ username: 'alice', password: SIGNUP.password })).resolves.toMatchObject({ id: alice.id });
+  });
+
+  it('**넘겨받은 트랜잭션 안에서는 끊는 알림을 하지 않는다** — 아직 커밋 전이라, 커밋한 호출부가 한다 (P13 D.5, 병합 전 검토)', async () => {
+    const alice = await approvedAlice();
+    const revoked: string[] = [];
+    const off = bus.onRevoke((userId) => revoked.push(userId));
+    try {
+      await db.transaction(async (tx) => {
+        await usersSvc.suspend(alice.id, ADMIN, tx);
+        await usersSvc.terminateSessions(alice.id, ADMIN, tx);
+      });
+    } finally {
+      off();
+    }
+    expect(revoked).toEqual([]);
+  });
+
+  it('**컨트롤러는 커밋한 뒤에 알린다** — 정지와 세션 강제 종료. 먼저 울리면 커밋 전 틈에 다시 붙은 연결이 옛 상태로 살아남는다', async () => {
+    const alice = await approvedAlice();
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    let committed = false;
+    const realTx = db.transaction.bind(db);
+    const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
+      const r = await realTx(...args);
+      committed = true;
+      return r;
+    }) as typeof db.transaction);
+    const seen: boolean[] = [];
+    const off = bus.onRevoke(() => seen.push(committed));
+    try {
+      await ctrl.suspend(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+      committed = false;
+      await ctrl.terminateSessions(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+    } finally {
+      off();
+      txSpy.mockRestore();
+    }
+    expect(seen).toEqual([true, true]);
+  });
+
+  it('**비밀번호 초기화·변경도 커밋한 뒤에 알린다** — 넘겨받은 트랜잭션 안에서는 알리지 않는다. 먼저 울리면 커밋 전 틈에 다시 붙은 연결이 아직 지워지지 않은 세션으로 살아남는다 (좁은 자체 점검 5)', async () => {
+    const alice = await approvedAlice();
+    const revoked: string[] = [];
+    const offInTx = bus.onRevoke((userId) => revoked.push(userId));
+    try {
+      await db.transaction(async (tx) => {
+        await usersSvc.resetPassword(alice.id, ADMIN, tx);
+      });
+    } finally {
+      offInTx();
+    }
+    expect(revoked).toEqual([]);
+
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    let committed = false;
+    const realTx = db.transaction.bind(db);
+    const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
+      const r = await realTx(...args);
+      committed = true;
+      return r;
+    }) as typeof db.transaction);
+    const seen: boolean[] = [];
+    const off = bus.onRevoke(() => seen.push(committed));
+    try {
+      const { temporaryPassword } = await ctrl.resetPassword(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+      committed = false;
+      await auth.changePassword(alice.id, { currentPassword: temporaryPassword, newPassword: 'Alice-new-2026' });
+    } finally {
+      off();
+      txSpy.mockRestore();
+    }
+    expect(seen).toEqual([true, true]);
+  });
+
+  it('**정지된 root는 강등할 수 있다** — 활성 root가 한 명뿐이어도 그 수는 줄지 않는다. 마지막 활성 root는 여전히 못 내린다 (병합 전 검토 — 코드 리뷰 5)', async () => {
+    const [a] = await db.insert(users).values({ username: 'root-a', displayName: 'A', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    const [b] = await db.insert(users).values({ username: 'root-b', displayName: 'B', passwordHash: 'x', role: 'root', status: 'suspended' }).returning();
+    await expect(usersSvc.changeRole(b.id, 'member', { id: a.id, role: 'root' })).resolves.toMatchObject({ row: { role: 'member' } });
+    await expect(usersSvc.changeRole(a.id, 'member', { id: b.id, role: 'root' })).rejects.toThrow(/마지막 root/);
+  });
+
+  it('**틀린 비밀번호면 정지를 드러내지 않는다** — 확인 뒤에 본다', async () => {
+    const alice = await approvedAlice();
+    await usersSvc.suspend(alice.id, ADMIN);
+    await expect(auth.login({ username: 'alice', password: 'wrong-password' })).rejects.toThrow(UnauthorizedException);
+    expect(await reasons()).toEqual(['wrong']);
+  });
+
+  it('자기 자신·승인 대기·이미 정지된 계정·관리자가 root — 정지하지 못한다', async () => {
+    const alice = await approvedAlice();
+    await expect(usersSvc.suspend(alice.id, { id: alice.id, role: 'admin' })).rejects.toThrow(/자기 자신/);
+    await auth.signup({ ...SIGNUP, username: 'bob', email: 'bob@example.internal' });
+    const bob = (await usersSvc.findByUsername('bob'))!;
+    await expect(usersSvc.suspend(bob.id, ADMIN)).rejects.toThrow(/활성 계정만/);
+    await usersSvc.suspend(alice.id, ADMIN);
+    await expect(usersSvc.suspend(alice.id, ADMIN)).rejects.toThrow(/활성 계정만/);
+    const [r] = await db.insert(users).values({ username: 'root2', displayName: 'root2', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    await expect(usersSvc.suspend(r.id, ADMIN)).rejects.toThrow(ForbiddenException);
+    await expect(usersSvc.unsuspend(bob.id, ADMIN)).rejects.toThrow(/정지된 계정이 아니다/);
+  });
+
+  it('**마지막 활성 root는 정지하지 못한다** — 둘이 서로를 동시에 정지해도 한 명은 남는다', async () => {
+    const [a] = await db.insert(users).values({ username: 'root-a', displayName: 'a', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    const [b] = await db.insert(users).values({ username: 'root-b', displayName: 'b', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    const settled = await Promise.allSettled([
+      usersSvc.suspend(b.id, { id: a.id, role: 'root' }),
+      usersSvc.suspend(a.id, { id: b.id, role: 'root' }),
+    ]);
+    expect(settled.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+    const [{ n }] = (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM users WHERE role = 'root' AND status = 'active'`)).rows;
+    expect(n).toBe(1);
+  });
+
+  it('**사내 계정은 IdP로 다시 들어와도 되살아나지 않는다** — 예전에는 로그인마다 상태를 활성으로 덮었다', async () => {
+    const first = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: 's' }, { state: 's', nonce: 'n' });
+    await usersSvc.suspend(first.id, ROOT);
+    await expect(auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: 's' }, { state: 's', nonce: 'n' })).rejects.toThrow(/정지돼 있다/);
+    expect((await usersSvc.findById(first.id))?.status).toBe('suspended');
+    expect(await reasons()).toContain('suspended');
+  });
+
+  it('정지된 사람은 비밀번호 찾기의 대상이 아니다 — 활성만 본다 (FR-1446)', async () => {
+    const alice = await approvedAlice();
+    await usersSvc.suspend(alice.id, ADMIN);
+    expect(await usersSvc.findRecoveryTarget('alice', SIGNUP.email)).toBeNull();
+  });
+});
+
+describe('비밀번호가 있는 계정인가 (P13 FR-1471)', () => {
+  it('로컬 계정은 참, 사내 계정은 거짓 — 화면이 **비밀번호 변경**을 보일지 정한다', async () => {
+    const alice = await approvedAlice();
+    expect(toMeView(alice).hasPassword).toBe(true);
+    const idp = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: 's' }, { state: 's', nonce: 'n' });
+    expect(toMeView(idp).hasPassword).toBe(false);
   });
 });
 

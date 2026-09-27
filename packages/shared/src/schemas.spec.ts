@@ -7,6 +7,9 @@ import {
   isUuid,
   userGrantsDto,
   changePasswordDto,
+  collabTitleDto,
+  flushCollabDto,
+  listUsersDto,
   createCategoryDto,
   createPageDto,
   createSpaceDto,
@@ -28,7 +31,7 @@ import {
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
-import { LLM_LIMITS } from './constants';
+import { COLLAB_LIMITS, LLM_LIMITS, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -254,3 +257,68 @@ describe('위임 목록 DTO (P11 F절)', () => {
   });
 });
 
+/**
+ * **사용자 목록의 찾기·거르기·나누기** (P13 C.6, FR-1450~1452). 기본 100에서 조용히 끊겨 300명 규모에서 200명을 화면에서 관리하지
+ * 못했다. 서버가 찾고 거르고 나눈다
+ */
+describe('listUsersDto (P13 FR-1450~1452)', () => {
+  it('비면 처음 100명', () => {
+    expect(listUsersDto.parse({})).toEqual({ limit: 100, offset: 0 });
+  });
+
+  it('찾는 말은 앞뒤를 잘라 100자까지', () => {
+    expect(listUsersDto.parse({ q: '  앨리스  ' }).q).toBe('앨리스');
+    expect(() => listUsersDto.parse({ q: 'x'.repeat(101) })).toThrow();
+  });
+
+  it('상태는 승인 대기·활성·잠김·정지만', () => {
+    for (const status of ['pending', 'active', 'locked', 'suspended']) expect(listUsersDto.parse({ status }).status).toBe(status);
+    expect(() => listUsersDto.parse({ status: 'deleted' })).toThrow();
+  });
+
+  it('쿼리 문자열의 숫자를 읽는다 — 한 번에 500명까지, 건너뛰기는 0 이상', () => {
+    expect(listUsersDto.parse({ limit: '50', offset: '100' })).toMatchObject({ limit: 50, offset: 100 });
+    expect(() => listUsersDto.parse({ limit: '501' })).toThrow();
+    expect(() => listUsersDto.parse({ offset: '-1' })).toThrow();
+  });
+
+  it('상한은 공유 상수다 — 화면이 같은 값으로 줄인다 (병합 전 코드 리뷰 10)', () => {
+    expect(listUsersDto.parse({ limit: String(USER_LIST_MAX) }).limit).toBe(USER_LIST_MAX);
+    expect(() => listUsersDto.parse({ limit: String(USER_LIST_MAX + 1) })).toThrow();
+    expect(listUsersDto.parse({}).limit).toBe(USER_LIST_PAGE);
+  });
+});
+
+/** **실시간 편집의 제목** (P13 FR-1460) — 입력을 멈추면 방에 알린다. 제목 칸과 같은 규칙이다 */
+describe('collabTitleDto (P13 FR-1460)', () => {
+  it('앞뒤를 자르고 1~300자', () => {
+    expect(collabTitleDto.parse({ title: '  회의록  ' })).toEqual({ title: '회의록' });
+    expect(() => collabTitleDto.parse({ title: '   ' })).toThrow();
+    expect(() => collabTitleDto.parse({ title: 'x'.repeat(301) })).toThrow();
+    expect(() => collabTitleDto.parse({})).toThrow();
+  });
+});
+
+/**
+ * **저장하고 보기로의 스냅숏** (P13 D.7 — 병합 전 자체 점검 8, 좁은 자체 점검 2). 화면이 자기 문서의 스냅숏(Yjs가 "누구의 몇 번째까지 가졌고
+ * 무엇을 지웠나"를 적는 값)을 함께 보내면 서버가 그만큼 받았는지 본다 — 끊긴 줄 모르는 연결에서 누르면 "이미 남아 있다"로 보기로 넘어가 보내지
+ * 못한 입력이 사라졌다. 처음에는 상태 벡터(`sv`)만 보냈는데, 지우기는 상태 벡터를 올리지 않아 **지우기만 한 입력**은 닿지 않아도 "저장됨"이었다
+ */
+describe('flushCollabDto — 스냅숏 (P13 D.7)', () => {
+  it('base64로 온다 — 없어도 된다', () => {
+    expect(flushCollabDto.parse({ snapshot: 'AAEBAQ==' })).toEqual({ snapshot: 'AAEBAQ==' });
+    expect(flushCollabDto.parse({})).toEqual({});
+    expect(flushCollabDto.parse({ title: '제목', snapshot: '' })).toEqual({ title: '제목', snapshot: '' });
+  });
+
+  it('**상태 벡터만 싣던 `sv`는 읽지 않는다** — 지운 기록이 없어 판정이 반쪽이다', () => {
+    expect(flushCollabDto.parse({ sv: 'AQKGAQE=' })).toEqual({});
+  });
+
+  it('base64가 아니거나 상한(`COLLAB_LIMITS.maxFlushSnapshotChars`)을 넘으면 받지 않는다', () => {
+    for (const bad of ['not base64!', 'AQ==AQ', '*'.repeat(8)]) expect(() => flushCollabDto.parse({ snapshot: bad }), bad).toThrow();
+    const max = COLLAB_LIMITS.maxFlushSnapshotChars;
+    expect(flushCollabDto.parse({ snapshot: 'A'.repeat(max) }).snapshot).toHaveLength(max);
+    expect(() => flushCollabDto.parse({ snapshot: 'A'.repeat(max + 1) })).toThrow();
+  });
+});

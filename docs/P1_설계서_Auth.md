@@ -3,6 +3,7 @@
 - 상위 문서: [`docs/설계서_Architecture.md`](설계서_Architecture.md), [`docs/scope-definition.md`](scope-definition.md)
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) 4절 1단계 산출물. 요구사항 + 설계를 한 문서에 둔다
 - 작성일: 2026-09-21 / 개정: 2026-09-21 (보안 점검 반영 — 2.4절) / 작성 LLM: Claude Opus 5
+- **Phase 13이 로그인 경로를 다시 짰다** (보류 16 닫음) — 비밀번호 확인과 해시는 트랜잭션 밖에서, 한 계정의 로그인은 줄을 서서 하나씩, 실패 횟수는 한 문장으로 올린 뒤 잠금, 잠긴 계정도 더미 해시로 한 번, 성공은 읽은 해시 그대로일 때만. 아래 흐름은 이 Phase의 기록이다 — 지금의 설계는 [`docs/P13_설계서_Readiness.md`](P13_설계서_Readiness.md) D.4
 - 인수 기준(`scope-definition.md` 5절): **가입 요청한 계정을 관리자가 승인하면 로그인된다. IdP 계정으로 로그인하면 그룹이 역할로 매핑된다. 두 경로 모두 감사로그에 남는다**
 
 ---
@@ -388,7 +389,7 @@ CREATE TRIGGER audit_events_no_update BEFORE UPDATE OR DELETE ON audit_events
   FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
 ```
 
-`CLAUDE.md` 6절은 운영에서 앱 DB 계정 권한으로도 막으라고 한다. **Phase 1에서는 하지 않았다** — 앱·마이그레이션·시드가 모두 소유자 계정 하나를 쓴다. 계정 분리는 ~~Phase 5에서~~ **아직 하지 않았다** — Phase 5가 받지 않고 반입 후로 다시 미뤘다 (`P5_검증기록_Release` 10절, 보류 12). 지금 막고 있는 것은 **트리거 한 겹뿐**이고, 그 사실을 여기 적어 둔다.
+`CLAUDE.md` 6절은 운영에서 앱 DB 계정 권한으로도 막으라고 한다. **Phase 1에서는 하지 않았다** — 앱·마이그레이션·시드가 모두 소유자 계정 하나를 쓴다. 계정 분리는 ~~Phase 5에서~~ ~~아직 하지 않았다~~ → **Phase 13에서 했다** (보류 12 닫음 2026-09-27 — 반입 전에). 앱 계정에는 `audit_events`의 UPDATE·DELETE·TRUNCATE가 없어 트리거와 권한 두 겹이다.
 
 **남기지 않는 것 (FR-238).** 비밀번호·임시 비밀번호·토큰·세션 ID. `email`은 `maskEmail`로 줄여 넣는다.
 
@@ -431,7 +432,7 @@ CREATE TRIGGER audit_events_no_update BEFORE UPDATE OR DELETE ON audit_events
 | `WF_SESSION_IDLE_MINUTES` | int | `30` | 유휴 타임아웃 |
 | `WF_SESSION_ABSOLUTE_HOURS` | int | `12` | 절대 타임아웃 |
 | `WF_ROOT_USERNAME` | string | `root` | 시드가 만드는 최초 계정 |
-| `WF_ROOT_PASSWORD` | string | **없음(필수)** | 최초 계정 비밀번호. 첫 로그인에 변경 강제 |
+| `WF_ROOT_PASSWORD` | string | ~~없음(필수)~~ → **선택** (Phase 13 — 시드만 쓴다. 기동 중인 앱에는 넘기지 않는다) | 최초 계정 비밀번호. 첫 로그인에 변경 강제 |
 | `WF_OIDC_ENABLED` | bool | `false` | 꺼지면 관련 엔드포인트 404 |
 | `WF_OIDC_ISSUER` | string | `''` | Discovery 기준 URL |
 | `WF_OIDC_CLIENT_ID` | string | `''` | |

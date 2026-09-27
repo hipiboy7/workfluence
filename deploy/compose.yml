@@ -1,7 +1,12 @@
 # 단일 호스트 compose (개발 Linux 서버·폐쇄망 운영 공용). CLAUDE.md 8.3절.
-# 기동 순서: docker compose -f deploy/compose.yml --env-file .env up -d
-# 마이그레이션(명시적 단계): docker compose -f deploy/compose.yml --env-file .env run --rm api node dist/db/migrate.js
-# 시드(최초 1회):            docker compose -f deploy/compose.yml --env-file .env run --rm api node dist/db/seed.js
+# 아래 명령은 저장소의 맨 위에서 친다 — 환경 파일은 deploy/.env다(맨 위의 .env는 개발용). 폐쇄망에서는 묶음을 푼 디렉토리에서
+# `-f compose.yml --env-file .env`로 친다(docs/운영가이드_반입.md).
+# 기동 순서: docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+# 마이그레이션(명시적 단계): docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/migrate.js
+# 시드(최초 1회):            docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/seed.js
+# 월간 작업:                 docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/cli/<작업>.js
+# **DB 계정이 둘이다** (P13_설계서_Readiness D.3, 보류 12). 기동 중인 api는 앱 계정(workfluence_app — DDL 없음, 감사로그는 쌓기만)으로,
+# tools는 소유 계정(workfluence)으로 붙는다. 앱 계정과 권한은 마이그레이션이 만든다(멱등).
 # 로그 순환 (P11_설계서_Ops D.6, FR-1216) — 디스크가 하나라 로그가 쌓이면 DB 쓰기부터 깨진다(CLAUDE.md 0.3절).
 # 도커 데몬의 기본값(크기 무제한)은 바꾸지 않는다 — 공유 서버의 다른 프로젝트에 닿는다. 이 compose 안에서만 건다.
 # 서비스마다 최대 WF_LOG_MAX_SIZE × WF_LOG_MAX_FILES (기본 20MB × 5 = 100MB, 셋이면 300MB)
@@ -42,6 +47,8 @@ services:
       # "네트워크는 된다"고 오판하기 쉽다. 값은 셸 환경에서 받아 오므로 저장소에
       # 사내 주소가 남지 않고, 프록시가 없는 폐쇄망 반입 서버에서는 빈 값이라 무해하다.
       args:
+        # 빌드한 커밋 — 이미지의 라벨이 된다. 반입 묶음이 지금 커밋으로 빌드된 이미지인지 이것으로 본다 (P13 FR-1404)
+        GIT_SHA: ${GIT_SHA:-unknown}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}
@@ -51,7 +58,8 @@ services:
     environment:
       WF_ENV: production
       WF_PORT: "3000"
-      WF_DATABASE_URL: postgres://workfluence:${WF_PG_PASSWORD}@postgres:5432/workfluence
+      # **앱 계정으로 붙는다** (P13 FR-1420·1422) — 표를 만들 권한이 없고 감사로그는 쌓기만 한다. 소유 계정 비밀번호는 넘기지 않는다
+      WF_DATABASE_URL: postgres://workfluence_app:${WF_PG_APP_PASSWORD:?WF_PG_APP_PASSWORD를 .env에 설정}@postgres:5432/workfluence
       WF_DB_AUTO_MIGRATE: "false"
       WF_TRUST_PROXY: "true"
       WF_SERVE_WEB: "true"
@@ -62,8 +70,7 @@ services:
       WF_SESSION_SECRET: ${WF_SESSION_SECRET:?WF_SESSION_SECRET를 deploy/.env에 설정 (32자 이상)}
       WF_SESSION_IDLE_MINUTES: ${WF_SESSION_IDLE_MINUTES:-30}
       WF_SESSION_ABSOLUTE_HOURS: ${WF_SESSION_ABSOLUTE_HOURS:-12}
-      WF_ROOT_USERNAME: ${WF_ROOT_USERNAME:-root}
-      WF_ROOT_PASSWORD: ${WF_ROOT_PASSWORD:?WF_ROOT_PASSWORD를 deploy/.env에 설정}
+      # 최초 계정(WF_ROOT_*)은 넘기지 않는다 — 시드만 쓰고 시드는 tools가 돈다 (P13 FR-1422)
       WF_OIDC_ENABLED: ${WF_OIDC_ENABLED:-false}
       WF_OIDC_ISSUER: ${WF_OIDC_ISSUER:-}
       WF_OIDC_CLIENT_ID: ${WF_OIDC_CLIENT_ID:-}
@@ -105,6 +112,34 @@ services:
     expose:
       - "3000"
     restart: unless-stopped
+
+  # 마이그레이션·시드·월간 작업·첨부 백업 (P13 D.2·D.3). **`up`으로는 뜨지 않는다**(profile) — `run --rm tools …`로 한 번씩 돈다.
+  # 같은 이미지, 소유 계정 접속, 첨부 볼륨. 앱 계정과 권한을 만드는 것도 여기서의 마이그레이션이다
+  tools:
+    image: ${WF_APP_IMAGE:-workfluence-app:latest}
+    profiles: ["tools"]
+    logging: *logging
+    environment:
+      WF_ENV: production
+      WF_LOG_LEVEL: ${WF_LOG_LEVEL:-info}
+      WF_DATABASE_URL: postgres://workfluence:${WF_PG_PASSWORD}@postgres:5432/workfluence
+      WF_DB_APP_ROLE: workfluence_app
+      WF_DB_APP_PASSWORD: ${WF_PG_APP_PASSWORD:?WF_PG_APP_PASSWORD를 .env에 설정}
+      # 스키마가 요구한다 — tools는 세션을 만들지 않는다
+      WF_SESSION_SECRET: ${WF_SESSION_SECRET:?WF_SESSION_SECRET를 .env에 설정 (32자 이상)}
+      WF_ROOT_USERNAME: ${WF_ROOT_USERNAME:-root}
+      # 시드만 쓴다. 비면 시드가 멈춘다(최초 계정을 만들 때만 필요하다)
+      WF_ROOT_PASSWORD: ${WF_ROOT_PASSWORD:-}
+      # 휴지통 정리는 첨부 파일도 지운다 — api와 같은 자리
+      WF_STORAGE_PATH: /data/attachments
+      WF_TRASH_RETENTION_DAYS: ${WF_TRASH_RETENTION_DAYS:-30}
+      WF_AUDIT_RETENTION_DAYS: ${WF_AUDIT_RETENTION_DAYS:-365}
+    volumes:
+      - attachments:/data/attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   nginx:
     image: nginx:1.27-alpine

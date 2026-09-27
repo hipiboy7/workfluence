@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { can, type Principal, type SearchHit } from '@workfluence/shared';
 import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
+import { containsPattern } from '../common/like';
 
 /**
  * 검색 경계 (CLAUDE.md 2절 DIP — **교체 가능 4축의 하나**).
@@ -26,9 +27,8 @@ export class SearchService implements SearchProvider {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async search(principal: Principal, q: string, limit: number, spaceId?: string): Promise<SearchHit[]> {
-    // `%`와 `_`는 ILIKE의 와일드카드다. 그대로 두면 `q=%` 한 글자가 **볼 수 있는 전부**를
-    // 돌려준다. 권한이 새지는 않지만 사용자가 적은 글자를 찾아 주는 것이 아니다 (P3 자체 점검 #12)
-    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    // `%`와 `_`를 풀어 둔다 — 그대로 두면 `q=%` 한 글자가 **볼 수 있는 전부**를 돌려준다 (P3 자체 점검 #12, `containsPattern`)
+    const like = containsPattern(q);
     const isAdmin = can(principal, 'space.manage');
 
     const rows = await this.db.execute<{

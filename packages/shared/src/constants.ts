@@ -8,7 +8,12 @@ export const ROLES = ['root', 'admin', 'member'] as const;
 export type Role = (typeof ROLES)[number];
 
 /** 사용자 상태. '잠김'은 저장하지 않고 locked_until로 파생한다 */
-export const USER_STATUSES = ['pending', 'active'] as const;
+/** 사용자 상태. **정지**(`suspended`)는 퇴사자 처리다 — 로그인 불가, 내용·소속은 남는다 (P13 C.5, FR-1440) */
+export const USER_STATUSES = ['pending', 'active', 'suspended'] as const;
+/** 사용자 목록 한 번의 수 (P13 FR-1451). 서버의 기본값과 화면의 "더 보기"가 같은 값을 쓴다 — 300명 규모에서 셋으로 끝까지 닿는다 */
+export const USER_LIST_PAGE = 100;
+/** 사용자 목록 한 번의 상한 — 화면은 조치 뒤에 보던 만큼(이 값까지) 다시 읽는다. 300명 규모를 한 번에 담는다 (병합 전 코드 리뷰 10) */
+export const USER_LIST_MAX = 500;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
 export const SPACE_KINDS = ['personal', 'team'] as const;
@@ -47,6 +52,9 @@ export const AUDIT_ACTIONS = [
   'user.sessions.terminate',
   'user.role.change',
   'user.grants.change',
+  // P13 계정 정지 (FR-1444)
+  'user.suspend',
+  'user.unsuspend',
   'category.create',
   'space.create',
   'space.update',
@@ -82,6 +90,8 @@ export const AUDIT_ACTIONS = [
   'page.export',
   'page.collab.save',
   'page.collab.flush',
+  // 실시간 편집의 제목 바꾸기 — 바꾼 사람을 남긴다. 저장의 작성자는 마지막으로 친 사람이라, 이것이 없으면 제목을 바꾼 사람이 흐려진다 (병합 전 보안 검토 L2)
+  'page.collab.title',
   'template.create',
   'template.update',
   'template.delete',
@@ -244,6 +254,11 @@ export const RATE_LIMITS = {
   findId: { max: 5, windowSec: 60 },
   recoverPassword: { max: 3, windowSec: 600 },
   login: { max: 20, windowSec: 60 },
+  /**
+   * 비밀번호 변경 — 로그인한 사람만 부르지만 센다 (P13 좁은 자체 점검 6). 변경은 그 계정의 로그인과 같은 줄에 선다(P13 D.4) — 세지 않으면
+   * 세션을 쥔 사람이 틀린 현재 비밀번호를 거듭 보내 그 계정의 로그인과 변경을 뒤로 민다. 성공은 돌려준다(로그인과 같다)
+   */
+  changePassword: { max: 5, windowSec: 60 },
 } as const;
 
 /**
@@ -331,6 +346,11 @@ export const LLM_TIMINGS = {
  */
 export const COLLAB_LIMITS = {
   maxFrameBytes: 16 * 1024 * 1024,
+  /**
+   * 저장하고 보기로가 싣는 **스냅숏**(base64 글자 수, P13 D.7). 상태 벡터에 지운 기록이 더해져 편집할수록 자란다 — 다만 방이 열려 있는
+   * 동안만이다(모두 나가면 정본에서 다시 시작한다). JSON 본문 상한(2MB, `main.ts`)에 제목과 함께 든다. 넘으면 화면이 싣지 않는다(판정을 건너뛴다)
+   */
+  maxFlushSnapshotChars: 1024 * 1024,
 } as const;
 
 /**

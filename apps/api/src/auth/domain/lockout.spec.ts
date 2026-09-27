@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PASSWORD_POLICY } from '@workfluence/shared';
-import { afterFailure, afterSuccess, isLocked, remainingLockMs } from './lockout';
+import { afterSuccess, isLocked, lockAfterFailure, remainingLockMs } from './lockout';
 
 /** A등급 (P1_설계서_Auth 0절). 테스트를 먼저 썼다. 시계는 주입한다. */
 
@@ -31,35 +31,6 @@ describe('isLocked', () => {
   });
 });
 
-describe('afterFailure (FR-205)', () => {
-  it('임계 미만이면 횟수만 올리고 잠그지 않는다', () => {
-    const s1 = afterFailure({ failedAttempts: 0, lockedUntil: null }, T0, policy);
-    expect(s1).toEqual({ failedAttempts: 1, lockedUntil: null });
-    const s4 = afterFailure({ failedAttempts: 3, lockedUntil: null }, T0, policy);
-    expect(s4).toEqual({ failedAttempts: 4, lockedUntil: null });
-  });
-
-  it('임계(5회)에 도달하면 잠근다', () => {
-    const s = afterFailure({ failedAttempts: 4, lockedUntil: null }, T0, policy);
-    expect(s.failedAttempts).toBe(5);
-    expect(s.lockedUntil).toEqual(at(policy.lockoutMinutes * MIN));
-    expect(isLocked(s, T0)).toBe(true);
-  });
-
-  it('잠긴 뒤 또 실패하면 잠금 시각이 뒤로 밀린다', () => {
-    const locked = { failedAttempts: 5, lockedUntil: at(15 * MIN) };
-    const next = afterFailure(locked, at(10 * MIN), policy);
-    expect(next.failedAttempts).toBe(6);
-    expect(next.lockedUntil).toEqual(at(25 * MIN));
-  });
-
-  it('입력 상태를 바꾸지 않는다 (순수)', () => {
-    const input = { failedAttempts: 4, lockedUntil: null };
-    afterFailure(input, T0, policy);
-    expect(input).toEqual({ failedAttempts: 4, lockedUntil: null });
-  });
-});
-
 describe('afterSuccess', () => {
   it('성공하면 횟수와 잠금을 모두 지운다', () => {
     expect(afterSuccess()).toEqual({ failedAttempts: 0, lockedUntil: null });
@@ -72,5 +43,25 @@ describe('remainingLockMs — 관리자 화면 표시용', () => {
     expect(remainingLockMs(s, at(5 * MIN))).toBe(10 * MIN);
     expect(remainingLockMs(s, at(20 * MIN))).toBe(0);
     expect(remainingLockMs({ failedAttempts: 0, lockedUntil: null }, T0)).toBe(0);
+  });
+});
+
+/**
+ * **틀린 확인 뒤의 잠금** (P13 D.4, FR-1431). 실패 횟수는 DB가 한 문장으로 올리고(`failed_attempts + 1 RETURNING`), 올린 뒤의 수로
+ * 잠글지 정한다 — 읽고 계산해 다시 쓰면 동시에 온 요청이 서로를 덮는다(측정 S3)
+ */
+describe('lockAfterFailure — 올린 뒤의 실패 횟수로 잠글지 (P13 FR-1431)', () => {
+  it('기준에 닿으면 지금부터 잠근다', () => {
+    expect(lockAfterFailure(policy.lockoutThreshold, T0, policy)).toEqual(at(policy.lockoutMinutes * MIN));
+  });
+
+  it('**기준을 넘어서도 잠근다** — 잠금이 풀린 뒤의 실패는 다시 잠근다(성공하기 전까지 횟수는 지워지지 않는다)', () => {
+    expect(lockAfterFailure(policy.lockoutThreshold + 3, T0, policy)).toEqual(at(policy.lockoutMinutes * MIN));
+    expect(lockAfterFailure(policy.lockoutThreshold + 3, at(90 * MIN), policy)).toEqual(at((90 + policy.lockoutMinutes) * MIN));
+  });
+
+  it('기준 전이면 잠그지 않는다', () => {
+    expect(lockAfterFailure(policy.lockoutThreshold - 1, T0, policy)).toBeNull();
+    expect(lockAfterFailure(1, T0, policy)).toBeNull();
   });
 });

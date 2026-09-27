@@ -53,7 +53,7 @@ describe('값 집합 제약 (0006)', () => {
         await makeUser(role, status);
       }
     }
-    expect(ROLES.length * USER_STATUSES.length).toBe(6);
+    expect(ROLES.length * USER_STATUSES.length).toBe(9);
   });
 
   it('spaces.kind·status와 space_members.role도 같은 방식으로 걸린다', async () => {

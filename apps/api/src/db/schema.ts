@@ -25,7 +25,7 @@ const timestamps = {
  * - IdP 계정:  oidc_sub 있음, password_hash 없음 (FR-217 — 비밀번호 로그인을 할 수 없다)
  * 둘 다 비어 있는 행은 **어느 방법으로도 로그인할 수 없는 유령 계정**이라 CHECK로 막는다.
  *
- * status는 pending|active 둘뿐이다. '잠김'은 저장하지 않고 locked_until로 파생한다 —
+ * status는 pending|active|suspended(P13 — 정지)다. '잠김'은 저장하지 않고 locked_until로 파생한다 —
  * 잠금은 시간이 지나면 저절로 풀리는 상태라서, 저장해 두면 실제와 어긋나는 순간이 생긴다.
  */
 export const users = pgTable(

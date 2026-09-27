@@ -286,7 +286,7 @@ e2e/                          [C] 기동 확인 시나리오
 
 | 키 | 용도 |
 |---|---|
-| `WF_PG_PASSWORD` | postgres 컨테이너 비밀번호. compose가 `WF_DATABASE_URL` 조립에도 쓴다 |
+| `WF_PG_PASSWORD` | postgres 컨테이너 비밀번호. compose가 `WF_DATABASE_URL` 조립에도 쓴다 — **정정 2026-09-27 (Phase 13):** api의 접속은 앱 계정(`workfluence_app`·`WF_PG_APP_PASSWORD`)으로 바뀌었다. 이 값은 postgres 초기화와 `tools`(소유 계정)만 쓴다 |
 | `WF_APP_IMAGE` | 기동할 app 이미지 태그 |
 | `WF_HTTPS_PORT` | nginx가 노출할 호스트 포트 |
 
@@ -324,7 +324,7 @@ process.env + .env 파일 ──▶ WF_로 시작하는 키만 추출 ──▶ 
 | 상수 | 내용 | 왜 여기인가 |
 |---|---|---|
 | `ROLES` | `root`·`admin`·`member` | DB `role` 컬럼 값. 바꾸면 데이터 이행 필요 |
-| `USER_STATUSES` | `pending`·`active` | 같음. `잠김`은 저장하지 않고 파생 |
+| `USER_STATUSES` | `pending`·`active` (**Phase 13:** `suspended`를 더했다 — 정지) | 같음. `잠김`은 저장하지 않고 파생 |
 | `SPACE_KINDS` / `SPACE_STATUSES` | `personal`·`team` / `active`·`suspended` | 같음 |
 | `SPACE_MEMBER_ROLES` | `owner`·`editor`·`viewer` | 같음 |
 | `AUDIT_ACTIONS` | 감사 이벤트 종류 | 기록된 값이라 이름을 바꾸면 과거 로그와 어긋난다 |
