@@ -24,6 +24,7 @@ import { UsersService } from '../users/users.service';
 import { safeDisplayName } from './domain/display-name';
 import { mapGroupsToRole } from './domain/claims';
 import { idpFailureKind } from './domain/idp-failure';
+import { KeyedSerial } from './domain/keyed-serial';
 import { OIDC_PROVIDER, type OidcClaims, type OidcProvider, type PkcePair } from './oidc/oidc.provider';
 
 /** 로그인 실패는 **사유를 구분하지 않는다** (FR-206). 이 문구 하나만 나간다. */
@@ -49,6 +50,9 @@ export function toMeView(u: UserRow): MeView {
 export class AuthService {
   private readonly log = new Logger('Auth');
 
+  /** 한 계정씩 로그인을 줄 세운다 (P13 FR-1431) — 프로세스에 하나. 앱 서버는 한 대다 */
+  private readonly loginSerial = new KeyedSerial();
+
   constructor(
     private readonly users: UsersService,
     private readonly audit: AuditService,
@@ -63,30 +67,39 @@ export class AuthService {
   /**
    * FR-202·205·206. 실패해도 감사로그는 남긴다.
    *
-   * **실패 횟수 갱신과 기록을 같은 트랜잭션에 둔다** (FR-236). 따로 두면 한쪽만 반영돼
+   * **비밀번호 확인은 트랜잭션 밖에서 한다** (P13 FR-1430, 보류 16). 연결을 쥔 채 argon2를 돌리면 로그인이 몰릴 때 연결 풀이 모두
+   * "idle in transaction"이 되어 남의 요청이 기다렸다. **잠금과 기록은 같은 트랜잭션에 둔다** (FR-236) — 따로 두면 한쪽만 반영돼
    * "잠겼는데 기록이 없다" 또는 그 반대가 생긴다.
    */
   async login(dto: LoginDto, ip?: string): Promise<UserRow> {
-    const result = await this.db.transaction(async (tx) => {
-      const r = await this.users.verifyCredentials(dto.username, dto.password, new Date(), tx);
-      if (!r.ok) {
-        await this.audit.record(
-          // 사유는 응답에 쓰지 않는다. 운영자가 나중에 볼 수 있게 기록에만 남긴다
-          { action: 'auth.login.failure', targetType: 'username', targetId: dto.username, detail: { reason: r.reason }, ip },
-          tx,
-        );
-      } else {
-        await this.audit.record({ action: 'auth.login.success', actorId: r.user.id, detail: { method: 'local' }, ip }, tx);
-      }
-      return r;
+    // **한 계정씩 줄을 선다** (P13 FR-1431). 확인과 기록이 한 사람씩이라, 동시에 틀린 N건이 와도 확인까지 가는 것은 잠금 기준만큼이다.
+    // 줄에서 기다리는 동안 연결을 쥐지 않는다
+    const result = await this.loginSerial.run(dto.username, async () => {
+      const now = new Date();
+      const check = await this.users.checkCredentials(dto.username, dto.password, now);
+      return this.db.transaction(async (tx) => {
+        const r = await this.users.settleCredentials(check, now, tx);
+        if (!r.ok) {
+          await this.audit.record(
+            // 사유는 응답에 쓰지 않는다. 운영자가 나중에 볼 수 있게 기록에만 남긴다
+            { action: 'auth.login.failure', targetType: 'username', targetId: dto.username, detail: { reason: r.reason }, ip },
+            tx,
+          );
+        } else {
+          await this.audit.record({ action: 'auth.login.success', actorId: r.user.id, detail: { method: 'local' }, ip }, tx);
+        }
+        return r;
+      });
     });
     if (!result.ok) throw new UnauthorizedException(LOGIN_FAILED);
     return result.user;
   }
 
   async signup(dto: SignupDto, ip?: string): Promise<void> {
+    // 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+    const passwordHash = await this.users.preparePassword(dto.password);
     await this.db.transaction(async (tx) => {
-      const row = await this.users.signup(dto, tx);
+      const row = await this.users.signup(dto, tx, passwordHash);
       await this.audit.record(
         { action: 'user.signup', targetType: 'user', targetId: row.id, detail: { username: row.username, email: dto.email }, ip },
         tx,
@@ -129,8 +142,10 @@ export class AuthService {
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto, ip?: string): Promise<void> {
+    // 지금 비밀번호 확인과 새 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+    const prepared = await this.users.prepareChangePassword(userId, dto.currentPassword, dto.newPassword);
     await this.db.transaction(async (tx) => {
-      await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx);
+      await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx, prepared);
       await this.audit.record({ action: 'auth.password.change', actorId: userId, ip }, tx);
     });
   }

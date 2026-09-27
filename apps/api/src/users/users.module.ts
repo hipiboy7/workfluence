@@ -33,8 +33,10 @@ export class UsersController {
     @CurrentUser() actor: SessionUser,
     @Req() req: Request,
   ): Promise<UserView> {
+    // 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+    const passwordHash = await this.users.preparePassword(dto.password);
     return this.db.transaction(async (tx) => {
-      const row = await this.users.create(dto, actor, tx);
+      const row = await this.users.create(dto, actor, tx, passwordHash);
       // 관리자가 만든 계정도 바로 활성이다. 승인 경로를 거치지 않으므로 여기서도 만든다 (FR-309)
       await this.spaces.ensurePersonalSpace(row.id, row.displayName, tx);
       await this.audit.record(
@@ -90,8 +92,10 @@ export class UsersController {
     @CurrentUser() actor: SessionUser,
     @Req() req: Request,
   ): Promise<{ user: UserView; temporaryPassword: string }> {
+    // 임시 비밀번호의 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+    const prepared = await this.users.prepareTemporaryPassword();
     return this.db.transaction(async (tx) => {
-      const { user, temporaryPassword } = await this.users.resetPassword(id, actor, tx);
+      const { user, temporaryPassword } = await this.users.resetPassword(id, actor, tx, prepared);
       await this.audit.record({ action: 'user.password.reset', actorId: actor.id, targetType: 'user', targetId: id, ip: req.ip }, tx);
       return { user: toUserView(user), temporaryPassword };
     });

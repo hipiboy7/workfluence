@@ -13,10 +13,10 @@ import {
   type SignupDto,
   type UserView,
 } from '@workfluence/shared';
-import * as argon2 from 'argon2';
 import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
-import { afterFailure, afterSuccess, isLocked } from '../auth/domain/lockout';
+import { afterSuccess, isLocked, lockAfterFailure, type LockoutPolicy } from '../auth/domain/lockout';
+import { burnPasswordCheck, hashPassword, verifyPassword } from './password';
 import { RevocationBus } from '../common/revocation.bus';
 import { DB, type Db } from '../db/db.module';
 import { byName } from '../db/order';
@@ -45,23 +45,29 @@ export function toUserView(u: UserRow, now: Date = new Date()): UserView {
     email: u.email,
     role: u.role as Role,
     // '잠김'은 저장값이 아니라 파생값이다 (FR-230)
-    status: u.status === 'pending' ? 'pending' : locked ? 'locked' : 'active',
+    status: u.status === 'pending' ? 'pending' : u.status === 'suspended' ? 'suspended' : locked ? 'locked' : 'active',
     mustChangePassword: u.mustChangePassword,
     grants: grantsForRole(u.role as Role, u.grants),
     createdAt: u.createdAt.toISOString(),
   };
 }
 
-export type CredentialResult = { ok: true; user: UserRow } | { ok: false; reason: 'unknown' | 'locked' | 'wrong' | 'pending' };
-
-const hash = (pw: string) => argon2.hash(pw, { type: argon2.argon2id });
+export type CredentialResult = { ok: true; user: UserRow } | { ok: false; reason: 'unknown' | 'locked' | 'wrong' | 'pending' | 'suspended' };
 
 /**
- * 어떤 비밀번호와도 맞지 않는 argon2id 해시.
- * **계정이 없을 때도 이것으로 검증을 한 번 돌린다** — 안 그러면 "없는 계정"만 빨리 답해서
- * 응답 시간으로 계정 존재가 새어 나간다 (P1_설계서_Auth 2.2절).
+ * **확인까지 한 결과** — 아직 DB에 적지 않았다 (P13 D.4). `checkCredentials`가 연결을 쥐지 않고 만들고, `settleCredentials`가 호출부의
+ * 짧은 트랜잭션에서 적는다(감사와 같은 트랜잭션 — P1 FR-236)
  */
-const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2FsdA$QkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWjAxMjM0NTY';
+export type CredentialCheck =
+  | { kind: 'unknown' }
+  | { kind: 'locked' }
+  | { kind: 'mismatch' | 'match'; user: UserRow; policy: LockoutPolicy };
+
+/** 관리자 초기화의 임시 비밀번호 — 해시는 트랜잭션을 열기 전에 만든다 (P13 FR-1434) */
+export type TemporaryPassword = { temporaryPassword: string; hash: string };
+
+/** 비밀번호 변경의 준비물 — 읽은 해시(그 사이 바뀌었는지 볼 때)와 새 해시 */
+export type PreparedPasswordChange = { readHash: string; nextHash: string };
 
 @Injectable()
 export class UsersService {
@@ -163,16 +169,29 @@ export class UsersService {
     if (violations.length) throw new BadRequestException(violations.join('; '));
   }
 
-  async signup(dto: SignupDto, tx: Db = this.db): Promise<UserRow> {
+  /**
+   * **해시를 트랜잭션 밖에서 만든다** (P13 FR-1434). 강도를 먼저 본다 — 약한 비밀번호에 argon2를 쓰지 않는다. 호출부는 이 값을 들고
+   * 트랜잭션을 연다
+   */
+  async preparePassword(pw: string): Promise<string> {
+    await this.assertPasswordStrength(pw, this.db);
+    return hashPassword(pw);
+  }
+
+  /**
+   * `passwordHash`는 `preparePassword`가 만든 것이다. 없으면 여기서 만든다 — 트랜잭션 없이 부르는 시험·도구용이다. 강도는 늘 다시 본다(값싸다)
+   */
+  async signup(dto: SignupDto, tx: Db = this.db, passwordHash?: string): Promise<UserRow> {
     await this.assertPasswordStrength(dto.password, tx);
     await this.assertUnique(dto.username, dto.email, tx);
+    const hashed = passwordHash ?? (await hashPassword(dto.password));
     const [row] = await tx
       .insert(users)
       .values({
         username: dto.username,
         displayName: dto.displayName,
         email: dto.email,
-        passwordHash: await hash(dto.password),
+        passwordHash: hashed,
         role: 'member',
         status: 'pending',
       })
@@ -181,19 +200,20 @@ export class UsersService {
   }
 
   /** 관리자가 직접 생성 → 바로 활성 (FR-231) */
-  async create(dto: CreateUserDto, actor: Principal, tx: Db = this.db): Promise<UserRow> {
+  async create(dto: CreateUserDto, actor: Principal, tx: Db = this.db, passwordHash?: string): Promise<UserRow> {
     if (!canAssignRole(actor, dto.role)) throw new ForbiddenException(`'${dto.role}' 역할을 부여할 권한이 없다`);
     // **여기도 강도를 본다.** 계약(zod)이 바닥만 보게 바뀐 뒤로 이 경로만 검사가 없었다 —
     // 관리자가 만든 계정은 바로 활성이라, 비어 있으면 가장 센 계정이 가장 약한 비밀번호를 갖는다
     await this.assertPasswordStrength(dto.password, tx);
     await this.assertUnique(dto.username, dto.email, tx);
+    const hashed = passwordHash ?? (await hashPassword(dto.password));
     const [row] = await tx
       .insert(users)
       .values({
         username: dto.username,
         displayName: dto.displayName,
         email: dto.email,
-        passwordHash: await hash(dto.password),
+        passwordHash: hashed,
         role: dto.role,
         status: 'active',
         approvedAt: sql`now()`,
@@ -251,7 +271,13 @@ export class UsersService {
   }
 
   /** 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다 */
-  async resetPassword(id: string, actor: Principal, tx: Db = this.db): Promise<{ user: UserRow; temporaryPassword: string }> {
+  /** 임시 비밀번호와 그 해시 — 트랜잭션을 열기 전에 만든다 (P13 FR-1434) */
+  async prepareTemporaryPassword(): Promise<TemporaryPassword> {
+    const temporaryPassword = generateTemporaryPassword((max) => randomInt(max));
+    return { temporaryPassword, hash: await hashPassword(temporaryPassword) };
+  }
+
+  async resetPassword(id: string, actor: Principal, tx: Db = this.db, prepared?: TemporaryPassword): Promise<{ user: UserRow; temporaryPassword: string }> {
     return this.inTx(tx, async (t) => {
       const target = await this.getManaged(id, actor, t);
       // IdP 계정에 비밀번호를 붙이면 IdP가 강제하던 인증(사내 MFA·정책)을 건너뛰는 옆문이 생긴다.
@@ -259,17 +285,17 @@ export class UsersService {
       if (target.oidcSub !== null) {
         throw new BadRequestException('사내 IdP 계정이다. 비밀번호를 부여하지 않는다 — IdP로 로그인한다');
       }
-      return this.applyTemporaryPassword(id, t);
+      return this.applyTemporaryPassword(id, t, prepared ?? (await this.prepareTemporaryPassword()));
     });
   }
 
-  private async applyTemporaryPassword(id: string, tx: Db = this.db): Promise<{ user: UserRow; temporaryPassword: string }> {
-    const temporaryPassword = generateTemporaryPassword((max) => randomInt(max));
+  private async applyTemporaryPassword(id: string, tx: Db, prepared: TemporaryPassword): Promise<{ user: UserRow; temporaryPassword: string }> {
+    const { temporaryPassword } = prepared;
     const cleared = afterSuccess();
     const [user] = await tx
       .update(users)
       .set({
-        passwordHash: await hash(temporaryPassword),
+        passwordHash: prepared.hash,
         mustChangePassword: true,
         failedAttempts: cleared.failedAttempts,
         lockedUntil: cleared.lockedUntil,
@@ -384,56 +410,92 @@ export class UsersService {
     return n;
   }
 
-  async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db): Promise<void> {
-    const user = await this.findById(id, tx);
+  /**
+   * 비밀번호 변경의 준비 — 지금 비밀번호를 확인하고 새 해시를 만든다. **연결을 쥐지 않는다** (P13 FR-1434). 읽은 해시를 함께 돌려
+   * 쓰는 쪽이 그 사이 바뀌지 않았는지 본다
+   */
+  async prepareChangePassword(id: string, currentPassword: string, newPassword: string): Promise<PreparedPasswordChange> {
+    const user = await this.findById(id);
     if (!user?.passwordHash) throw new NotFoundException('사용자를 찾을 수 없다');
-    if (!(await argon2.verify(user.passwordHash, currentPassword))) throw new BadRequestException('현재 비밀번호가 올바르지 않다');
-    await this.assertPasswordStrength(newPassword, tx);
-    await tx
+    if (!(await verifyPassword(user.passwordHash, currentPassword))) throw new BadRequestException('현재 비밀번호가 올바르지 않다');
+    await this.assertPasswordStrength(newPassword, this.db);
+    return { readHash: user.passwordHash, nextHash: await hashPassword(newPassword) };
+  }
+
+  async changePassword(id: string, currentPassword: string, newPassword: string, tx: Db = this.db, prepared?: PreparedPasswordChange): Promise<void> {
+    const p = prepared ?? (await this.prepareChangePassword(id, currentPassword, newPassword));
+    // **읽은 해시가 그대로일 때만** 바꾼다 — 확인과 쓰기 사이에 관리자 초기화나 다른 변경이 끼면 옛 비밀번호로 확인한 것이 된다
+    const done = await tx
       .update(users)
-      .set({ passwordHash: await hash(newPassword), mustChangePassword: false, updatedAt: sql`now()` })
-      .where(eq(users.id, id));
+      .set({ passwordHash: p.nextHash, mustChangePassword: false, updatedAt: sql`now()` })
+      .where(and(eq(users.id, id), eq(users.passwordHash, p.readHash)))
+      .returning({ id: users.id });
+    if (done.length === 0) throw new ConflictException('그 사이 비밀번호가 바뀌었다 — 다시 시도한다');
     // 비밀번호가 바뀌면 그 사용자의 세션을 전부 끊는다. 호출부가 자기 세션은 다시 만든다
     await this.destroyAllSessions(id, tx);
   }
 
   /**
-   * 로컬 계정 검증 (FR-202, FR-205, FR-206).
+   * 로컬 계정 확인 (FR-202, FR-205, FR-206) — **DB 연결을 쥐지 않는다** (P13 D.4, FR-1430·1432, 보류 16).
    *
-   * 호출부는 `reason`으로 응답을 나누지 않는다 — 전부 같은 401이다. 이 값은 **감사로그와
-   * 관리자 화면에만** 쓴다.
+   * 사용자 행을 읽고(트랜잭션 없이), 없거나 비밀번호가 없으면(사내 계정) 또는 잠겨 있으면 **더미 해시로 한 번** 확인하고 끝낸다 — 그런
+   * 계정만 빨리 답하면 응답 시간으로 계정 상태가 드러난다(측정 S0b — 잠긴 계정은 약 5ms였다). 아니면 argon2로 확인한다 — 한 줄(동시 실행
+   * 상한) 안에서, 연결 없이.
+   *
+   * **한 계정의 로그인은 줄을 서서 부른다**(`AuthService` — `KeyedSerial`). 그래야 여기서 읽은 잠금이 앞 사람의 기록 뒤의 값이다.
+   * 적는 것(실패 횟수·잠금·초기화)은 `settleCredentials`가 호출부의 짧은 트랜잭션에서 감사와 함께 한다
    */
-  async verifyCredentials(username: string, password: string, now: Date = new Date(), tx: Db = this.db): Promise<CredentialResult> {
-    const user = await this.findByUsername(username, tx);
+  async checkCredentials(username: string, password: string, now: Date = new Date()): Promise<CredentialCheck> {
+    const user = await this.findByUsername(username);
     if (!user || !user.passwordHash) {
-      await argon2.verify(DUMMY_HASH, password).catch(() => false);
-      return { ok: false, reason: 'unknown' };
+      await burnPasswordCheck(password);
+      return { kind: 'unknown' };
     }
+    if (isLocked({ failedAttempts: user.failedAttempts, lockedUntil: user.lockedUntil }, now)) {
+      await burnPasswordCheck(password);
+      return { kind: 'locked' };
+    }
+    // **운영이 조절한 값을 쓴다** (FR-521). 코드 기본값은 DB가 비었을 때만 쓰인다
+    const policy = await this.settings.get();
+    const ok = await verifyPassword(user.passwordHash, password);
+    return { kind: ok ? 'match' : 'mismatch', user, policy };
+  }
 
-    const state = { failedAttempts: user.failedAttempts, lockedUntil: user.lockedUntil };
-    if (isLocked(state, now)) return { ok: false, reason: 'locked' };
-
-    if (!(await argon2.verify(user.passwordHash, password))) {
-      // **운영이 조절한 값을 쓴다** (FR-521). 코드 기본값은 DB가 비었을 때만 쓰인다
-      const next = afterFailure(state, now, await this.settings.get(tx));
-      await tx
+  /**
+   * 확인한 결과를 적는다 — **호출부의 트랜잭션에서** 감사와 함께 (P1 FR-236, P13 FR-1435).
+   *
+   * 틀렸으면 실패 횟수를 **한 문장으로** 올리고(`failed_attempts + 1 RETURNING` — 읽고 계산해 쓰면 동시에 온 요청이 서로를 덮는다),
+   * 올린 뒤의 수가 기준에 닿으면 잠근다. 읽은 비밀번호 그대로일 때만 — 그 사이 관리자 초기화가 풀어 둔 계정을 다시 잠그지 않게.
+   * 맞았으면 횟수와 잠금을 지운다. 비밀번호가 맞아도 승인 대기·정지면 못 들어간다 — **비밀번호 확인 뒤에** 보는 이유는 먼저 보면
+   * 계정 상태가 비밀번호 없이 새어 나가기 때문이다(FR-206·1443). 호출부는 `reason`으로 응답을 나누지 않는다 — 전부 같은 401이다
+   */
+  async settleCredentials(check: CredentialCheck, now: Date, tx: Db = this.db): Promise<CredentialResult> {
+    if (check.kind === 'unknown') return { ok: false, reason: 'unknown' };
+    if (check.kind === 'locked') return { ok: false, reason: 'locked' };
+    const { user } = check;
+    if (check.kind === 'mismatch') {
+      const [row] = await tx
         .update(users)
-        .set({ failedAttempts: next.failedAttempts, lockedUntil: next.lockedUntil, updatedAt: sql`now()` })
-        .where(eq(users.id, user.id));
-      return { ok: false, reason: isLocked(next, now) ? 'locked' : 'wrong' };
+        .set({ failedAttempts: sql`${users.failedAttempts} + 1`, updatedAt: sql`now()` })
+        .where(and(eq(users.id, user.id), eq(users.passwordHash, user.passwordHash!)))
+        .returning({ failedAttempts: users.failedAttempts });
+      // 그 사이 비밀번호가 바뀌었으면(초기화) 옛 비밀번호의 실패는 세지 않는다
+      const lockUntil = row ? lockAfterFailure(row.failedAttempts, now, check.policy) : null;
+      if (!lockUntil) return { ok: false, reason: 'wrong' };
+      await tx.update(users).set({ lockedUntil: lockUntil }).where(eq(users.id, user.id));
+      return { ok: false, reason: 'locked' };
     }
-
-    // 비밀번호가 맞아도 승인 대기면 못 들어간다. 비밀번호 확인 **뒤에** 보는 이유는
-    // 먼저 보면 "이 아이디는 승인 대기다"가 비밀번호 없이 새어 나가기 때문이다.
-    if (user.status === 'pending') return { ok: false, reason: 'pending' };
-
     if (user.failedAttempts > 0 || user.lockedUntil) {
       const cleared = afterSuccess();
-      await tx
-        .update(users)
-        .set({ failedAttempts: cleared.failedAttempts, lockedUntil: cleared.lockedUntil })
-        .where(eq(users.id, user.id));
+      await tx.update(users).set({ failedAttempts: cleared.failedAttempts, lockedUntil: cleared.lockedUntil }).where(eq(users.id, user.id));
     }
+    if (user.status === 'pending') return { ok: false, reason: 'pending' };
+    if (user.status === 'suspended') return { ok: false, reason: 'suspended' };
     return { ok: true, user };
+  }
+
+  /** 확인하고 적는다 — 한 번에. 트랜잭션 없이 부르는 시험·도구용이다. 로그인은 둘을 나눠 부른다(연결을 쥐지 않게) */
+  async verifyCredentials(username: string, password: string, now: Date = new Date(), tx: Db = this.db): Promise<CredentialResult> {
+    return this.settleCredentials(await this.checkCredentials(username, password, now), now, tx);
   }
 }
