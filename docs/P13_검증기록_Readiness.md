@@ -101,36 +101,42 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 
 ## 4. 자동 검사
 
-`pnpm test:cov` — HEAD `fdf4270`, 실패 0 · 건너뜀 0. 수치는 각 패키지의 `coverage-summary.json`에서 뽑았다.
+`pnpm test:cov` — 병합 전 검토를 반영한 뒤(`af542e0`), 실패 0 · 건너뜀 0. 수치는 각 패키지의 `coverage-summary.json`에서 뽑았다.
+`pnpm lint`·`pnpm typecheck` 종료 0 · `pnpm verify:docs` 위반 없음(문서 66개).
 
 | 패키지 | 파일 | 시험 | 라인 | 브랜치 | 함수 |
 |---|---|---|---|---|---|
-| shared (A) | 12 | 358 | 99.86% | 96.88% | 99.36% |
-| api (A+B) | 61 | 974 | 95.40% | 90.25% | 93.72% |
-| web (측정만) | 12 | 118 | 89.01% | 83.01% | 79.24% |
+| shared (A) | 12 | 365 | 99.86% | 96.88% | 99.36% |
+| api (A+B) | 65 | 1,004 | 95.55% | 90.39% | 93.91% |
+| web (측정만) | 13 | 126 | 86.91% | 79.43% | 77.68% |
+
+반영 전(`fdf4270`)은 shared 358 · api 974 · web 118건이었다 — 검토 반영이 시험 45건을 더했다.
 
 이번 Phase가 만진 모듈:
 
 | 모듈 | 등급 | 라인 | 브랜치 | 함수 |
 |---|---|---|---|---|
 | shared `permissions.ts` · `env.ts` · `constants.ts` · `release.ts` · `schemas.ts` | A | 100 | 100 | 100 |
-| api `auth/domain/concurrency-gate.ts` · `keyed-serial.ts` · `lockout.ts` | A | 100 | 100 | 100 |
+| api `auth/domain/concurrency-gate.ts` · `keyed-serial.ts` · `lockout.ts` · `argon-slots.ts` | A | 100 | 100 | 100 |
+| api `common/domain/scram.ts` | A | 100 | 100 | 100 |
 | api `pages/domain/realtime.ts` | A | 100 | 92.72 | 100 |
 | api `users/password.ts` | B | 100 | 100 | 85.71 |
-| api `users/users.service.ts` | B | 95.78 | 90.84 | 96 |
-| api `auth/auth.service.ts` | B | 97.91 | 83.33 | 96 |
-| api `pages/collab/collab.gateway.ts` | B | 83.82 | 78.96 | 80.88 |
+| api `users/users.service.ts` | B | 97.6 | 91.72 | 96 |
+| api `auth/auth.service.ts` | B | 98.01 | 83.33 | 96.15 |
+| api `pages/collab/collab.gateway.ts` | B | 84.41 | 80.07 | 81.42 |
 | api `common/like.ts` | B | 100 | 100 | 100 |
 | api `cli/trash-purge.ts` · `audit-purge.ts` · `reindex.ts` | B | 81.66 · 79.16 · 75 | 61.9 · 75 · 75 | 50 · 33.33 · 66.66 |
 
 - 앱 계정(`apps/api/src/db/app-role.ts`)·마이그레이션·시드는 측정에서 뺀 자리다(`apps/api/src/db/**` — `apps/api/vitest.config.ts`).
-  앱 계정은 `app-role.integration.spec.ts`가 **그 계정으로 붙어** 막힌 것을 본다(권한 목록만 읽으면 "주었다"만 보인다). 컨테이너에서도 봤다(3절).
+  앱 계정은 `app-role.integration.spec.ts`가 **그 계정으로 붙어** 막힌 것을 본다(권한 목록만 읽으면 "주었다"만 보인다) — 이제 SCRAM 확인값으로
+  만든 계정이다. 시드는 `seed.integration.spec.ts`(여섯). 컨테이너에서도 봤다(3절).
 - 월간 작업의 낮은 수치는 명령으로 부를 때만 도는 끝부분(`require.main`)이다. 본문은 `cli.integration.spec.ts`가 시험 DB로 보고, 명령
   자체는 컨테이너의 `tools`에서 돌렸다(3절).
 - **A등급은 시험을 먼저 썼다** — Red → Green: `1f67ea2` → `6b2da79`(정지·감사·권한, 최초 계정 비밀번호 선택·앱 DB 계정, 묶음의 운영 문서,
   argon2 줄) · `d11f174` → `09eb03a`(한 계정씩 줄 세우기, 올린 뒤의 실패 횟수로 잠금 — `6b2da79`의 "확인 전에 세기"는 같은 계정의 맞는
   동시 로그인을 잠가 거뒀다) · `f1ea44a` → `0a2984a`(사용자 목록·제목 DTO) · `631fe73` → `3d193f1`(저장 판정의 "바뀐 것 없음") ·
-  `14443fd` → `09306b8`(비밀번호 안내문).
+  `14443fd` → `09306b8`(비밀번호 안내문). 병합 전 검토 반영: `608db43` → `841f308`(argon2 상한·SCRAM·앱 계정 비밀번호 규칙·감사 종류) ·
+  `8d553f7`·`44ba67a` → `aa17bed`(상태 벡터 DTO·목록 상한).
 - 무거운 시험 하나(문단 5만 개)가 공유 서버 부하에서 기본 한도 5초를 넘어 한도를 20초로 두었다 — 커버리지를 켜고 혼자 돌면 3.6초(`26768f0`).
 
 ## 5. 브라우저 — E2E
@@ -229,7 +235,19 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 
 ## 9. 검토
 
-(채움)
+병합 전에 넷을 Opus 5.5로 돌렸다(`ef9a1b9` 기준). 처리 내역은 [`docs/internal/P13_검토서_Review.md`](internal/P13_검토서_Review.md) — 여기에는 수만 둔다.
+
+| 검토 | 결과 | 오탐 | 처리 |
+|---|---|---|---|
+| 문서 개정 에이전트(코드 대조) | 코드 결함 3 + 배포 틈 7 | 0 | 전부 처리 |
+| `self-reviewer` | 14 (중간 2 · 낮음 12) | 0 | 13 반영 · 1 까닭을 적고 둠 |
+| 코드 리뷰 | 14 (중간 2 · 낮음 12) | 0 | 13 반영 · 1 문서화 |
+| 보안 검토 | 중간 1 · 낮음 2 + 참고 8 | 0 | 3 반영 · 참고 4 반영 · 4 둠 |
+| `doc-consistency` | 43 + 변경 밖 3 | 0 | 42 반영 · 1 병합 때 |
+
+셋이 따로 찾은 것이 가장 컸다 — **바꾼 비밀번호가 공격자의 세션을 남긴다**(이번 Phase가 확인을 트랜잭션 밖으로 빼며 틈이 약 0.2초로 넓어졌다).
+반영분은 A등급 Red → Green 셋(`608db43`→`841f308`, `8d553f7`·`44ba67a`→`aa17bed`)이고, 고친 곳마다 옛 코드로 되돌려 새 시험이 실패하는지 봤다.
+반영한 뒤의 수치는 4절, 반영한 이미지의 확인은 6절 끝이다.
 
 ## 10. 확인하지 못한 것
 
