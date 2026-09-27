@@ -198,6 +198,7 @@ describe('parseDotenv', () => {
  */
 describe('Phase 13 — DB 계정과 최초 계정 (P13 FR-1421·1422)', () => {
   const { WF_ROOT_PASSWORD: _unused, ...withoutRoot } = valid;
+  const APP_PW = 'app-pass-0123456789';
 
   it('`WF_ROOT_PASSWORD`는 선택이다 — 기동 중인 앱에는 넘기지 않는다', () => {
     expect(parseEnv(withoutRoot).WF_ROOT_PASSWORD).toBeUndefined();
@@ -205,17 +206,25 @@ describe('Phase 13 — DB 계정과 최초 계정 (P13 FR-1421·1422)', () => {
   });
 
   it('앱 계정 이름과 비밀번호는 함께 있다 — 하나만 있으면 기동 실패', () => {
-    const ok = parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'app-pass' });
+    const ok = parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: APP_PW });
     expect(ok.WF_DB_APP_ROLE).toBe('workfluence_app');
-    expect(ok.WF_DB_APP_PASSWORD).toBe('app-pass');
+    expect(ok.WF_DB_APP_PASSWORD).toBe(APP_PW);
     expect(parseEnv(valid).WF_DB_APP_ROLE).toBeUndefined();
     expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app' })).toThrow(/WF_DB_APP_PASSWORD/);
-    expect(() => parseEnv({ ...valid, WF_DB_APP_PASSWORD: 'app-pass' })).toThrow(/WF_DB_APP_ROLE/);
+    expect(() => parseEnv({ ...valid, WF_DB_APP_PASSWORD: APP_PW })).toThrow(/WF_DB_APP_ROLE/);
+  });
+
+  it('**앱 계정 비밀번호는 16자 이상, 영문·숫자·`._~-`만** — 접속 주소(URL)에 그대로 들어가고, 데이터베이스에 보낼 확인값(SCRAM)을 앱이 만든다 (병합 전 검토 — 평문을 DB 문장에 싣지 않는다)', () => {
+    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: '0123456789abcdef' }).WF_DB_APP_PASSWORD).toBe('0123456789abcdef');
+    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'Aa0._~-Aa0._~-Aa' }).WF_DB_APP_PASSWORD).toBe('Aa0._~-Aa0._~-Aa');
+    for (const bad of ['0123456789abcde', 'has space inside it', 'slash/in/the/password', 'percent%encoded-value', 'hash#in-the-password', 'dollar$sign-password', '한글이섞인비밀번호0123456789']) {
+      expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: bad }), bad).toThrow(/WF_DB_APP_PASSWORD/);
+    }
   });
 
   it('앱 계정 이름은 소문자 SQL 식별자만 — 따옴표·공백·대문자는 기동 실패', () => {
     for (const bad of ['Workfluence', 'wf app', 'wf"app', '1app', 'a'.repeat(64)]) {
-      expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: bad, WF_DB_APP_PASSWORD: 'p' }), bad).toThrow(/WF_DB_APP_ROLE/);
+      expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: bad, WF_DB_APP_PASSWORD: APP_PW }), bad).toThrow(/WF_DB_APP_ROLE/);
     }
   });
 });

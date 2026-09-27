@@ -72,4 +72,32 @@ describe('KeyedSerial', () => {
     const serial = new KeyedSerial();
     await expect(Promise.all([1, 2, 3].map((n) => serial.run('k', async () => n * 2)))).resolves.toEqual([2, 4, 6]);
   });
+
+  it('**앞이 끝나고 둘째가 도는 중에 온 셋째도 기다린다** — 끝난 사람이 열쇠를 지우면 셋째가 둘째와 함께 돌아 잠금이 다시 느슨해진다 (병합 전 자체 점검 9)', async () => {
+    const serial = new KeyedSerial();
+    const order: string[] = [];
+    const first = deferred();
+    const second = deferred();
+    const a1 = serial.run('alice', async () => {
+      await first.promise;
+      order.push('a1 끝');
+    });
+    const a2 = serial.run('alice', async () => {
+      order.push('a2 시작');
+      await second.promise;
+      order.push('a2 끝');
+    });
+    first.resolve();
+    await a1;
+    await tick();
+    expect(order).toEqual(['a1 끝', 'a2 시작']);
+    // 둘째가 도는 중에 셋째가 온다 — 줄의 꼬리는 둘째의 것이다
+    const a3 = serial.run('alice', async () => void order.push('a3'));
+    await tick();
+    expect(order).toEqual(['a1 끝', 'a2 시작']);
+    second.resolve();
+    await Promise.all([a2, a3]);
+    expect(order).toEqual(['a1 끝', 'a2 시작', 'a2 끝', 'a3']);
+    expect(serial.size).toBe(0);
+  });
 });
