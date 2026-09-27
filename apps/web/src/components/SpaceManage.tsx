@@ -124,7 +124,7 @@ export function SpaceManage({ space, onChanged, onDeleted }: { space: SpaceView;
           </button>
         </p>
       ) : (
-        <p className="muted small">지우기는 Crew가 본인뿐인 주인, 또는 중지된 스페이스에서 관리자가 할 수 있다.</p>
+        <p className="muted small">지우기는 활성 스페이스에서 Crew가 본인뿐인 주인, 또는 중지된 스페이스에서 관리자가 할 수 있다.</p>
       )}
     </section>
   );

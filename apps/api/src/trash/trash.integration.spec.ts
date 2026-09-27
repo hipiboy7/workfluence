@@ -1,4 +1,4 @@
-import type { Principal } from '@workfluence/shared';
+import { PAGE_TREE_MAX_DEPTH, type Principal } from '@workfluence/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { pages, spaces, users } from '../db/schema';
@@ -85,6 +85,33 @@ describe('페이지 휴지통 (FR-510~512)', () => {
     const { movedToRoot } = await svc.restorePage(child, me);
     expect(movedToRoot).toBe(true);
     expect((await db.query.pages.findFirst({ where: eq(pages.id, child) }))?.parentId).toBeNull();
+  });
+
+  it(`**제자리가 ${PAGE_TREE_MAX_DEPTH}단계를 넘게 됐으면 최상위로 올린다** — 지운 뒤 부모가 더 깊이 옮겨졌다(옮기기는 지운 자식을 세지 않는다 — P14 병합 전 코드 리뷰 7)`, async () => {
+    const me = await user('me');
+    const sp = await team(me);
+    // 부모가 맨 아래(10단계)에 있다 — 자식이 제자리로 돌아가면 11단계
+    let parent: string | null = null;
+    for (let i = 1; i <= PAGE_TREE_MAX_DEPTH; i++) parent = await page(sp.id, me.id, `L${i}`, parent);
+    const child = await page(sp.id, me.id, '자식', parent);
+    await drop(child);
+
+    const { movedToRoot } = await db.transaction((tx) => svc.restorePage(child, me, tx));
+    expect(movedToRoot).toBe(true);
+    expect((await db.query.pages.findFirst({ where: eq(pages.id, child) }))?.parentId).toBeNull();
+  });
+
+  it(`${PAGE_TREE_MAX_DEPTH}단계까지는 제자리로 돌아간다`, async () => {
+    const me = await user('me');
+    const sp = await team(me);
+    let parent: string | null = null;
+    for (let i = 1; i < PAGE_TREE_MAX_DEPTH; i++) parent = await page(sp.id, me.id, `L${i}`, parent);
+    const child = await page(sp.id, me.id, '자식', parent);
+    await drop(child);
+
+    const { movedToRoot } = await db.transaction((tx) => svc.restorePage(child, me, tx));
+    expect(movedToRoot).toBe(false);
+    expect((await db.query.pages.findFirst({ where: eq(pages.id, child) }))?.parentId).toBe(parent);
   });
 
   it('부모가 살아 있으면 제자리로 돌아간다', async () => {

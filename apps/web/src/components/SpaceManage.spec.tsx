@@ -128,7 +128,7 @@ describe('SpaceManage — 보이는 조건은 access', () => {
     const onDeleted = vi.fn();
     const { unmount } = render(<SpaceManage space={space()} onChanged={vi.fn()} onDeleted={onDeleted} />);
     expect(screen.queryByRole('button', { name: '지우기' })).toBeNull();
-    expect(screen.getByText(/지우기는 Crew가 본인뿐인 주인/)).toBeTruthy();
+    expect(screen.getByText(/지우기는 활성 스페이스에서 Crew가 본인뿐인 주인/)).toBeTruthy();
     unmount();
     render(<SpaceManage space={space({ access: { ...NO, canChangeStatus: true, canDelete: true, isOwner: true } })} onChanged={vi.fn()} onDeleted={onDeleted} />);
     fireEvent.click(screen.getByRole('button', { name: '지우기' }));

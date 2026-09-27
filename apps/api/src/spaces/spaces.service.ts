@@ -224,7 +224,7 @@ export class SpacesService {
     return row;
   }
 
-  /** 삭제 (FR-307). Crew가 둘 이상이면 소유자도 못 지운다 — `spaceAccess.canDelete`가 판정한다 */
+  /** 삭제 (FR-307). Crew가 둘 이상이면 소유자도 못 지우고, 중지되면 관리자만 지운다(P14) — `spaceAccess.canDelete`가 판정한다 */
   async softDelete(spaceId: string, principal: Principal, tx: Db = this.db): Promise<SpaceRow> {
     const ctx = await this.context(spaceId, principal, tx);
     if (!ctx.access.canDelete) throw new ForbiddenException('이 스페이스를 지울 권한이 없다');

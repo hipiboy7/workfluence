@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { LIST_PAGE_LIMIT, can, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
+import { LIST_PAGE_LIMIT, PAGE_TREE_MAX_DEPTH, can, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
 import { api } from '../api';
 import { useAuth } from '../auth';
 
@@ -31,8 +31,12 @@ export function TrashPage() {
   const restorePage = (p: TrashPageView) =>
     void api<{ movedToRoot: boolean }>(`/api/trash/pages/${p.id}/restore`, { method: 'POST' })
       .then((r) => {
-        // 부모가 아직 지워져 있으면 최상위로 올라간다 (FR-512). 말없이 옮기면 찾지 못한다
-        setNotice(r.movedToRoot ? `"${p.title}"을 되살렸다. 부모가 아직 휴지통에 있어 맨 위로 옮겼다.` : `"${p.title}"을 되살렸다.`);
+        // 부모가 아직 지워져 있거나 제자리가 깊이 한도를 넘으면 최상위로 올라간다 (FR-512, P14). 말없이 옮기면 찾지 못한다
+        setNotice(
+          r.movedToRoot
+            ? `"${p.title}"을 되살렸다. 제자리로 돌아갈 수 없어(부모가 아직 휴지통에 있거나 ${PAGE_TREE_MAX_DEPTH}단계를 넘는다) 맨 위로 옮겼다.`
+            : `"${p.title}"을 되살렸다.`,
+        );
         load();
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
