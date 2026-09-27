@@ -17,6 +17,8 @@ type Props = {
   onState?: (s: CollabState) => void;
   /** 서버가 이 문서의 자동 저장이 멈췄다고(까닭), 또는 풀렸다고(`null`) 알렸다 (P9 FR-1011) */
   onSaveBlocked?: (reason: string | null) => void;
+  /** 이 편집기의 Yjs 문서 — 만들 때 넘기고 놓을 때 `null`. 저장하고 보기로가 상태 벡터를 싣는다 (병합 전 자체 점검 8) */
+  onDoc?: (doc: Y.Doc | null) => void;
 };
 
 /**
@@ -35,11 +37,15 @@ type Props = {
  */
 export function CollabEditor(props: Props) {
   const [live, setLive] = useState<{ pageId: string; ydoc: Y.Doc; awareness: Awareness } | null>(null);
+  const onDoc = useRef(props.onDoc);
+  onDoc.current = props.onDoc;
   useEffect(() => {
     const ydoc = new Y.Doc();
     const awareness = new Awareness(ydoc);
     setLive({ pageId: props.pageId, ydoc, awareness });
+    onDoc.current?.(ydoc);
     return () => {
+      onDoc.current?.(null);
       awareness.destroy();
       ydoc.destroy();
     };

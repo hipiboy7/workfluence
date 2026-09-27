@@ -8,6 +8,7 @@ import { auditEvents, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
 import { loadEnv } from '../config/config.module';
 import { SettingsService } from '../settings/settings.service';
+import { UsersController } from '../users/users.module';
 import { UsersService, toUserView } from '../users/users.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { AuthService, toMeView } from './auth.service';
@@ -395,6 +396,53 @@ describe('비밀번호가 바뀌면 그 사용자의 모든 세션이 끊긴다 
     expect(await countFor(alice.id)).toBe(0);
     expect(await countFor(bob.id)).toBe(1);
   });
+
+  /**
+   * **확인과 기록 사이의 변경** (병합 전 검토 — 보안 L1·코드 리뷰 2·자체 점검 3). 확인(argon2)은 연결 없이 도는데, 그 사이 본인이 비밀번호를
+   * 바꾸면 변경이 세션을 모두 지운 뒤에 옛 비밀번호의 로그인이 세션을 만들었다 — 침해를 알아채고 바꾼 비밀번호가 공격자의 세션을 남긴다
+   */
+  it('**맞는 비밀번호로 확인하는 사이 비밀번호가 바뀌면 들이지 않는다**', async () => {
+    const alice = await approvedAlice();
+    const check = await usersSvc.checkCredentials('alice', SIGNUP.password);
+    expect(check.kind).toBe('match');
+    await auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'Alice-new-2026' });
+    await expect(usersSvc.settleCredentials(check, new Date())).resolves.toEqual({ ok: false, reason: 'changed' });
+  });
+
+  it('확인하는 사이 정지되면 들이지 않는다 — 읽어 둔 행이 아니라 지금의 상태로 판정한다', async () => {
+    const alice = await approvedAlice();
+    const check = await usersSvc.checkCredentials('alice', SIGNUP.password);
+    await usersSvc.suspend(alice.id, ROOT);
+    await expect(usersSvc.settleCredentials(check, new Date())).resolves.toEqual({ ok: false, reason: 'suspended' });
+  });
+
+  it('**비밀번호 변경은 그 계정의 로그인과 줄을 선다** — 확인을 마친 로그인이 세션까지 만든 뒤에 바꿔, 그 세션도 지운다', async () => {
+    const alice = await approvedAlice();
+    let letIn!: () => void;
+    const held = new Promise<void>((r) => (letIn = r));
+    let reached!: () => void;
+    const atSession = new Promise<void>((r) => (reached = r));
+    // 로그인이 기록을 마치고 세션을 만들기 **직전에** 멈춘다 — 줄 밖이던 때는 이 틈에 변경이 모두 지우고 끝났다
+    const login = auth.login({ username: 'alice', password: SIGNUP.password }, undefined, async (u) => {
+      reached();
+      await held;
+      await sessionRow('made-while-changing', u.id);
+    });
+    await atSession;
+    const prepare = vi.spyOn(usersSvc, 'prepareChangePassword');
+    try {
+      const change = auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'Alice-new-2026' });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(prepare).not.toHaveBeenCalled(); // 줄에서 기다린다
+      letIn();
+      await login;
+      await change;
+      expect(prepare).toHaveBeenCalledTimes(1);
+    } finally {
+      prepare.mockRestore();
+    }
+    expect(await countFor(alice.id)).toBe(0);
+  });
 });
 
 describe('역할 (FR-232, FR-233)', () => {
@@ -414,22 +462,9 @@ describe('역할 (FR-232, FR-233)', () => {
 });
 
 /**
- * **풀 크기보다 많은 동시 로그인** (T-026).
- *
- * 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면, 동시 요청이 풀 크기에 닿는 순간
- * 열려 있는 트랜잭션끼리 서로의 연결을 기다려 **영원히 풀리지 않는다.** 부하 측정에서
- * 실제로 앱 전체가 멈췄다.
- *
- * **동시 요청 수를 풀 크기에서 계산한다.** 숫자를 직접 적어 두면 누가 풀을 키웠을 때
- * 결함이 되살아난 채로 테스트가 초록이 된다 — 두 숫자가 묶여 있지 않으면 조용히
- * 무장해제된다 (코드 리뷰 5).
- *
- * 이 테스트는 **느려지면 실패한다.** 데드락은 오류를 내지 않고 조용히 멈추기 때문에
- * "던졌더니 다 돌아왔다"를 시간 안에 확인하는 것 말고는 잡을 방법이 없다.
- */
-/**
- * **확인하기 전에 센다** (P13 FR-1431, 측정 S3). 확인 뒤에 세던 때는 동시에 틀린 10건이 1회로 세졌다 — 서로가 읽은 값을 덮었다. 자리를 먼저
- * 잡으면 확인까지 가는 것은 기준 횟수뿐이다. 기준이 5면 넷은 '틀림', 다섯째는 그 실패로 잠가 '잠김', 나머지는 확인하지 않고 '잠김'이다.
+ * **한 계정씩 줄을 서서 확인한다** (P13 FR-1431, 측정 S3). 확인 뒤에 읽고 계산해 쓰던 때는 동시에 틀린 10건이 1회로 세졌다 — 서로가 읽은
+ * 값을 덮었다. 줄 안에서 잠금을 새로 읽고 실패 횟수는 한 문장으로 올리므로, 기준이 5면 넷은 '틀림', 다섯째는 그 실패로 잠가 '잠김',
+ * 나머지는 확인하지 않고 '잠김'이다(처음 정한 "확인하기 전에 센다"는 같은 계정의 맞는 동시 로그인까지 잠가서 거뒀다 — A.1-6).
  * **잠긴 계정·없는 계정도 argon2를 한 번 돈다** (FR-1432) — 잠긴 계정만 5ms에 답하면 응답 시간으로 계정이 드러난다(측정 S0b)
  */
 describe('잠금 — 동시에 틀려도 잠기고, 잠긴 계정도 같은 시간을 쓴다 (P13 FR-1431·1432)', () => {
@@ -592,7 +627,8 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
     const revoked: string[] = [];
     const off = bus.onRevoke((userId) => revoked.push(userId));
     try {
-      const { row, before } = await db.transaction((tx) => usersSvc.suspend(alice.id, ADMIN, tx));
+      // 트랜잭션을 넘기지 않는다 — 서비스가 열고 커밋한 뒤에 알린다(넘기면 커밋한 호출부가 알린다 — 아래)
+      const { row, before } = await usersSvc.suspend(alice.id, ADMIN);
       expect(row.status).toBe('suspended');
       expect(before).toBe('active');
     } finally {
@@ -605,6 +641,51 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
     expect(await reasons()).toContain('suspended');
     await usersSvc.unsuspend(alice.id, ADMIN);
     await expect(auth.login({ username: 'alice', password: SIGNUP.password })).resolves.toMatchObject({ id: alice.id });
+  });
+
+  it('**넘겨받은 트랜잭션 안에서는 끊는 알림을 하지 않는다** — 아직 커밋 전이라, 커밋한 호출부가 한다 (P13 D.5, 병합 전 검토)', async () => {
+    const alice = await approvedAlice();
+    const revoked: string[] = [];
+    const off = bus.onRevoke((userId) => revoked.push(userId));
+    try {
+      await db.transaction(async (tx) => {
+        await usersSvc.suspend(alice.id, ADMIN, tx);
+        await usersSvc.terminateSessions(alice.id, ADMIN, tx);
+      });
+    } finally {
+      off();
+    }
+    expect(revoked).toEqual([]);
+  });
+
+  it('**컨트롤러는 커밋한 뒤에 알린다** — 정지와 세션 강제 종료. 먼저 울리면 커밋 전 틈에 다시 붙은 연결이 옛 상태로 살아남는다', async () => {
+    const alice = await approvedAlice();
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    let committed = false;
+    const realTx = db.transaction.bind(db);
+    const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
+      const r = await realTx(...args);
+      committed = true;
+      return r;
+    }) as typeof db.transaction);
+    const seen: boolean[] = [];
+    const off = bus.onRevoke(() => seen.push(committed));
+    try {
+      await ctrl.suspend(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+      committed = false;
+      await ctrl.terminateSessions(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+    } finally {
+      off();
+      txSpy.mockRestore();
+    }
+    expect(seen).toEqual([true, true]);
+  });
+
+  it('**정지된 root는 강등할 수 있다** — 활성 root가 한 명뿐이어도 그 수는 줄지 않는다. 마지막 활성 root는 여전히 못 내린다 (병합 전 검토 — 코드 리뷰 5)', async () => {
+    const [a] = await db.insert(users).values({ username: 'root-a', displayName: 'A', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    const [b] = await db.insert(users).values({ username: 'root-b', displayName: 'B', passwordHash: 'x', role: 'root', status: 'suspended' }).returning();
+    await expect(usersSvc.changeRole(b.id, 'member', { id: a.id, role: 'root' })).resolves.toMatchObject({ row: { role: 'member' } });
+    await expect(usersSvc.changeRole(a.id, 'member', { id: b.id, role: 'root' })).rejects.toThrow(/마지막 root/);
   });
 
   it('**틀린 비밀번호면 정지를 드러내지 않는다** — 확인 뒤에 본다', async () => {
@@ -663,6 +744,20 @@ describe('비밀번호가 있는 계정인가 (P13 FR-1471)', () => {
   });
 });
 
+/**
+ * **풀 크기보다 많은 동시 로그인** (T-026).
+ *
+ * 트랜잭션 안에서 풀에 두 번째 연결을 달라고 하면, 동시 요청이 풀 크기에 닿는 순간
+ * 열려 있는 트랜잭션끼리 서로의 연결을 기다려 **영원히 풀리지 않는다.** 부하 측정에서
+ * 실제로 앱 전체가 멈췄다.
+ *
+ * **동시 요청 수를 풀 크기에서 계산한다.** 숫자를 직접 적어 두면 누가 풀을 키웠을 때
+ * 결함이 되살아난 채로 테스트가 초록이 된다 — 두 숫자가 묶여 있지 않으면 조용히
+ * 무장해제된다 (코드 리뷰 5).
+ *
+ * 이 테스트는 **느려지면 실패한다.** 데드락은 오류를 내지 않고 조용히 멈추기 때문에
+ * "던졌더니 다 돌아왔다"를 시간 안에 확인하는 것 말고는 잡을 방법이 없다.
+ */
 describe('동시 로그인이 연결 풀을 잠그지 않는다 (T-026)', () => {
   const CONCURRENT = TEST_POOL_MAX * 2;
 

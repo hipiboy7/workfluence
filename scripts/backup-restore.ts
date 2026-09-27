@@ -148,8 +148,12 @@ function main(): void {
         `docker ${MIGRATE.join(' ')}`,
     );
   }
+  // **앱 계정과 권한을 다시 준다** — 위에서 권한 줄을 붓지 않았다. 표 만들기(`tools`, 소유 계정)가 계정을 만들고 권한을 맞춘다(멱등,
+  // 마이그레이션은 방금 같은 수임을 봤으니 새로 적용되는 것이 없다). **행·파일 대조보다 먼저 한다** (병합 전 코드 리뷰 8) — 대조가 멈춰도
+  // 사람이 판단해 띄울 수 있게. 이것이 없으면 앱이 `permission denied`를 낸다(장애대응 7.30절)
+  dc(MIGRATE.slice(COMPOSE.length));
   if (files < blobs) {
-    throw new Error(`첨부 파일이 ${blobs - files}개 모자란다. DB는 있는데 실체가 없는 첨부가 생긴다`);
+    throw new Error(`첨부 파일이 ${blobs - files}개 모자란다. DB는 있는데 실체가 없는 첨부가 생긴다 (앱 계정의 권한은 맞췄다)`);
   }
   if (files > blobs) {
     console.log(`[restore] 참고: 아무도 안 쓰는 파일이 ${files - blobs}개 있다 (pnpm trash:purge가 정리한다)`);
@@ -157,7 +161,7 @@ function main(): void {
   if (missing.length) {
     throw new Error(
       `복원 뒤 행이 모자란다: ${missing.map(([t, n]) => `${t} ${n} → ${after[t]}`).join(', ')}. ` +
-        `백업 시점의 수치는 하한이므로 이것은 실제 손실이다`,
+        `백업 시점의 수치는 하한이므로 이것은 실제 손실이다 (앱 계정의 권한은 맞췄다)`,
     );
   }
   if (extra.length) {
@@ -165,9 +169,6 @@ function main(): void {
     console.log(`[restore] 참고: 백업 도중 들어온 쓰기 — ${extra.map(([t, n]) => `${t} ${n} → ${after[t]}`).join(', ')}`);
   }
 
-  // **앱 계정과 권한을 다시 준다** — 위에서 권한 줄을 붓지 않았다. 표 만들기(`tools`, 소유 계정)가 계정을 만들고 권한을 맞춘다(멱등,
-  // 마이그레이션은 이미 같은 수라 새로 적용되는 것이 없다). 이것이 없으면 앱이 `permission denied`를 낸다(장애대응 7.30절)
-  dc(MIGRATE.slice(COMPOSE.length));
   console.log(`[restore] 완료 — 대조한 표 ${Object.keys(meta.counts).length}개의 행 수를 모두 채웠고, 앱 계정의 권한을 맞췄다`);
 }
 

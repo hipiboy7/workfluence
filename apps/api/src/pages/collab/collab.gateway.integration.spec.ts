@@ -15,6 +15,7 @@ import { SettingsService } from '../../settings/settings.service';
 import { SpacesService } from '../../spaces/spaces.service';
 import { UsersService } from '../../users/users.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../../test/db';
+import { PagesController } from '../pages.module';
 import { PagesService } from '../pages.service';
 import type { Ledger } from '../domain/makers';
 import { MAX_PRESENCE_BINDS, MAX_UNWRITTEN_PRESENCE_BINDS } from '../domain/presence';
@@ -435,6 +436,85 @@ describe('실시간 편집의 결함 셋 (P13 C.7, FR-1460~1462)', () => {
 
   it('방이 없으면 제목을 받지 않는다 — REST 저장 경로로 간다', () => {
     expect(gw.setTitle(pageId, '받을 곳 없음', userId)).toBe(false);
+  });
+
+  it('**저장하는 동안 들어온 제목을 지우지 않는다** — 다음 저장이 싣는다 (병합 전 검토 — 코드 리뷰 1·자체 점검 1)', async () => {
+    await attach();
+    const pagesSvc = (gw as unknown as { pagesSvc: PagesService }).pagesSvc;
+    const original = pagesSvc.saveCollabVersion.bind(pagesSvc);
+    // 저장 트랜잭션이 도는 사이 다른 사람이 제목을 바꾼다 — 예전에는 저장이 끝나며 그 제목을 지웠다
+    const spy = vi.spyOn(pagesSvc, 'saveCollabVersion').mockImplementationOnce(async (...args) => {
+      expect(gw.setTitle(pageId, '저장 도중에 온 제목', otherId)).toBe(true);
+      return original(...args);
+    });
+    try {
+      expect((await gw.flush(pageId, '먼저 보낸 제목')).saved).toBe(true);
+      expect(await titleNow()).toBe('먼저 보낸 제목');
+      await idle();
+      await inner.sweep();
+      await vi.waitFor(async () => expect(await titleNow()).toBe('저장 도중에 온 제목'));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /** 화면이 부르는 두 문(제목·저장하고 보기로)을 **컨트롤러로** 본다 — 답의 모양과 감사는 컨트롤러가 만든다 (병합 전 검토) */
+  describe('컨트롤러의 답과 감사', () => {
+    const ctrl = () =>
+      new PagesController(new PagesService(db, new SpacesService(db), new NotificationsService(db, new InAppChannel())), new AuditService(db), gw, {} as never, new SpacesService(db), db);
+    const me = () => ({ id: otherId, role: 'admin' }) as never;
+    const audits = async (action: string) =>
+      (await db.execute<{ actor: string; detail: Record<string, unknown> }>(sql`SELECT actor_id AS actor, detail FROM audit_events WHERE action = ${action} ORDER BY created_at`)).rows;
+    const screenOf = (room: { doc: Y.Doc }, text: string) => {
+      const screen = new Y.Doc();
+      Y.applyUpdate(screen, Y.encodeStateAsUpdate(room.doc));
+      const before = Y.encodeStateVector(screen);
+      const p = new Y.XmlElement('paragraph');
+      p.insert(0, [new Y.XmlText(text)]);
+      screen.getXmlFragment('default').insert(0, [p]);
+      return { sv: Buffer.from(Y.encodeStateVector(screen)).toString('base64'), update: Y.encodeStateAsUpdate(screen, before) };
+    };
+
+    it('**제목을 바꾼 사람을 감사에 남긴다** — 저장의 작성자는 마지막으로 친 사람이라 흐려진다 (보안 검토 L2)', async () => {
+      await attach();
+      await expect(ctrl().collabTitle(pageId, { title: '감사에 남을 제목' }, me())).resolves.toEqual({ applied: true });
+      expect(await audits('page.collab.title')).toEqual([{ actor: otherId, detail: { title: '감사에 남을 제목' } }]);
+    });
+
+    it('방이 없으면 받지 않고 감사도 없다', async () => {
+      await expect(ctrl().collabTitle(pageId, { title: '받을 곳 없음' }, me())).resolves.toEqual({ applied: false });
+      expect(await audits('page.collab.title')).toEqual([]);
+    });
+
+    it('**이미 남아 있으면 답과 감사가 그것을 말한다** — `unchanged` (코드 리뷰 7)', async () => {
+      const { room } = await attach();
+      const sock = [...room.members][0] as { socket: FakeSocket };
+      sock.socket.emit('message', editUpdate(room.doc, '자동 저장될 글'));
+      const before = await currentVersion();
+      await idle();
+      await inner.sweep();
+      await vi.waitFor(async () => expect(await currentVersion()).toBe(before + 1));
+      await expect(ctrl().flush(pageId, {}, me())).resolves.toMatchObject({ saved: true, unchanged: true, currentVersionNo: before + 1 });
+      expect((await audits('page.collab.flush'))[0].detail).toMatchObject({ saved: true, unchanged: true });
+    });
+
+    it('**화면이 친 것을 서버가 받지 못했으면 저장했다고 답하지 않는다** — 끊긴 줄 모르는 연결에서 누른 것이다 (자체 점검 8)', { timeout: 20_000 }, async () => {
+      const { room } = await attach();
+      const { sv } = screenOf(room, '보내지 못한 글');
+      const before = await currentVersion();
+      await expect(ctrl().flush(pageId, { sv }, me())).resolves.toMatchObject({ saved: false, reason: expect.stringMatching(/닿지 않았다/) });
+      expect(await currentVersion()).toBe(before);
+    });
+
+    it('**막 친 글자가 오는 중이면 기다렸다가 남긴다** — 누르기 직전의 입력은 WebSocket으로 오는 중일 수 있다', { timeout: 20_000 }, async () => {
+      const { room } = await attach();
+      const sock = [...room.members][0] as { socket: FakeSocket };
+      const { sv, update } = screenOf(room, '오는 중인 글');
+      const before = await currentVersion();
+      const flushing = ctrl().flush(pageId, { sv }, me());
+      setTimeout(() => sock.socket.emit('message', Buffer.concat([Buffer.of(0), Buffer.from(update)])), 200);
+      await expect(flushing).resolves.toMatchObject({ saved: true, unchanged: false, currentVersionNo: before + 1 });
+    });
   });
 
   /**

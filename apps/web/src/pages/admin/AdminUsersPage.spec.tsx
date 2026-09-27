@@ -153,6 +153,48 @@ describe('AdminUsersPage — 찾기·거르기·더 보기 (P13 C.6, FR-1450~145
     expect(calls.some((c) => c.url.includes('status=suspended'))).toBe(true);
   });
 
+  it('**더 보기가 새 찾기와 엉키지 않는다** — 새 찾기가 오는 중에 눌러도 옛 목록 뒤에 새 조건의 조각을 붙이거나 새 찾기를 버리지 않는다 (병합 전 코드 리뷰 10)', async () => {
+    rows = many(250);
+    const base = globalThis.fetch;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let searching = false;
+    globalThis.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input).includes('q=user2')) {
+        searching = true;
+        await held;
+      }
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    renderPage();
+    await screen.findByText('user000');
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'user2' } });
+    await waitFor(() => expect(searching).toBe(true)); // 새 찾기가 오는 중이다
+    fireEvent.click(screen.getByRole('button', { name: '더 보기' }));
+    await screen.findByText('user100'); // 보이는 목록의 조건(찾는 말 없음)으로 이어 받았다
+    release();
+    await screen.findByText('전체 50명 · 50명 보는 중');
+    expect(screen.queryByText('user000')).toBeNull();
+    expect(screen.queryByText('user100')).toBeNull();
+    expect(screen.getByText('user249')).toBeTruthy();
+  });
+
+  it('**조치 뒤에는 보던 만큼 다시 읽는다** — 처음 100명으로 돌아가 뒤쪽에서 정지한 사람이 화면에서 사라지지 않게 (병합 전 코드 리뷰 10)', async () => {
+    window.confirm = vi.fn(() => true);
+    rows = many(150);
+    renderPage();
+    await screen.findByText('user000');
+    fireEvent.click(screen.getByRole('button', { name: '더 보기' }));
+    await screen.findByText('user149');
+    const stop = Array.from(screen.getByText('user120').closest('tr')!.querySelectorAll('button')).find((b) => b.textContent === '정지')!;
+    await waitFor(() => expect(stop.disabled).toBe(false));
+    fireEvent.click(stop);
+    await waitFor(() => expect(Array.from(screen.getByText('user120').closest('tr')!.querySelectorAll('button')).some((b) => b.textContent === '정지 해제')).toBe(true));
+    const lastList = calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/users?')).at(-1)!;
+    expect(new URL(lastList.url, 'http://t').searchParams.get('limit')).toBe('150');
+    expect(screen.getByText('전체 150명 · 150명 보는 중')).toBeTruthy();
+  });
+
   it('상태는 한국어로 보인다', async () => {
     rows = [user({ id: 'p1', username: 'wait', status: 'pending' }), user({ id: 's1', username: 'gone', status: 'suspended' })];
     renderPage();

@@ -48,8 +48,8 @@ export class AuthController {
   @Public()
   @RateLimit(RATE_LIMITS.login)
   async login(@Body(new ZodPipe(loginDto)) dto: ReturnType<typeof loginDto.parse>, @Req() req: Request): Promise<MeView> {
-    const user = await this.auth.login(dto, req.ip);
-    await startSession(req, user.id);
+    // 세션은 **그 계정의 줄 안에서** 만든다 — 비밀번호 변경과 엇갈리지 않게 (`AuthService.login`)
+    const user = await this.auth.login(dto, req.ip, (u) => startSession(req, u.id));
     // **성공했으므로 제한 예산을 돌려준다.** 무차별 대입을 막는 것이 목적이니 실패만 세면 된다 (T-023)
     this.rateLimit.refund(req);
     return toMeView(user);

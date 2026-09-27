@@ -154,7 +154,8 @@ test('관리자가 찾아서 정지하면 로그인되지 않고, 정지를 풀�
   await expect(page.getByText(/전체 1명/)).toBeVisible();
   page.once('dialog', (d) => void d.accept());
   await row.getByRole('button', { name: '정지', exact: true }).click();
-  await expect(row.getByText('정지', { exact: true }).first()).toBeVisible();
+  // **상태 칸의 뱃지를 본다** — 글자 '정지'는 누르기 전부터 있는 정지 단추에도 걸려 늘 참이었다 (병합 전 자체 점검 10)
+  await expect(row.locator('td .badge').filter({ hasText: /^정지$/ })).toBeVisible();
   await expect(row.getByRole('button', { name: '정지 해제' })).toBeVisible();
 
   // 정지된 사람은 맞는 비밀번호로도 못 들어온다 — 응답은 다른 실패와 같다(계정 상태가 새지 않게)
@@ -167,7 +168,7 @@ test('관리자가 찾아서 정지하면 로그인되지 않고, 정지를 풀�
   await expect(leaverPage.getByRole('alert')).toContainText('아이디 또는 비밀번호가 올바르지 않다');
 
   await row.getByRole('button', { name: '정지 해제' }).click();
-  await expect(row.getByText('활성')).toBeVisible();
+  await expect(row.locator('td .badge').filter({ hasText: /^활성$/ })).toBeVisible();
   await leaverPage.getByRole('button', { name: '로그인' }).click();
   await expect(leaverPage.getByText(`${leaver.displayName}님`)).toBeVisible();
   await other.close();

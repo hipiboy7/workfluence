@@ -58,7 +58,10 @@ export function toUserView(u: UserRow, now: Date = new Date()): UserView {
   };
 }
 
-export type CredentialResult = { ok: true; user: UserRow } | { ok: false; reason: 'unknown' | 'locked' | 'wrong' | 'pending' | 'suspended' };
+/** `changed` — 확인한 뒤 적기 전에 비밀번호가 바뀌었다(본인 변경·관리자 초기화). 옛 비밀번호로 들어온 것이 된다 */
+export type CredentialResult =
+  | { ok: true; user: UserRow }
+  | { ok: false; reason: 'unknown' | 'locked' | 'wrong' | 'pending' | 'suspended' | 'changed' };
 
 /**
  * **확인까지 한 결과** — 아직 DB에 적지 않았다 (P13 D.4). `checkCredentials`가 연결을 쥐지 않고 만들고, `settleCredentials`가 호출부의
@@ -293,13 +296,13 @@ export class UsersService {
     });
   }
 
-  /** 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다 */
   /** 임시 비밀번호와 그 해시 — 트랜잭션을 열기 전에 만든다 (P13 FR-1434) */
   async prepareTemporaryPassword(): Promise<TemporaryPassword> {
     const temporaryPassword = generateTemporaryPassword((max) => randomInt(max));
     return { temporaryPassword, hash: await hashPassword(temporaryPassword) };
   }
 
+  /** 관리자 초기화 (FR-209). 임시 비밀번호는 **돌려주기만** 하고 저장하지 않는다 */
   async resetPassword(id: string, actor: Principal, tx: Db = this.db, prepared?: TemporaryPassword): Promise<{ user: UserRow; temporaryPassword: string }> {
     return this.inTx(tx, async (t) => {
       const target = await this.getManaged(id, actor, t);
@@ -341,8 +344,10 @@ export class UsersService {
       // **잠그고 읽는다** — 읽은 위임으로 다시 쓰므로, 그 사이의 위임 변경을 덮지 않게 (`getManaged` → `lockForUpdate`)
       const target = await this.getManaged(id, actor, t);
       if (!canAssignRole(actor, role)) throw new ForbiddenException(`'${role}' 역할을 부여할 권한이 없다`);
-      // 마지막 root를 강등하면 아무도 root 권한을 되돌릴 수 없다 (FR-233). 순수 함수로 두기 어려워 여기서 센다
-      if (target.role === 'root' && role !== 'root') {
+      // 마지막 root를 강등하면 아무도 root 권한을 되돌릴 수 없다 (FR-233). 순수 함수로 두기 어려워 여기서 센다.
+      // **활성 root를 강등할 때만 센다** (병합 전 검토 — 코드 리뷰 5·자체 점검 5). 셈은 활성 root만 세므로, 정지된 root를 강등해도 그 수는
+      // 줄지 않는다 — 대상의 상태를 보지 않으면 활성 root가 한 명일 때 퇴사한(정지된) root를 정리할 수 없었다
+      if (target.role === 'root' && target.status === 'active' && role !== 'root') {
         // **root 강등을 줄 세운 뒤 센다** — 잠금을 쥔 다음 문장은 앞선 강등이 커밋한 것을 본다 (`LAST_ROOT_LOCK`)
         await t.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${LAST_ROOT_LOCK}))`);
         // **`t`로 센다.** `this.db`는 풀이라, 트랜잭션 안에서 부르면 연결을 하나 쥔 채
@@ -425,6 +430,7 @@ export class UsersService {
    * (RevocationBus — 강제 종료와 같다). 이전 상태를 돌려준다 — 호출부가 감사에 싣는다
    */
   async suspend(id: string, actor: Principal, tx: Db = this.db): Promise<{ row: UserRow; before: UserStatus }> {
+    const opened = tx === this.db;
     const result = await this.inTx(tx, async (t) => {
       const target = await this.lockForUpdate({ id }, t);
       if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
@@ -440,8 +446,9 @@ export class UsersService {
       await t.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
       return { row, before };
     });
-    // 끊는 알림은 지운 뒤에 — 트랜잭션을 여기서 열었으면 커밋된 뒤다. 열린 편집 연결이 그 자리에서 끊긴다 (FR-1442)
-    this.revocation.revoke(id);
+    // **끊는 알림은 커밋한 뒤에** (FR-1442, 병합 전 검토). 트랜잭션을 여기서 열었으면 지금이 커밋 뒤다. 호출부가 넘긴 트랜잭션이면 커밋은
+    // 호출부의 일이라 알림도 호출부가 한다(`UsersController.suspend`) — 여기서 울리면 커밋 전이다
+    if (opened) this.revocation.revoke(id);
     return result;
   }
 
@@ -470,13 +477,14 @@ export class UsersService {
    * 변경과 같은 판단이다 (FR-224). `sess`는 connect-pg-simple가 넣은 세션 객체 전체다.
    */
   async terminateSessions(id: string, actor: Principal, tx: Db = this.db): Promise<number> {
+    const opened = tx === this.db;
     const n = await this.inTx(tx, async (t) => {
       await this.getManaged(id, actor, t);
       const r = await t.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
       return r.rowCount ?? 0;
     });
-    // 끊는 알림은 지운 뒤에 — 트랜잭션을 여기서 열었으면 커밋된 뒤다
-    this.revocation.revoke(id);
+    // 끊는 알림은 커밋한 뒤에 — 정지와 같다(넘겨받은 트랜잭션이면 호출부가 알린다)
+    if (opened) this.revocation.revoke(id);
     return n;
   }
 
@@ -555,13 +563,19 @@ export class UsersService {
       await tx.update(users).set({ lockedUntil: lockUntil }).where(eq(users.id, user.id));
       return { ok: false, reason: 'locked' };
     }
-    if (user.failedAttempts > 0 || user.lockedUntil) {
-      const cleared = afterSuccess();
-      await tx.update(users).set({ failedAttempts: cleared.failedAttempts, lockedUntil: cleared.lockedUntil }).where(eq(users.id, user.id));
-    }
-    if (user.status === 'pending') return { ok: false, reason: 'pending' };
-    if (user.status === 'suspended') return { ok: false, reason: 'suspended' };
-    return { ok: true, user };
+    // **읽은 비밀번호 그대로일 때만 들인다** (병합 전 검토 — 보안 L1·코드 리뷰 2·자체 점검 3). 확인(argon2)은 연결 없이 돌아, 그 사이 본인이
+    // 비밀번호를 바꾸면 변경이 세션을 모두 지운 **뒤에** 이 로그인이 세션을 새로 만들었다 — "비밀번호를 바꾸면 모두 끊긴다"(`CLAUDE.md` 7절)를
+    // 비켜 간다. 확인과 초기화를 한 문장으로 하고, 상태도 돌려받은 값(지금의 값)으로 판정한다 — 그 사이 정지됐으면 들이지 않는다.
+    // 남는 틈(적은 뒤 세션을 만들기 전)은 호출부가 막는다 — 세션을 같은 계정 줄 안에서 만들고, 비밀번호 변경도 그 줄에 선다(`AuthService`)
+    const [fresh] = await tx
+      .update(users)
+      .set(afterSuccess())
+      .where(and(eq(users.id, user.id), eq(users.passwordHash, user.passwordHash!)))
+      .returning();
+    if (!fresh) return { ok: false, reason: 'changed' };
+    if (fresh.status === 'pending') return { ok: false, reason: 'pending' };
+    if (fresh.status === 'suspended') return { ok: false, reason: 'suspended' };
+    return { ok: true, user: fresh };
   }
 
   /** 확인하고 적는다 — 한 번에. 트랜잭션 없이 부르는 시험·도구용이다. 로그인은 둘을 나눠 부른다(연결을 쥐지 않게) */

@@ -82,6 +82,27 @@ export const SAVE_FAILED_REASON = '서버가 버전을 남기지 못했다 — �
 /** 아무도 없는 방을 이만큼 두고도 아무 일이 없으면 치운다 (고아 방 회수) */
 const EMPTY_ROOM_TTL_MS = 60_000;
 
+/**
+ * **저장하고 보기로가 화면의 입력을 다 받았는가** (병합 전 자체 점검 8). 화면이 보낸 상태 벡터가 방의 문서보다 앞서면 그 화면이 친 글자가
+ * 아직 오지 않았다 — 막 친 글자는 WebSocket으로 오는 중일 수 있어 이만큼 기다린다. 그래도 앞서면 끊긴 줄 모르는 연결에서 누른 것이다
+ */
+const FLUSH_CATCH_UP_MS = 1_500;
+const FLUSH_CATCH_UP_STEP_MS = 50;
+const NOT_RECEIVED = '이 화면의 입력이 아직 서버에 닿지 않았다 — 연결이 끊겼을 수 있다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다';
+
+/** 화면의 상태 벡터에 방의 문서가 아직 받지 못한 것이 있는가. 읽지 못하는 값은 보지 않는다 — 그 사람의 저장 판정만 흐려진다 */
+function screenIsAhead(doc: Y.Doc, screenSv: Uint8Array): boolean {
+  let screen: Map<number, number>;
+  try {
+    screen = Y.decodeStateVector(screenSv);
+  } catch {
+    return false;
+  }
+  const server = Y.decodeStateVector(Y.encodeStateVector(doc));
+  for (const [client, clock] of screen) if (clock > (server.get(client) ?? 0)) return true;
+  return false;
+}
+
 type Member = {
   socket: WebSocket;
   principal: Principal;
@@ -998,7 +1019,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     // **저장하는 동안 들어온 변경은 그대로 둔다.** 무조건 0으로 밀면 그 변경은
     // 다음 타이핑이나 퇴장까지 저장되지 않는다 (자체 점검 12)
     if (room.lastChangeAt === changedAt) room.lastChangeAt = 0;
-    room.title = null;
+    // **저장한 제목일 때만 비운다** (병합 전 검토 — 코드 리뷰 1·자체 점검 1). 저장하는 동안 들어온 제목(`setTitle`·`flush`)은 이 버전에
+    // 없다 — 비우면 다음 저장이 옛 제목으로 "바뀐 것 없음"이 되고, 그 사람의 화면은 이미 보냈다고 믿어 다시 보내지 않는다
+    if (room.title === title) room.title = null;
     await this.rememberState(pageId, room, room.versionNo);
     // **사람이 남아 있으면 방을 닫지 않는다.** 저장 버튼이 편집을 끊으면 안 된다
     if (trigger !== 'idle') await this.finish(pageId, room);
@@ -1041,9 +1064,16 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
    *
    * **저장이 끝난 뒤에 돌아온다.** 그래야 호출부가 읽는 버전 번호가 실제와 맞는다.
    */
-  async flush(pageId: string, title?: string): Promise<{ saved: boolean; reason: string; unchanged?: true }> {
+  async flush(pageId: string, title?: string, screenSv?: Uint8Array): Promise<{ saved: boolean; reason: string; unchanged?: true }> {
     const room = this.rooms.get(pageId);
     if (!room) return { saved: false, reason: '편집 중인 사람이 없다' };
+    // **화면이 친 것을 다 받았는지 본다** (위 `FLUSH_CATCH_UP_MS`). 못 받았는데 "이미 남아 있다"로 답하면 화면은 보기로 넘어가 그 입력을 잃는다
+    if (screenSv) {
+      const until = Date.now() + FLUSH_CATCH_UP_MS;
+      while (screenIsAhead(room.doc, screenSv) && Date.now() < until) await new Promise((r) => setTimeout(r, FLUSH_CATCH_UP_STEP_MS));
+      if (this.rooms.get(pageId) !== room) return { saved: false, reason: '편집 중인 사람이 없다' };
+      if (screenIsAhead(room.doc, screenSv)) return { saved: false, reason: NOT_RECEIVED };
+    }
     // **제목도 함께 남긴다.** 협업 모드에서도 제목은 평범한 입력칸이고, 그것을 안 보내면
     // 사람이 고친 제목이 조용히 버려진다 (자체 점검 3)
     if (title) room.title = title;

@@ -12,6 +12,8 @@ export type Role = (typeof ROLES)[number];
 export const USER_STATUSES = ['pending', 'active', 'suspended'] as const;
 /** 사용자 목록 한 번의 수 (P13 FR-1451). 서버의 기본값과 화면의 "더 보기"가 같은 값을 쓴다 — 300명 규모에서 셋으로 끝까지 닿는다 */
 export const USER_LIST_PAGE = 100;
+/** 사용자 목록 한 번의 상한 — 화면은 조치 뒤에 보던 만큼(이 값까지) 다시 읽는다. 300명 규모를 한 번에 담는다 (병합 전 코드 리뷰 10) */
+export const USER_LIST_MAX = 500;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
 export const SPACE_KINDS = ['personal', 'team'] as const;

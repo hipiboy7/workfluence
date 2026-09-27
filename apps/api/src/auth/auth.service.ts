@@ -79,13 +79,17 @@ export class AuthService {
    * "idle in transaction"이 되어 남의 요청이 기다렸다. **잠금과 기록은 같은 트랜잭션에 둔다** (FR-236) — 따로 두면 한쪽만 반영돼
    * "잠겼는데 기록이 없다" 또는 그 반대가 생긴다.
    */
-  async login(dto: LoginDto, ip?: string): Promise<UserRow> {
+  /**
+   * 로컬 로그인. `begin`은 **세션을 만드는 일**이다 — 들어왔을 때 줄 안에서 부른다(병합 전 검토). 비밀번호 변경이 같은 줄에 서므로, 변경은
+   * 이 세션이 생긴 뒤에 돌아 그것까지 지운다. 줄 밖에서 만들면 적은 뒤와 만들기 전 사이에 변경이 끼어, 지운 뒤에 세션이 생긴다
+   */
+  async login(dto: LoginDto, ip?: string, begin?: (user: UserRow) => Promise<void>): Promise<UserRow> {
     // **한 계정씩 줄을 선다** (P13 FR-1431). 확인과 기록이 한 사람씩이라, 동시에 틀린 N건이 와도 확인까지 가는 것은 잠금 기준만큼이다.
     // 줄에서 기다리는 동안 연결을 쥐지 않는다
     const result = await this.loginSerial.run(dto.username, async () => {
       const now = new Date();
       const check = await this.users.checkCredentials(dto.username, dto.password, now);
-      return this.db.transaction(async (tx) => {
+      const settled = await this.db.transaction(async (tx) => {
         const r = await this.users.settleCredentials(check, now, tx);
         if (!r.ok) {
           await this.audit.record(
@@ -98,6 +102,8 @@ export class AuthService {
         }
         return r;
       });
+      if (settled.ok && begin) await begin(settled.user);
+      return settled;
     });
     if (!result.ok) throw new UnauthorizedException(LOGIN_FAILED);
     return result.user;
@@ -150,11 +156,17 @@ export class AuthService {
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto, ip?: string): Promise<void> {
-    // 지금 비밀번호 확인과 새 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
-    const prepared = await this.users.prepareChangePassword(userId, dto.currentPassword, dto.newPassword);
-    await this.db.transaction(async (tx) => {
-      await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx, prepared);
-      await this.audit.record({ action: 'auth.password.change', actorId: userId, ip }, tx);
+    const user = await this.users.findById(userId);
+    if (!user) throw new NotFoundException('사용자를 찾을 수 없다');
+    // **그 계정의 로그인과 같은 줄에 선다** (병합 전 검토). 줄 밖에서 바꾸면, 옛 비밀번호로 확인 중이던 로그인이 변경이 세션을 모두 지운
+    // 뒤에 세션을 만든다 — 침해를 알아채고 바꾼 비밀번호가 공격자의 세션을 남긴다. 로그인은 아이디가 정확히 같아야 들어오므로 열쇠가 같다
+    await this.loginSerial.run(user.username, async () => {
+      // 지금 비밀번호 확인과 새 해시는 트랜잭션을 열기 전에 (P13 FR-1434)
+      const prepared = await this.users.prepareChangePassword(userId, dto.currentPassword, dto.newPassword);
+      await this.db.transaction(async (tx) => {
+        await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx, prepared);
+        await this.audit.record({ action: 'auth.password.change', actorId: userId, ip }, tx);
+      });
     });
   }
 

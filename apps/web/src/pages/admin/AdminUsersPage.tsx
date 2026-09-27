@@ -4,6 +4,8 @@ import {
   DELEGABLE_ACTIONS,
   ROLES,
   USER_LIST_FILTERS,
+  USER_LIST_MAX,
+  USER_LIST_PAGE,
   can,
   canManageUser,
   type DelegableAction,
@@ -23,8 +25,6 @@ const GRANT_LABELS: Record<DelegableAction, string> = { 'llm.manage': 'LLM 연�
 /** 상태의 이름 (P13 C.6) — 예전에는 저장값(`active` 등)을 그대로 보였다 */
 const STATUS_LABELS: Record<UserStatusView, string> = { pending: '승인 대기', active: '활성', locked: '잠김', suspended: '정지' };
 
-/** 한 번에 받는 사람 수 — 서버 기본값과 같다(`listUsersDto`) */
-const PAGE = 100;
 
 /** 입력을 멈추고 이만큼 뒤에 찾는다 */
 const SEARCH_DELAY_MS = 300;
@@ -54,50 +54,64 @@ export function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [temporary, setTemporary] = useState<{ username: string; password: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // 늦게 온 옛 응답이 새 찾기의 결과를 덮지 않게 — 마지막 요청만 받는다
+  // 늦게 온 옛 응답이 새 찾기의 결과를 덮지 않게 — 마지막 찾기만 받는다
   const seq = useRef(0);
+  // **지금 보이는 목록의 조건** — "더 보기"는 입력 칸이 아니라 이 조건으로 이어 받는다. 찾기가 목록을 바꿀 때마다 새 값이 된다 (병합 전 코드 리뷰 10)
+  const shown = useRef<{ q: string; filter: UserListFilter | '' }>({ q: '', filter: '' });
+  const [moreBusy, setMoreBusy] = useState(false);
 
-  const fetchPage = useCallback((offset: number, query: string, status: UserListFilter | '') => {
-    const params = new URLSearchParams({ limit: String(PAGE), offset: String(offset) });
+  const fetchPage = useCallback((offset: number, query: string, status: UserListFilter | '', limit: number = USER_LIST_PAGE) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (query.trim()) params.set('q', query.trim());
     if (status) params.set('status', status);
     return api<UserListView>(`/api/users?${params.toString()}`);
   }, []);
 
-  /** 처음부터 다시 읽는다 — 찾기·거르기가 바뀌었거나 조치 뒤에 */
-  const load = useCallback(() => {
-    const mine = ++seq.current;
-    fetchPage(0, q, filter)
-      .then((r) => {
-        if (mine !== seq.current) return;
-        setRows(r.items);
-        setTotal(r.total);
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, [fetchPage, q, filter]);
+  /** 처음부터 다시 읽는다 — 찾기·거르기가 바뀌었거나 조치 뒤에(그때는 보던 만큼 — `limit`) */
+  const load = useCallback(
+    (limit: number = USER_LIST_PAGE) => {
+      const mine = ++seq.current;
+      fetchPage(0, q, filter, limit)
+        .then((r) => {
+          if (mine !== seq.current) return;
+          shown.current = { q, filter };
+          setRows(r.items);
+          setTotal(r.total);
+        })
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    },
+    [fetchPage, q, filter],
+  );
 
   // 입력을 멈추면 찾는다 — 글자마다 서버를 부르지 않는다
   useEffect(() => {
-    const t = setTimeout(load, SEARCH_DELAY_MS);
+    const t = setTimeout(() => load(), SEARCH_DELAY_MS);
     return () => clearTimeout(t);
   }, [load]);
 
+  /**
+   * 뒤를 이어 받는다 — **보이는 목록의 조건으로.** 예전에는 입력 칸의 새 조건으로 옛 목록 뒤를 받아 붙이고, 찾기의 순번을 올려 오는 중이던
+   * 새 찾기의 결과를 버렸다. 받는 사이 새 찾기가 목록을 바꿨으면 이것을 버린다 (병합 전 코드 리뷰 10)
+   */
   const more = () => {
-    const mine = ++seq.current;
-    fetchPage(rows.length, q, filter)
+    const at = shown.current;
+    setMoreBusy(true);
+    fetchPage(rows.length, at.q, at.filter)
       .then((r) => {
-        if (mine !== seq.current) return;
+        if (shown.current !== at) return;
         setRows((prev) => [...prev, ...r.items]);
         setTotal(r.total);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setMoreBusy(false));
   };
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
     try {
       await fn();
-      load();
+      // **보던 만큼 다시 읽는다** — 처음 100명으로 돌아가면 뒤쪽에서 조치한 사람이 화면에서 사라졌다 (병합 전 코드 리뷰 10)
+      load(Math.min(USER_LIST_MAX, Math.max(USER_LIST_PAGE, rows.length)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -243,7 +257,7 @@ export function AdminUsersPage() {
       </table>
       {rows.length < total && (
         <p>
-          <button type="button" onClick={more}>더 보기</button>
+          <button type="button" onClick={more} disabled={moreBusy}>더 보기</button>
         </p>
       )}
       <p className="muted small">
