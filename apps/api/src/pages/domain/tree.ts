@@ -40,3 +40,18 @@ export function checkMove(args: MoveArgs): MoveCheck {
   if (ancestors.length + 1 + subtreeHeight > maxDepth) return { ok: false, reason: 'too-deep' };
   return { ok: true };
 }
+
+/**
+ * **옮긴 뒤 새 부모 아래의 순서** (A등급, P14_설계서_Spaces D.1, FR-1502).
+ *
+ * `siblings`는 새 부모 아래 형제의 **지금 순서**다(화면과 같은 순서 — 자리, 만든 시각). 옮기는 페이지가 그 안에 있으면(같은 부모 안에서 옮기기)
+ * 먼저 빼고, `index`(0부터 — 자기를 뺀 형제 가운데 몇 번째) 자리에 끼운다. 형제 수보다 크면 맨 뒤다. 서비스는 돌려받은 순서대로 자리를
+ * 0부터 다시 매긴다 — 예전에는 받은 자리 값을 그대로 적어 같은 값이 여럿 생겼다.
+ *
+ * **조회하지 않는다** — `checkMove`와 같은 판단.
+ */
+export function placeAt(siblings: readonly string[], movedId: string, index: number): string[] {
+  const rest = siblings.filter((id) => id !== movedId);
+  const at = Math.max(0, Math.min(Math.trunc(index), rest.length));
+  return [...rest.slice(0, at), movedId, ...rest.slice(at)];
+}

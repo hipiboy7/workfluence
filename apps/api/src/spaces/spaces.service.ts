@@ -12,8 +12,9 @@ import {
   type SpaceView,
   type UpdateSpaceDto,
 } from '@workfluence/shared';
-import { and, count, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, count, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
+import { containsPattern } from '../common/like';
 import { DB, type Db } from '../db/db.module';
 import { byName } from '../db/order';
 import { spaceCategories, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
@@ -98,8 +99,16 @@ export class SpacesService {
    *
    * **여기서 막는다.** 핸들러에 `@RequireAction`을 붙이면 `scope`와 무관하게 막혀 일반
    * 사용자가 자기 목록도 못 본다. 권한이 `scope` 값에 달려 있으므로 판정도 여기여야 한다.
+   *
+   * **찾기와 상태는 DB가 거른다** (P14 FR-1514). 자르기(`limit`) 전에 걸러야 상한 밖의 스페이스도 찾아진다 — 화면에서만 거르면 500개 밖을
+   * 찾지 못한다(T-051과 같은 까닭). `q`는 이름·키의 부분 일치 — `%`·`_`는 글자 그대로 찾는다(`containsPattern`)
    */
-  async list(principal: Principal, scope: 'personal' | 'team' | 'all', limit: number): Promise<SpaceView[]> {
+  async list(
+    principal: Principal,
+    scope: 'personal' | 'team' | 'all',
+    limit: number,
+    filter: { q?: string; status?: SpaceRow['status'] } = {},
+  ): Promise<SpaceView[]> {
     if (scope === 'all' && !can(principal, 'space.manage')) {
       throw new ForbiddenException('전체 스페이스를 볼 권한이 없다');
     }
@@ -119,7 +128,12 @@ export class SpacesService {
               : and(eq(spaces.kind, 'team'), ids.length ? or(inArray(spaces.id, ids), eq(spaces.createdBy, principal.id)) : eq(spaces.createdBy, principal.id)),
           );
 
-    const rows = await this.db.select().from(spaces).where(visible).orderBy(byName(spaces.name));
+    const found = filter.q ? or(ilike(spaces.name, containsPattern(filter.q)), ilike(spaces.key, containsPattern(filter.q))) : undefined;
+    const rows = await this.db
+      .select()
+      .from(spaces)
+      .where(and(visible, found, filter.status ? eq(spaces.status, filter.status) : undefined))
+      .orderBy(byName(spaces.name));
     const views = await Promise.all(rows.map((r) => this.toView(r, principal)));
     // 볼 수 없는 것을 먼저 빼고 자른다. 자르고 거르면 결과가 조용히 비는 수가 있다
     return views.filter((v) => v.access.canRead).slice(0, limit);

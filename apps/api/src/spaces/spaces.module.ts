@@ -37,7 +37,7 @@ export class SpacesController {
     @Query(new ZodPipe(spaceListQueryDto)) q: ReturnType<typeof spaceListQueryDto.parse>,
     @CurrentUser() me: SessionUser,
   ): Promise<SpaceView[]> {
-    return this.spaces.list(me, q.scope, q.limit);
+    return this.spaces.list(me, q.scope, q.limit, { q: q.q, status: q.status });
   }
 
   @Get(':id')

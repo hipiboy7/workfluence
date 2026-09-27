@@ -141,9 +141,20 @@ export type AddMemberDto = z.infer<typeof addMemberDto>;
 export const updateMemberRoleDto = z.object({ role: z.enum(ASSIGNABLE_MEMBER_ROLES) });
 export type UpdateMemberRoleDto = z.infer<typeof updateMemberRoleDto>;
 
+/**
+ * 스페이스 목록의 조건. `q`는 이름·키의 부분 일치, `status`는 상태 — **서버가 찾고 거른다** (P14 FR-1514, P4 FR-537 상한 + 검색). 화면에서만 거르면
+ * 상한 밖의 스페이스를 찾지 못한다(T-051). 빈 찾기는 찾지 않는 것이다
+ */
 export const spaceListQueryDto = z.object({
   scope: z.enum(['personal', 'team', 'all']).default('personal'),
   limit: z.coerce.number().int().min(1).max(500).default(200),
+  q: z
+    .string()
+    .trim()
+    .max(100)
+    .optional()
+    .transform((v) => (v ? v : undefined)),
+  status: z.enum(SPACE_STATUSES).optional(),
 });
 export type SpaceListQueryDto = z.infer<typeof spaceListQueryDto>;
 
@@ -185,6 +196,7 @@ export const updatePageDto = z.object({
 });
 export type UpdatePageDto = z.infer<typeof updatePageDto>;
 
+/** 옮기기 (P2 FR-346). `position`은 **새 부모 아래 형제 가운데 몇 번째**(0부터)다 — 서버가 형제의 자리를 다시 매긴다. 형제 수보다 크면 맨 뒤 (P14 FR-1502) */
 export const movePageDto = z.object({
   parentId: z.uuid().nullable(),
   position: z.number().int().min(0),

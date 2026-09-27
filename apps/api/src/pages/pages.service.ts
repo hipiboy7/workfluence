@@ -22,7 +22,7 @@ import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
 import { pageVersions, pages, spaces, users, type PageRow } from '../db/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
-import { checkMove, type TreeNode } from './domain/tree';
+import { checkMove, placeAt, type TreeNode } from './domain/tree';
 
 /**
  * 페이지·버전 (P2_설계서_Page 3절). B등급 — 실제 PostgreSQL로 통합 테스트한다.
@@ -336,13 +336,42 @@ export class PagesService {
     return { ...toPageSummary(page), content, createdBy: page.createdBy, updatedBy: principal.id, createdAt: page.createdAt.toISOString() };
   }
 
+  /**
+   * 옮기기 (FR-346, P14_설계서_Spaces D.1). **자리(`position`)는 새 부모 아래 형제 가운데 몇 번째(0부터)다** — 형제를 화면과 같은 순서로 읽어
+   * 끼우고(`placeAt`, A등급) 0부터 다시 매긴다(FR-1502). 예전에는 받은 값을 그대로 적어 같은 자리가 여럿 생겼고, 순서가 만든 시각으로 갈려
+   * "이 페이지 다음"을 지킬 수 없었다.
+   *
+   * **한 스페이스의 옮기기는 줄을 선다**(FR-1503) — 둘이 동시에 다시 매기면 서로의 자리를 덮어 겹친다. 잠금은 트랜잭션이 끝나면 풀린다.
+   * 형제의 줄은 자리만 고친다 — 내용이 바뀐 것이 아니라 "최근에 고친 문서"에 올리지 않는다. 옛 부모 아래의 틈은 그대로 둔다(순서는 같다)
+   */
   async move(id: string, dto: MovePageDto, principal: Principal, tx: Db): Promise<PageSummary> {
     const page = await this.row(id, tx);
     await this.spaces.assertWrite(page.spaceId, principal, tx);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`page-tree:${page.spaceId}`}))`);
     if (dto.parentId) await this.assertParent(tx, dto.parentId, page.spaceId, id);
+    const siblings = await tx
+      .select({ id: pages.id, position: pages.position })
+      .from(pages)
+      .where(
+        and(
+          eq(pages.spaceId, page.spaceId),
+          dto.parentId ? eq(pages.parentId, dto.parentId) : isNull(pages.parentId),
+          isNull(pages.deletedAt),
+        ),
+      )
+      .orderBy(asc(pages.position), asc(pages.createdAt));
+    const order = placeAt(
+      siblings.map((s) => s.id),
+      id,
+      dto.position,
+    );
+    const was = new Map(siblings.map((s) => [s.id, s.position]));
+    for (const [at, siblingId] of order.entries()) {
+      if (siblingId !== id && was.get(siblingId) !== at) await tx.update(pages).set({ position: at }).where(eq(pages.id, siblingId));
+    }
     const [row] = await tx
       .update(pages)
-      .set({ parentId: dto.parentId, position: dto.position, updatedBy: principal.id, updatedAt: sql`now()` })
+      .set({ parentId: dto.parentId, position: order.indexOf(id), updatedBy: principal.id, updatedAt: sql`now()` })
       .where(eq(pages.id, id))
       .returning();
     return toPageSummary(row);
