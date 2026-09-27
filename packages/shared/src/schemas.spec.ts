@@ -31,7 +31,7 @@ import {
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
-import { LLM_LIMITS } from './constants';
+import { LLM_LIMITS, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -280,6 +280,12 @@ describe('listUsersDto (P13 FR-1450~1452)', () => {
     expect(listUsersDto.parse({ limit: '50', offset: '100' })).toMatchObject({ limit: 50, offset: 100 });
     expect(() => listUsersDto.parse({ limit: '501' })).toThrow();
     expect(() => listUsersDto.parse({ offset: '-1' })).toThrow();
+  });
+
+  it('상한은 공유 상수다 — 화면이 같은 값으로 줄인다 (병합 전 코드 리뷰 10)', () => {
+    expect(listUsersDto.parse({ limit: String(USER_LIST_MAX) }).limit).toBe(USER_LIST_MAX);
+    expect(() => listUsersDto.parse({ limit: String(USER_LIST_MAX + 1) })).toThrow();
+    expect(listUsersDto.parse({}).limit).toBe(USER_LIST_PAGE);
   });
 });
 

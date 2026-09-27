@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, REQUEST_ID_PATTERN, TABLE_LIMITS, USER_LIST_PAGE, USER_STATUSES } from './constants';
+import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, REQUEST_ID_PATTERN, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
 
 /** 설계 고정값 중 **이름의 모양**이 규칙인 것 (P11 D.4, FR-1214·1218) */
 
@@ -74,5 +74,9 @@ describe('사용자 상태와 감사 종류 — P13 계정 정지 (FR-1440·1444
 
   it('사용자 목록은 한 번에 100명 — 서버의 기본값과 화면의 "더 보기"가 같은 값을 쓴다 (병합 전 자체 점검 14)', () => {
     expect(USER_LIST_PAGE).toBe(100);
+  });
+
+  it('**한 번에 받을 수 있는 상한은 300명 규모를 한 번에 담는다** — 조치 뒤에 보던 만큼 다시 읽는다 (병합 전 코드 리뷰 10)', () => {
+    expect(USER_LIST_MAX).toBeGreaterThanOrEqual(3 * USER_LIST_PAGE);
   });
 });
