@@ -9,23 +9,24 @@
 | 순서 | 문서 | 왜 |
 |---|---|---|
 | 1 | [`docs/학습가이드_시스템이해.md`](docs/학습가이드_시스템이해.md) | 개발 용어 없이 전체 그림을 잡는다. 30분 |
-| 2 | [`docs/scope-definition.md`](docs/scope-definition.md) | 무엇을 왜 만드는가, 어디까지가 범위인가 |
-| 3 | [`docs/설계서_Architecture.md`](docs/설계서_Architecture.md) | 구조·데이터 모델·확장점. 코드를 읽기 전에 본다 |
-| 4 | [`CLAUDE.md`](CLAUDE.md) | 이 저장소에서 코드·문서를 만드는 규칙 |
-| 5 | [`docs/P0_설계서_Foundation.md`](docs/P0_설계서_Foundation.md) | Phase 0이 만든 것의 요구사항과 설계 |
-| 6 | 아래 "개발 환경 준비"를 직접 실행 | 문서를 믿지 말고 돌려 본다 |
+| 2 | [`docs/사용자가이드_사용법.md`](docs/사용자가이드_사용법.md) | 화면에서 무엇을 누르면 무엇이 되는가 — 모든 사용자(1부)·관리자(2부)·자주 묻는 것(3부) |
+| 3 | [`docs/scope-definition.md`](docs/scope-definition.md) | 무엇을 왜 만드는가, 어디까지가 범위인가 |
+| 4 | [`docs/설계서_Architecture.md`](docs/설계서_Architecture.md) | 구조·데이터 모델·확장점. 코드를 읽기 전에 본다 |
+| 5 | [`CLAUDE.md`](CLAUDE.md) | 이 저장소에서 코드·문서를 만드는 규칙 |
+| 6 | [`docs/P0_설계서_Foundation.md`](docs/P0_설계서_Foundation.md) | Phase 0이 만든 것의 요구사항과 설계 |
+| 7 | 아래 "개발 환경 준비"를 직접 실행 | 문서를 믿지 말고 돌려 본다 |
 
 그다음 필요할 때 보는 문서다.
 
 | 상황 | 문서 |
 |---|---|
 | 장애가 났다 | [`docs/운영가이드_장애대응.md`](docs/운영가이드_장애대응.md) |
-| 폐쇄망에 반입한다 | [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md) |
+| 폐쇄망에 반입한다 · 새 버전을 들여온다 | [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md) |
 | 운영을 넘겨받았다 | [`docs/운영가이드_운영이관.md`](docs/운영가이드_운영이관.md) |
-| 리눅스 서버에서 이미지를 만든다 | [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md) |
+| 리눅스 서버에서 이미지를 만들고 반입 묶음을 싼다 | [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md) |
 | 새 기능을 넣고 싶다 | [`docs/기능백로그.md`](docs/기능백로그.md) |
 | 이 오류 본 적 있나 | [`docs/internal/검토서_트러블슈팅.md`](docs/internal/검토서_트러블슈팅.md) |
-| 무엇을 어떻게 검증했나 | Phase별 검증기록 — [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) · [`docs/P1_검증기록_Auth.md`](docs/P1_검증기록_Auth.md) · [`docs/P2_검증기록_Page.md`](docs/P2_검증기록_Page.md) · [`docs/P3_검증기록_Content.md`](docs/P3_검증기록_Content.md) · [`docs/P4_검증기록_Admin.md`](docs/P4_검증기록_Admin.md) · [`docs/P5_검증기록_Release.md`](docs/P5_검증기록_Release.md) · [`docs/P6_검증기록_Collab.md`](docs/P6_검증기록_Collab.md) · [`docs/P7_검증기록_Hardening.md`](docs/P7_검증기록_Hardening.md) · [`docs/P8_검증기록_Mention.md`](docs/P8_검증기록_Mention.md) · [`docs/P9_검증기록_Gate.md`](docs/P9_검증기록_Gate.md) · [`docs/P10_검증기록_Llm.md`](docs/P10_검증기록_Llm.md) · [`docs/P11_검증기록_Ops.md`](docs/P11_검증기록_Ops.md) |
+| 무엇을 어떻게 검증했나 | Phase별 검증기록 — [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) · [`docs/P1_검증기록_Auth.md`](docs/P1_검증기록_Auth.md) · [`docs/P2_검증기록_Page.md`](docs/P2_검증기록_Page.md) · [`docs/P3_검증기록_Content.md`](docs/P3_검증기록_Content.md) · [`docs/P4_검증기록_Admin.md`](docs/P4_검증기록_Admin.md) · [`docs/P5_검증기록_Release.md`](docs/P5_검증기록_Release.md) · [`docs/P6_검증기록_Collab.md`](docs/P6_검증기록_Collab.md) · [`docs/P7_검증기록_Hardening.md`](docs/P7_검증기록_Hardening.md) · [`docs/P8_검증기록_Mention.md`](docs/P8_검증기록_Mention.md) · [`docs/P9_검증기록_Gate.md`](docs/P9_검증기록_Gate.md) · [`docs/P10_검증기록_Llm.md`](docs/P10_검증기록_Llm.md) · [`docs/P11_검증기록_Ops.md`](docs/P11_검증기록_Ops.md) · [`docs/P12_검증기록_Limits.md`](docs/P12_검증기록_Limits.md) |
 | 왜 이런 작업 방식인가 | [`docs/internal/검토서_방법론개정.md`](docs/internal/검토서_방법론개정.md) |
 
 ## 구조
@@ -62,9 +63,13 @@ pnpm dev:db          # 터미널 1: 임베디드 PostgreSQL (첫 실행 시 초�
 
 ```bash
 pnpm db:migrate      # 터미널 2: 마이그레이션 적용
+pnpm db:seed         # 처음 한 번: root 계정. 비밀번호는 .env의 WF_ROOT_PASSWORD, 첫 로그인에서 바꾼다
 pnpm check:env       # 마지막 줄에 READY 확인
 pnpm dev             # 개발 서버 (web http://127.0.0.1:5173, api :3000)
 ```
+
+`pnpm db:seed`를 건너뛰면 **아무도 로그인하지 못한다** — 계정을 만드는 화면은 없고, 가입 요청은 승인할 관리자가 있어야 한다.
+두 번 쳐도 된다(있는 계정의 비밀번호는 바꾸지 않는다).
 
 운영과 같은 단일 프로세스로 확인하려면 `.env`에 `WF_SERVE_WEB=true`를 두고:
 
@@ -83,4 +88,4 @@ pnpm test:e2e        # Playwright (api가 떠 있어야 한다)
 
 ## 배포
 
-Linux 서버에서 이미지를 빌드해 폐쇄망으로 반입한다. 경로는 [`docs/설계서_Architecture.md`](docs/설계서_Architecture.md) 9절, Phase 0 검증 명령은 [`docs/P0_검증기록_Foundation.md`](docs/P0_검증기록_Foundation.md) 6.1절에 있다. 반입 당일의 절차는 [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md), 평소의 운영은 [`docs/운영가이드_운영이관.md`](docs/운영가이드_운영이관.md)에 있다.
+Linux 서버에서 이미지를 빌드해 폐쇄망으로 반입한다. 경로는 [`docs/설계서_Architecture.md`](docs/설계서_Architecture.md) 9절에 있다. 이미지를 만들고(빌드한 커밋을 라벨로 단다) 반입 묶음을 만들어 tar로 싸는 순서는 [`docs/운영가이드_리눅스빌드.md`](docs/운영가이드_리눅스빌드.md), 반입 당일의 설치(첫 root 계정까지)와 새 버전 들여오기는 [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md), 평소의 운영은 [`docs/운영가이드_운영이관.md`](docs/운영가이드_운영이관.md)에 있다.

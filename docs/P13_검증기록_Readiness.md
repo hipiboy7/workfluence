@@ -3,7 +3,7 @@
 - 작성일: 2026-09-27 / 작성 LLM: Claude Opus 5.5
 - 설계: [`docs/P13_설계서_Readiness.md`](P13_설계서_Readiness.md) · 검토: 9절
 - 요청 원문과 착수 쟁점의 답: `docs/prompts/phase13/scope.md`
-- 시행착오는 여기 쓰지 않는다 — [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) T-051~T-056
+- 시행착오는 여기 쓰지 않는다 — [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) T-051~T-058
 - 이 계정 소유의 사본에서 일했다(T-040·T-042). 컨테이너 확인은 이 서버의 개발 스택(`workfluence-*`)에서, 설치 리허설은 그와 분리한 compose 프로젝트에서 했다
 
 ## 1. 배포·운영 가능성 점검 (착수 쟁점 1)
@@ -99,7 +99,37 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 
 ## 4. 자동 검사
 
-(채움)
+`pnpm test:cov` — HEAD `fdf4270`, 실패 0 · 건너뜀 0. 수치는 각 패키지의 `coverage-summary.json`에서 뽑았다.
+
+| 패키지 | 파일 | 시험 | 라인 | 브랜치 | 함수 |
+|---|---|---|---|---|---|
+| shared (A) | 12 | 358 | 99.86% | 96.88% | 99.36% |
+| api (A+B) | 61 | 974 | 95.40% | 90.25% | 93.72% |
+| web (측정만) | 12 | 118 | 89.01% | 83.01% | 79.24% |
+
+이번 Phase가 만진 모듈:
+
+| 모듈 | 등급 | 라인 | 브랜치 | 함수 |
+|---|---|---|---|---|
+| shared `permissions.ts` · `env.ts` · `constants.ts` · `release.ts` · `schemas.ts` | A | 100 | 100 | 100 |
+| api `auth/domain/concurrency-gate.ts` · `keyed-serial.ts` · `lockout.ts` | A | 100 | 100 | 100 |
+| api `pages/domain/realtime.ts` | A | 100 | 92.72 | 100 |
+| api `users/password.ts` | B | 100 | 100 | 85.71 |
+| api `users/users.service.ts` | B | 95.78 | 90.84 | 96 |
+| api `auth/auth.service.ts` | B | 97.91 | 83.33 | 96 |
+| api `pages/collab/collab.gateway.ts` | B | 83.82 | 78.96 | 80.88 |
+| api `common/like.ts` | B | 100 | 100 | 100 |
+| api `cli/trash-purge.ts` · `audit-purge.ts` · `reindex.ts` | B | 81.66 · 79.16 · 75 | 61.9 · 75 · 75 | 50 · 33.33 · 66.66 |
+
+- 앱 계정(`apps/api/src/db/app-role.ts`)·마이그레이션·시드는 측정에서 뺀 자리다(`apps/api/src/db/**` — `apps/api/vitest.config.ts`).
+  앱 계정은 `app-role.integration.spec.ts`가 **그 계정으로 붙어** 막힌 것을 본다(권한 목록만 읽으면 "주었다"만 보인다). 컨테이너에서도 봤다(3절).
+- 월간 작업의 낮은 수치는 명령으로 부를 때만 도는 끝부분(`require.main`)이다. 본문은 `cli.integration.spec.ts`가 시험 DB로 보고, 명령
+  자체는 컨테이너의 `tools`에서 돌렸다(3절).
+- **A등급은 시험을 먼저 썼다** — Red → Green: `1f67ea2` → `6b2da79`(정지·감사·권한, 최초 계정 비밀번호 선택·앱 DB 계정, 묶음의 운영 문서,
+  argon2 줄) · `d11f174` → `09eb03a`(한 계정씩 줄 세우기, 올린 뒤의 실패 횟수로 잠금 — `6b2da79`의 "확인 전에 세기"는 같은 계정의 맞는
+  동시 로그인을 잠가 거뒀다) · `f1ea44a` → `0a2984a`(사용자 목록·제목 DTO) · `631fe73` → `3d193f1`(저장 판정의 "바뀐 것 없음") ·
+  `14443fd` → `09306b8`(비밀번호 안내문).
+- 무거운 시험 하나(문단 5만 개)가 공유 서버 부하에서 기본 한도 5초를 넘어 한도를 20초로 두었다 — 커버리지를 켜고 혼자 돌면 3.6초(`26768f0`).
 
 ## 5. 브라우저 — E2E
 
@@ -128,7 +158,11 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 
 ## 8. 기능백로그
 
-F-006(인터넷이 되는 Windows에서 띄워 보기) — Phase 13과 따로 `exp/windows`에서. 결과는 그 브랜치와 PR 설명.
+| # | 무엇 | 처리 |
+|---|---|---|
+| F-006 | 인터넷이 되는 Windows에서 띄워 보기 | Phase 13과 따로 `exp/windows`에서. 결과는 그 브랜치와 PR 설명 |
+| F-007 | 페이지 트리에서 하위 페이지를 만들고 옮긴다(P2 FR-346) | `접수` · S — API는 있고 화면이 없다(사용자 결정: 이번에 하지 않는다) |
+| F-008 | 관리자가 화면에서 스페이스를 관리한다(P4 FR-530·532) | `접수` · S — 같은 까닭 |
 
 ## 9. 검토
 
