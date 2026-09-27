@@ -3,7 +3,7 @@
 - 작성일: 2026-09-27 / 작성 LLM: Claude Opus 5.5
 - 설계: [`docs/P13_설계서_Readiness.md`](P13_설계서_Readiness.md) · 검토: 9절
 - 요청 원문과 착수 쟁점의 답: `docs/prompts/phase13/scope.md`
-- 시행착오는 여기 쓰지 않는다 — [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) T-051~T-058
+- 시행착오는 여기 쓰지 않는다 — [`docs/internal/검토서_트러블슈팅.md`](internal/검토서_트러블슈팅.md) T-051~T-059
 - 이 계정 소유의 사본에서 일했다(T-040·T-042). 컨테이너 확인은 이 서버의 개발 스택(`workfluence-*`)에서, 설치 리허설은 그와 분리한 compose 프로젝트에서 했다
 
 ## 1. 배포·운영 가능성 점검 (착수 쟁점 1)
@@ -146,7 +146,68 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 
 ## 6. 설치 리허설 — 반입 가이드를 적힌 그대로 (NFR-132)
 
-(채움)
+2026-09-27 07:05~07:16 UTC, HEAD `ef9a1b9`. 빌드 가이드로 이미지와 묶음을 만들고, 그 묶음을 반입 가이드대로 **빈 볼륨**에 설치했다.
+명령과 출력 원문은 이 서버의 `.local/tmp/rehearsal/`에 있다(커밋하지 않는다 — 12.2절).
+
+**가이드와 다르게 한 것** — 이것뿐이다.
+
+| 무엇 | 왜 |
+|---|---|
+| 셸에 `COMPOSE_PROJECT_NAME=wfrh` | 이 서버에 같은 이름(`deploy`)의 개발 스택이 있다. 가이드대로 `deploy`로 풀면 그 볼륨을 그대로 쓴다. 개발 스택은 **볼륨을 남기고** 내렸다가(`down`, `-v` 없이) 끝나고 다시 띄웠다 — 고정된 컨테이너 이름과 8443 포트가 겹친다 |
+| 묶음 tar의 자리 | `/media/반입` 대신 빌드 가이드 12절이 만든 `.local/release/` |
+| 7절 `curl -sk` → `curl --cacert certs/cert.pem` | TLS 검증을 끄지 않는다(`CLAUDE.md` 7절). 인증서 SAN에 `127.0.0.1`이 있다 |
+| 7절 브라우저 확인 → 같은 API를 Node로 | 로그인·비밀번호 변경·문서·첨부·감사를 화면이 부르는 API 그대로, TLS 검증을 켠 채(`NODE_EXTRA_CA_CERTS`). 같이 고치기는 **WebSocket 둘**로 |
+| 7.1절 재부팅 | 하지 않았다 — 공유 서버다(가이드 7.1절·빌드 가이드 11절). 재시작 정책만 봤다 |
+| 빌드 가이드 6절 첫 줄(`pull postgres nginx`) | 건너뛰었다 — 가이드의 조건("처음 올리는 것이면")에 들지 않고, 받으면 개발 스택의 postgres 판이 바뀔 수 있다 |
+
+**빌드 가이드** (저장소, 개발 스택)
+
+| 절 | 결과 |
+|---|---|
+| 3 | `git status --short` 빈 줄 · Docker 29.6.1 · Compose v5.3.1 · 여유 7.6GB |
+| 5 | 38초(의존성 층은 캐시). 라벨 `ef9a1b906893…` = `git rev-parse HEAD` · **380MB**(예산 400MB) · `workfluence-app:ef9a1b9` 태그 |
+| 5 (T-058) | 같은 빌드 문맥을 로컬 nginx 이미지 위에 복사해 봤다 — `deploy` 아래는 `Dockerfile·ca·compose.yml·entrypoint.sh·nginx.conf`뿐, `.env`·`*.pem` **0개** |
+| 6 | 표 만들기 `12개 마이그레이션 적용 상태` · `앱 계정 workfluence_app: 권한 적용` — 두 번 쳐도 같다 · 시드 `root 계정 이미 정상` |
+| 7·8 | 기동 **13초**(목표 30초) · `HTTP 200 {"status":"ok","db":"ok",…}` |
+| 11.1 | 셋 다 `restart=unless-stopped` · 도커 `enabled`. 실제 재부팅은 미실시 |
+| 12 | `release:bundle` — 앱 이미지 = 커밋 `ef9a1b9`(새 검사 FR-1407 통과), 15개 파일 · 263MB, `env.template` 키 34개(값 0개 — `tools`가 쓰는 `WF_ROOT_PASSWORD`·`WF_ROOT_USERNAME`도 있다). `release:verify` — `통과 — 필수 15개 · 체크섬 14개 일치` · `git ef9a1b9 · 이미지 3개`. tar 264MB, 첫 줄 `workfluence-2026-09-27/` |
+
+**반입 가이드** (`~/workfluence/deploy`, 빈 볼륨 `wfrh_postgres_data`·`wfrh_attachments`)
+
+| 절 | 결과 |
+|---|---|
+| 0 | 도커 `enabled` · Compose v5.3.1 · 여유 7.0GB · sha256sum 8.32 · OpenSSL 3.2.2 |
+| 1 | `sha256sum -c` — **14줄 모두 `OK`** · `MANIFEST` `version=0.1.0 gitSha=ef9a1b9` 이미지 셋 |
+| 2 | `Loaded image` 셋(postgres:17 · workfluence-app:latest · nginx:1.27-alpine) |
+| 3 | 필수 키 줄 수 `4` · `.env` 권한 `-rw-------` · 인증서 SAN `DNS:wf.example.internal, DNS:localhost, IP Address:127.0.0.1` |
+| 4 | postgres healthy |
+| 5 | `12개 마이그레이션 적용 상태` · `앱 계정 workfluence_app: 권한 적용` — 두 번째도 같다 |
+| 5-1 | `root 계정 생성: root (첫 로그인에서 비밀번호 변경 강제)` → 두 번째 `root 계정 이미 정상: root` |
+| 6 | 셋 다 healthy, `tools`는 목록에 없다 |
+| 7 | 헬스 `{"status":"ok","db":"ok"}` · 점검 **10/10**: 요청 번호 하나 · 첫 화면과 스크립트 200 · root 로그인 201(비밀번호 변경 강제) → 바꾼 비밀번호로 로그인 · 문서 저장 → 버전 2 · 한글 이름 첨부 올리고 내려받기(같은 내용·같은 이름) · **WebSocket 둘 — 한쪽 글자가 다른 쪽에 곧바로**, 자동 저장 → 버전 3 · 감사 8종(`auth.login.success`·`auth.password.change`·`space.create`·`page.create`·`page.update`·`attachment.upload`·`attachment.download`·`page.collab.save`) |
+| 7.2 | ① `WF_DATABASE_URL=postgres://workfluence_app` · `WF_ROOT_*` `0` ② `INSERT`·`SELECT` (2 rows) |
+| 7 나머지 | `X-Request-Id` 1개 · nginx 로그 JSON 한 줄 · 셋 다 `max-file:5 max-size:20m` · `WF_ROOT_PASSWORD` 비움 |
+| 8 | `db.dump` 58KB · 첨부 백업 `tar -tzf … \| wc -l` → `3`(맨 위·폴더·파일) — compose의 진행 줄은 표준 오류로 가 tar.gz를 망치지 않는다 |
+
+**운영이관 가이드** (같은 설치에서)
+
+| 절 | 결과 |
+|---|---|
+| 4.2 | 휴지통 정리 `대상 DB: postgres:5432/workfluence (사용자 workfluence)` … `파일 0` · 감사로그 정리 `보존 기간 365일` … `0건 삭제` — 둘 다 종료 0 |
+| 4.2 (음성) | 감사로그 정리를 `api`로 → `사용자 workfluence_app` · `permission denied for table audit_events` — 가이드가 말한 그대로 |
+| 10.2 | `재색인 완료: 1개 페이지` |
+| 10.3 | **처음 연습했다.** 8절 백업 뒤 문서·첨부를 하나씩 더 만들고(문서 2·첨부 2) 여섯 줄을 적힌 그대로 → `pg_restore`·`find`·`tar` 종료 0, 표 만들기가 권한을 맞춤 → 문서 1·첨부 1·파일 1. 확인 5/5: root 로그인 · 더 만든 문서가 없다 · 옛 문서 버전 3 · 옛 첨부가 같은 내용으로 내려받아진다 · 감사로그를 쓴다. 7.2절 ①② 그대로 |
+
+**빈 볼륨에 `pnpm backup:restore`** (FR-1406, T-056) — 위 설치를 `pnpm backup:create`로 뜨고(마이그레이션 12 · 사용자 1 · 페이지 1 ·
+첨부 1 · 감사 11), 설치를 내린 뒤 또 다른 빈 프로젝트(`wfrs`, 표 0 · 앱 계정 없음)에:
+
+| 도구 | 결과 |
+|---|---|
+| 고치기 전(`fdf4270`) | `ERROR:  role "workfluence_app" does not exist` · `Command was: GRANT USAGE ON SCHEMA public TO workfluence_app;` → 종료 1, **표 0개** |
+| 고친 뒤(`ef9a1b9`) | `행 수 대조` 13개 표 모두 채움 · `마이그레이션 — 백업 12개 · 복원 후 12개` · `첨부 — DB가 가리키는 파일 1개 · 디스크에 있는 파일 1개` · 표 만들기 `앱 계정 workfluence_app: 권한 적용` → 종료 0. 표 20 · 사용자 1 · 앱 계정 1 · 감사로그 권한 `INSERT,SELECT` |
+
+**정리** — `wfrh`·`wfrs` 프로젝트를 볼륨까지 지우고(`down -v`), `~/workfluence`·리허설 백업·묶음 파일을 지웠다. 개발 스택을 새 이미지
+(`latest` = `ef9a1b9`)로 다시 띄웠다 — healthy, 사용자 7 · 페이지 4(내리기 전과 같다). 남은 볼륨은 `deploy_*` 둘뿐이다.
 
 ## 7. 보류 결정 처리
 
