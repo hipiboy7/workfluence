@@ -53,7 +53,7 @@ describe('scramSha256Verifier', () => {
   });
 
   it('**평문이 결과에 없다**', () => {
-    expect(scramSha256Verifier('0123456789abcdef-secret', SALT)).not.toContain('0123456789abcdef-secret');
+    expect(scramSha256Verifier('plain-text-secret-aa', SALT)).not.toContain('plain-text-secret-aa');
   });
 
   it('**인쇄 가능한 ASCII만 받는다** — PostgreSQL은 비밀번호를 SASLprep으로 고른 뒤 계산한다. ASCII 밖은 여기서 같게 만들 수 없다', () => {

@@ -215,9 +215,10 @@ describe('Phase 13 — DB 계정과 최초 계정 (P13 FR-1421·1422)', () => {
   });
 
   it('**앱 계정 비밀번호는 16자 이상, 영문·숫자·`._~-`만** — 접속 주소(URL)에 그대로 들어가고, 데이터베이스에 보낼 확인값(SCRAM)을 앱이 만든다 (병합 전 검토 — 평문을 DB 문장에 싣지 않는다)', () => {
-    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: '0123456789abcdef' }).WF_DB_APP_PASSWORD).toBe('0123456789abcdef');
-    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'Aa0._~-Aa0._~-Aa' }).WF_DB_APP_PASSWORD).toBe('Aa0._~-Aa0._~-Aa');
-    for (const bad of ['0123456789abcde', 'has space inside it', 'slash/in/the/password', 'percent%encoded-value', 'hash#in-the-password', 'dollar$sign-password', '한글이섞인비밀번호0123456789']) {
+    // 시험 값은 실제 비밀번호 모양(엔트로피가 높은 값)을 흉내 내지 않는다 — gitleaks가 키로 읽는다 (T-045)
+    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'aaaa-bbbb-cccc-dd' }).WF_DB_APP_PASSWORD).toBe('aaaa-bbbb-cccc-dd');
+    expect(parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'aaaa.bbbb_cccc~dd' }).WF_DB_APP_PASSWORD).toBe('aaaa.bbbb_cccc~dd');
+    for (const bad of ['aaaa-bbbb-cccc', 'has space inside it', 'slash/in/the/password', 'percent%encoded-value', 'hash#in-the-password', 'dollar$sign-password', '한글이섞인비밀번호0123456789']) {
       expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: bad }), bad).toThrow(/WF_DB_APP_PASSWORD/);
     }
   });
