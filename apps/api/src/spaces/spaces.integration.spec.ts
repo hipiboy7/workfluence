@@ -1,7 +1,7 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, documentSchemaVersion, spaceListQueryDto, type DocNode, type Principal } from '@workfluence/shared';
-import { and, count, eq, isNull, sql } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { pageVersions, pages, spaceCategories, spaces, users } from '../db/schema';
 import { PagesController } from '../pages/pages.module';
@@ -359,6 +359,36 @@ describe('페이지 트리 (FR-326~330)', () => {
       await db.execute(sql.raw('DROP FUNCTION IF EXISTS p14_fail_move()'));
     }
     expect(await positions([a.id, b.id, c.id])).toEqual(before);
+  });
+
+  it('**잠금이 부모 판정보다 먼저다** — X를 Y 아래로, Y를 X 아래로 동시에 옮기면 뒤의 것은 앞의 결과를 보고 순환으로 거절된다 (자체 점검 4·17)', { timeout: 30_000 }, async () => {
+    const { owner, mk } = await setup();
+    const x = await mk('X', null);
+    const y = await mk('Y', null);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let movedNow!: () => void;
+    const moved = new Promise<void>((r) => (movedNow = r));
+    // 앞의 옮기기는 X를 Y 아래로 옮긴 채 커밋하지 않고 잠금을 쥐고 있다
+    const first = db.transaction(async (tx) => {
+      await pagesSvc.move(x.id, { parentId: y.id, position: 0 }, owner, tx);
+      movedNow();
+      await held;
+    });
+    await moved;
+    // 뒤의 옮기기가 잠금을 기다린다. 판정이 잠금보다 먼저면 커밋 전의 트리(X가 맨 위)를 보고 통과해 X → Y → X 고리가 생긴다
+    const second = move(y.id, x.id, 0, owner);
+    const settled = second.then(
+      () => 'ok',
+      (e: unknown) => e,
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await first;
+    expect(await settled).toBeInstanceOf(BadRequestException);
+    expect(((await settled) as Error).message).toBe('페이지를 자기 자신이나 자손 아래로 옮길 수 없다');
+    const rows = await db.select({ id: pages.id, parentId: pages.parentId }).from(pages).where(inArray(pages.id, [x.id, y.id]));
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.parentId]))).toEqual({ [x.id]: y.id, [y.id]: null });
   });
 
   it('**트리 잠금은 오래 기다리지 않는다** — 옮기기·만들기·지우기가 잠금을 기다리다 한도를 넘으면 409 (보안 검토 1, 코드 리뷰 6)', { timeout: 30_000 }, async () => {
