@@ -11,6 +11,7 @@ import {
   flushCollabDto,
   listUsersDto,
   createCategoryDto,
+  createCommentDto,
   createPageDto,
   createSpaceDto,
   createTemplateDto,
@@ -21,6 +22,7 @@ import {
   llmAskDto,
   loginDto,
   movePageDto,
+  parseId,
   updateTemplateDto,
   recoverPasswordDto,
   searchQueryDto,
@@ -229,6 +231,38 @@ describe('LLM DTO — PostgreSQL이 받지 않는 글자와 키의 모양', () =
     for (const bad of ['k\u200b', '키값', 'k\u0000', 'a b', 'k\t1']) {
       expect(createLlmProviderDto.safeParse({ ...base, apiKey: bad }).success).toBe(false);
     }
+  });
+});
+
+describe('식별자는 소문자로 맞춘다 (P14 반영분 점검 2)', () => {
+  // DB가 돌려주는 uuid는 소문자다. 대문자로 받은 값을 그대로 두면 JS 비교·잠금 이름·방 이름에서 같은 페이지가 다른 값이 된다 — 자기 아래로
+  // 옮기는 순환 판정이 지나 고리가 생기고(`checkMove`의 `a.id === selfId`), 대문자 스페이스 id로 만들면 트리 잠금이 다른 이름이 됐다
+  const U = '0F6B2C3D-1234-4ABC-8DEF-0123456789AB';
+  const L = U.toLowerCase();
+  const body = emptyDocument();
+
+  it('**대문자도 받되 소문자로 돌려준다** — 본문·쿼리의 식별자 칸 전부', () => {
+    expect(createPageDto.parse({ spaceId: U, parentId: U, title: 't', content: body })).toMatchObject({ spaceId: L, parentId: L });
+    expect(movePageDto.parse({ parentId: U, position: 0 }).parentId).toBe(L);
+    expect(createCommentDto.parse({ parentId: U, body }).parentId).toBe(L);
+    expect(createSpaceDto.parse({ name: 'n', kind: 'team', categoryId: U }).categoryId).toBe(L);
+    expect(updateSpaceDto.parse({ categoryId: U }).categoryId).toBe(L);
+    expect(auditQueryDto.parse({ actorId: U }).actorId).toBe(L);
+    expect(searchQueryDto.parse({ q: '회의', spaceId: U }).spaceId).toBe(L);
+    expect(llmAskDto.parse({ providerId: U, question: 'q' }).providerId).toBe(L);
+    expect(llmAskDto.parse({ providerId: U, conversationId: U, question: 'q' }).conversationId).toBe(L);
+    expect(llmAskDto.parse({ providerId: U, promptId: U, question: 'q' }).promptId).toBe(L);
+    // 없음·null은 그대로
+    expect(createPageDto.parse({ spaceId: L, title: 't', content: body }).parentId).toBeNull();
+    expect(movePageDto.parse({ parentId: null, position: 0 }).parentId).toBeNull();
+  });
+
+  it('**`parseId`** — 경로의 식별자(`UuidPipe`, 실시간 편집의 방 이름)가 쓴다. 모양이 아니면 `null`, 맞으면 소문자', () => {
+    expect(parseId(U)).toBe(L);
+    expect(parseId(L)).toBe(L);
+    for (const bad of ['', 'x', `${L}/labels/x`, undefined, null, 7]) expect(parseId(bad), String(bad)).toBeNull();
+    // 모양 판정은 `isUuid`와 같다 — 대문자도 식별자다
+    expect(isUuid(U)).toBe(true);
   });
 });
 
