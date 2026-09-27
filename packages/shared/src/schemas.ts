@@ -206,7 +206,7 @@ export const updatePageDto = z.object({
 });
 export type UpdatePageDto = z.infer<typeof updatePageDto>;
 
-/** 옮기기 (P2 FR-346). `position`은 **새 부모 아래 형제 가운데 몇 번째**(0부터)다 — 서버가 형제의 자리를 다시 매긴다. 형제 수보다 크면 맨 뒤 (P14 FR-1502) */
+/** 옮기기 (P2 FR-346). `position`은 **새 부모 아래 형제 가운데 몇 번째**(0부터)다 — 서버가 새 자리 값을 정한다(틈이 없을 때만 형제를 다시 매긴다). 형제 수보다 크면 맨 뒤 (P14 FR-1502) */
 export const movePageDto = z.object({
   parentId: idSchema.nullable(),
   position: z.number().int().min(0),
