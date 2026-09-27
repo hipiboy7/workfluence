@@ -31,6 +31,8 @@ test('하위 페이지를 만들고 옮긴다 — 트리가 새 자리와 들여
   await expect(page.getByRole('heading', { name: spaceName })).toBeVisible();
   const spaceUrl = page.url();
   const tree = page.getByRole('list', { name: '페이지 트리' });
+  // 그 페이지의 줄 — 트리는 목록 안의 목록이라 조상 줄도 그 이름을 담는다. 링크에서 가장 가까운 줄을 잡는다
+  const line = (title: string) => tree.getByRole('link', { name: title, exact: true }).locator('xpath=ancestor::li[1]');
 
   // 맨 위에 둘을 만든다
   for (const title of ['회의록', '규정']) {
@@ -49,7 +51,10 @@ test('하위 페이지를 만들고 옮긴다 — 트리가 새 자리와 들여
   await expect(page.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   await page.goto(spaceUrl);
   await expect(tree.getByRole('listitem')).toHaveText([/^회의록/, /^9월 회의/, /^규정/]);
-  await expect(tree.getByRole('listitem').filter({ hasText: '9월 회의' })).toHaveCSS('margin-left', '16px');
+  // 9월 회의는 회의록 줄 안의 목록에 들여 있다
+  await expect(line('9월 회의')).toHaveCSS('margin-left', '16px');
+  await expect(line('회의록').getByRole('list').getByRole('link')).toHaveText(['9월 회의']);
+  await expect(line('규정')).toHaveCSS('margin-left', '0px');
 
   // 2) 옮기기 — 9월 회의를 맨 위의 맨 앞으로
   await tree.getByRole('link', { name: '9월 회의' }).click();
@@ -60,6 +65,7 @@ test('하위 페이지를 만들고 옮긴다 — 트리가 새 자리와 들여
   await mover.getByRole('button', { name: '옮기기' }).click();
   await expect(page).toHaveURL(spaceUrl);
   await expect(tree.getByRole('listitem')).toHaveText([/^9월 회의/, /^회의록/, /^규정/]);
+  await expect(line('9월 회의')).toHaveCSS('margin-left', '0px');
 
   // 3) 회의록을 규정 아래로 — 자기와 그 아래는 새 부모 목록에 없다
   await tree.getByRole('link', { name: '회의록' }).click();
@@ -69,5 +75,6 @@ test('하위 페이지를 만들고 옮긴다 — 트리가 새 자리와 들여
   await mover.getByRole('button', { name: '옮기기' }).click();
   await expect(page).toHaveURL(spaceUrl);
   await expect(tree.getByRole('listitem')).toHaveText([/^9월 회의/, /^규정/, /^회의록/]);
-  await expect(tree.getByRole('listitem').filter({ hasText: '회의록' })).toHaveCSS('margin-left', '16px');
+  await expect(line('회의록')).toHaveCSS('margin-left', '16px');
+  await expect(line('규정').getByRole('list').getByRole('link')).toHaveText(['회의록']);
 });

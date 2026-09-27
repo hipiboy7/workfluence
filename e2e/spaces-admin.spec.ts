@@ -58,15 +58,21 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
   await expect(manage.getByRole('status')).toHaveText('저장했다.');
   await expect(page.getByText(`팀 · `).first()).toContainText(category);
 
-  // 4) 모든 스페이스에서 찾아 중지한다 — 한 번 더 묻는다
+  // 4) 모든 스페이스에서 찾아 중지한다 — 한 번 더 묻는다. **찾기가 줄을 좁힌다** — 찾기 전에는 여럿(관리자의 개인 스페이스만 해도 하나 더), 찾은 뒤에는 하나
   await page.goto('/admin/spaces');
+  const bodyRows = page.getByRole('table', { name: '모든 스페이스' }).locator('tbody tr');
+  await expect(bodyRows.first()).toBeVisible();
+  expect(await bodyRows.count()).toBeGreaterThan(1);
   await page.getByRole('searchbox').fill(spaceName);
+  await expect(bodyRows).toHaveCount(1);
   const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: spaceName }) });
   await expect(row).toHaveCount(1);
-  await expect(page.getByRole('link', { name: spaceName })).toHaveCount(1);
   page.once('dialog', (d) => void d.accept());
   await row.getByRole('button', { name: '중지' }).click();
-  await expect(row.getByText('중지', { exact: true })).toBeVisible();
+  // 상태 칸이 중지로 바뀌고 조치가 다시 쓰기가 된다 — "중지" 글자만 보면 누르기 전의 단추도 맞는다
+  await expect(row.getByRole('button', { name: '다시 쓰기' })).toBeVisible();
+  await expect(row.getByRole('button', { name: '중지' })).toHaveCount(0);
+  await expect(row.locator('td').nth(3)).toHaveText('중지');
 
   // 중지된 스페이스는 읽기만 된다 — 새 페이지 칸이 없다
   await row.getByRole('link', { name: spaceName }).click();
