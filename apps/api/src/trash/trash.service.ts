@@ -1,8 +1,9 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { can, type Principal, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
+import { PAGE_POSITION_GAP, can, type Principal, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
 import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { pages, spaces, users, type PageRow, type SpaceRow } from '../db/schema';
+import { lockTree } from '../pages/tree-lock';
 import { SpacesService } from '../spaces/spaces.service';
 
 /**
@@ -69,6 +70,8 @@ export class TrashService {
   async restorePage(id: string, principal: Principal, tx: Db = this.db): Promise<{ page: PageRow; movedToRoot: boolean }> {
     const row = await tx.query.pages.findFirst({ where: and(eq(pages.id, id), isNotNull(pages.deletedAt)) });
     if (!row) throw new NotFoundException('휴지통에서 찾을 수 없다');
+    // 트리를 바꾸는 일은 줄을 선다 (P14 D.1 — `lockTree`). 부모를 보는 사이 누가 그 부모를 지우거나 옮기면 어긋난다
+    await lockTree(tx, row.spaceId);
     await this.spaces.assertWrite(row.spaceId, principal, tx);
 
     let movedToRoot = false;
@@ -82,10 +85,11 @@ export class TrashService {
     let position = row.position;
     if (movedToRoot) {
       const [{ maxPos }] = await tx
-        .select({ maxPos: sql<number>`coalesce(max(${pages.position}), -1)::int` })
+        .select({ maxPos: sql<number>`coalesce(max(${pages.position}), ${-PAGE_POSITION_GAP})::int` })
         .from(pages)
         .where(and(eq(pages.spaceId, row.spaceId), isNull(pages.parentId), isNull(pages.deletedAt)));
-      position = maxPos + 1;
+      // 맨 뒤 + 간격 — 새 페이지와 같다 (P14 D.1)
+      position = maxPos + PAGE_POSITION_GAP;
     }
     const [next] = await tx
       .update(pages)

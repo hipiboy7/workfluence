@@ -4,6 +4,7 @@ import {
   ASSIGNABLE_MEMBER_ROLES,
   COLLAB_LIMITS,
   LIST_PAGE_LIMIT,
+  LIST_SEARCH_MAX,
   LLM_LIMITS,
   REQUEST_ID_PATTERN,
   ROLES,
@@ -153,7 +154,7 @@ export const spaceListQueryDto = z.object({
   q: z
     .string()
     .trim()
-    .max(100)
+    .max(LIST_SEARCH_MAX)
     .optional()
     .transform((v) => (v ? v : undefined)),
   status: z.enum(SPACE_STATUSES).optional(),
@@ -302,7 +303,7 @@ export type UserListFilter = (typeof USER_LIST_FILTERS)[number];
 
 /** 사용자 목록의 찾기·거르기·나누기 (P13 C.6, FR-1450~1452) — 기본 100명에서 조용히 끊겼다 */
 export const listUsersDto = z.object({
-  q: z.string().trim().max(100).optional(),
+  q: z.string().trim().max(LIST_SEARCH_MAX).optional(),
   status: z.enum(USER_LIST_FILTERS).optional(),
   limit: z.coerce.number().int().min(1).max(USER_LIST_MAX).default(USER_LIST_PAGE),
   offset: z.coerce.number().int().min(0).default(0),

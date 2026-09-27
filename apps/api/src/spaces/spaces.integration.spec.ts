@@ -1,11 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DOCUMENT_SCHEMA_VERSION, PAGE_TREE_MAX_DEPTH, documentSchemaVersion, spaceListQueryDto, type DocNode, type Principal } from '@workfluence/shared';
-import { and, count, eq, isNull } from 'drizzle-orm';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DOCUMENT_SCHEMA_VERSION, PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, documentSchemaVersion, spaceListQueryDto, type DocNode, type Principal } from '@workfluence/shared';
+import { and, count, eq, isNull, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { pageVersions, pages, spaceCategories, spaces, users } from '../db/schema';
+import { PagesController } from '../pages/pages.module';
 import { PagesService } from '../pages/pages.service';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
-import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
+import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { SpacesController } from './spaces.module';
 import { SpacesService } from './spaces.service';
 
@@ -217,7 +219,9 @@ describe('페이지 트리 (FR-326~330)', () => {
     const other = await spacesSvc.create({ name: '팀2', kind: 'team', categoryId: null, description: '' }, owner);
     const a = await mk('A', null);
     const b = await db.transaction((tx) => pagesSvc.create({ spaceId: other.id, parentId: null, title: 'B', content: doc('B') }, owner, tx));
-    await expect(db.transaction((tx) => pagesSvc.move(a.id, { parentId: b.id, position: 0 }, owner, tx))).rejects.toThrow(/다른 스페이스/);
+    // **없는 것과 같게 답한다** (P14 병합 전 보안 검토 4) — 따로 답하면 아는 페이지 id가 살아 있는지를 알려 준다
+    await expect(db.transaction((tx) => pagesSvc.move(a.id, { parentId: b.id, position: 0 }, owner, tx))).rejects.toThrow(NotFoundException);
+    await expect(db.transaction((tx) => pagesSvc.move(a.id, { parentId: b.id, position: 0 }, owner, tx))).rejects.toThrow(/부모 페이지를 찾을 수 없다/);
   });
 
   it(`깊이 ${PAGE_TREE_MAX_DEPTH}를 넘으면 막는다`, async () => {
@@ -235,7 +239,7 @@ describe('페이지 트리 (FR-326~330)', () => {
     const b = await mk('B', null);
     expect(b.parentId).toBeNull();
 
-    const moved = await db.transaction((tx) => pagesSvc.move(b.id, { parentId: a.id, position: 0 }, owner, tx));
+    const moved = (await db.transaction((tx) => pagesSvc.move(b.id, { parentId: a.id, position: 0 }, owner, tx))).page;
     expect(moved.parentId).toBe(a.id);
     expect(moved.position).toBe(0);
 
@@ -243,74 +247,154 @@ describe('페이지 트리 (FR-326~330)', () => {
     expect(tree.find((p) => p.id === b.id)?.parentId).toBe(a.id);
 
     // 루트로 되돌린다
-    const back = await db.transaction((tx) => pagesSvc.move(b.id, { parentId: null, position: 1 }, owner, tx));
+    const back = (await db.transaction((tx) => pagesSvc.move(b.id, { parentId: null, position: 1 }, owner, tx))).page;
     expect(back.parentId).toBeNull();
   });
 
   /** 트리 화면의 순서(자리, 만든 시각)대로 제목을 늘어놓는다 */
-  const order = async (spaceId: string, owner: Principal, parentId: string | null = null) =>
-    (await pagesSvc.tree(spaceId, owner)).filter((p) => p.parentId === parentId).map((p) => `${p.title}@${p.position}`);
+  const titles = async (spaceId: string, owner: Principal, parentId: string | null = null) =>
+    (await pagesSvc.tree(spaceId, owner)).filter((p) => p.parentId === parentId).map((p) => p.title);
+  const positions = async (ids: string[]) =>
+    Object.fromEntries((await db.select({ id: pages.id, position: pages.position }).from(pages)).filter((r) => ids.includes(r.id)).map((r) => [r.id, r.position]));
+  const move = (id: string, parentId: string | null, position: number, who: Principal) =>
+    db.transaction((tx) => pagesSvc.move(id, { parentId, position }, who, tx));
 
-  it('**자리는 형제 가운데 몇 번째다** — 서버가 형제의 자리를 0부터 다시 매긴다. 같은 부모 안에서도, 형제 수보다 크면 맨 뒤 (P14 FR-1502)', async () => {
+  it('**자리는 형제 가운데 몇 번째다** — 앞·가운데·뒤, 형제 수보다 크면 맨 뒤, 같은 부모 안에서도, 다른 부모 아래로도 (P14 FR-1502)', async () => {
     const { owner, space, mk } = await setup();
-    const [, , , d] = [await mk('A', null), await mk('B', null), await mk('C', null), await mk('D', null)];
-    const all = await pagesSvc.tree(space.id, owner);
-    const id = (t: string) => all.find((p) => p.title === t)!.id;
-    await db.transaction((tx) => pagesSvc.move(d.id, { parentId: null, position: 1 }, owner, tx));
-    expect(await order(space.id, owner)).toEqual(['A@0', 'D@1', 'B@2', 'C@3']);
-    await db.transaction((tx) => pagesSvc.move(id('A'), { parentId: null, position: 3 }, owner, tx));
-    expect(await order(space.id, owner)).toEqual(['D@0', 'B@1', 'C@2', 'A@3']);
-    await db.transaction((tx) => pagesSvc.move(id('B'), { parentId: null, position: 99 }, owner, tx));
-    expect(await order(space.id, owner)).toEqual(['D@0', 'C@1', 'A@2', 'B@3']);
-    // 다른 부모 아래로 — 그 부모의 형제 사이에 끼우고, 옛 부모 아래의 틈은 그대로 둔다(순서는 같다)
-    const c1 = await mk('C1', id('C'));
-    await mk('C2', id('C'));
-    await db.transaction((tx) => pagesSvc.move(id('A'), { parentId: id('C'), position: 1 }, owner, tx));
-    expect(await order(space.id, owner, id('C'))).toEqual(['C1@0', 'A@1', 'C2@2']);
-    expect(await order(space.id, owner)).toEqual(['D@0', 'C@1', 'B@3']);
-    expect(c1.parentId).toBe(id('C'));
+    const [a, b, c, d] = [await mk('A', null), await mk('B', null), await mk('C', null), await mk('D', null)];
+    await move(d.id, null, 1, owner);
+    expect(await titles(space.id, owner)).toEqual(['A', 'D', 'B', 'C']);
+    await move(a.id, null, 3, owner);
+    expect(await titles(space.id, owner)).toEqual(['D', 'B', 'C', 'A']);
+    await move(b.id, null, 99, owner);
+    expect(await titles(space.id, owner)).toEqual(['D', 'C', 'A', 'B']);
+    await move(b.id, null, 0, owner);
+    expect(await titles(space.id, owner)).toEqual(['B', 'D', 'C', 'A']);
+    // 다른 부모 아래로 — 그 부모의 형제 사이에 끼운다
+    await mk('C1', c.id);
+    await mk('C2', c.id);
+    await move(a.id, c.id, 1, owner);
+    expect(await titles(space.id, owner, c.id)).toEqual(['C1', 'A', 'C2']);
+    expect(await titles(space.id, owner)).toEqual(['B', 'D', 'C']);
   });
 
-  it('**같은 자리 값이 여럿이던 형제도 바로잡는다** — 예전 API는 받은 값을 그대로 적었다', async () => {
+  it('**틈이 있으면 옮긴 한 줄만 고친다** — 새 페이지는 간격을 두고 생기고, 형제의 자리 값은 그대로다 (보안 검토 1)', async () => {
+    const { owner, mk } = await setup();
+    const made = [await mk('A', null), await mk('B', null), await mk('C', null)];
+    expect(Object.values(await positions(made.map((p) => p.id)))).toEqual([0, PAGE_POSITION_GAP, 2 * PAGE_POSITION_GAP]);
+    const before = await positions([made[0].id, made[1].id]);
+    await move(made[2].id, null, 1, owner);
+    expect(await positions([made[0].id, made[1].id])).toEqual(before);
+    expect((await positions([made[2].id]))[made[2].id]).toBe(PAGE_POSITION_GAP / 2);
+  });
+
+  it('**틈이 없으면 한 번에 다시 매긴다** — 붙은 자리도, 옛 API가 남긴 겹친 자리도 바로잡는다', async () => {
     const { owner, space, mk } = await setup();
     const [a, b, c] = [await mk('A', null), await mk('B', null), await mk('C', null)];
     await db.update(pages).set({ position: 0 }).where(eq(pages.spaceId, space.id));
-    await db.transaction((tx) => pagesSvc.move(c.id, { parentId: null, position: 1 }, owner, tx));
-    expect(await order(space.id, owner)).toEqual(['A@0', 'C@1', 'B@2']);
-    expect([a.id, b.id]).toHaveLength(2);
+    await move(c.id, null, 1, owner);
+    expect(await titles(space.id, owner)).toEqual(['A', 'C', 'B']);
+    expect(await positions([a.id, b.id, c.id])).toEqual({ [a.id]: 0, [c.id]: PAGE_POSITION_GAP, [b.id]: 2 * PAGE_POSITION_GAP });
   });
 
-  it('**형제는 자리만 고친다** — 고친 사람·시각은 옮긴 페이지만 바뀐다(형제를 "최근에 고친 문서"에 올리지 않는다)', async () => {
+  it('**형제는 자리만 고친다** — 다시 매겨도 고친 사람·시각은 옮긴 페이지만 바뀐다(형제를 "최근에 고친 문서"에 올리지 않는다)', async () => {
     const { owner, space, mk } = await setup();
-    const [a, b] = [await mk('A', null), await mk('B', null)];
+    const [, b, c] = [await mk('A', null), await mk('B', null), await mk('C', null)];
+    await db.update(pages).set({ position: 0 }).where(eq(pages.spaceId, space.id)); // 틈이 없다 — 가운데로 옮기면 다시 매긴다
     const mover = await user('mover');
     await spacesSvc.addMember(space.id, { username: 'mover', role: 'editor' }, owner);
-    const before = await db.query.pages.findFirst({ where: eq(pages.id, a.id) });
-    await db.transaction((tx) => pagesSvc.move(b.id, { parentId: null, position: 0 }, mover, tx));
-    const after = await db.query.pages.findFirst({ where: eq(pages.id, a.id) });
-    expect(after!.position).toBe(1);
+    const before = await db.query.pages.findFirst({ where: eq(pages.id, b.id) });
+    await move(c.id, null, 1, mover);
+    const after = await db.query.pages.findFirst({ where: eq(pages.id, b.id) });
+    expect(after!.position).toBe(2 * PAGE_POSITION_GAP); // 다시 매겨졌다
     expect(after!.updatedAt.toISOString()).toBe(before!.updatedAt.toISOString());
     expect(after!.updatedBy).toBe(owner.id);
-    expect((await db.query.pages.findFirst({ where: eq(pages.id, b.id) }))!.updatedBy).toBe(mover.id);
+    expect((await db.query.pages.findFirst({ where: eq(pages.id, c.id) }))!.updatedBy).toBe(mover.id);
   });
 
-  it('**한 스페이스의 옮기기는 줄을 선다** — 여럿이 동시에 옮겨도 자리가 겹치지 않는다 (P14 FR-1503)', async () => {
+  it('**다른 스페이스의 형제와 지운 형제는 세지 않는다** — 맨 위로 옮겨도 남의 스페이스 맨 위 페이지는 그대로다 (자체 점검 4)', async () => {
+    const { owner, space, mk } = await setup();
+    const other = await spacesSvc.create({ name: '팀2', kind: 'team', categoryId: null, description: '' }, owner);
+    const q = await db.transaction((tx) => pagesSvc.create({ spaceId: other.id, parentId: null, title: 'Q', content: doc('Q') }, owner, tx));
+    const r = await db.transaction((tx) => pagesSvc.create({ spaceId: other.id, parentId: null, title: 'R', content: doc('R') }, owner, tx));
+    await db.update(pages).set({ position: 0 }).where(eq(pages.spaceId, other.id));
+    await mk('A', null);
+    const gone = await mk('지울 것', null);
+    await mk('B', null);
+    await db.transaction((tx) => pagesSvc.softDelete(gone.id, owner, tx));
+    await db.update(pages).set({ position: 0 }).where(eq(pages.spaceId, space.id)); // 다시 매기게 한다
+    // 지운 것을 빼면 형제는 A·B — 1은 "A 다음"이다
+    const x = await mk('X', null);
+    await move(x.id, null, 1, owner);
+    expect(await titles(space.id, owner)).toEqual(['A', 'X', 'B']);
+    expect(await positions([q.id, r.id])).toEqual({ [q.id]: 0, [r.id]: 0 }); // 남의 스페이스는 건드리지 않았다
+    expect((await positions([gone.id]))[gone.id]).toBe(0); // 지운 형제는 다시 매기지 않았다
+  });
+
+  it(`**한 스페이스의 옮기기는 줄을 선다** — 시험 풀의 두 배(${TEST_POOL_MAX * 2})를 동시에 옮겨도 자리가 겹치지 않는다 (P14 FR-1503)`, async () => {
     const { owner, space, mk } = await setup();
     const made = [];
-    for (let i = 0; i < 8; i++) made.push(await mk(`P${i}`, null));
-    await Promise.all(made.map((p, i) => db.transaction((tx) => pagesSvc.move(p.id, { parentId: null, position: (i * 5) % 8 }, owner, tx))));
-    const positions = (await pagesSvc.tree(space.id, owner)).map((p) => p.position).sort((x, y) => x - y);
-    expect(positions).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    for (let i = 0; i < TEST_POOL_MAX * 2; i++) made.push(await mk(`P${i}`, null));
+    await db.update(pages).set({ position: 0 }).where(eq(pages.spaceId, space.id)); // 다시 매기는 길로 겹치게 한다
+    await Promise.all(made.map((p, i) => move(p.id, null, (i * 5) % made.length, owner)));
+    const got = (await pagesSvc.tree(space.id, owner)).map((p) => p.position);
+    expect(new Set(got).size).toBe(made.length);
   });
 
-  it('**거절되면 아무것도 바뀌지 않는다** — 한 트랜잭션이다 (P14 NFR-140)', async () => {
+  it('**다시 매긴 뒤에 실패해도 아무것도 바뀌지 않는다** — 한 트랜잭션이다 (P14 NFR-140, 코드 리뷰 — 판정 전에 거절되는 경우만 보던 시험을 바꿨다)', async () => {
+    const { owner, space, mk } = await setup();
+    const [a, b, c] = [await mk('A', null), await mk('B', null), await mk('C', null)];
+    await db.update(pages).set({ position: 0 }).where(eq(pages.spaceId, space.id));
+    const before = await positions([a.id, b.id, c.id]);
+    // 형제를 다시 매긴 뒤의 마지막 쓰기(옮긴 페이지)에서 실패하게 한다
+    await db.execute(
+      sql.raw(`CREATE OR REPLACE FUNCTION p14_fail_move() RETURNS trigger AS $$ BEGIN IF NEW.id = '${c.id}' THEN RAISE EXCEPTION 'p14 시험: 마지막 쓰기 실패'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`),
+    );
+    await db.execute(sql.raw('CREATE TRIGGER p14_fail_move BEFORE UPDATE ON pages FOR EACH ROW EXECUTE FUNCTION p14_fail_move()'));
+    try {
+      // drizzle은 DB의 오류를 `cause`에 싣는다
+      await expect(move(c.id, null, 1, owner)).rejects.toSatisfy((e) => String((e as { cause?: { message?: string } }).cause?.message).includes('마지막 쓰기 실패'));
+    } finally {
+      await db.execute(sql.raw('DROP TRIGGER IF EXISTS p14_fail_move ON pages'));
+      await db.execute(sql.raw('DROP FUNCTION IF EXISTS p14_fail_move()'));
+    }
+    expect(await positions([a.id, b.id, c.id])).toEqual(before);
+  });
+
+  it('**트리 잠금은 오래 기다리지 않는다** — 옮기기·만들기·지우기가 잠금을 기다리다 한도를 넘으면 409 (보안 검토 1, 코드 리뷰 6)', { timeout: 30_000 }, async () => {
     const { owner, space, mk } = await setup();
     const a = await mk('A', null);
-    await mk('B', null);
-    const child = await mk('A1', a.id);
-    const before = await order(space.id, owner);
-    await expect(db.transaction((tx) => pagesSvc.move(a.id, { parentId: child.id, position: 0 }, owner, tx))).rejects.toThrow(/자기 자신/);
-    expect(await order(space.id, owner)).toEqual(before);
+    const b = await mk('B', null);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockedNow = new Promise<void>((r) => (locked = r));
+    const holder = db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`page-tree:${space.id}`}))`);
+      locked();
+      await held;
+    });
+    await lockedNow;
+    try {
+      await expect(move(a.id, null, 1, owner)).rejects.toThrow(ConflictException);
+      await expect(db.transaction((tx) => pagesSvc.create({ spaceId: space.id, parentId: null, title: 'N', content: doc('N') }, owner, tx))).rejects.toThrow(/다른 사람이 바꾸는 중이다/);
+      await expect(db.transaction((tx) => pagesSvc.softDelete(b.id, owner, tx))).rejects.toThrow(ConflictException);
+    } finally {
+      release();
+      await holder;
+    }
+    // 잠금이 풀리면 곧바로 된다
+    await expect(move(a.id, null, 1, owner)).resolves.toMatchObject({ page: { id: a.id } });
+  });
+
+  it('**감사에 어디서 어디로를 남긴다** — 형제 수로 잘린 실제 자리와 옛 부모 (코드 리뷰 8·보안 검토 6)', async () => {
+    const { owner, mk } = await setup();
+    const a = await mk('A', null);
+    const b = await mk('B', null);
+    const ctrl = new PagesController(pagesSvc, new AuditService(db), {} as never, {} as never, spacesSvc, db);
+    await ctrl.move(b.id, { parentId: a.id, position: 99 }, owner as never, { ip: '127.0.0.1' } as never);
+    const rows = await db.execute<{ detail: unknown }>(sql`SELECT detail FROM audit_events WHERE action = 'page.move' AND target_id = ${b.id}`);
+    expect(rows.rows[0].detail).toEqual({ from: { parentId: null, position: PAGE_POSITION_GAP }, to: { parentId: a.id, position: 0, index: 0 } });
   });
 
   it('viewer는 이동하지 못한다', async () => {
@@ -440,8 +524,31 @@ describe('스페이스 목록의 찾기·상태 (P14 FR-1514)', () => {
     const owner = await user('owner');
     const outsider = await user('outsider');
     await spacesSvc.create({ name: '운영팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.create({ name: '개발팀', kind: 'team', categoryId: null, description: '' }, owner);
     await spacesSvc.create({ name: '운영 비밀', kind: 'team', categoryId: null, description: '' }, outsider);
+    expect((await spacesSvc.list(owner, 'team', 200)).map((v) => v.name)).toEqual(['개발팀', '운영팀']);
     expect((await spacesSvc.list(owner, 'team', 200, { q: '운영' })).map((v) => v.name)).toEqual(['운영팀']);
+  });
+
+  it('**모든 스페이스는 관리자만** — 일반 사용자가 부르면 403 (자체 점검 5 — 관리 콘솔 전체의 방어선이다)', async () => {
+    const owner = await user('owner');
+    await expect(spacesSvc.list(owner, 'all', 500)).rejects.toThrow(ForbiddenException);
+    const ctrl = new SpacesController(spacesSvc, new AuditService(db), db);
+    await expect(ctrl.list(spaceListQueryDto.parse({ scope: 'all' }), owner as never)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('모든 스페이스는 SQL에서 자른다 — 상한만큼만 돌려준다(코드 리뷰 3)', async () => {
+    const admin = await user('boss', 'admin');
+    const owner = await user('owner');
+    for (const name of ['가', '나', '다']) await spacesSvc.create({ name, kind: 'team', categoryId: null, description: '' }, owner);
+    // 결과는 JS로 잘라도 같다 — **줄마다의 조회(`toView`)를 상한만큼만 돌리는지**를 센다
+    const toView = vi.spyOn(spacesSvc as unknown as { toView: (...a: unknown[]) => unknown }, 'toView');
+    try {
+      expect((await spacesSvc.list(admin, 'all', 2)).map((v) => v.name)).toEqual(['가', '나']);
+      expect(toView).toHaveBeenCalledTimes(2);
+    } finally {
+      toView.mockRestore();
+    }
   });
 });
 

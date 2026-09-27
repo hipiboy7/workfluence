@@ -100,8 +100,9 @@ export class PagesController {
     @Req() req: Request,
   ): Promise<PageSummary> {
     return this.db.transaction(async (tx) => {
-      const page = await this.pages.move(id, dto, me, tx);
-      await this.audit.record({ action: 'page.move', actorId: me.id, targetType: 'page', targetId: id, detail: dto, ip: req.ip }, tx);
+      const { page, from, to } = await this.pages.move(id, dto, me, tx);
+      // **어디서 어디로 옮겼나를 남긴다** (P14 병합 전 검토) — 요청한 값만 적으면 형제 수로 잘린 실제 자리와 옛 부모가 남지 않았다
+      await this.audit.record({ action: 'page.move', actorId: me.id, targetType: 'page', targetId: id, detail: { from, to }, ip: req.ip }, tx);
       return page;
     });
   }

@@ -129,11 +129,14 @@ export class SpacesService {
           );
 
     const found = filter.q ? or(ilike(spaces.name, containsPattern(filter.q)), ilike(spaces.key, containsPattern(filter.q))) : undefined;
-    const rows = await this.db
+    const query = this.db
       .select()
       .from(spaces)
       .where(and(visible, found, filter.status ? eq(spaces.status, filter.status) : undefined))
       .orderBy(byName(spaces.name));
+    // **모든 스페이스는 SQL에서 자른다** (P14 병합 전 검토) — 관리자에게는 `canRead`가 늘 참이라 걸러질 것이 없다. 자르기 전에 줄마다 `toView`(질의
+    // 서너 개)를 돌리면 스페이스 수백 개에 질의 천여 개가 연결 풀로 몰렸다. 다른 범위는 볼 수 없는 것을 먼저 빼고 자른다(아래)
+    const rows = scope === 'all' ? await query.limit(limit) : await query;
     const views = await Promise.all(rows.map((r) => this.toView(r, principal)));
     // 볼 수 없는 것을 먼저 빼고 자른다. 자르고 거르면 결과가 조용히 비는 수가 있다
     return views.filter((v) => v.access.canRead).slice(0, limit);
