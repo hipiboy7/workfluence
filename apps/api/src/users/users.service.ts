@@ -12,11 +12,14 @@ import {
   type DelegableAction,
   type Principal,
   type Role,
+  type ListUsersDto,
   type SignupDto,
+  type UserListView,
   type UserStatus,
   type UserView,
 } from '@workfluence/shared';
-import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, ilike, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
+import { containsPattern } from '../common/like';
 import { randomInt } from 'node:crypto';
 import { afterSuccess, isLocked, lockAfterFailure, type LockoutPolicy } from '../auth/domain/lockout';
 import { burnPasswordCheck, hashPassword, verifyPassword } from './password';
@@ -116,10 +119,27 @@ export class UsersService {
     return row;
   }
 
-  async list(limit: number): Promise<UserView[]> {
-    const rows = await this.db.select().from(users).orderBy(desc(users.createdAt)).limit(limit);
+  /**
+   * 사용자 목록 — **서버가 찾고 거르고 나눈다** (P13 C.6, FR-1450~1452). 화면에서 거르면 한 번에 받은 100명 밖을 못 찾는다. 찾는 말은
+   * 아이디·이름·email의 부분 일치, 상태의 '잠김'은 저장값이 아니라 잠금 시각에서 판다(FR-230). 새로 온 사람부터, 같은 시각이면 id 순
+   */
+  async list(f: ListUsersDto): Promise<UserListView> {
     const now = new Date();
-    return rows.map((r) => toUserView(r, now));
+    const conds: SQL[] = [];
+    if (f.q) {
+      const like = containsPattern(f.q);
+      conds.push(or(ilike(users.username, like), ilike(users.displayName, like), ilike(users.email, like))!);
+    }
+    const notLocked = or(isNull(users.lockedUntil), lte(users.lockedUntil, now))!;
+    if (f.status === 'pending' || f.status === 'suspended') conds.push(eq(users.status, f.status));
+    if (f.status === 'active') conds.push(eq(users.status, 'active'), notLocked);
+    if (f.status === 'locked') conds.push(eq(users.status, 'active'), gt(users.lockedUntil, now));
+    const where = conds.length ? and(...conds) : undefined;
+    const [rows, [{ n }]] = await Promise.all([
+      this.db.select().from(users).where(where).orderBy(desc(users.createdAt), desc(users.id)).limit(f.limit).offset(f.offset),
+      this.db.select({ n: count() }).from(users).where(where),
+    ]);
+    return { items: rows.map((r) => toUserView(r, now)), total: n };
   }
 
   async adminDisplayNames(): Promise<string[]> {

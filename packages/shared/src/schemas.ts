@@ -279,6 +279,22 @@ export type UserView = {
   createdAt: string;
 };
 
+/** 사용자 목록에서 거를 수 있는 상태 — 잠김은 저장값이 아니라 파생값이다(FR-230) */
+export const USER_LIST_FILTERS = ['pending', 'active', 'locked', 'suspended'] as const;
+export type UserListFilter = (typeof USER_LIST_FILTERS)[number];
+
+/** 사용자 목록의 찾기·거르기·나누기 (P13 C.6, FR-1450~1452) — 기본 100명에서 조용히 끊겼다 */
+export const listUsersDto = z.object({
+  q: z.string().trim().max(100).optional(),
+  status: z.enum(USER_LIST_FILTERS).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type ListUsersDto = z.infer<typeof listUsersDto>;
+
+/** 목록 한 조각과 전체 수 */
+export type UserListView = { items: UserView[]; total: number };
+
 export type MeView = {
   id: string;
   username: string;
@@ -341,6 +357,9 @@ export type PageVersionView = {
 };
 /** 실시간 편집을 **지금 바로** 버전으로 남긴다 (P6_설계서_Collab). 제목도 함께 온다 */
 export const flushCollabDto = z.object({ title: z.string().trim().min(1).max(300).optional() });
+/** 실시간 편집의 제목 — 입력을 멈추면 방에 알린다 (P13 FR-1460). 제목 칸과 같은 규칙이다 */
+export const collabTitleDto = z.object({ title: z.string().trim().min(1).max(300) });
+export type CollabTitleDto = z.infer<typeof collabTitleDto>;
 export type FlushCollabDto = z.infer<typeof flushCollabDto>;
 
 /** 페이지 템플릿 (P6_설계서_Collab FR-740) */

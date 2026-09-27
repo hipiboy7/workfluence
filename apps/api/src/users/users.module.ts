@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Global, Inject, Module, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import { createUserDto, listLimitDto, updateUserRoleDto, userGrantsDto, type UserGrantsDto, type UserView } from '@workfluence/shared';
+import { createUserDto, updateUserRoleDto, userGrantsDto, type UserGrantsDto, type UserView, listUsersDto, type ListUsersDto, type UserListView } from '@workfluence/shared';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
@@ -22,8 +22,8 @@ export class UsersController {
 
   @Get()
   @RequireAction('user.manage')
-  list(@Query(new ZodPipe(listLimitDto)) q: { limit: number }): Promise<UserView[]> {
-    return this.users.list(q.limit);
+  list(@Query(new ZodPipe(listUsersDto)) q: ListUsersDto): Promise<UserListView> {
+    return this.users.list(q);
   }
 
   @Post()
