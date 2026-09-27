@@ -31,7 +31,7 @@ import {
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
-import { COLLAB_LIMITS, LLM_LIMITS, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
+import { COLLAB_LIMITS, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -104,6 +104,9 @@ describe('카테고리·스페이스 DTO', () => {
     expect(spaceListQueryDto.safeParse({ status: 'deleted' }).success).toBe(false);
     // 빈 찾기는 찾지 않는 것이다 — 모두 보인다
     expect(spaceListQueryDto.parse({ q: '   ' })).toEqual({ scope: 'personal', limit: 200 });
+    // 상한은 공유 상수 하나다 — 관리 화면이 그 값으로 "찾기로 좁힌다"를 말한다
+    expect(spaceListQueryDto.parse({ limit: SPACE_LIST_MAX }).limit).toBe(SPACE_LIST_MAX);
+    expect(spaceListQueryDto.safeParse({ limit: SPACE_LIST_MAX + 1 }).success).toBe(false);
   });
 });
 

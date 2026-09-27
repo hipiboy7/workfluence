@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, RATE_LIMITS, REQUEST_ID_PATTERN, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
+import { AUDIT_ACTIONS, COLLAB_LIMITS, LIST_PAGE_LIMIT, LLM_TIMINGS, LOG_EVENTS, RATE_LIMITS, REQUEST_ID_PATTERN, SPACE_LIST_MAX, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
 
 /** 설계 고정값 중 **이름의 모양**이 규칙인 것 (P11 D.4, FR-1214·1218) */
 
@@ -91,3 +91,11 @@ describe('RATE_LIMITS — IP별 요청 제한', () => {
     expect(RATE_LIMITS.changePassword).toEqual({ max: 5, windowSec: 60 });
   });
 });
+
+describe('스페이스 목록의 상한 (P14 FR-1514)', () => {
+  it('**한 번에 500개까지** — 서버의 목록 조건과 관리 화면의 "찾기로 좁힌다" 안내가 이 값 하나를 쓴다. 기본 쪽(200)보다 크다', () => {
+    expect(SPACE_LIST_MAX).toBe(500);
+    expect(SPACE_LIST_MAX).toBeGreaterThan(LIST_PAGE_LIMIT);
+  });
+});
+
