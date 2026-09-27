@@ -206,6 +206,22 @@ export const REQUEST_ID_PATTERN = new RegExp(`^[A-Za-z0-9-]{${LOG_LIMITS.request
 /** 페이지 트리 최대 깊이. 무한 중첩은 이동·경로 계산 비용을 키운다. */
 export const PAGE_TREE_MAX_DEPTH = 10;
 
+/**
+ * 페이지 트리의 **자리 간격** (P14_설계서_Spaces D.1). 새 페이지는 형제의 맨 뒤 + 간격에 붙고, 옮기기는 이웃 사이의 가운데를 잡는다 — 보통 옮긴
+ * 한 줄만 고친다. 틈이 없을 때만 형제 전체를 간격으로 다시 매긴다(`placeAt`). 형제마다 다시 쓰면 줄마다 검색 색인까지 다시 써서, 본문이 큰 형제
+ * 300개 아래로 옮기는 데 1.2초였다(병합 전 보안 검토 1). 2의 거듭제곱이라 가운데를 거듭 잡아도 여러 번 나뉜다
+ */
+export const PAGE_POSITION_GAP = 1024;
+
+/** 자리 값의 한도 — 끝으로 거듭 옮겨 이것에 닿으면 다시 매긴다. `pages.position`은 int4다 */
+export const PAGE_POSITION_LIMIT = 2 ** 30;
+
+/**
+ * 한 스페이스의 트리 잠금을 기다리는 상한 (P14 D.1, FR-1503). 옮기기·만들기·지우기·되살리기가 줄을 서는데, 기다리는 동안 연결을 쥐므로 오래 기다리면
+ * 남의 요청이 연결을 기다린다(T-026). 넘으면 409 — 잠시 뒤 다시 한다
+ */
+export const PAGE_TREE_LOCK_WAIT_MS = 2000;
+
 /** 상태 변경 요청에 요구하는 CSRF 헤더 (CLAUDE.md 7절). 값이 아니라 헤더의 존재가 방어다. */
 export const CSRF_HEADER = 'x-workfluence-request';
 export const CSRF_HEADER_VALUE = '1';
@@ -240,6 +256,15 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
  * 간다. 넘기 시작하면 그때 만든다 — 지금 만들면 쓰이지 않는 코드가 된다.
  */
 export const LIST_PAGE_LIMIT = 200;
+
+/**
+ * 스페이스 목록을 한 번에 받는 상한 (P14 FR-1514). 관리 콘솔의 모든 스페이스 화면이 이만큼 받고, 채우면 "찾기로 좁힌다"를 말한다 — 찾기와 상태
+ * 거르기는 서버가 자르기 전에 한다(`spaceListQueryDto`)
+ */
+export const SPACE_LIST_MAX = 500;
+
+/** 목록 찾기 글자의 상한 — 사용자 찾기·스페이스 찾기(서버의 조건)와 관리 화면의 찾기 칸이 같이 쓴다 */
+export const LIST_SEARCH_MAX = 100;
 
 /** settings 테이블 키 */
 export const SETTINGS_KEYS = {

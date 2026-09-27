@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, RATE_LIMITS, REQUEST_ID_PATTERN, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
+import { AUDIT_ACTIONS, COLLAB_LIMITS, DB_POOL, LIST_PAGE_LIMIT, LIST_SEARCH_MAX, LLM_TIMINGS, LOG_EVENTS, PAGE_POSITION_GAP, PAGE_POSITION_LIMIT, PAGE_TREE_LOCK_WAIT_MS, RATE_LIMITS, REQUEST_ID_PATTERN, SPACE_LIST_MAX, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
 
 /** 설계 고정값 중 **이름의 모양**이 규칙인 것 (P11 D.4, FR-1214·1218) */
 
@@ -91,3 +91,32 @@ describe('RATE_LIMITS — IP별 요청 제한', () => {
     expect(RATE_LIMITS.changePassword).toEqual({ max: 5, windowSec: 60 });
   });
 });
+
+describe('스페이스 목록의 상한 (P14 FR-1514)', () => {
+  it('**한 번에 500개까지** — 서버의 목록 조건과 관리 화면의 "찾기로 좁힌다" 안내가 이 값 하나를 쓴다. 기본 쪽(200)보다 크다', () => {
+    expect(SPACE_LIST_MAX).toBe(500);
+    expect(SPACE_LIST_MAX).toBeGreaterThan(LIST_PAGE_LIMIT);
+  });
+});
+
+describe('페이지 트리의 자리와 잠금 (P14 D.1 — 병합 전 검토)', () => {
+  it('**자리 간격은 2의 거듭제곱** — 이웃 사이 가운데를 거듭 잡아도 정수로 여러 번 나뉜다', () => {
+    expect(PAGE_POSITION_GAP).toBe(1024);
+    expect(Number.isInteger(Math.log2(PAGE_POSITION_GAP))).toBe(true);
+  });
+
+  it('**자리 한도는 int4 안** — 한도에서 한 간격을 더해도 넘치지 않는다', () => {
+    expect(PAGE_POSITION_LIMIT + PAGE_POSITION_GAP).toBeLessThan(2 ** 31);
+    expect(PAGE_POSITION_LIMIT).toBeGreaterThan(PAGE_POSITION_GAP * 1000);
+  });
+
+  it('**트리 잠금은 오래 기다리지 않는다** — 연결을 쥔 채 기다리므로 연결 대기 한도보다 훨씬 짧다', () => {
+    expect(PAGE_TREE_LOCK_WAIT_MS).toBe(2000);
+    expect(PAGE_TREE_LOCK_WAIT_MS * 4).toBeLessThanOrEqual(DB_POOL.connectionTimeoutMillis);
+  });
+
+  it('목록 찾기 글자는 100자까지 — 사용자·스페이스 찾기와 화면의 입력 칸이 같이 쓴다', () => {
+    expect(LIST_SEARCH_MAX).toBe(100);
+  });
+});
+

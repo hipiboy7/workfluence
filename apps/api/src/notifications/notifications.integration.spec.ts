@@ -180,10 +180,8 @@ describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
     const sp = await team(owner);
     await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
 
-    const created = await pagesSvc.create(
-      { spaceId: sp.id, parentId: null, title: '회의록', content: body('@mate 확인 부탁') },
-      owner,
-      db,
+    const created = await db.transaction((tx) =>
+      pagesSvc.create({ spaceId: sp.id, parentId: null, title: '회의록', content: body('@mate 확인 부탁') }, owner, tx),
     );
 
     const list = await svc.list(mate, 20);
@@ -198,7 +196,7 @@ describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
     await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
     await db.update(users).set({ email: 'mate@example.internal' }).where(eq(users.id, mate.id));
     const got: { count: number; recipients: unknown[] }[] = [];
-    await pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('@mate 확인') }, owner, db, (m) => got.push(m));
+    await db.transaction((tx) => pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('@mate 확인') }, owner, tx, (m) => got.push(m)));
     expect(got).toHaveLength(1);
     expect(got[0].count).toBe(1);
     expect(got[0].recipients).toHaveLength(1);
@@ -209,7 +207,7 @@ describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
     const mate = await user('mate');
     const sp = await team(owner);
     await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
-    const created = await pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('@mate 확인') }, owner, db);
+    const created = await db.transaction((tx) => pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('@mate 확인') }, owner, tx));
     expect(await svc.list(mate, 20)).toHaveLength(1);
 
     // 오타 고치듯 두 번 더 저장한다. 멘션은 그대로다
@@ -226,7 +224,7 @@ describe('페이지 본문의 멘션 (FR-500 — 자체 점검 1)', () => {
     const mate = await user('mate');
     const sp = await team(owner);
     await spacesSvc.addMember(sp.id, { username: 'mate', role: 'editor' }, owner);
-    const created = await pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('내용') }, owner, db);
+    const created = await db.transaction((tx) => pagesSvc.create({ spaceId: sp.id, parentId: null, title: 'T', content: body('내용') }, owner, tx));
     expect(await svc.list(mate, 20)).toHaveLength(0);
 
     await pagesSvc.update(created.id, { title: 'T', content: body('@mate 다시 봐 줘'), baseVersionNo: created.currentVersionNo }, owner, db);

@@ -169,7 +169,8 @@ const NO_ACCESS: SpaceAccess = {
  * - 개인: 생성자와 관리자만. Crew 없음.
  * - 팀: Crew(owner·editor·viewer)만 읽기. owner·editor·관리자만 쓰기.
  * - 중지 상태: 누구도 쓰기 불가(읽기 전용).
- * - 삭제: 생성자는 Crew가 본인뿐(memberCount < 2)일 때, 관리자는 중지 상태일 때.
+ * - 삭제: 생성자는 Crew가 본인뿐(memberCount < 2)이고 **활성일 때**, 관리자는 중지 상태일 때. 원문 "'중지'하게되면, admin만 삭제할 수
+ *   있어야해" — 처음 판은 활성 조건을 빠뜨려 중지된 스페이스를 주인이 지울 수 있었다(P14 병합 전 보안 검토 5).
  */
 export function spaceAccess(
   principal: Principal | null | undefined,
@@ -189,7 +190,7 @@ export function spaceAccess(
       canWrite: canRead && active,
       canManageMembers: false,
       canChangeStatus: canRead,
-      canDelete: (isOwner && memberCount < 2) || (admin && !active),
+      canDelete: (isOwner && memberCount < 2 && active) || (admin && !active),
       isOwner,
     };
   }
@@ -201,7 +202,7 @@ export function spaceAccess(
     canWrite,
     canManageMembers: admin || isOwner,
     canChangeStatus: admin || isOwner,
-    canDelete: (isOwner && memberCount < 2) || (admin && !active),
+    canDelete: (isOwner && memberCount < 2 && active) || (admin && !active),
     isOwner,
   };
 }

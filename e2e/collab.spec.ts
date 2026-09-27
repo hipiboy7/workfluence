@@ -43,7 +43,7 @@ test('두 사람이 같은 페이지를 동시에 고치면 서로 보이고, �
   await a.getByLabel('이름').fill(spaceName);
   await a.getByRole('button', { name: '만들기' }).click();
   await a.getByRole('link', { name: spaceName }).click();
-  await a.getByLabel('아이디로 Crew 추가 (editor)').fill(mate.username);
+  await a.getByLabel('아이디로 Crew 추가').fill(mate.username);
   await a.getByRole('button', { name: '추가' }).click();
 
   const pageTitle = `협업 문서 ${Date.now()}`;
@@ -161,7 +161,7 @@ test('A가 부르고 B가 마지막으로 고쳐도, 알림함은 A가 불렀다
   await a.getByLabel('이름').fill(spaceName);
   await a.getByRole('button', { name: '만들기' }).click();
   await a.getByRole('link', { name: spaceName }).click();
-  await a.getByLabel('아이디로 Crew 추가 (editor)').fill(mate.username);
+  await a.getByLabel('아이디로 Crew 추가').fill(mate.username);
   await a.getByRole('button', { name: '추가' }).click();
   await a.getByLabel('새 페이지 제목').fill(`멘션 문서 ${Date.now()}`);
   await a.getByRole('button', { name: '만들기' }).click();
@@ -272,7 +272,7 @@ test('조작한 연결이 보낸 것은 문서에 들어가지 않고 그 연결
   await a.getByLabel('이름').fill(spaceName);
   await a.getByRole('button', { name: '만들기' }).click();
   await a.getByRole('link', { name: spaceName }).click();
-  await a.getByLabel('아이디로 Crew 추가 (editor)').fill(mate.username);
+  await a.getByLabel('아이디로 Crew 추가').fill(mate.username);
   await a.getByRole('button', { name: '추가' }).click();
   await a.getByLabel('새 페이지 제목').fill(`관문 문서 ${Date.now()}`);
   await a.getByRole('button', { name: '만들기' }).click();
