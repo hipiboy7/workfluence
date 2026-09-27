@@ -241,6 +241,12 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
  */
 export const LIST_PAGE_LIMIT = 200;
 
+/**
+ * 스페이스 목록을 한 번에 받는 상한 (P14 FR-1514). 관리 콘솔의 모든 스페이스 화면이 이만큼 받고, 채우면 "찾기로 좁힌다"를 말한다 — 찾기와 상태
+ * 거르기는 서버가 자르기 전에 한다(`spaceListQueryDto`)
+ */
+export const SPACE_LIST_MAX = 500;
+
 /** settings 테이블 키 */
 export const SETTINGS_KEYS = {
   contactInfo: 'contact_info',

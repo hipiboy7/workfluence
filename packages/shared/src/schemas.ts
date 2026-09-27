@@ -3,10 +3,12 @@ import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
   COLLAB_LIMITS,
+  LIST_PAGE_LIMIT,
   LLM_LIMITS,
   REQUEST_ID_PATTERN,
   ROLES,
   SPACE_KINDS,
+  SPACE_LIST_MAX,
   SPACE_MEMBER_ROLES,
   SPACE_STATUSES,
   USER_LIST_MAX,
@@ -147,7 +149,7 @@ export type UpdateMemberRoleDto = z.infer<typeof updateMemberRoleDto>;
  */
 export const spaceListQueryDto = z.object({
   scope: z.enum(['personal', 'team', 'all']).default('personal'),
-  limit: z.coerce.number().int().min(1).max(500).default(200),
+  limit: z.coerce.number().int().min(1).max(SPACE_LIST_MAX).default(LIST_PAGE_LIMIT),
   q: z
     .string()
     .trim()
