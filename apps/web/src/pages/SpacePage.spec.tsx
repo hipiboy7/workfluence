@@ -122,6 +122,8 @@ describe('SpacePage — 트리와 하위 페이지', () => {
     ]);
     const inner = within(list.children[0] as HTMLElement).getByRole('list');
     expect(lines(inner)).toEqual([['9월 회의', '16px']]);
+    // 안쪽 목록은 브라우저의 기본 들여쓰기(40px)를 없앤다 — 단계마다 16px만 (반영분 점검 3)
+    expect(inner.style.paddingLeft).toBe('0px');
   });
 
   it('**위치를 고르면 그 아래에 만든다** — 기본은 맨 위', async () => {

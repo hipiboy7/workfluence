@@ -22,6 +22,8 @@ let delay: (url: string) => number = () => 0;
 let categoryDelete: { status: number; body: unknown } = { status: 200, body: { ok: true } };
 // 이 찾기어를 담은 목록 요청은 실패한다
 let failWhen: (url: string) => boolean = () => false;
+// 분류 읽기가 실패한다
+let categoriesFail = false;
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
 
@@ -50,6 +52,7 @@ beforeEach(() => {
   delay = () => 0;
   categoryDelete = { status: 200, body: { ok: true } };
   failWhen = () => false;
+  categoriesFail = false;
   me = { id: 'a1', username: 'boss', displayName: '관리자', role: 'admin', mustChangePassword: false, grants: [], hasPassword: true };
   spaces = [
     space({ id: 's1', key: 'OPS1', name: '운영팀' }),
@@ -69,7 +72,7 @@ beforeEach(() => {
       const status = p.get('status');
       return answer(json(200, spaces.filter((s) => (!q || s.name.includes(q) || s.key.includes(q)) && (!status || s.status === status))));
     }
-    if (method === 'GET' && url === '/api/categories') return answer(json(200, categories));
+    if (method === 'GET' && url === '/api/categories') return answer(categoriesFail ? json(500, { message: '분류를 읽지 못했다' }) : json(200, categories));
     // 같은 이름이 있으면 서버는 있던 것을 돌려준다(`CategoriesController.create`)
     if (method === 'POST' && url === '/api/categories') {
       const name = (JSON.parse(init!.body as string) as { name: string }).name;
@@ -174,6 +177,17 @@ describe('AdminSpacesPage — 모든 스페이스', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('**찾기가 돼도 분류 칸의 실패는 남는다** — 목록의 실패만 지운다(하나로 두면 찾기가 될 때 상관없는 실패까지 지웠다 — 반영분 점검 5)', async () => {
+    categoriesFail = true;
+    renderPage();
+    await screen.findByRole('link', { name: '운영팀' });
+    expect(screen.getByRole('alert').textContent).toContain('분류를 읽지 못했다');
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '개발' } });
+    await screen.findByRole('link', { name: '개발팀' });
+    await waitFor(() => expect(screen.queryByRole('link', { name: '운영팀' })).toBeNull());
+    expect(screen.getByRole('alert').textContent).toContain('분류를 읽지 못했다');
+  });
+
   it('**늦게 온 옛 찾기의 실패도 버린다** — 마지막 찾기가 됐으면 알리지 않는다', async () => {
     renderPage();
     await screen.findByRole('link', { name: '운영팀' });
@@ -221,6 +235,17 @@ describe('AdminSpacesPage — 분류', () => {
     ]);
     expect((await screen.findByRole('status')).textContent).toBe('분류 "개발"을(를) 만들었다.');
     await screen.findByLabelText('분류 개발 이름');
+  });
+
+  it('**만들기를 두 번 눌러도 한 번 보낸다** — 앞의 것이 끝날 때까지 받지 않는다(반영분 점검 11)', async () => {
+    delay = (url) => (url === '/api/categories' ? 200 : 0);
+    renderPage();
+    await screen.findByLabelText('분류 운영 이름');
+    fireEvent.change(screen.getByLabelText('새 분류'), { target: { value: '개발' } });
+    fireEvent.click(screen.getByRole('button', { name: '만들기' }));
+    fireEvent.click(screen.getByRole('button', { name: '만들기' }));
+    await screen.findByLabelText('분류 개발 이름');
+    expect(writes().filter((c) => c.method === 'POST')).toHaveLength(1);
   });
 
   it('**이미 있는 이름이면 "만들었다"고 하지 않는다** — 서버는 있던 것을 돌려준다', async () => {

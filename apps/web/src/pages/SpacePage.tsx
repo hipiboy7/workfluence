@@ -118,14 +118,15 @@ export function SpacePage() {
 
   // 고른 부모가 다시 읽은 트리에 없으면(그 사이 지워졌다) 맨 위로 보이고 맨 위로 보낸다 — 보이는 것과 보내는 것이 같아야 한다
   const parentValue = rows.some((r) => r.id === parentId) ? parentId : '';
-  // **트리는 목록 안의 목록이다** — 들여쓰기를 여백으로만 그리면 화면 낭독기가 단계를 읽지 못한다 (병합 전 코드 리뷰 13)
+  // **트리는 목록 안의 목록이다** — 들여쓰기를 여백으로만 그리면 화면 낭독기가 단계를 읽지 못한다 (병합 전 코드 리뷰 13). 안쪽 목록의 기본 들여쓰기
+  // (브라우저의 40px)는 없앤다 — 줄의 16px에 더해져 단계마다 56px가 되면 깊은 페이지가 칸 밖으로 밀렸다(반영분 점검 3)
   const branch = (items: readonly TreeRow[]): ReactNode =>
     items.map((p) => {
       const kids = kidsOf.get(p.id) ?? [];
       return (
         <li key={p.id} style={{ marginLeft: p.depth > 0 ? 16 : 0 }}>
           <Link to={`/pages/${p.id}`}>{p.title}</Link> <span className="muted small">v{p.currentVersionNo}</span>
-          {kids.length > 0 && <ul>{branch(kids)}</ul>}
+          {kids.length > 0 && <ul style={{ paddingLeft: 0 }}>{branch(kids)}</ul>}
         </li>
       );
     });

@@ -20,10 +20,15 @@ export function AdminSpacesPage() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<SpaceStatus | ''>('');
   const [error, setError] = useState<string | null>(null);
+  // 목록 찾기의 실패는 따로 둔다 — 찾기가 되면 그것만 지운다. 하나로 두면 찾기가 될 때 분류 읽기·조치의 실패까지 지웠다(반영분 점검 5)
+  const [listError, setListError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryView[]>([]);
   const [newCategory, setNewCategory] = useState('');
   const [renaming, setRenaming] = useState<Record<string, string>>({});
+  // 만들기를 두 번 누르면 같은 이름이 두 번 간다 — 앞의 것이 끝날 때까지 받지 않는다
+  const creating = useRef(false);
+  const [busy, setBusy] = useState(false);
   // 늦게 온 옛 응답이 새 찾기의 결과를 덮지 않게 — 마지막 찾기만 받는다
   const seq = useRef(0);
 
@@ -36,12 +41,12 @@ export function AdminSpacesPage() {
       .then((r) => {
         if (mine !== seq.current) return;
         setRows(r);
-        // 찾기가 다시 되면 앞선 찾기의 오류는 지난 일이다 (병합 전 검토)
-        setError(null);
+        // 찾기가 다시 되면 앞선 찾기의 실패는 지난 일이다 (병합 전 검토)
+        setListError(null);
       })
       .catch((e: unknown) => {
         // 늦게 온 옛 찾기의 실패도 받지 않는다 — 성공처럼 마지막 찾기만
-        if (mine === seq.current) setError(e instanceof Error ? e.message : String(e));
+        if (mine === seq.current) setListError(e instanceof Error ? e.message : String(e));
       });
   }, [q, status]);
 
@@ -89,7 +94,9 @@ export function AdminSpacesPage() {
   const addCategory = (e: FormEvent) => {
     e.preventDefault();
     const name = newCategory.trim();
-    if (!name) return;
+    if (!name || creating.current) return;
+    creating.current = true;
+    setBusy(true);
     // 같은 이름이 이미 있으면 서버는 있던 것을 돌려준다 — "만들었다"고 하지 않는다 (병합 전 검토)
     setError(null);
     setNotice(null);
@@ -99,7 +106,11 @@ export function AdminSpacesPage() {
         setNewCategory('');
         loadCategories();
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => {
+        creating.current = false;
+        setBusy(false);
+      });
   };
 
   const renameCategory = (c: CategoryView) => {
@@ -137,6 +148,7 @@ export function AdminSpacesPage() {
       <p className="muted small"><Link to="/">← 홈</Link> · 지운 스페이스는 <Link to="/trash">휴지통</Link>에서 되살린다</p>
       {error && <p className="badge fail" role="alert">{error}</p>}
       {notice && <p className="badge" role="status">{notice}</p>}
+      {listError && <p className="badge fail" role="alert">{listError}</p>}
 
       <form className="card row" role="search" onSubmit={(e) => e.preventDefault()}>
         <label>
@@ -215,7 +227,9 @@ export function AdminSpacesPage() {
         <form onSubmit={addCategory}>
           <label htmlFor="cat-new">새 분류</label>
           <input id="cat-new" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} required />
-          <button type="submit">만들기</button>
+          <button type="submit" disabled={busy}>
+            만들기
+          </button>
         </form>
       </section>
     </main>
