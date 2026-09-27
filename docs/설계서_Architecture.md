@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 13까지 구현 완료** (2026-09-27). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 13까지 구현 완료, Phase 14 진행 중** (2026-09-27). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -72,7 +72,8 @@ workfluence/
 │   │   │   ├── spaces/           [P2] 스페이스·카테고리·Crew
 │   │   │   ├── pages/            [P2] 페이지·버전 / [P6] collab/(WebSocket 게이트웨이) ·
 │   │   │   │                     domain/{realtime,ydoc}.ts / [P7] domain/liveness.ts / [P8] domain/makers.ts /
-│   │   │   │                     [P9] domain/{gate,presence}.ts (실시간 편집의 관문)
+│   │   │   │                     [P9] domain/{gate,presence}.ts (실시간 편집의 관문) / [P13] domain/received.ts /
+│   │   │                     [P14] domain/tree.ts의 placeAt (옮긴 자리 = 형제 가운데 몇 번째)
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
@@ -87,6 +88,8 @@ workfluence/
 │   └── web/                      React + Vite SPA
 │       └── src/{components,pages,api.ts,auth.tsx}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기) ·
 │                                 [P10] components/RequireUuidParam.tsx (주소의 id가 식별자 모양일 때만 화면을 그린다)
+│                                 [P14] components/pageTree.ts (트리 펼치기 하나 — 트리·위치 고르기·옮기기) · components/{MovePage,SpaceManage}.tsx ·
+│                                 pages/admin/AdminSpacesPage.tsx (모든 스페이스 + 분류)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown}.ts
 ├── e2e/                          Playwright
@@ -291,6 +294,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 11 | 운영 로그·위임·반입 설정 — 요청 번호(nginx `$request_id` → `X-Request-Id`)·요청 문맥(`AsyncLocalStorage`)·앱 접근 로그·event 코드(`LOG_EVENTS`, 장애대응 가이드와 대조)·감사 `request_id`, `users.grants`와 `can()`의 위임(`llm.manage`), compose 로그 순환·nginx JSON 로그·사내 CA 시작 스크립트(`0010_ops`) |
 | 12 | 답을 기다리는 표시·문서 모양의 한계 — LLM 질문 화면의 기다린 초와 "답변이 늦어지고 있습니다."(흐름 상태 기계 `waitingSince`), 편집기 스키마의 순서·개수 규칙(`NON_EMPTY_NODES`·`FIRST_CHILD` — 정본 검증과 실시간 상태의 변환, 대조 시험이 증명. 목록 항목의 첫 자식은 관문 `gate.ts`가 적용한 뒤로 본다), 실시간 편집 프레임 16MiB(`COLLAB_LIMITS`, 넘으면 1009와 감사)·표 칸 값의 범위(`TABLE_LIMITS`, 편집기가 붙여 넣은 값을 줄이고 범위를 넘는 표 명령은 하지 않는다) |
 | 13 | 반입 준비 — 로그인 경로(한 계정씩 줄 `KeyedSerial`, 비밀번호 확인·해시는 트랜잭션 밖 · 프로세스의 argon2 동시 실행 상한 `ConcurrencyGate`, 실패 횟수는 한 문장으로), 계정 정지(`users.status` = `suspended`, 정지하면 세션·편집 연결을 끊는다), 사용자 목록의 찾기·거르기·나누기, DB 계정 둘(앱 `workfluence_app` — 마이그레이션이 만들고 권한을 준다 `apps/api/src/db/app-role.ts`), compose `tools`(마이그레이션·시드·월간 작업 `apps/api/src/cli`), 반입 묶음의 운영 문서와 이미지의 커밋 라벨 |
+| 14 | 페이지 트리와 스페이스를 화면에서(F-007·F-008) — 옮기기의 자리를 형제 가운데 몇 번째로 굳히고 서버가 형제를 다시 매긴다(`placeAt`, 스페이스마다 잠금 `page-tree:<스페이스>`), 모든 스페이스 목록을 DB가 찾고 거른다(`q`·`status`, `SPACE_LIST_MAX`), 화면 넷(트리 펼치기 · 옮기기 칸 · 관리 칸 · 관리 콘솔의 스페이스). 마이그레이션 없음 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

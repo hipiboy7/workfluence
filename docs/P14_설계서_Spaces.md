@@ -7,7 +7,6 @@ Phase 14는 기능백로그의 **F-007**(페이지 트리에서 하위 페이지
 선행: [`docs/P2_설계서_Page.md`](P2_설계서_Page.md) FR-346 · [`docs/P4_설계서_Admin.md`](P4_설계서_Admin.md) FR-530·532·537·538 ·
 구조: [`docs/설계서_Architecture.md`](설계서_Architecture.md)
 
-> **경로에 백틱이 없는 것은 아직 만들지 않은 것이다** (4.1절). 만들면 붙인다.
 
 ---
 
@@ -90,19 +89,19 @@ Phase 14는 기능백로그의 **F-007**(페이지 트리에서 하위 페이지
 
 ### D.2 화면 — 페이지 트리 (FR-1500·1501·1504·1505)
 
-- **트리 펼치기**(apps/web/src/components/pageTree.ts, 순수 함수) — 서버가 준 목록(부모·자리 순서)을 들여쓰기 깊이와 함께 한 줄로 펼친다.
+- **트리 펼치기**(`apps/web/src/components/pageTree.ts`, 순수 함수) — 서버가 준 목록(부모·자리 순서)을 들여쓰기 깊이와 함께 한 줄로 펼친다.
   "자기와 그 아래"를 구한다. 스페이스 화면의 트리, 위치 고르기, 옮기기 칸이 이것 하나를 쓴다.
 - **스페이스 화면** — 새 페이지 칸에 **위치**(맨 위 / 들여 쓴 페이지 목록). 주소의 `?parent=<페이지>`가 있으면 그것을 골라 두고 제목 칸으로 간다.
 - **페이지 보기** — 쓸 수 있으면 **하위 페이지 만들기**(→ `/spaces/<스페이스>?parent=<이 페이지>`)와 **옮기기**.
-  옮기기 칸(apps/web/src/components/MovePage.tsx)은 새 부모(맨 위 + 자기와 그 아래를 뺀 페이지들)와 자리(맨 앞 / "<형제> 다음")를 고르고
+  옮기기 칸(`apps/web/src/components/MovePage.tsx`)은 새 부모(맨 위 + 자기와 그 아래를 뺀 페이지들)와 자리(맨 앞 / "<형제> 다음")를 고르고
   `PATCH /api/pages/:id/move`를 부른다. 거절되면 서버의 까닭을 그 칸에 보인다. 옮기면 트리가 있는 스페이스 화면으로 간다.
 
 ### D.3 화면 — 스페이스 관리 (FR-1510 ~ FR-1515)
 
-- **스페이스 화면의 관리 칸**(apps/web/src/components/SpaceManage.tsx) — `access.canChangeStatus`면 이름·설명·분류(쓸 수 있을 때)와
+- **스페이스 화면의 관리 칸**(`apps/web/src/components/SpaceManage.tsx`) — `access.canChangeStatus`면 이름·설명·분류(쓸 수 있을 때)와
   중지·다시 쓰기, `access.canDelete`면 지우기(확인 → `DELETE` → 스페이스 목록). 분류 목록은 `GET /api/categories`.
 - **Crew** — 넣을 때 역할 고르기(editor·viewer), 줄마다 역할 고르기(`PATCH /api/spaces/:id/members/:userId`). owner 줄은 바꾸지 않는다.
-- **관리 콘솔의 스페이스 화면**(apps/web/src/pages/admin/AdminSpacesPage.tsx) — 찾기 칸(입력을 멈추면 찾는다)·상태 고르기 →
+- **관리 콘솔의 스페이스 화면**(`apps/web/src/pages/admin/AdminSpacesPage.tsx`) — 찾기 칸(입력을 멈추면 찾는다)·상태 고르기 →
   `GET /api/spaces?scope=all&q=&status=&limit=500`. 줄마다 이름(열기)·키·종류·상태·분류·Crew 수·만든 사람과 동작(중지·다시 쓰기, 중지된
   것은 지우기). 500개를 채우면 "찾기로 좁힌다"를 보인다. 아래에 분류 칸(만들기·이름 바꾸기·지우기).
 - **스페이스 목록 화면**의 관리 메뉴에 **스페이스 관리**(`space.manage`일 때).
@@ -147,8 +146,9 @@ Phase 14는 기능백로그의 **F-007**(페이지 트리에서 하위 페이지
 | 목록 조건 | `packages/shared/src/schemas.ts` | **A** | `spaceListQueryDto`의 `q`·`status`(D.4) |
 | 페이지 서비스 | `apps/api/src/pages/pages.service.ts` | B | 옮기기의 잠금·다시 매기기(D.1) |
 | 스페이스 서비스 | `apps/api/src/spaces/spaces.service.ts` | B | 목록 찾기(D.4) |
-| 트리 펼치기 | apps/web/src/components/pageTree.ts | B | D.2 |
-| 화면 | `apps/web/src/pages/SpacePage.tsx` · `apps/web/src/pages/PageViewPage.tsx` · `apps/web/src/pages/SpacesPage.tsx` · `apps/web/src/App.tsx` 외 새 화면 셋(D.2·D.3) | B | G절 |
+| 트리 펼치기 | `apps/web/src/components/pageTree.ts` | B | D.2 |
+| 화면 | `apps/web/src/pages/SpacePage.tsx` · `apps/web/src/pages/PageViewPage.tsx` · `apps/web/src/pages/SpacesPage.tsx` · `apps/web/src/App.tsx` · `apps/web/src/components/MovePage.tsx` · `apps/web/src/components/SpaceManage.tsx` · `apps/web/src/pages/admin/AdminSpacesPage.tsx` | B | G절 |
+| 목록의 상한 | `packages/shared/src/constants.ts` (`SPACE_LIST_MAX`) | **A** | 서버의 목록 조건과 관리 화면의 안내가 같은 값(D.3·D.4) |
 
 ## I. 설정 항목
 

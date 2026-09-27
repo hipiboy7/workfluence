@@ -114,7 +114,7 @@ export function AdminSpacesPage() {
     return (
       <main className="shell">
         <h1>스페이스 관리</h1>
-        <p className="badge fail" role="alert">스페이스를 관리할 권한이 없다.</p>
+        <p className="badge fail" role="alert">권한이 없다 — 스페이스 관리는 관리자만 한다.</p>
         <p className="muted small"><Link to="/">← 홈</Link></p>
       </main>
     );

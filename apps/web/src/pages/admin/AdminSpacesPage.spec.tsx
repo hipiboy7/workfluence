@@ -146,7 +146,7 @@ describe('AdminSpacesPage — 모든 스페이스', () => {
   it('관리 권한이 없으면 목록을 부르지 않는다', async () => {
     me = { ...me, role: 'member' };
     renderPage();
-    expect(await screen.findByText('스페이스를 관리할 권한이 없다.')).toBeTruthy();
+    expect(await screen.findByText('권한이 없다 — 스페이스 관리는 관리자만 한다.')).toBeTruthy();
     expect(listCalls()).toEqual([]);
   });
 });
