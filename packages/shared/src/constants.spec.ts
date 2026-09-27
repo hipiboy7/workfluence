@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, REQUEST_ID_PATTERN, TABLE_LIMITS } from './constants';
+import { AUDIT_ACTIONS, COLLAB_LIMITS, LLM_TIMINGS, LOG_EVENTS, REQUEST_ID_PATTERN, TABLE_LIMITS, USER_STATUSES } from './constants';
 
 /** 설계 고정값 중 **이름의 모양**이 규칙인 것 (P11 D.4, FR-1214·1218) */
 
@@ -58,3 +58,13 @@ describe('상한 (P12 A.1-2·4·5)', () => {
   });
 });
 
+describe('사용자 상태와 감사 종류 — P13 계정 정지 (FR-1440·1444)', () => {
+  it('정지(`suspended`)가 사용자 상태에 있다 — 승인 대기·활성과 같은 축이다', () => {
+    expect(USER_STATUSES).toEqual(['pending', 'active', 'suspended']);
+  });
+
+  it('정지·정지 해제가 감사 종류에 있다', () => {
+    expect(AUDIT_ACTIONS).toContain('user.suspend');
+    expect(AUDIT_ACTIONS).toContain('user.unsuspend');
+  });
+});

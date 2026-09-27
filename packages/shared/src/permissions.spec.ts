@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { PASSWORD_POLICY } from './constants';
-import { DELEGABLE_ACTIONS, can, canAssignRole, canManageUser, checkPasswordPolicy, countCharClasses, grantsForRole, isAdminRole, spaceAccess } from './permissions';
+import {
+  DELEGABLE_ACTIONS,
+  can,
+  canAssignRole,
+  canManageUser,
+  checkPasswordPolicy,
+  countCharClasses,
+  grantsForRole,
+  isAdminRole,
+  spaceAccess,
+  suspendProblem,
+  unsuspendProblem,
+} from './permissions';
 
 const root = { id: 'r', role: 'root' as const };
 const admin = { id: 'a', role: 'admin' as const };
@@ -173,3 +185,46 @@ describe('위임 — root가 관리자에게 행위 하나를 준다 (P11 D.1, F
   });
 });
 
+/**
+ * **계정 정지** (P13 C.5, FR-1441). 관리할 수 있는 사람만(P11의 관리의 우열), 자기 자신과 마지막 활성 root는 못 한다.
+ * 정지는 활성 계정만, 해제는 정지 계정만. 문제가 없으면 `null`, 있으면 화면에 보일 까닭을 돌려준다
+ */
+describe('suspendProblem / unsuspendProblem (P13 FR-1441)', () => {
+  const target = (role: 'root' | 'admin' | 'member', status: 'pending' | 'active' | 'suspended' = 'active', id = 't') => ({ id, role, status });
+
+  it('관리할 수 있으면 활성 계정을 정지한다', () => {
+    expect(suspendProblem(admin, target('member'), 2)).toBeNull();
+    expect(suspendProblem(admin, target('admin'), 2)).toBeNull();
+    expect(suspendProblem(root, target('root', 'active', 'r2'), 2)).toBeNull();
+  });
+
+  it('관리할 수 없는 사람은 정지하지 못한다 — admin은 root를, member는 아무도', () => {
+    expect(suspendProblem(admin, target('root'), 2)).toBe('이 사용자를 관리할 권한이 없다');
+    expect(suspendProblem(member, target('member'), 2)).toBe('이 사용자를 관리할 권한이 없다');
+  });
+
+  it('위임받은 관리자는 위임 없는 관리자가 정지하지 못한다 (P11 관리의 우열)', () => {
+    const delegated = { id: 'd', role: 'admin' as const, status: 'active' as const, grants: ['llm.manage'] };
+    expect(suspendProblem(admin, delegated, 2)).toBe('이 사용자를 관리할 권한이 없다');
+    expect(suspendProblem(root, delegated, 2)).toBeNull();
+  });
+
+  it('자기 자신은 정지하지 못한다', () => {
+    expect(suspendProblem(admin, target('admin', 'active', 'a'), 2)).toBe('자기 자신은 정지할 수 없다');
+  });
+
+  it('활성 계정만 정지한다 — 승인 대기·이미 정지는 아니다', () => {
+    expect(suspendProblem(admin, target('member', 'pending'), 2)).toBe('활성 계정만 정지할 수 있다');
+    expect(suspendProblem(admin, target('member', 'suspended'), 2)).toBe('활성 계정만 정지할 수 있다');
+  });
+
+  it('**마지막 활성 root는 정지하지 못한다** — 되살릴 사람이 없다', () => {
+    expect(suspendProblem(root, target('root', 'active', 'r2'), 1)).toBe('마지막 root는 정지할 수 없다');
+  });
+
+  it('해제는 정지된 계정만, 관리할 수 있는 사람만', () => {
+    expect(unsuspendProblem(admin, target('member', 'suspended'))).toBeNull();
+    expect(unsuspendProblem(admin, target('member', 'active'))).toBe('정지된 계정이 아니다');
+    expect(unsuspendProblem(admin, target('root', 'suspended'))).toBe('이 사용자를 관리할 권한이 없다');
+  });
+});

@@ -191,3 +191,31 @@ describe('parseDotenv', () => {
     expect(parseDotenv('A=1\r\nB=2\r\n')).toEqual({ A: '1', B: '2' });
   });
 });
+
+/**
+ * **DB 계정 분리** (P13 C.3, 보류 12). 기동 중인 api는 최초 계정 비밀번호를 쥐지 않는다 — 시드만 쓴다. 마이그레이션이 만들 앱 계정은
+ * 이름과 비밀번호가 함께 있어야 하고, 이름은 SQL 식별자로 쓸 수 있는 모양이어야 한다
+ */
+describe('Phase 13 — DB 계정과 최초 계정 (P13 FR-1421·1422)', () => {
+  const { WF_ROOT_PASSWORD: _unused, ...withoutRoot } = valid;
+
+  it('`WF_ROOT_PASSWORD`는 선택이다 — 기동 중인 앱에는 넘기지 않는다', () => {
+    expect(parseEnv(withoutRoot).WF_ROOT_PASSWORD).toBeUndefined();
+    expect(parseEnv(valid).WF_ROOT_PASSWORD).toBe('root-initial-password');
+  });
+
+  it('앱 계정 이름과 비밀번호는 함께 있다 — 하나만 있으면 기동 실패', () => {
+    const ok = parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app', WF_DB_APP_PASSWORD: 'app-pass' });
+    expect(ok.WF_DB_APP_ROLE).toBe('workfluence_app');
+    expect(ok.WF_DB_APP_PASSWORD).toBe('app-pass');
+    expect(parseEnv(valid).WF_DB_APP_ROLE).toBeUndefined();
+    expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: 'workfluence_app' })).toThrow(/WF_DB_APP_PASSWORD/);
+    expect(() => parseEnv({ ...valid, WF_DB_APP_PASSWORD: 'app-pass' })).toThrow(/WF_DB_APP_ROLE/);
+  });
+
+  it('앱 계정 이름은 소문자 SQL 식별자만 — 따옴표·공백·대문자는 기동 실패', () => {
+    for (const bad of ['Workfluence', 'wf app', 'wf"app', '1app', 'a'.repeat(64)]) {
+      expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: bad, WF_DB_APP_PASSWORD: 'p' }), bad).toThrow(/WF_DB_APP_ROLE/);
+    }
+  });
+});
