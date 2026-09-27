@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { SPACE_LIST_MAX, SPACE_STATUSES, can, type CategoryView, type SpaceStatus, type SpaceView } from '@workfluence/shared';
+import { LIST_SEARCH_MAX, SPACE_LIST_MAX, SPACE_STATUSES, can, type CategoryView, type SpaceStatus, type SpaceView } from '@workfluence/shared';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
-
-/** 입력을 멈추고 이만큼 뒤에 찾는다 — 사용자 관리와 같다 */
-const SEARCH_DELAY_MS = 300;
+import { confirmSuspendText } from '../../components/SpaceManage';
+import { SEARCH_DELAY_MS } from '../../timing';
 
 const STATUS_LABELS: Record<SpaceStatus, string> = { active: '활성', suspended: '중지' };
 
@@ -35,9 +34,15 @@ export function AdminSpacesPage() {
     if (status) params.set('status', status);
     api<SpaceView[]>(`/api/spaces?${params.toString()}`)
       .then((r) => {
-        if (mine === seq.current) setRows(r);
+        if (mine !== seq.current) return;
+        setRows(r);
+        // 찾기가 다시 되면 앞선 찾기의 오류는 지난 일이다 (병합 전 검토)
+        setError(null);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => {
+        // 늦게 온 옛 찾기의 실패도 받지 않는다 — 성공처럼 마지막 찾기만
+        if (mine === seq.current) setError(e instanceof Error ? e.message : String(e));
+      });
   }, [q, status]);
 
   const loadCategories = useCallback(() => {
@@ -69,7 +74,7 @@ export function AdminSpacesPage() {
   };
 
   const changeStatus = (s: SpaceView, next: SpaceStatus) => {
-    if (next === 'suspended' && !window.confirm(`"${s.name}"을(를) 중지한다. 모두 읽기만 되고, 다시 쓰기로 되돌릴 수 있다.`)) return;
+    if (next === 'suspended' && !window.confirm(confirmSuspendText(s.name))) return;
     void act(
       () => api(`/api/spaces/${s.id}/status`, { method: 'PATCH', json: { status: next } }),
       next === 'suspended' ? `"${s.name}"을(를) 중지했다.` : `"${s.name}"을(를) 다시 쓸 수 있게 했다.`,
@@ -85,10 +90,16 @@ export function AdminSpacesPage() {
     e.preventDefault();
     const name = newCategory.trim();
     if (!name) return;
-    void act(() => api('/api/categories', { method: 'POST', json: { name } }), `분류 "${name}"을(를) 만들었다.`, () => {
-      setNewCategory('');
-      loadCategories();
-    });
+    // 같은 이름이 이미 있으면 서버는 있던 것을 돌려준다 — "만들었다"고 하지 않는다 (병합 전 검토)
+    setError(null);
+    setNotice(null);
+    api<CategoryView>('/api/categories', { method: 'POST', json: { name } })
+      .then((c) => {
+        setNotice(categories.some((x) => x.id === c.id) ? `분류 "${c.name}"은(는) 이미 있다.` : `분류 "${c.name}"을(를) 만들었다.`);
+        setNewCategory('');
+        loadCategories();
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   };
 
   const renameCategory = (c: CategoryView) => {
@@ -130,7 +141,7 @@ export function AdminSpacesPage() {
       <form className="card row" role="search" onSubmit={(e) => e.preventDefault()}>
         <label>
           찾기{' '}
-          <input type="search" value={q} placeholder="이름·키" onChange={(e) => setQ(e.target.value)} />
+          <input type="search" value={q} placeholder="이름·키" maxLength={LIST_SEARCH_MAX} onChange={(e) => setQ(e.target.value)} />
         </label>
         <label>
           상태{' '}
@@ -191,7 +202,6 @@ export function AdminSpacesPage() {
               <input
                 aria-label={`분류 ${c.name} 이름`}
                 value={renaming[c.id] ?? c.name}
-               
                 onChange={(e) => setRenaming((r) => ({ ...r, [c.id]: e.target.value }))}
               />{' '}
               <button type="button" onClick={() => renameCategory(c)} disabled={(renaming[c.id] ?? c.name).trim() === c.name}>

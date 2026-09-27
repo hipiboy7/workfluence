@@ -62,7 +62,10 @@ export function childrenOf(pages: readonly PageSummary[], parentId: string | nul
   return pages.filter((p) => p.parentId === parentId);
 }
 
-/** 들여쓰기한 이름 — 고르기 목록(`<option>`)에는 모양을 넣을 수 없어 글자로 들인다 */
+/**
+ * 들여쓰기한 이름 — 고르기 목록(`<option>`)에는 모양을 넣을 수 없어 글자로 들인다. **줄바꿈 없는 공백(U+00A0)** 이라 브라우저가 접지 않는다 —
+ * 보통 공백이면 옵션 글자에서 앞뒤가 잘리고 겹친 것이 하나로 접혀 깊이가 보이지 않는다
+ */
 export function indentedTitle(row: TreeRow): string {
-  return `${'  '.repeat(row.depth)}${row.depth > 0 ? '└ ' : ''}${row.title}`;
+  return `${'\u00a0\u00a0'.repeat(row.depth)}${row.depth > 0 ? '└ ' : ''}${row.title}`;
 }

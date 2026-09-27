@@ -49,9 +49,10 @@ describe('subtreeIds · childrenOf · indentedTitle', () => {
     expect(childrenOf(pages, null).map((p) => p.id)).toEqual(['a', 'b']);
   });
 
-  it('들여쓴 이름 — 깊이만큼 들이고 가지 표시', () => {
+  it('들여쓴 이름 — 깊이만큼 들이고 가지 표시. **줄바꿈 없는 공백**이다(보통 공백은 옵션 글자에서 접혀 깊이가 사라진다)', () => {
     const rows = flattenTree(pages);
     expect(indentedTitle(rows[0])).toBe('A');
-    expect(indentedTitle(rows[2])).toBe('    └ A1X');
+    expect(indentedTitle(rows[2])).toBe(`${'\u00a0'.repeat(4)}└ A1X`);
+    expect(indentedTitle(rows[2]).startsWith(' ')).toBe(false);
   });
 });

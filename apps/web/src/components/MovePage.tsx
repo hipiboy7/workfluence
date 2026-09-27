@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { PageSummary } from '@workfluence/shared';
+import { PAGE_TREE_MAX_DEPTH, type PageSummary } from '@workfluence/shared';
 import { api } from '../api';
 import { childrenOf, flattenTree, indentedTitle, subtreeIds } from './pageTree';
 
@@ -26,7 +26,9 @@ export function MovePage({ page, onMoved, onCancel }: { page: PageSummary; onMov
 
   const blocked = useMemo(() => (tree ? subtreeIds(tree, page.id) : new Set<string>()), [tree, page.id]);
   const parents = useMemo(() => (tree ? flattenTree(tree).filter((r) => !blocked.has(r.id)) : []), [tree, blocked]);
-  const parent = parentId || null;
+  // **목록에 없는 부모는 고른 것으로 치지 않는다** — 부모가 그 사이 지워졌으면(고아) 칸은 "맨 위"를 보이는데 그 id를 보내 거절됐다 (병합 전 검토)
+  const parentValue = parentId && tree?.some((p) => p.id === parentId && !blocked.has(p.id)) ? parentId : '';
+  const parent = parentValue || null;
   const siblings = useMemo(() => (tree ? childrenOf(tree, parent).filter((p) => p.id !== page.id) : []), [tree, parent, page.id]);
   // **지금 부모면 지금 자리, 다른 부모면 맨 뒤** — 부모만 바꾸고 누르면 그 부모의 끝에 붙는다
   const defaultIndex = useMemo(() => {
@@ -61,7 +63,7 @@ export function MovePage({ page, onMoved, onCancel }: { page: PageSummary; onMov
           <label htmlFor="mv-parent">어디 아래로</label>
           <select
             id="mv-parent"
-            value={parentId}
+            value={parentValue}
             onChange={(e) => {
               setParentId(e.target.value);
               setIndex(null);
@@ -83,7 +85,7 @@ export function MovePage({ page, onMoved, onCancel }: { page: PageSummary; onMov
               </option>
             ))}
           </select>
-          <p className="muted small">자기 자신과 그 아래로는 옮길 수 없다. 페이지는 10단계까지 들어간다.</p>
+          <p className="muted small">자기 자신과 그 아래로는 옮길 수 없다. 페이지는 {PAGE_TREE_MAX_DEPTH}단계까지 들어간다.</p>
           <button type="submit" disabled={busy}>
             옮기기
           </button>{' '}

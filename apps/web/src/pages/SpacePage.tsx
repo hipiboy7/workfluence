@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ASSIGNABLE_MEMBER_ROLES, type PageTemplateView, type PageSummary, type SpaceMemberView, type SpaceView } from '@workfluence/shared';
 import { api } from '../api';
 import { EMPTY_DOC } from '../components/Editor';
-import { flattenTree, indentedTitle } from '../components/pageTree';
+import { flattenTree, indentedTitle, type TreeRow } from '../components/pageTree';
 import { SpaceManage } from '../components/SpaceManage';
 
 type MemberRole = (typeof ASSIGNABLE_MEMBER_ROLES)[number];
@@ -28,22 +28,31 @@ export function SpacePage() {
   const [crew, setCrew] = useState<SpaceMemberView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [parentId, setParentId] = useState(search.get('parent') ?? '');
+  // 빈 값이 맨 위다. 주소의 `?parent=`는 트리를 읽은 뒤 그 스페이스에 있을 때만 받는다(아래)
+  const [parentId, setParentId] = useState('');
   const [templates, setTemplates] = useState<PageTemplateView[]>([]);
   const [templateId, setTemplateId] = useState('');
   const [username, setUsername] = useState('');
   const [addRole, setAddRole] = useState<MemberRole>('editor');
   const titleBox = useRef<HTMLInputElement>(null);
+  // 늦게 온 옛 응답이 새 읽기를 덮지 않게 — 역할을 연달아 바꾸면 응답 순서가 뒤바뀐다 (병합 전 자체 점검 13)
+  const seq = useRef(0);
 
   const load = useCallback(() => {
     setError(null);
+    const mine = ++seq.current;
     api<SpaceView>(`/api/spaces/${id}`)
       .then(async (s) => {
+        const pages = await api<PageSummary[]>(`/api/pages?spaceId=${id}`);
+        const members = s.kind === 'team' ? await api<SpaceMemberView[]>(`/api/spaces/${id}/members`) : [];
+        if (mine !== seq.current) return;
         setSpace(s);
-        setTree(await api<PageSummary[]>(`/api/pages?spaceId=${id}`));
-        if (s.kind === 'team') setCrew(await api<SpaceMemberView[]>(`/api/spaces/${id}/members`));
+        setTree(pages);
+        setCrew(members);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => {
+        if (mine === seq.current) setError(e instanceof Error ? e.message : String(e));
+      });
   }, [id]);
   useEffect(load, [load]);
   useEffect(() => {
@@ -52,13 +61,32 @@ export function SpacePage() {
       .then(setTemplates)
       .catch(() => setTemplates([]));
   }, []);
-  // 하위 페이지 만들기로 왔으면 그 부모를 골라 두고 제목 칸으로 간다 (FR-1500). 스페이스를 읽은 뒤에야 칸이 있다
+  // 부모 → 자식 순서로 펼친다(`pageTree`) — 위치 고르기와 옮기기 칸도 같은 것을 쓴다. 깊이는 서버가 10으로 제한한다
+  const rows = useMemo(() => flattenTree(tree), [tree]);
+  // 줄마다 그 아래 줄 — 트리를 목록 안의 목록으로 그린다(아래). 제목을 칠 때마다 다시 그리므로 미리 묶어 둔다
+  const kidsOf = useMemo(() => {
+    const m = new Map<string, TreeRow[]>();
+    for (const r of rows) {
+      // 깊이 0은 맨 위 단계다 — 부모를 잃은 가지도 여기서 시작한다(`flattenTree`)
+      if (r.depth === 0 || r.parentId === null) continue;
+      const list = m.get(r.parentId);
+      if (list) list.push(r);
+      else m.set(r.parentId, [r]);
+    }
+    return m;
+  }, [rows]);
+
+  // 하위 페이지 만들기로 왔으면 그 부모를 골라 두고 제목 칸으로 간다 (FR-1500). **그 값이 바뀔 때 한 번만** — 다시 읽을 때마다(Crew·관리 칸 뒤)
+  // 되돌리면 사람이 바꾼 위치가 원래 부모로 돌아가 엉뚱한 곳에 만들어졌다. **이 스페이스의 트리에 있을 때만** — 없는 id(지워졌거나 다른 스페이스)를
+  // 받으면 칸은 "맨 위"를 보이면서 그 id를 보냈다 (병합 전 검토)
   const wanted = search.get('parent');
+  const applied = useRef<string | null>(null);
   useEffect(() => {
-    if (!wanted) return;
+    if (!wanted || applied.current === wanted || !tree.some((p) => p.id === wanted)) return;
+    applied.current = wanted;
     setParentId(wanted);
     titleBox.current?.focus();
-  }, [wanted, space]);
+  }, [wanted, tree]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -78,7 +106,7 @@ export function SpacePage() {
       const picked = templates.find((t) => t.id === templateId);
       const p = await api<PageSummary>('/api/pages', {
         method: 'POST',
-        json: { spaceId: id, parentId: parentId || null, title, content: picked?.content ?? EMPTY_DOC },
+        json: { spaceId: id, parentId: parentValue || null, title, content: picked?.content ?? EMPTY_DOC },
       });
       setTitle('');
       nav(`/pages/${p.id}/edit`);
@@ -88,8 +116,19 @@ export function SpacePage() {
   if (error && !space) return <main className="shell"><p className="badge fail" role="alert">{error}</p><Link to="/">← 목록</Link></main>;
   if (!space) return <main className="shell"><p className="muted">불러오는 중…</p></main>;
 
-  // 부모 → 자식 순서로 펼친다(`pageTree`) — 위치 고르기와 옮기기 칸도 같은 것을 쓴다. 깊이는 서버가 10으로 제한한다
-  const rows = flattenTree(tree);
+  // 고른 부모가 다시 읽은 트리에 없으면(그 사이 지워졌다) 맨 위로 보이고 맨 위로 보낸다 — 보이는 것과 보내는 것이 같아야 한다
+  const parentValue = rows.some((r) => r.id === parentId) ? parentId : '';
+  // **트리는 목록 안의 목록이다** — 들여쓰기를 여백으로만 그리면 화면 낭독기가 단계를 읽지 못한다 (병합 전 코드 리뷰 13)
+  const branch = (items: readonly TreeRow[]): ReactNode =>
+    items.map((p) => {
+      const kids = kidsOf.get(p.id) ?? [];
+      return (
+        <li key={p.id} style={{ marginLeft: p.depth > 0 ? 16 : 0 }}>
+          <Link to={`/pages/${p.id}`}>{p.title}</Link> <span className="muted small">v{p.currentVersionNo}</span>
+          {kids.length > 0 && <ul>{branch(kids)}</ul>}
+        </li>
+      );
+    });
 
   return (
     <main className="shell">
@@ -105,20 +144,14 @@ export function SpacePage() {
 
       <section className="card">
         <h2>페이지</h2>
-        <ul aria-label="페이지 트리">
-          {rows.map((p) => (
-            <li key={p.id} style={{ marginLeft: p.depth * 16 }}>
-              <Link to={`/pages/${p.id}`}>{p.title}</Link> <span className="muted small">v{p.currentVersionNo}</span>
-            </li>
-          ))}
-        </ul>
+        <ul aria-label="페이지 트리">{branch(rows.filter((r) => r.depth === 0))}</ul>
         {tree.length === 0 && <p className="muted">아직 페이지가 없다.</p>}
         {space.access.canWrite && (
           <form onSubmit={addPage} id="new-page">
             <label htmlFor="pg-title">새 페이지 제목</label>
             <input id="pg-title" ref={titleBox} value={title} onChange={(e) => setTitle(e.target.value)} required />
             <label htmlFor="pg-parent">위치</label>
-            <select id="pg-parent" value={parentId} onChange={(e) => setParentId(e.target.value)}>
+            <select id="pg-parent" value={parentValue} onChange={(e) => setParentId(e.target.value)}>
               <option value="">맨 위</option>
               {rows.map((r) => (
                 <option key={r.id} value={r.id}>

@@ -2,7 +2,7 @@
 import type { SpaceView } from '@workfluence/shared';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SpaceManage } from './SpaceManage';
+import { SpaceManage, confirmSuspendText } from './SpaceManage';
 
 /**
  * 컴포넌트 시험 — 스페이스 화면의 관리 칸 (P14_설계서_Spaces D.3, FR-1510·1511). 보이는 조건은 응답의 `access`다 — 화면은 규칙을 다시 만들지
@@ -54,9 +54,25 @@ afterEach(() => {
 const writes = () => calls.filter((c) => c.method !== 'GET');
 
 describe('SpaceManage — 보이는 조건은 access', () => {
-  it('관리할 수도 지울 수도 없으면 칸이 없다', () => {
+  it('관리할 수도 지울 수도 없으면 칸이 없다 — 분류도 읽지 않는다', async () => {
     const { container } = render(<SpaceManage space={space({ access: NO })} onChanged={vi.fn()} onDeleted={vi.fn()} />);
     expect(container.textContent).toBe('');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([]);
+  });
+
+  it('**부모가 같은 값으로 다시 읽어도 치던 것은 남는다** — 서버의 값이 바뀌었을 때만 칸을 맞춘다', async () => {
+    const { rerender } = render(<SpaceManage space={space()} onChanged={vi.fn()} onDeleted={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: '치는 중' } });
+    fireEvent.change(screen.getByLabelText('설명'), { target: { value: '적는 중' } });
+    // Crew를 바꾸면 스페이스 화면이 스페이스를 다시 읽는다 — 값은 같고 객체만 새것이다
+    rerender(<SpaceManage space={space()} onChanged={vi.fn()} onDeleted={vi.fn()} />);
+    expect((screen.getByLabelText('이름') as HTMLInputElement).value).toBe('치는 중');
+    expect((screen.getByLabelText('설명') as HTMLTextAreaElement).value).toBe('적는 중');
+    // 서버의 값이 바뀌면(누가 이름을 바꿨다) 그것을 보인다
+    rerender(<SpaceManage space={space({ name: '운영지원팀' })} onChanged={vi.fn()} onDeleted={vi.fn()} />);
+    expect((screen.getByLabelText('이름') as HTMLInputElement).value).toBe('운영지원팀');
+    await screen.findByRole('option', { name: '운영' });
   });
 
   it('**이름·설명·분류를 저장한다** — 분류를 고르지 않으면 `null`', async () => {
@@ -91,6 +107,9 @@ describe('SpaceManage — 보이는 조건은 access', () => {
     fireEvent.click(screen.getByRole('button', { name: '중지' }));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(confirm).toHaveBeenCalledTimes(2);
+    // 열어 둔 편집 창이 곧바로가 아니라 몇 분 안에 끊긴다고 말한다(주기 재판정)
+    expect(confirm).toHaveBeenCalledWith(confirmSuspendText('운영팀'));
+    expect(confirmSuspendText('운영팀')).toContain('열어 둔 편집 창은 몇 분 안에 끊긴다');
     expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended' } }]);
   });
 

@@ -95,6 +95,26 @@ describe('MovePage — 새 부모와 자리', () => {
     expect(moves()[0].body).toEqual({ parentId: null, position: 1 });
   });
 
+  it('**부모가 목록에 없으면(고아) 맨 위로 친다** — 칸이 보이는 것과 보내는 것이 같다', async () => {
+    // 부모가 그 사이 지워져 트리에 없다 — 트리는 이 페이지를 맨 위 단계에 보인다(`flattenTree`)
+    const orphan = page('o1', 'gone', 0);
+    const withOrphan = [...tree, orphan];
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url: String(input), body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined });
+      return Promise.resolve(method === 'GET' ? json(200, withOrphan) : json(200, {}));
+    }) as unknown as typeof fetch;
+    const onMoved = vi.fn();
+    render(<MovePage page={orphan} onMoved={onMoved} onCancel={vi.fn()} />);
+    await screen.findByLabelText('어디 아래로');
+    expect((screen.getByLabelText('어디 아래로') as HTMLSelectElement).value).toBe('');
+    // 맨 위의 형제는 A·B — 다른 부모로 가는 것이라 기본은 맨 뒤
+    expect(optionTexts('자리')).toEqual(['맨 앞', 'A 다음', 'B 다음']);
+    fireEvent.click(screen.getByRole('button', { name: '옮기기' }));
+    await waitFor(() => expect(onMoved).toHaveBeenCalled());
+    expect(moves()).toEqual([{ method: 'PATCH', url: '/api/pages/o1/move', body: { parentId: null, position: 2 } }]);
+  });
+
   it('**거절되면 서버의 까닭을 그대로 보이고 넘어가지 않는다** (FR-1504)', async () => {
     moveAnswer = { status: 400, body: { message: '페이지 트리는 10단계까지다' } };
     const onMoved = vi.fn();

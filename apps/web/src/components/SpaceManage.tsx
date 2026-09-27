@@ -3,6 +3,14 @@ import type { CategoryView, SpaceView } from '@workfluence/shared';
 import { api } from '../api';
 
 /**
+ * 중지를 묻는 말 — 스페이스 화면의 관리 칸과 관리 콘솔이 같이 쓴다(같은 말을 두 곳에 적으면 한쪽만 바뀐다). **열어 둔 편집 창은 곧바로 끊기지
+ * 않는다** — 주기 재판정(`WF_COLLAB_RECHECK_MS`, 기본 5분)이 끊는다(병합 전 자체 점검 15)
+ */
+export function confirmSuspendText(name: string): string {
+  return `"${name}"을(를) 중지한다. 모두 읽기만 되고(열어 둔 편집 창은 몇 분 안에 끊긴다), 다시 쓰기로 되돌릴 수 있다.`;
+}
+
+/**
  * 스페이스 화면의 **관리** 칸 (P14_설계서_Spaces D.3, FR-1510·1511). 보이는 조건은 응답의 `access`다(P2 FR-345) — 화면은 규칙을 다시 만들지
  * 않는다. 이름·설명·분류와 중지·다시 쓰기는 `canChangeStatus`, 지우기는 `canDelete`. 중지된 스페이스는 이름·설명·분류를 바꿀 수 없다(서버 규칙).
  *
@@ -16,21 +24,23 @@ export function SpaceManage({ space, onChanged, onDeleted }: { space: SpaceView;
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const active = space.status === 'active';
+  const visible = space.access.canChangeStatus || space.access.canDelete;
 
-  // 다시 읽은 스페이스로 칸을 맞춘다 — 저장·상태 바꾸기 뒤에 부모가 새 값을 준다
+  // **서버의 값이 바뀌었을 때만** 칸을 맞춘다 — 부모는 Crew를 바꿀 때도 스페이스를 다시 읽는데, 그때마다 맞추면 치던 이름·설명이 지워졌다(병합 전 검토)
   useEffect(() => {
     setName(space.name);
     setDescription(space.description);
     setCategoryId(space.categoryId ?? '');
-  }, [space]);
+  }, [space.id, space.name, space.description, space.categoryId]);
   useEffect(() => {
-    // 분류를 못 읽어도 나머지 관리는 된다 — 화면 오류로 올리지 않는다
+    // 관리 칸이 보일 때만 읽는다. 분류를 못 읽어도 나머지 관리는 된다 — 화면 오류로 올리지 않는다
+    if (!visible) return;
     api<CategoryView[]>('/api/categories')
       .then(setCategories)
       .catch(() => setCategories([]));
-  }, []);
+  }, [visible]);
 
-  if (!space.access.canChangeStatus && !space.access.canDelete) return null;
+  if (!visible) return null;
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setError(null);
@@ -50,7 +60,7 @@ export function SpaceManage({ space, onChanged, onDeleted }: { space: SpaceView;
   };
 
   const changeStatus = (status: 'active' | 'suspended') => {
-    if (status === 'suspended' && !window.confirm(`"${space.name}"을(를) 중지한다. 모두 읽기만 되고, 다시 쓰기로 되돌릴 수 있다.`)) return;
+    if (status === 'suspended' && !window.confirm(confirmSuspendText(space.name))) return;
     void run(
       () => api(`/api/spaces/${space.id}/status`, { method: 'PATCH', json: { status } }),
       status === 'suspended' ? '중지했다 — 읽기만 된다.' : '다시 쓸 수 있게 했다.',
