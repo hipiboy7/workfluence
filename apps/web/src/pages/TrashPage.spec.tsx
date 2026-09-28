@@ -1,10 +1,16 @@
 // @vitest-environment happy-dom
 import type { MeView } from '@workfluence/shared';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from '../auth';
+import { AuthProvider, useAuth } from '../auth';
 import { TrashPage } from './TrashPage';
+
+/** 누구인지 화면에 닿았는지 보인다 — 닿기 전의 "부르지 않았다"는 아무것도 증명하지 않는다(병합 전 코드 리뷰 7) */
+function MeProbe() {
+  const { me } = useAuth();
+  return me ? <p data-testid="me">{me.username}</p> : null;
+}
 
 /**
  * 컴포넌트 시험 — 휴지통의 **지운 스페이스** 칸 (P4 FR-513 · P15 FR-1630). 관리자와 스페이스 관리 전체를 맡겨 받은 member에게 보이고, 그때만 목록을
@@ -37,6 +43,7 @@ const renderPage = () =>
   render(
     <MemoryRouter>
       <AuthProvider>
+        <MeProbe />
         <TrashPage />
       </AuthProvider>
     </MemoryRouter>,
@@ -55,7 +62,8 @@ describe('TrashPage — 지운 스페이스 (P15 FR-1630)', () => {
     me = { ...me, grants: ['category.manage', 'space.unsuspend'] };
     renderPage();
     await screen.findByRole('region', { name: '지운 페이지' });
-    await waitFor(() => expect(urls).toContain('/api/auth/me'));
+    // 누구인지 휴지통 화면에 닿은 뒤에 본다 — 같은 문맥이 바뀌면 휴지통도 다시 그려진다
+    expect((await screen.findByTestId('me')).textContent).toBe('kim');
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByRole('region', { name: '지운 스페이스' })).toBeNull();
     expect(urls.some((u) => u.startsWith('/api/trash/spaces'))).toBe(false);

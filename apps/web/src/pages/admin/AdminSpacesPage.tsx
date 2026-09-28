@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { LIST_SEARCH_MAX, SPACE_LIST_MAX, SPACE_STATUSES, can, type CategoryView, type SpaceStatus, type SpaceView } from '@workfluence/shared';
+import { CATEGORY_NAME_MAX, LIST_SEARCH_MAX, SPACE_LIST_MAX, SPACE_STATUSES, can, type CategoryView, type SpaceStatus, type SpaceView } from '@workfluence/shared';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { CategoryList } from '../../components/CategoryList';
-import { confirmSuspendText } from '../../components/SpaceManage';
+import { canTakeOver, confirmSuspendText, confirmTakeoverText } from '../../components/SpaceManage';
 import { SEARCH_DELAY_MS } from '../../timing';
 
 const STATUS_LABELS: Record<SpaceStatus, string> = { active: '활성', suspended: '중지' };
@@ -80,6 +80,8 @@ export function AdminSpacesPage() {
       after();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      // 그 사이 누가 바꿔 거절됐으면(409) 지금 상태를 다시 읽는다 — 옛 단추가 남으면 다시 눌러도 같은 거절이다(P15 병합 전 코드 리뷰 12)
+      after();
     }
   };
 
@@ -94,6 +96,12 @@ export function AdminSpacesPage() {
   const remove = (s: SpaceView) => {
     if (!window.confirm(`"${s.name}"을(를) 지운다. 스페이스와 그 안의 페이지가 보이지 않게 된다 — 휴지통에서 되살린다.`)) return;
     void act(() => api(`/api/spaces/${s.id}`, { method: 'DELETE' }), `"${s.name}"을(를) 지웠다 — 휴지통에 있다.`);
+  };
+
+  // 주인이 건 중지를 관리자가 건 중지로 — 같은 상태를 다시 보내면 서버가 넘겨받는다 (P15 A.1-12, 병합 전 보안 검토 1)
+  const takeOver = (s: SpaceView) => {
+    if (!window.confirm(confirmTakeoverText(s.name))) return;
+    void act(() => api(`/api/spaces/${s.id}/status`, { method: 'PATCH', json: { status: 'suspended' } }), `"${s.name}"을(를) 관리자가 건 중지로 바꿨다.`);
   };
 
   const addCategory = (e: FormEvent) => {
@@ -131,7 +139,15 @@ export function AdminSpacesPage() {
   return (
     <main className="shell">
       <h1>스페이스 관리</h1>
-      <p className="muted small"><Link to="/">← 홈</Link> · 지운 스페이스는 <Link to="/trash">휴지통</Link>에서 되살린다</p>
+      <p className="muted small">
+        <Link to="/">← 홈</Link>
+        {/* 지운 스페이스는 스페이스 관리 전체가 되살린다 — 분류 관리만 받은 사람의 휴지통에는 그 칸이 없다 (병합 전 문서 정합성 24) */}
+        {overseer && (
+          <>
+            {' '}· 지운 스페이스는 <Link to="/trash">휴지통</Link>에서 되살린다
+          </>
+        )}
+      </p>
       {error && <p className="badge fail" role="alert">{error}</p>}
       {notice && <p className="badge" role="status">{notice}</p>}
       {listError && <p className="badge fail" role="alert">{listError}</p>}
@@ -190,6 +206,12 @@ export function AdminSpacesPage() {
                       ) : (
                         <button type="button" onClick={() => changeStatus(s, 'active')}>다시 쓰기</button>
                       ))}
+                    {canTakeOver(s) && (
+                      <>
+                        {' '}
+                        <button type="button" onClick={() => takeOver(s)}>관리자가 건 중지로 바꾸기</button>
+                      </>
+                    )}
                     {s.access.canDelete && (
                       <>
                         {' '}
@@ -220,7 +242,7 @@ export function AdminSpacesPage() {
         />
         <form onSubmit={addCategory}>
           <label htmlFor="cat-new">새 분류</label>
-          <input id="cat-new" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} required />
+          <input id="cat-new" value={newCategory} maxLength={CATEGORY_NAME_MAX} onChange={(e) => setNewCategory(e.target.value)} required />
           <button type="submit" disabled={busy}>
             만들기
           </button>

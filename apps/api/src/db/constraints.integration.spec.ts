@@ -1,4 +1,6 @@
 import { sql } from 'drizzle-orm';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { inspect } from 'node:util';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DELEGABLE_ACTIONS, DELEGATION, ROLES, SPACE_KINDS, SPACE_MEMBER_ROLES, SPACE_STATUSES, USER_STATUSES } from '@workfluence/shared';
@@ -131,9 +133,61 @@ describe('위임할 수 있는 행위 — 코드의 목록과 DB의 CHECK (P11 �
         const attempt = db.execute(
           sql`INSERT INTO users (username, display_name, password_hash, role, status, grants) VALUES (${`grant${n}`}, ${`위임 ${n}`}, 'x', ${role}, 'active', ARRAY[${action}]::text[])`,
         );
+        // 거절은 **이 제약 때문**이어야 한다 — 어떤 오류든 통과하면 오타나 다른 제약으로 실패해도 초록이다(병합 전 자체 점검 8)
         if (DELEGATION[action].holder === role) await expect(attempt, `${action} → ${role}`).resolves.toBeDefined();
-        else await expect(attempt, `${action} → ${role}`).rejects.toThrow();
+        else expect(await rejected(attempt), `${action} → ${role}`).toMatch(/users_grants_holder_chk/);
       }
     }
   });
 });
+
+describe('이미 중지된 공간 — 0012가 건 사람을 지금의 사실로 채운다 (P15 D.2)', () => {
+  /** 마이그레이션 파일의 채우기 문장을 **그대로** 읽는다 — 시험에 SQL을 다시 적으면 둘이 달라져도 모른다(T-069) */
+  function backfillStatement(): string {
+    const file = readFileSync(resolve(__dirname, '../../drizzle/0012_grants.sql'), 'utf8');
+    const start = file.indexOf('UPDATE spaces s SET suspended_by_owner');
+    expect(start, '0012에 채우기 문장이 있다').toBeGreaterThan(-1);
+    return file.slice(start, file.indexOf(';', start) + 1);
+  }
+
+  it('**건 사람이 만든 사람이거나 Crew의 owner면 주인, 아니거나 모르면 관리자가 건 것** — 활성인 공간은 건드리지 않는다', async () => {
+    const id = async (username: string, role = 'member') =>
+      (
+        await db.execute<{ id: string }>(
+          sql`INSERT INTO users (username, display_name, password_hash, role, status) VALUES (${username}, ${username}, 'x', ${role}, 'active') RETURNING id`,
+        )
+      ).rows[0].id;
+    const maker = await id('maker');
+    const crewOwner = await id('crew-owner');
+    const editor = await id('editor');
+    const boss = await id('boss', 'admin');
+    const space = async (key: string, kind: string, status: string, suspendedBy: string | null) =>
+      (
+        await db.execute<{ id: string }>(
+          sql`INSERT INTO spaces (key, name, kind, status, description, created_by, suspended_by, suspended_by_owner)
+              VALUES (${key}, ${key}, ${kind}, ${status}, '', ${maker}, ${suspendedBy}, ${status === 'active'})
+              RETURNING id`,
+        )
+      ).rows[0].id;
+    const byMaker = await space('WFBYMAKR', 'team', 'suspended', maker);
+    const byCrewOwner = await space('WFBYCROW', 'team', 'suspended', crewOwner);
+    const byEditor = await space('WFBYEDIT', 'team', 'suspended', editor);
+    const byAdmin = await space('WFBYADMN', 'personal', 'suspended', boss);
+    const unknown = await space('WFBYNULL', 'personal', 'suspended', null);
+    // 활성 공간의 값은 뜻이 없다 — 채우기가 건드리지 않는지 보려고 일부러 참으로 둔다
+    const active = await space('WFACTIVE', 'team', 'active', null);
+    for (const [sp, user, role] of [
+      [byCrewOwner, crewOwner, 'owner'],
+      [byEditor, editor, 'editor'],
+    ] as const) {
+      await db.execute(sql`INSERT INTO space_members (space_id, user_id, role, added_by) VALUES (${sp}, ${user}, ${role}, ${maker})`);
+    }
+
+    await db.execute(sql.raw(backfillStatement()));
+
+    const rows = await db.execute<{ id: string; suspended_by_owner: boolean }>(sql`SELECT id, suspended_by_owner FROM spaces`);
+    const got = new Map(rows.rows.map((r) => [r.id, r.suspended_by_owner]));
+    expect([byMaker, byCrewOwner, byEditor, byAdmin, unknown, active].map((x) => got.get(x))).toEqual([true, true, false, false, false, true]);
+  });
+});
+

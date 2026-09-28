@@ -2,6 +2,7 @@ import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
+  CATEGORY_NAME_MAX,
   COLLAB_LIMITS,
   LIST_PAGE_LIMIT,
   LIST_SEARCH_MAX,
@@ -121,7 +122,7 @@ export type UpdateUserRoleDto = z.infer<typeof updateUserRoleDto>;
 
 // ---- 카테고리·스페이스 ----
 
-export const createCategoryDto = z.object({ name: z.string().trim().min(1).max(50) });
+export const createCategoryDto = z.object({ name: z.string().trim().min(1).max(CATEGORY_NAME_MAX) });
 export type CreateCategoryDto = z.infer<typeof createCategoryDto>;
 
 export const createSpaceDto = z.object({
@@ -276,9 +277,16 @@ export type AttachLabelDto = z.infer<typeof attachLabelDto>;
 /**
  * 위임 목록 전체 (P11 F절) — 켜고 끄는 두 상태뿐이라 목록을 통째로 보낸다(멱등). 위임할 수 있는 행위만, 겹치지 않게
  */
+const delegableList = z.array(z.enum(DELEGABLE_ACTIONS)).refine((a) => new Set(a).size === a.length, '같은 위임을 두 번 적었다');
+
+/**
+ * 위임 목록 (P11 F절 · P15 F절). 목록 전체를 받는다. **`expected`는 화면이 본 목록**이다 — 서버의 목록과 다르면 409(그 사이 누가 바꿨다). 목록
+ * 전체를 보내므로, 옛 화면이 방금 거둔 위임을 조용히 되살리는 길을 막는다(병합 전 보안 검토 2). 없으면 보지 않는다(목록 전체를 바꾸는 호출)
+ */
 export const userGrantsDto = z
   .object({
-    grants: z.array(z.enum(DELEGABLE_ACTIONS)).refine((a) => new Set(a).size === a.length, '같은 위임을 두 번 적었다'),
+    grants: delegableList,
+    expected: delegableList.optional(),
   })
   .strict();
 export type UserGrantsDto = z.infer<typeof userGrantsDto>;
@@ -353,7 +361,8 @@ export type CategoryView = {
   createdBy: string;
   createdAt: string;
   access: CategoryAccess;
-  usage: { spaces: number; otherSpaces: number };
+  /** 바꿀 수 있는 사람과 만든 사람에게만 — 다른 사람에게는 `null`이다(남의 비공개 공간·휴지통까지 센 수라서, P15 병합 전 검토) */
+  usage: { spaces: number; otherSpaces: number } | null;
 };
 
 export type SpaceView = {

@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../auth';
 import { SEARCH_DELAY_MS } from '../../timing';
-import { confirmSuspendText } from '../../components/SpaceManage';
+import { confirmSuspendText, confirmTakeoverText } from '../../components/SpaceManage';
 import { AdminSpacesPage } from './AdminSpacesPage';
 
 /**
@@ -305,6 +305,43 @@ describe('AdminSpacesPage — 분류', () => {
     expect([del(mine).disabled, del(theirs).disabled]).toEqual([true, true]);
     expect(del(theirs).title).toBe('분류는 만든 사람과 관리자가 바꾸고 지운다');
     expect((within(mine).getByRole('textbox') as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe('AdminSpacesPage — 넘겨받기·쓰임을 보이는 범위 (P15 병합 전 검토)', () => {
+  it('**주인이 건 중지를 넘겨받는다** — 주인이 건 줄에만 단추가 있고, 묻고, 같은 상태를 보낸다', async () => {
+    spaces = [
+      space({ id: 's1', key: 'OPS1', name: '운영팀', status: 'suspended', suspendedByOwner: true, access: { ...NO, canChangeStatus: true, canDelete: true } }),
+      space({ id: 's2', key: 'DEV1', name: '개발팀', status: 'suspended', suspendedByOwner: false, access: { ...NO, canChangeStatus: true, canDelete: true } }),
+    ];
+    const confirm = vi.fn(() => true);
+    window.confirm = confirm;
+    renderPage();
+    await screen.findByRole('link', { name: '운영팀' });
+    expect(rowButtons('운영팀')).toEqual(['다시 쓰기', '관리자가 건 중지로 바꾸기', '지우기']);
+    expect(rowButtons('개발팀')).toEqual(['다시 쓰기', '지우기']);
+    fireEvent.click(within(within(table()).getByRole('link', { name: '운영팀' }).closest('tr')!).getByRole('button', { name: '관리자가 건 중지로 바꾸기' }));
+    await waitFor(() => expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended' } }]));
+    expect(confirm).toHaveBeenCalledWith(confirmTakeoverText('운영팀'));
+  });
+
+  it('**쓰임이 없는 줄은 개수를 말하지 않는다** — 서버는 바꿀 수 있는 사람과 만든 사람에게만 싣는다', async () => {
+    me = { ...me, id: 'm1', role: 'member', grants: ['space.oversee'] };
+    categories = [category({ id: 'c1', name: '남의 것', createdBy: 'u9', access: { canRename: false, canDelete: false }, usage: null })];
+    renderPage();
+    const item = (await screen.findByLabelText('분류 남의 것 이름')).closest('li')!;
+    expect(item.textContent).not.toMatch(/공간 \d+개/);
+  });
+
+  it('**휴지통 안내는 지운 스페이스를 되살릴 수 있는 사람에게만** — 분류 관리만 받은 사람의 휴지통에는 그 칸이 없다 (병합 전 문서 정합성 24)', async () => {
+    me = { ...me, id: 'm1', role: 'member', grants: ['category.manage'] };
+    renderPage();
+    await screen.findByLabelText('분류 운영 이름');
+    expect(screen.queryByRole('link', { name: '휴지통' })).toBeNull();
+    cleanup();
+    me = { ...me, grants: ['space.oversee'] };
+    renderPage();
+    expect(await screen.findByRole('link', { name: '휴지통' })).toBeTruthy();
   });
 });
 

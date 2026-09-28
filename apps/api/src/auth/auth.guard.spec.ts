@@ -108,6 +108,21 @@ describe('AuthGuard', () => {
     await expect(new AuthGuard(c.reflector, usersOf({ ...ACTIVE, role: 'admin' }), ENV, POLICY_STUB).canActivate(c.exec)).resolves.toBe(true);
   });
 
+  it('**위임은 받는 역할의 것만 싣는다** — member의 분류 관리는 먹고, member 행에 LLM 연결 관리가 적혀 있어도 보지 않는다 (P15 D.1, FR-1605)', async () => {
+    const managed = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'category.manage' });
+    await expect(
+      new AuthGuard(managed.reflector, usersOf({ ...ACTIVE, role: 'member', grants: ['category.manage'] }), ENV, POLICY_STUB).canActivate(managed.exec),
+    ).resolves.toBe(true);
+    const plain = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'category.manage' });
+    await expect(new AuthGuard(plain.reflector, usersOf({ ...ACTIVE, role: 'member', grants: [] }), ENV, POLICY_STUB).canActivate(plain.exec)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    const forged = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'llm.manage' });
+    await expect(
+      new AuthGuard(forged.reflector, usersOf({ ...ACTIVE, role: 'member', grants: ['llm.manage'] }), ENV, POLICY_STUB).canActivate(forged.exec),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('**위임은 요청마다 사용자 행에서 읽는다** — 준 동안은 통과하고, 거두면 다음 요청부터 403 (P11 A.1-5)', async () => {
     const granted = ctx({ userId: 'u1', createdAt: Date.now() }, { 'wf:action': 'llm.manage' });
     await expect(

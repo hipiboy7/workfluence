@@ -31,10 +31,17 @@ export type SpaceContext = { space: SpaceRow; membership: SpaceMemberRole | null
 /** 관리자가 건 중지를 풀지 못하는 주인에게 주는 까닭 (P15 FR-1611·1612) — 화면(공간의 관리 칸)은 누르기 전에 까닭을 보인다 */
 export const ADMIN_SUSPENDED_MESSAGE = "관리자가 중지한 스페이스다 — 다시 쓰기는 관리자나 '관리자가 건 중지 풀기'를 받은 주인이 한다";
 
-/** 외래 키 위반(23503) — 분류를 붙이는 사이 그 분류가 지워졌다(P15 D.4). drizzle은 원래 오류를 `cause`에 싣는다 */
-function isForeignKeyViolation(e: unknown): boolean {
-  const codeOf = (x: unknown) => (typeof x === 'object' && x !== null && 'code' in x ? (x as { code?: unknown }).code : undefined);
-  return codeOf(e) === '23503' || codeOf((e as { cause?: unknown } | null)?.cause) === '23503';
+/** 공간이 분류를 가리키는 외래 키 — `0002_space_page`가 지은 이름이다 */
+const SPACE_CATEGORY_FK = 'spaces_category_id_space_categories_id_fk';
+
+/**
+ * **분류의** 외래 키 위반(23503) — 분류를 붙이는 사이 그 분류가 지워졌다(P15 D.4). 다른 외래 키(만든 사람 등)의 위반까지 "없는 분류다"로 바꾸지
+ * 않게 제약 이름을 본다(병합 전 코드 리뷰 12). drizzle은 원래 오류를 `cause`에 싣는다
+ */
+function isCategoryGone(e: unknown): boolean {
+  const pg = (x: unknown) => (typeof x === 'object' && x !== null ? (x as { code?: unknown; constraint?: unknown }) : undefined);
+  const cause = pg((e as { cause?: unknown } | null)?.cause) ?? pg(e);
+  return cause?.code === '23503' && cause.constraint === SPACE_CATEGORY_FK;
 }
 
 /**
@@ -48,7 +55,7 @@ const asSpaceLike = (s: SpaceRow) => ({ ...s, kind: s.kind as SpaceView['kind'],
 
 /** 분류를 붙이는 쓰기가 지워진 분류를 만났다 — 500이 아니라 400 (P15 D.4). 분류 지우기가 분류 행을 잠가 둘을 줄 세운다 */
 function noSuchCategory(e: unknown): never {
-  if (isForeignKeyViolation(e)) throw new BadRequestException('없는 분류다');
+  if (isCategoryGone(e)) throw new BadRequestException('없는 분류다');
   throw e;
 }
 
@@ -68,11 +75,12 @@ export class SpacesService {
 
   /**
    * **관리 컨텍스트** (P15 D.3) — 상태 바꾸기·지우기. 읽지 못해도 판정한다: 스페이스 관리 전체(`space.oversee`)를 받은 사람은 Crew가 아닌
-   * 공간도 중지한다(FR-1630). 읽을 수도 바꿀 수도 지울 수도 없으면 `context`처럼 404다 — 있는지 드러내지 않는다
+   * 공간도 중지한다(FR-1630). 읽을 수도 바꿀 수도 없으면 `context`처럼 404다 — 있는지 드러내지 않는다. 지울 수 있으면 바꿀 수도 있다
+   * (`canDelete` ⇒ `canChangeStatus` — 주인은 활성일 때, 스페이스 관리 전체는 중지일 때)
    */
   private async manageContext(spaceId: string, principal: Principal, tx: Db): Promise<SpaceContext> {
     const ctx = await this.load(spaceId, principal, tx);
-    if (!ctx.access.canRead && !ctx.access.canChangeStatus && !ctx.access.canDelete) throw new NotFoundException('스페이스를 찾을 수 없다');
+    if (!ctx.access.canRead && !ctx.access.canChangeStatus) throw new NotFoundException('스페이스를 찾을 수 없다');
     return ctx;
   }
 
@@ -173,11 +181,11 @@ export class SpacesService {
     if (scope === 'all' && !can(principal, 'space.oversee')) {
       throw new ForbiddenException('전체 스페이스를 볼 권한이 없다');
     }
-    const mineIds = await this.db
-      .select({ id: spaceMembers.spaceId })
-      .from(spaceMembers)
-      .where(eq(spaceMembers.userId, principal.id));
-    const ids = mineIds.map((r) => r.id);
+    // 내 Crew 자리는 내 팀 목록에만 쓴다 — 모든 스페이스에는 치지 않는다(병합 전 코드 리뷰 13)
+    const ids =
+      scope === 'team'
+        ? (await this.db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, principal.id))).map((r) => r.id)
+        : [];
 
     const visible =
       scope === 'all'
@@ -281,42 +289,71 @@ export class SpacesService {
    * 중지·다시 쓰기 (FR-306 · P15 C.2). **읽지 못해도** 판정한다(`manageContext`). 중지할 때 건 사람이 주인인지 적는다(FR-1610) — 관리자가 건
    * 중지는 `space.unsuspend`를 받은 주인만 푼다(판정은 `spaceAccess.canChangeStatus`). 풀지 못하는 주인에게는 까닭을 말한다(FR-1612).
    *
-   * **상태가 같으면 쓰지 않는다** — 건 사람이 바뀌지 않는다. 다시 걸어 "건 사람"을 바꾸게 두면, 권한을 받은 주인이 관리자가 건 중지를 제가 건 것으로
-   * 바꿔 두고 권한을 거둔 뒤에도 푼다. 호출부는 `changed`가 거짓이면 감사 행을 남기지 않는다
+   * **상태가 같으면 쓰지 않는다. 하나만 예외다** — 주인이 아닌 사람(관리자·스페이스 관리 전체)이 **주인이 건 중지**를 다시 걸면 **넘겨받는다**
+   * (`takeover` — 건 사람을 그 사람으로, 관리자가 건 중지로. 중지된 때는 그대로). 푸는 사람을 줄이기만 하는 쪽이다(병합 전 보안 검토 1 — 넘겨받는
+   * 길이 없으면 주인이 먼저 다시 걸어 관리자의 중지를 늘 비켰다). 주인이 관리자가 건 중지를 다시 걸어 "주인이 건 것"으로 바꾸는 길은 없다 — 판정이
+   * 푸는 것과 같은 권한을 요구한다(A.1-12).
+   *
+   * **판정한 상태에서만 쓴다** — 쓰기의 조건에 판정에 쓴 값(상태·건 사람이 주인인가·지워지지 않았다)을 모두 둔다. 둘이 동시에 바꾸면 뒤의 것은 앞의
+   * 결과를 판정하지 않고 덮지 않고 409다. 상태만 보면, 관리자가 다시 쓰기 → 중지를 끝낸 사이 주인의 풀기가 "주인이 건 중지"로 판정한 채 관리자가
+   * 건 중지를 풀었다(ABA — 병합 전 검토 셋이 따로 찾았다). 호출부는 `changed`가 거짓이면 감사 행을 남기지 않는다
    */
   async changeStatus(
     spaceId: string,
     status: 'active' | 'suspended',
     principal: Principal,
     tx: Db = this.db,
-  ): Promise<{ row: SpaceRow; changed: boolean }> {
+  ): Promise<{ row: SpaceRow; changed: boolean; takeover: boolean; wasByOwner: boolean }> {
     const ctx = await this.manageContext(spaceId, principal, tx);
+    const same = ctx.space.status === status;
+    const wasByOwner = ctx.space.suspendedByOwner;
     if (!ctx.access.canChangeStatus) {
-      if (ctx.space.status === 'suspended' && ctx.access.isOwner) throw new ForbiddenException(ADMIN_SUSPENDED_MESSAGE);
+      // 풀려는 주인에게만 까닭을 말한다 — 다시 걸려는 것(같은 상태)은 까닭이 다르다(병합 전 코드 리뷰 12)
+      if (!same && ctx.space.status === 'suspended' && ctx.access.isOwner) throw new ForbiddenException(ADMIN_SUSPENDED_MESSAGE);
       throw new ForbiddenException('상태를 바꿀 권한이 없다');
     }
-    if (ctx.space.status === status) return { row: ctx.space, changed: false };
-    // 상태를 조건에 둔다 — 두 사람이 동시에 바꾸면 뒤의 것은 앞의 결과를 판정하지 않은 채 덮지 않고 409다
+    const takeover = same && status === 'suspended' && wasByOwner && !ctx.access.isOwner;
+    if (same && !takeover) return { row: ctx.space, changed: false, takeover: false, wasByOwner };
     const [row] = await tx
       .update(spaces)
-      .set({
-        status,
-        suspendedAt: status === 'suspended' ? sql`now()` : null,
-        suspendedBy: status === 'suspended' ? principal.id : null,
-        suspendedByOwner: status === 'suspended' && ctx.access.isOwner,
-        updatedAt: sql`now()`,
-      })
-      .where(and(eq(spaces.id, spaceId), eq(spaces.status, ctx.space.status)))
+      .set(
+        takeover
+          ? { suspendedBy: principal.id, suspendedByOwner: false, updatedAt: sql`now()` }
+          : {
+              status,
+              suspendedAt: status === 'suspended' ? sql`now()` : null,
+              suspendedBy: status === 'suspended' ? principal.id : null,
+              suspendedByOwner: status === 'suspended' && ctx.access.isOwner,
+              updatedAt: sql`now()`,
+            },
+      )
+      .where(
+        and(
+          eq(spaces.id, spaceId),
+          isNull(spaces.deletedAt),
+          eq(spaces.status, ctx.space.status),
+          eq(spaces.suspendedByOwner, ctx.space.suspendedByOwner),
+        ),
+      )
       .returning();
     if (!row) throw new ConflictException('그 사이 누가 상태를 바꿨다 — 다시 본다');
-    return { row, changed: true };
+    return { row, changed: true, takeover, wasByOwner };
   }
 
-  /** 삭제 (FR-307). Crew가 둘 이상이면 소유자도 못 지우고, 중지되면 관리자·스페이스 관리 전체만 지운다(P14 · P15) — `spaceAccess.canDelete`가 판정한다 */
+  /**
+   * 삭제 (FR-307). Crew가 둘 이상이면 소유자도 못 지우고, 중지되면 관리자·스페이스 관리 전체만 지운다(P14 · P15) — `spaceAccess.canDelete`가 판정한다.
+   * **판정한 상태에서만 지운다** — 주인의 지우기(활성으로 판정)와 관리자의 중지가 겹치면 중지된 공간을 주인이 지웠고, 스페이스 관리 전체의
+   * 지우기(중지로 판정)와 주인의 다시 쓰기가 겹치면 쓰는 중인 공간이 휴지통으로 갔다. 두 번 누르면 감사가 두 줄 남았다(병합 전 검토) — 이제 409다
+   */
   async softDelete(spaceId: string, principal: Principal, tx: Db = this.db): Promise<SpaceRow> {
     const ctx = await this.manageContext(spaceId, principal, tx);
     if (!ctx.access.canDelete) throw new ForbiddenException('이 스페이스를 지울 권한이 없다');
-    const [row] = await tx.update(spaces).set({ deletedAt: sql`now()`, updatedAt: sql`now()` }).where(eq(spaces.id, spaceId)).returning();
+    const [row] = await tx
+      .update(spaces)
+      .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(and(eq(spaces.id, spaceId), isNull(spaces.deletedAt), eq(spaces.status, ctx.space.status)))
+      .returning();
+    if (!row) throw new ConflictException('그 사이 누가 이 스페이스를 바꿨다 — 다시 본다');
     return row;
   }
 

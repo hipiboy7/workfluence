@@ -1,4 +1,5 @@
-import { BadGatewayException, BadRequestException, ForbiddenException, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { inspect } from 'node:util';
+import { BadGatewayException, BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
@@ -1084,11 +1085,43 @@ describe('위임 — 관리자가 member에게 셋을 맡긴다 (P15 D.1, FR-160
     expect([down.row.grants, down.clearedGrants]).toEqual([[], []]);
   });
 
-  it('**DB도 받는 역할을 본다** — 셋을 가진 member를 문장 하나로 관리자로 올리면 거부된다 (NFR-151)', async () => {
+  it('**DB도 받는 역할을 본다** — 셋을 가진 member를 문장 하나로 관리자로 올리면 거부된다. 위임을 비우고 올리면 된다 (NFR-151)', async () => {
     const m = await mk('mem', 'member');
     await usersSvc.changeGrants(m.id, ['space.unsuspend'], ROOT);
-    await expect(db.update(users).set({ role: 'admin' }).where(eq(users.id, m.id))).rejects.toThrow();
+    // 어떤 오류든 통과하지 않게 제약 이름까지 본다(병합 전 자체 점검 8)
+    const e = await db.update(users).set({ role: 'admin' }).where(eq(users.id, m.id)).then(() => null, (x: unknown) => x);
+    expect(inspect(e, { depth: 6 })).toMatch(/users_grants_holder_chk/);
     expect((await usersSvc.findById(m.id))?.role).toBe('member');
+    await expect(db.update(users).set({ role: 'admin', grants: [] }).where(eq(users.id, m.id))).resolves.toBeDefined();
+  });
+
+  it('**화면이 본 목록과 다르면 409** — 옛 화면이 그 사이 남이 거둔 위임을 되살리지 않는다. 맞으면 된다 (병합 전 보안 검토 2)', async () => {
+    const boss = await mk('boss', 'admin');
+    const other = await mk('other', 'admin');
+    const m = await mk('mem', 'member');
+    await usersSvc.changeGrants(m.id, ['category.manage', 'space.oversee'], asActor(boss));
+    // 다른 관리자가 스페이스 관리 전체를 거뒀다 — 옛 화면은 아직 둘을 본다
+    await usersSvc.changeGrants(m.id, ['category.manage'], asActor(other), db, ['category.manage', 'space.oversee']);
+    await expect(
+      usersSvc.changeGrants(m.id, ['category.manage', 'space.oversee', 'space.unsuspend'], asActor(boss), db, ['category.manage', 'space.oversee']),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect((await usersSvc.findById(m.id))?.grants).toEqual(['category.manage']);
+    // 다시 읽은 목록으로 보내면 된다
+    const ok = await usersSvc.changeGrants(m.id, ['category.manage', 'space.unsuspend'], asActor(boss), db, ['category.manage']);
+    expect(ok.after).toEqual(['category.manage', 'space.unsuspend']);
+  });
+
+  it('**역할을 바꿔 사라지는 위임도 거둘 수 있는 사람만** — LLM 연결 관리를 가진 관리자도 같은 관리자를 member로 내리지 못한다. root는 된다. 관리자는 셋을 받은 member를 관리자로 올린다 (병합 전 보안 검토 후보 e)', async () => {
+    const boss = await mk('boss', 'admin');
+    const peer = await mk('peer', 'admin');
+    for (const a of [boss, peer]) await usersSvc.changeGrants(a.id, ['llm.manage'], ROOT);
+    const peerActor = asActor({ ...peer, grants: ['llm.manage'] });
+    await expect(usersSvc.changeRole(boss.id, 'member', peerActor)).rejects.toThrow('역할을 바꾸면 사라지는 위임을 거둘 권한이 없다: llm.manage');
+    expect((await usersSvc.findById(boss.id))?.grants).toEqual(['llm.manage']);
+    await expect(usersSvc.changeRole(boss.id, 'member', ROOT)).resolves.toMatchObject({ clearedGrants: ['llm.manage'] });
+    const m = await mk('mem', 'member');
+    await usersSvc.changeGrants(m.id, [...THREE], asActor(peer));
+    await expect(usersSvc.changeRole(m.id, 'admin', peerActor)).resolves.toMatchObject({ clearedGrants: [...THREE] });
   });
 
   it('**받거나 잃으면 다음 요청부터 먹는다** — 가드가 싣는 사용자 행에 바로 보인다 (FR-1605)', async () => {

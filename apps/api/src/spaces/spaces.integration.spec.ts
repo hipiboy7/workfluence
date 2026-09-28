@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { inspect } from 'node:util';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, createPageDto, documentSchemaVersion, movePageDto, spaceListQueryDto, type DocNode, type Principal } from '@workfluence/shared';
 import { eq, inArray, sql } from 'drizzle-orm';
@@ -42,6 +43,24 @@ async function holdOpen(fn: (tx: Tx) => Promise<unknown>): Promise<{ release: ()
 const settle = (p: Promise<unknown>): Promise<unknown> => p.then(() => 'ok', (e: unknown) => e);
 /** 뒤의 일이 잠금 앞에 설 때까지 기다린다 — 잠금 대기 상한(2초)보다 짧게 */
 const queued = () => new Promise((r) => setTimeout(r, 300));
+
+/**
+ * 잠금을 기다리는 요청이 `n`개가 될 때까지 본다 — 앞의 일을 붙잡아 둔 채 뒤의 일이 **실제로 잠금 앞에 섰을 때** 푼다. 시간(`queued`)에 기대면 느린 날엔
+ * 뒤의 일이 잠금에 닿기 전에 앞의 일이 끝나 경합 없이 지나간다(P15 병합 전 코드 리뷰 6)
+ */
+async function lockWaiters(n = 1, timeoutMs = 5000): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    const r = await db.execute<{ n: number }>(
+      sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+    );
+    if (r.rows[0].n >= n) return;
+    if (Date.now() - start > timeoutMs) throw new Error(`잠금을 기다리는 요청이 ${n}개가 되지 않았다`);
+    await new Promise((res) => setTimeout(res, 20));
+  }
+}
+/** 이만큼 기다려도 끝나지 않으면 `'기다리는 중'` — 잠금 앞에 서지 않고 곧바로 끝나야 하는 일을 본다 */
+const within = (p: Promise<unknown>, ms = 1500): Promise<unknown> => Promise.race([settle(p), new Promise((r) => setTimeout(() => r('기다리는 중'), ms))]);
 
 async function user(username: string, role: 'root' | 'admin' | 'member' = 'member'): Promise<Principal> {
   const [u] = await db
@@ -824,7 +843,7 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
     await ctrl.changeStatus(s.id, { status: 'active' }, admin as never, REQ);
     await ctrl.changeStatus(s.id, { status: 'suspended' }, owner as never, REQ);
     const rows = await db.select().from(auditEvents).where(eq(auditEvents.action, 'space.status.change'));
-    expect(rows.map((r) => r.detail)).toEqual([{ status: 'active' }, { status: 'suspended', byOwner: true }]);
+    expect(rows.map((r) => r.detail)).toEqual([{ status: 'active', wasByOwner: false }, { status: 'suspended', byOwner: true }]);
   });
 
   it('**동시에 바꾸면 뒤의 것은 409다** — 앞의 것이 커밋하기 전에 읽은 상태로 덮지 않는다', { timeout: 30_000 }, async () => {
@@ -833,13 +852,80 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
     const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
     const first = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', owner, tx));
     const second = settle(spacesSvc.changeStatus(s.id, 'suspended', admin));
-    await queued();
+    await lockWaiters(1);
     first.release();
     await first.done;
     expect(await second).toBeInstanceOf(ConflictException);
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
     // 주인이 건 중지로 남는다 — 관리자의 요청이 판정 없이 "관리자가 건 것"으로 덮지 않았다
     expect([row?.suspendedBy, row?.suspendedByOwner]).toEqual([owner.id, true]);
+  });
+
+  it('**관리자 둘이 동시에 중지하면 뒤의 것은 409** — 상태만 바뀌고 건 사람(주인인가)은 그대로인 경합. 건 사람이 앞사람으로 남는다', { timeout: 30_000 }, async () => {
+    const owner = await user('owner');
+    const a1 = await user('boss1', 'admin');
+    const a2 = await user('boss2', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const first = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', a1, tx));
+    const second = settle(spacesSvc.changeStatus(s.id, 'suspended', a2));
+    await lockWaiters(1);
+    first.release();
+    await first.done;
+    expect(await second).toBeInstanceOf(ConflictException);
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) }))?.suspendedBy).toBe(a1.id);
+  });
+
+  it('**주인이 건 중지도 주인이 아닌 Crew는 못 푼다** — editor (병합 전 코드 리뷰 1)', async () => {
+    const owner = await user('owner');
+    const ed = await user('ed');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.addMember(s.id, { username: 'ed', role: 'editor' }, owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    await expect(spacesSvc.changeStatus(s.id, 'active', ed)).rejects.toThrow('상태를 바꿀 권한이 없다');
+    await expect(spacesSvc.changeStatus(s.id, 'active', withGrants(ed, ['space.unsuspend']))).rejects.toThrow('상태를 바꿀 권한이 없다');
+  });
+
+  it('**관리자는 주인이 건 중지를 넘겨받는다** — 다시 중지하면 관리자가 건 중지가 되고 감사에 남는다. 거꾸로는 안 된다 (병합 전 보안 검토 1)', async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const { row: first } = await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    const ctrlS = new SpacesController(spacesSvc, new AuditService(db), db);
+    const view = await ctrlS.changeStatus(s.id, { status: 'suspended' }, admin as never, REQ);
+    expect([view.status, view.suspendedByOwner]).toEqual(['suspended', false]);
+    const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
+    // 건 사람이 바뀌고, 중지된 때는 그대로다 — 읽기만 된 것은 주인이 건 때부터다
+    expect([row?.suspendedBy, row?.suspendedByOwner, row?.suspendedAt?.toISOString()]).toEqual([admin.id, false, first.suspendedAt?.toISOString()]);
+    const [audit] = await db.select().from(auditEvents).where(eq(auditEvents.action, 'space.status.change'));
+    expect(audit.detail).toEqual({ status: 'suspended', byOwner: false, takeover: true });
+    // 이제 주인은 권한이 있어야 푼다
+    await expect(spacesSvc.changeStatus(s.id, 'active', owner)).rejects.toThrow(ADMIN_SUSPENDED_MESSAGE);
+    // 관리자가 건 중지를 다시 걸면 쓰지 않는다. 주인이 다시 걸어 "주인이 건 것"으로 바꾸지 못한다 — 푸는 것과 같은 권한이 든다
+    await expect(spacesSvc.changeStatus(s.id, 'suspended', admin)).resolves.toMatchObject({ changed: false });
+    await expect(spacesSvc.changeStatus(s.id, 'suspended', owner)).rejects.toThrow('상태를 바꿀 권한이 없다');
+    // 풀면 감사에 풀린 중지가 누구 것이었는지 남는다
+    await ctrlS.changeStatus(s.id, { status: 'active' }, admin as never, REQ);
+    const all = await db.select().from(auditEvents).where(eq(auditEvents.action, 'space.status.change'));
+    expect(all.map((r) => r.detail)).toContainEqual({ status: 'active', wasByOwner: false });
+  });
+
+  it('**판정한 상태에서만 쓴다(ABA)** — 주인이 "주인이 건 중지"로 판정한 풀기는, 그 사이 관리자가 다시 쓰기 → 중지로 넘겨받았으면 409다 (병합 전 검토)', { timeout: 30_000 }, async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    // 관리자가 다시 쓰기 → 중지를 한 트랜잭션에서 하고 커밋하기 전에, 주인이 옛 상태(주인이 건 중지)로 판정한 풀기를 보낸다
+    const admins = await holdOpen(async (tx) => {
+      await spacesSvc.changeStatus(s.id, 'active', admin, tx);
+      await spacesSvc.changeStatus(s.id, 'suspended', admin, tx);
+    });
+    const resume = settle(spacesSvc.changeStatus(s.id, 'active', owner));
+    await lockWaiters(1);
+    admins.release();
+    await admins.done;
+    expect(await resume).toBeInstanceOf(ConflictException);
+    const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
+    expect([row?.status, row?.suspendedByOwner]).toEqual(['suspended', false]);
   });
 });
 
@@ -901,6 +987,40 @@ describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
   });
 });
 
+describe('지우기도 판정한 상태에서만 (P15 병합 전 검토)', () => {
+  it('**주인의 지우기(활성으로 판정)와 관리자의 중지가 겹치면 409** — 중지된 공간을 주인이 지우지 않는다', { timeout: 30_000 }, async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const suspending = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', admin, tx));
+    const removing = settle(spacesSvc.softDelete(s.id, owner));
+    await lockWaiters(1);
+    suspending.release();
+    await suspending.done;
+    expect(await removing).toBeInstanceOf(ConflictException);
+    const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
+    expect([row?.status, row?.deletedAt]).toEqual(['suspended', null]);
+  });
+
+  it('**두 번 지우면 뒤의 것은 409, 지워지는 사이 다시 쓰게 해도 409** — 감사가 두 줄 남거나 지운 공간의 상태가 바뀌지 않는다', { timeout: 30_000 }, async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    const first = await holdOpen((tx) => spacesSvc.softDelete(s.id, admin, tx));
+    const second = settle(spacesSvc.softDelete(s.id, admin));
+    const resume = settle(spacesSvc.changeStatus(s.id, 'active', admin));
+    await lockWaiters(2);
+    first.release();
+    await first.done;
+    expect(await second).toBeInstanceOf(ConflictException);
+    expect(await resume).toBeInstanceOf(ConflictException);
+    const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
+    expect(row?.status).toBe('suspended');
+    expect(row?.deletedAt).not.toBeNull();
+  });
+});
+
 describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 사람과 관리자 (P15 C.3, 보류 33)', () => {
   const ctrl = () => new CategoriesController(new AuditService(db), db);
   const viewOf = async (me: Principal, id: string) => (await ctrl().list(me as never)).find((c) => c.id === id)!;
@@ -912,6 +1032,8 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     const cat = await ctrl().create({ name: '운영' }, a as never, REQ);
     expect([cat.createdBy, cat.usage, cat.access]).toEqual([a.id, { spaces: 0, otherSpaces: 0 }, { canRename: true, canDelete: true }]);
     expect((await viewOf(b, cat.id)).access).toEqual({ canRename: false, canDelete: false });
+    // 바꿀 수 없는 사람에게는 쓰임을 싣지 않는다 — 남의 비공개 공간·휴지통까지 센 수다 (병합 전 검토)
+    expect((await viewOf(b, cat.id)).usage).toBeNull();
 
     await spacesSvc.create({ name: 'a 공간', kind: 'personal', categoryId: cat.id, description: '' }, a);
     // b가 만든 팀이지만 a가 owner로 있다 — a의 공간이다
@@ -925,10 +1047,13 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     const theirs = await spacesSvc.create({ name: 'b 팀', kind: 'team', categoryId: cat.id, description: '' }, b);
     await spacesSvc.softDelete(theirs.id, b);
     expect((await viewOf(a, cat.id)).usage).toEqual({ spaces: 3, otherSpaces: 1 });
+    // 만든 사람은 바꿀 수 없어도 쓰임을 본다 — 왜 못 지우는지
     expect((await viewOf(a, cat.id)).access).toEqual({ canRename: false, canDelete: false });
     expect((await viewOf(admin, cat.id)).access).toEqual({ canRename: true, canDelete: true });
     expect((await viewOf(withGrants(b, ['category.manage']), cat.id)).access).toEqual({ canRename: true, canDelete: true });
     expect((await viewOf(withGrants(b, ['space.oversee']), cat.id)).access).toEqual({ canRename: false, canDelete: false });
+    expect((await viewOf(withGrants(b, ['space.oversee']), cat.id)).usage).toBeNull();
+    expect((await viewOf(admin, cat.id)).usage).toEqual({ spaces: 3, otherSpaces: 1 });
   });
 
   it('**만든 사람은 자기 공간만 쓰면 지운다** — 그 공간은 분류 없음이 되고 감사에 남는다 (FR-1621·1622)', async () => {
@@ -961,6 +1086,37 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     expect(audit.detail).toEqual({ name: '운영2', cleared: [{ id: theirs.id, name: 'b 팀', deleted: true }] });
   });
 
+  it('**이름이 겹치면 409** — 이미 있는 이름, 그리고 확인과 쓰기 사이에 누가 같은 이름을 만들었을 때(유일 제약 — 500이 아니다) (병합 전 자체 점검 2)', { timeout: 30_000 }, async () => {
+    const admin = await user('boss', 'admin');
+    const cat = await ctrl().create({ name: '운영' }, admin as never, REQ);
+    await ctrl().create({ name: '재무' }, admin as never, REQ);
+    await expect(ctrl().rename(cat.id, { name: '재무' }, admin as never, REQ)).rejects.toThrow(ConflictException);
+    // 같은 이름을 넣고 커밋하기 전에 이름을 바꾼다 — 앞의 확인에는 보이지 않고, 쓰기가 유일 제약에서 기다렸다가 부딪힌다
+    const inserting = await holdOpen((tx) => tx.insert(spaceCategories).values({ name: '인사', createdBy: admin.id }));
+    const renaming = settle(ctrl().rename(cat.id, { name: '인사' }, admin as never, REQ));
+    await lockWaiters(1);
+    inserting.release();
+    await inserting.done;
+    const got = await renaming;
+    expect(got).toBeInstanceOf(ConflictException);
+    expect((got as Error).message).toBe('같은 이름의 분류가 이미 있다');
+    expect((await db.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, cat.id) }))?.name).toBe('운영');
+  });
+
+  it('**권한 없는 사람은 줄에 서지 않는다** — 분류 행이 잠겨 있어도 만든 사람도 분류 관리도 아니면 곧바로 403 (병합 전 보안 검토 후보 c)', { timeout: 30_000 }, async () => {
+    const a = await user('a');
+    const stranger = await user('stranger');
+    const cat = await ctrl().create({ name: '운영' }, a as never, REQ);
+    const locked = await holdOpen((tx) => tx.select().from(spaceCategories).where(eq(spaceCategories.id, cat.id)).for('update'));
+    try {
+      expect(await within(ctrl().remove(cat.id, stranger as never, REQ))).toBeInstanceOf(ForbiddenException);
+      expect(await within(ctrl().rename(cat.id, { name: '바꿈' }, stranger as never, REQ))).toBeInstanceOf(ForbiddenException);
+    } finally {
+      locked.release();
+      await locked.done;
+    }
+  });
+
   it('**남이 붙이는 사이 만든 사람이 지우면 기다렸다가 다시 센다** — 분류 행을 잠그므로 붙이기가 끝난 뒤의 쓰임으로 판정한다(403) (D.4)', { timeout: 30_000 }, async () => {
     const a = await user('a');
     const b = await user('b');
@@ -969,13 +1125,23 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     // b가 분류를 붙이고 아직 커밋하지 않았다 — 외래 키 검사가 분류 행을 잡고 있다
     const attaching = await holdOpen((tx) => tx.update(spaces).set({ categoryId: cat.id }).where(eq(spaces.id, theirs.id)));
     const removing = settle(ctrl().remove(cat.id, a as never, REQ));
-    await queued();
+    // 지우기가 분류 행의 잠금 앞에 선 뒤에 푼다 — 먼저 풀면 잠금이 없어도 붙이기가 끝난 뒤에 세어 403이 된다
+    await lockWaiters(1);
     attaching.release();
     await attaching.done;
     // 잠그지 않고 세면 쓰임 0(커밋 전)으로 판정하고 지우려다 외래 키로 터진다 — 거절이 아니라 오류였다
     expect(await removing).toBeInstanceOf(ForbiddenException);
     expect(await db.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, cat.id) })).toBeTruthy();
     expect((await db.query.spaces.findFirst({ where: eq(spaces.id, theirs.id) }))?.categoryId).toBe(cat.id);
+  });
+
+  it('**다른 외래 키가 깨진 것은 "없는 분류다"로 바꾸지 않는다** — 분류 외래 키의 이름만 본다 (병합 전 코드 리뷰 12)', async () => {
+    // 없는 사람으로 만든다 — 만든 사람의 외래 키가 깨진다. 분류와는 상관이 없다
+    const ghost: Principal = { id: '00000000-0000-4000-8000-00000000abcd', role: 'member' };
+    const got = await settle(spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, ghost));
+    expect(got).toBeInstanceOf(Error);
+    expect(got).not.toBeInstanceOf(BadRequestException);
+    expect(inspect(got, { depth: 6 })).toMatch(/spaces_created_by_users_id_fk|created_by/);
   });
 
   it('**지우는 사이 공간에 그 분류를 붙이면 400이다** — 분류 행의 잠금 뒤에 줄을 서고, 지워진 분류를 만난다(500이 아니다) (D.4)', { timeout: 30_000 }, async () => {
@@ -991,7 +1157,8 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     });
     const attach = settle(spacesSvc.update(s.id, { categoryId: cat.id }, owner));
     const create = settle(spacesSvc.create({ name: '새 팀', kind: 'team', categoryId: cat.id, description: '' }, owner));
-    await queued();
+    // 둘 다 외래 키 검사가 분류 행의 잠금 앞에 선 뒤에 푼다 — 먼저 풀면 앞단의 확인이 400을 내어 23503 길을 거치지 않는다
+    await lockWaiters(2);
     deleting.release();
     await deleting.done;
     for (const got of [await attach, await create]) {

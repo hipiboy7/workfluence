@@ -24,7 +24,7 @@ export type Action =
   | 'system.manage' // root 전용
   | 'settings.manage' // 담당자 안내문 등
   | 'space.create'
-  | 'space.manage' // 전체 스페이스 조회·상태 변경·중지 스페이스 삭제
+  | 'space.manage' // 모든 공간의 **내용**을 읽는 관리자 — 검색·라벨·알림·페이지 휴지통·템플릿. 목록·상태·지우기는 `space.oversee`다 (P15 A.1-1)
   | 'category.create'
   | 'page.read'
   | 'page.write'
@@ -124,6 +124,8 @@ export function canGrant(actor: Principal | null | undefined, action: DelegableA
   if (!actor || !can(actor, 'user.grants.change')) return false;
   const rule = DELEGATION[action];
   if (rule.holder !== targetRole) return false;
+  // 주는 사람은 그 행위를 스스로 할 수 있어야 한다 — 역할로 가지지 않은 것을 주면 받은 사람을 관리하지 못한다(병합 전 자체 점검 10)
+  if (!can(actor, action)) return false;
   return rule.grantor === 'root' ? actor.role === 'root' : isAdminRole(actor.role);
 }
 

@@ -266,6 +266,9 @@ export const SPACE_LIST_MAX = 500;
 /** 목록 찾기 글자의 상한 — 사용자 찾기·스페이스 찾기(서버의 조건)와 관리 화면의 찾기 칸이 같이 쓴다 */
 export const LIST_SEARCH_MAX = 100;
 
+/** 분류 이름의 상한 — 계약(`createCategoryDto`)과 화면의 분류 칸(관리 칸·관리 콘솔)이 같이 쓴다 (P15 병합 전 자체 점검 7) */
+export const CATEGORY_NAME_MAX = 50;
+
 /** settings 테이블 키 */
 export const SETTINGS_KEYS = {
   contactInfo: 'contact_info',

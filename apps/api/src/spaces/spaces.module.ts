@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import {
   addMemberDto,
+  can,
   categoryAccess,
   createCategoryDto,
   createSpaceDto,
@@ -103,10 +104,12 @@ export class SpacesController {
     @Req() req: Request,
   ): Promise<SpaceView> {
     await this.db.transaction(async (tx) => {
-      const { row, changed } = await this.spaces.changeStatus(id, dto.status, me, tx);
-      // 같은 상태를 다시 보내면 쓰지 않고 감사 행도 남기지 않는다. 중지는 건 사람이 주인이었는지를 함께 남긴다 (P15 FR-1610)
+      const { row, changed, takeover, wasByOwner } = await this.spaces.changeStatus(id, dto.status, me, tx);
+      // 같은 상태를 다시 보내면 쓰지 않고 감사 행도 남기지 않는다. 중지는 건 사람이 주인이었는지(넘겨받았으면 그것도), 다시 쓰기는 풀린 중지가
+      // 누구 것이었는지를 남긴다 — "관리자가 건 중지를 누가 풀었나"를 앞 행을 찾지 않고 본다 (P15 FR-1610, 병합 전 보안 검토 후보 g)
       if (!changed) return;
-      const detail = dto.status === 'suspended' ? { ...dto, byOwner: row.suspendedByOwner } : dto;
+      const detail =
+        dto.status === 'suspended' ? { ...dto, byOwner: row.suspendedByOwner, ...(takeover ? { takeover: true } : {}) } : { ...dto, wasByOwner };
       await this.audit.record({ action: 'space.status.change', actorId: me.id, targetType: 'space', targetId: id, detail, ip: req.ip }, tx);
     });
     // 읽지 못해도 바꿀 수 있는 사람(스페이스 관리 전체)에게 바꾼 뒤 404를 주지 않는다
@@ -204,6 +207,7 @@ export class CategoriesController {
     @Req() req: Request,
   ): Promise<CategoryView> {
     return this.db.transaction(async (tx) => {
+      await this.mayTouch(tx, id, me, '이름을 바꾼다');
       const row = await this.lockCategory(tx, id);
       const usage = (await this.usageOf(tx, [id])).get(id);
       if (!categoryAccess(me, row, usage ?? NO_USAGE).canRename) throw new ForbiddenException(deniedWhy(me, row, '이름을 바꾼다'));
@@ -228,6 +232,7 @@ export class CategoriesController {
   @Delete(':id')
   async remove(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
     await this.db.transaction(async (tx) => {
+      await this.mayTouch(tx, id, me, '지운다');
       const row = await this.lockCategory(tx, id);
       const usage = (await this.usageOf(tx, [id])).get(id);
       if (!categoryAccess(me, row, usage ?? NO_USAGE).canDelete) throw new ForbiddenException(deniedWhy(me, row, '지운다'));
@@ -273,6 +278,17 @@ export class CategoriesController {
     });
   }
 
+  /**
+   * **권한 없는 사람은 줄에 서지 않는다** — 만든 사람도 분류 관리도 아니면 잠그기 전에 403이다(만든 사람은 바뀌지 않는다). 잠금 뒤에 서면 그 사람도
+   * 연결을 쥐고 기다리고, 그 분류를 붙이는 공간 쓰기가 그 뒤에 선다(병합 전 보안 검토 후보 c — P14의 트리 잠금과 같은 원칙). 판정의 나머지(남의
+   * 공간이 쓰는가)는 잠근 뒤에 한다
+   */
+  private async mayTouch(tx: Db, id: string, me: SessionUser, verb: string): Promise<void> {
+    const row = await tx.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, id) });
+    if (!row) throw new NotFoundException('분류를 찾을 수 없다');
+    if (row.createdBy !== me.id && !can(me, 'category.manage')) throw new ForbiddenException(deniedWhy(me, row, verb));
+  }
+
   /** 분류 행을 잠그고 읽는다 — 없으면 404. **트랜잭션 안에서 부른다** (잠금은 트랜잭션이 끝날 때 풀린다) */
   private async lockCategory(tx: Db, id: string): Promise<SpaceCategoryRow> {
     const [row] = await tx.select().from(spaceCategories).where(eq(spaceCategories.id, id)).for('update');
@@ -284,7 +300,7 @@ export class CategoriesController {
    * **쓰임** (P15 D.4) — 분류마다 그 분류를 쓰는 공간(휴지통 포함)의 수와, 그 가운데 **만든 사람이 주인이 아닌** 공간의 수. 주인은 공간을 만든
    * 사람이거나 Crew의 owner다(`spaceAccess.isOwner`와 같다). 질의 하나로 센다 — 분류마다 치지 않는다
    */
-  private async usageOf(tx: Db, ids?: readonly string[]): Promise<Map<string, CategoryView['usage']>> {
+  private async usageOf(tx: Db, ids?: readonly string[]): Promise<Map<string, CategoryUsage>> {
     if (ids && !ids.length) return new Map();
     const rows = await tx
       .select({
@@ -302,11 +318,18 @@ export class CategoriesController {
   }
 }
 
-const NO_USAGE: CategoryView['usage'] = { spaces: 0, otherSpaces: 0 };
+type CategoryUsage = { spaces: number; otherSpaces: number };
+const NO_USAGE: CategoryUsage = { spaces: 0, otherSpaces: 0 };
 
-function toCategoryView(row: SpaceCategoryRow, usage: CategoryView['usage'] | undefined, me: SessionUser): CategoryView {
+/**
+ * 줄 하나. **쓰임은 바꿀 수 있는 사람과 만든 사람에게만 싣는다** — 수에는 남의 개인 공간·읽지 못하는 팀 공간·휴지통이 든다. 지우기 전에 몇 개가
+ * 분류 없음이 되는지 물어야 하는 사람(FR-1624)과 "왜 못 지우나"를 알아야 하는 만든 사람만 본다(병합 전 검토 셋이 짚은 드러남)
+ */
+function toCategoryView(row: SpaceCategoryRow, usage: CategoryUsage | undefined, me: SessionUser): CategoryView {
   const u = usage ?? NO_USAGE;
-  return { id: row.id, name: row.name, createdBy: row.createdBy, createdAt: row.createdAt.toISOString(), access: categoryAccess(me, row, u), usage: u };
+  const access = categoryAccess(me, row, u);
+  const shown = access.canRename || access.canDelete || row.createdBy === me.id;
+  return { id: row.id, name: row.name, createdBy: row.createdBy, createdAt: row.createdAt.toISOString(), access, usage: shown ? u : null };
 }
 
 /** 거절의 까닭 — 만든 사람이면 남의 공간이 써서, 아니면 만든 사람이 아니어서다 */

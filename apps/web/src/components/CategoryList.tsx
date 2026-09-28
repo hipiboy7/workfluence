@@ -4,7 +4,9 @@ import { api } from '../api';
 
 /** 지우기를 묻는 말 — 쓰던 공간(휴지통 포함)이 몇 개 "분류 없음"이 되는지 말한다 (P15 FR-1624) */
 export function confirmDeleteCategoryText(c: CategoryView): string {
-  const cleared = c.usage.spaces > 0 ? ` 이 분류를 쓰는 공간 ${c.usage.spaces}개(휴지통 포함)가 "분류 없음"이 된다.` : '';
+  // 쓰임은 지울 수 있는 사람에게 늘 온다 — 없으면(서버가 싣지 않았다) 개수를 말하지 않는다
+  const n = c.usage?.spaces ?? 0;
+  const cleared = n > 0 ? ` 이 분류를 쓰는 공간 ${n}개(휴지통 포함)가 "분류 없음"이 된다.` : '';
   return `분류 "${c.name}"을(를) 지운다.${cleared} 되살릴 수 없다 — 어느 공간이었는지는 감사로그에 남는다.`;
 }
 
@@ -71,7 +73,7 @@ export function CategoryList({
     if (!window.confirm(confirmDeleteCategoryText(c))) return;
     void act(
       () => api(`/api/categories/${c.id}`, { method: 'DELETE' }),
-      c.usage.spaces > 0 ? `분류 "${c.name}"을(를) 지웠다 — 쓰던 공간 ${c.usage.spaces}개는 분류 없음이 됐다.` : `분류 "${c.name}"을(를) 지웠다.`,
+      (c.usage?.spaces ?? 0) > 0 ? `분류 "${c.name}"을(를) 지웠다 — 쓰던 공간 ${c.usage?.spaces}개는 분류 없음이 됐다.` : `분류 "${c.name}"을(를) 지웠다.`,
     );
   };
 
@@ -102,9 +104,12 @@ export function CategoryList({
                 <button type="button" onClick={() => remove(c)} disabled={!c.access.canDelete} title={c.access.canDelete ? undefined : why(c)}>
                   지우기
                 </button>{' '}
-                <span className="muted small">
-                  공간 {c.usage.spaces}개{c.usage.otherSpaces > 0 ? ` (만든 사람의 것이 아닌 공간 ${c.usage.otherSpaces}개)` : ''}
-                </span>
+                {/* 쓰임은 바꿀 수 있는 사람과 만든 사람에게만 온다 (P15 병합 전 검토) */}
+                {c.usage && (
+                  <span className="muted small">
+                    공간 {c.usage.spaces}개{c.usage.otherSpaces > 0 ? ` (만든 사람의 것이 아닌 공간 ${c.usage.otherSpaces}개)` : ''}
+                  </span>
+                )}
               </li>
             );
           })}

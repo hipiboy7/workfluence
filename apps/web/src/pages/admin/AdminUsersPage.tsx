@@ -111,13 +111,31 @@ export function AdminUsersPage() {
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
+    // **보던 만큼 다시 읽는다** — 처음 100명으로 돌아가면 뒤쪽에서 조치한 사람이 화면에서 사라졌다 (병합 전 코드 리뷰 10). 실패해도 다시 읽는다 —
+    // 그 사이 누가 바꿔 거절됐으면(409) 옛 칸을 그대로 두면 다시 눌러도 같은 거절이다 (P15 병합 전 코드 리뷰 12)
+    const reload = () => load(Math.min(USER_LIST_MAX, Math.max(USER_LIST_PAGE, rows.length)));
     try {
       await fn();
-      // **보던 만큼 다시 읽는다** — 처음 100명으로 돌아가면 뒤쪽에서 조치한 사람이 화면에서 사라졌다 (병합 전 코드 리뷰 10)
-      load(Math.min(USER_LIST_MAX, Math.max(USER_LIST_PAGE, rows.length)));
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      reload();
     }
+  };
+
+  // 위임을 보내는 동안 그 줄의 칸을 막는다 — 빨리 둘을 누르면 둘째가 첫째의 결과를 보지 못한 목록을 보낸다(서버는 409로 막는다)
+  const [grantPending, setGrantPending] = useState<ReadonlySet<string>>(new Set());
+  const changeGrant = (u: UserView, a: DelegableAction, on: boolean) => {
+    const grants = on ? [...u.grants, a] : u.grants.filter((g) => g !== a);
+    setGrantPending((p) => new Set(p).add(u.id));
+    // **화면이 본 목록을 함께 보낸다** — 서버의 목록과 다르면 409다. 목록 전체를 보내므로 옛 화면이 방금 남이 거둔 위임을 되살렸다 (병합 전 보안 검토 2)
+    void act(() => api(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants, expected: u.grants } })).finally(() =>
+      setGrantPending((p) => {
+        const next = new Set(p);
+        next.delete(u.id);
+        return next;
+      }),
+    );
   };
 
   const suspend = (u: UserView) => {
@@ -189,12 +207,9 @@ export function AdminUsersPage() {
                             type="checkbox"
                             aria-label={`${u.username} ${GRANT_LABELS[a]}`}
                             checked={u.grants.includes(a)}
-                            disabled={!allowed}
+                            disabled={!allowed || grantPending.has(u.id)}
                             title={allowed ? undefined : DELEGATION[a].grantor === 'root' ? '시스템 관리자만 주고 거둔다' : CANNOT_MANAGE}
-                            onChange={(e) => {
-                              const grants = e.target.checked ? [...u.grants, a] : u.grants.filter((g) => g !== a);
-                              void act(() => api(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants } }));
-                            }}
+                            onChange={(e) => changeGrant(u, a, e.target.checked)}
                           />{' '}
                           {GRANT_LABELS[a]}
                         </label>

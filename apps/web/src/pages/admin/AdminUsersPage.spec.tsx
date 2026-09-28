@@ -86,10 +86,11 @@ describe('AdminUsersPage — 위임', () => {
     expect(box.checked).toBe(false);
     fireEvent.click(box);
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
-    expect(calls.find((c) => c.method === 'PUT')).toEqual({ method: 'PUT', url: '/api/users/a1/grants', body: { grants: ['llm.manage'] } });
+    // 화면이 본 목록(`expected`)을 함께 보낸다 — 서버의 목록과 다르면 409다 (P15 병합 전 보안 검토 2)
+    expect(calls.find((c) => c.method === 'PUT')).toEqual({ method: 'PUT', url: '/api/users/a1/grants', body: { grants: ['llm.manage'], expected: [] } });
     await waitFor(() => expect((screen.getByRole('checkbox', { name: 'boss LLM 연결 관리' }) as HTMLInputElement).checked).toBe(true));
     fireEvent.click(screen.getByRole('checkbox', { name: 'boss LLM 연결 관리' }));
-    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ grants: [] }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ grants: [], expected: ['llm.manage'] }));
   });
 
   it('**행마다 그 역할이 받는 위임만 있다** — 관리자 줄에 LLM 연결 관리, member 줄에 셋 (P15 D.5)', async () => {
@@ -109,10 +110,39 @@ describe('AdminUsersPage — 위임', () => {
     await waitFor(() => expect(box.disabled).toBe(false));
     expect((screen.getByRole('checkbox', { name: 'boss LLM 연결 관리' }) as HTMLInputElement).disabled).toBe(true);
     fireEvent.click(box);
-    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toEqual({ method: 'PUT', url: '/api/users/m1/grants', body: { grants: ['category.manage'] } }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')).toEqual({ method: 'PUT', url: '/api/users/m1/grants', body: { grants: ['category.manage'], expected: [] } }),
+    );
     await waitFor(() => expect((screen.getByRole('checkbox', { name: 'alice 분류 관리' }) as HTMLInputElement).checked).toBe(true));
     fireEvent.click(screen.getByRole('checkbox', { name: 'alice 스페이스 관리 전체' }));
-    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ grants: ['category.manage', 'space.oversee'] }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ grants: ['category.manage', 'space.oversee'], expected: ['category.manage'] }),
+    );
+  });
+
+  it('**보내는 동안 그 줄의 칸을 막고, 거절되면 다시 읽는다** — 빨리 둘을 누르면 둘째가 첫째의 결과를 모르는 목록을 보냈다 (P15 병합 전 코드 리뷰 5·12)', async () => {
+    me = { ...me, id: 'a2', role: 'admin', grants: [] };
+    let answerPut!: (r: Response) => void;
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') {
+        calls.push({ method: 'PUT', url: String(input), body: JSON.parse(String(init?.body)) as unknown });
+        return new Promise<Response>((ok) => (answerPut = ok));
+      }
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    renderPage();
+    const first = (await screen.findByRole('checkbox', { name: 'alice 분류 관리' })) as HTMLInputElement;
+    await waitFor(() => expect(first.disabled).toBe(false));
+    fireEvent.click(first);
+    const other = screen.getByRole('checkbox', { name: 'alice 스페이스 관리 전체' }) as HTMLInputElement;
+    await waitFor(() => expect(other.disabled).toBe(true));
+    const listsBefore = calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/users?')).length;
+    answerPut(json(409, { message: '그 사이 누가 이 사람의 위임을 바꿨다 — 목록을 다시 본다' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('그 사이 누가 이 사람의 위임을 바꿨다');
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/users?')).length).toBeGreaterThan(listsBefore));
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: 'alice 스페이스 관리 전체' }) as HTMLInputElement).disabled).toBe(false));
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
   });
 
   it('**다른 관리자에게는 보이기만 한다** — LLM 연결 관리를 주고 거두는 것은 root만 (A.1-3)', async () => {
