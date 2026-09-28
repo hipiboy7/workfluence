@@ -99,6 +99,8 @@ function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlock
 
   const editor = useEditor(
     {
+      // 쓰는 칸은 이름이 있는 입력란이다(P17 F-010 4번 — 모양은 styles.css의 .editor, T-077)
+      editorProps: { attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': '본문' } },
       extensions: [
         // 보기·편집용과 **같은 목록**에 실행 취소만 끈다 — Yjs가 자기 실행 취소를 들고 있다 (P9 D.7)
         ...editorExtensions({ collab: true }),

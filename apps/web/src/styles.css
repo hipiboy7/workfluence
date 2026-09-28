@@ -96,3 +96,10 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .field-error { color: #b42318; margin: 0.3rem 0 0.6rem; font-size: 0.9rem; }
 input[aria-invalid='true'] { border-color: #b42318; }
 .page-nav { display: flex; gap: 0.5rem; margin-top: 1rem; }
+
+/* 편집기의 쓰는 칸 (P17 F-010 4·5번) — 테두리와 높이가 있고 어디를 눌러도 쓴다. 처음 판은 모양이 없어 빈 칸이 보이지 않는 한 줄 띠였다(T-077) */
+.editor:not(.readonly) .ProseMirror { min-height: 18rem; border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 0.9rem; background: #fff; cursor: text; outline: none; }
+.editor:not(.readonly) .ProseMirror:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+.comment-editor .editor:not(.readonly) .ProseMirror { min-height: 5rem; }
+.editor .ProseMirror > :first-child { margin-top: 0; }
+.editor .ProseMirror > :last-child { margin-bottom: 0; }

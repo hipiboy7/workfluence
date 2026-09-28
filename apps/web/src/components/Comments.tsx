@@ -91,7 +91,9 @@ export function Comments({ pageId, canWrite }: { pageId: string; canWrite: boole
               답하는 중 · <button type="button" className="linklike" onClick={() => setReplyTo(null)}>취소</button>
             </p>
           )}
-          <Editor value={draft} onChange={setDraft} />
+          <div className="comment-editor">
+            <Editor value={draft} onChange={setDraft} ariaLabel={replyTo ? '답 쓰기' : '댓글 쓰기'} />
+          </div>
           <button type="submit">등록</button>
         </form>
       )}

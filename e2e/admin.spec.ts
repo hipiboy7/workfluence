@@ -56,7 +56,11 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
 
   // 3) 댓글로 동료를 부른다
   await page.goto(pageUrl);
-  await page.locator('section[aria-label="댓글"] .editor .ProseMirror').click();
+  // 쓰는 칸은 보이는 입력란이다 — 이름으로 찾고 높이를 본다. CSS 선택자로 누르면 보이지 않는 띠도 눌려 결함을 놓쳤다(T-077)
+  const commentBox = page.getByRole('textbox', { name: '댓글 쓰기' });
+  await expect(commentBox).toBeVisible();
+  expect((await commentBox.boundingBox())!.height).toBeGreaterThanOrEqual(60);
+  await commentBox.click();
   await page.keyboard.type(`@${MATE.username} 확인 부탁`);
   const [posted] = await Promise.all([
     page.waitForResponse((r) => /\/api\/pages\/[^/]+\/comments$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST'),
