@@ -260,14 +260,17 @@ test('위키 페이지를 마크다운으로 복사해 질문에 붙인다', asy
   await expect(page.getByText('버전 2')).toBeVisible();
 
   await page.goto(page.url().replace(/\/edit$/, ''));
+  // **Windows의 클립보드는 줄바꿈을 CRLF로 돌려준다** — 화면은 LF로 쓰는데 브라우저가 Windows 클립보드의 글 형식에 맞춰 바꾼다(Windows 체험
+  // 워크플로에서 실측, T-063). 질문 칸(textarea)은 붙여 넣을 때 LF로 맞추므로 사람이 보는 결과는 같다 — 줄바꿈을 맞춰 견준다
+  const readClipboard = async () => (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n');
   await page.getByRole('button', { name: '마크다운 복사' }).click();
   await expect(page.getByText('마크다운을 복사했다')).toBeVisible();
-  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  const copied = await readClipboard();
   expect(copied).toBe(`# ${title}\n\n예산 초안을 검토한다`);
 
   await page.getByRole('button', { name: '텍스트 복사' }).click();
   await expect(page.getByText('텍스트를 복사했다')).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${title}\n\n예산 초안을 검토한다`);
+  expect(await readClipboard()).toBe(`${title}\n\n예산 초안을 검토한다`);
 
   // 붙여 넣어 묻는다 — 무엇이 LLM 서버로 가는지 사람이 보고 붙인다 (쟁점 4)
   await page.goto('/llm');
