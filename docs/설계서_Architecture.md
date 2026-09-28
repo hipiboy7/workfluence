@@ -90,6 +90,7 @@ workfluence/
 │                                 [P10] components/RequireUuidParam.tsx (주소의 id가 식별자 모양일 때만 화면을 그린다)
 │                                 [P14] components/pageTree.ts (트리 펼치기 하나 — 트리·위치 고르기·옮기기) · components/{MovePage,SpaceManage}.tsx ·
 │                                 pages/admin/AdminSpacesPage.tsx (모든 스페이스 + 분류)
+│                                 [P15] components/CategoryList.tsx (분류의 이름 바꾸기·지우기 — 관리 칸과 관리 콘솔이 같이 쓴다)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown}.ts
 ├── e2e/                          Playwright
@@ -100,7 +101,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P14]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P15]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -188,14 +189,16 @@ shared  ←  api(config → db → common → 기능 모듈)
 요청 → AuthGuard (세션 확인 · 사용자 적재 · 비밀번호 변경 강제 확인)
          │
          ├─ 시스템 행위 판정:  shared.can(user, action)          → 403
-         └─ 스페이스 판정:     shared.spaceAccess(user, space, membership, memberCount)
-                                 → { canRead, canWrite, canManageMembers, canChangeStatus, canDelete }
+         ├─ 스페이스 판정:     shared.spaceAccess(user, space, membership, memberCount)
+         │                       → { canRead, canWrite, canManageMembers, canEditInfo(P15), canChangeStatus, canDelete, isOwner }
+         └─ 분류 판정(P15):    shared.categoryAccess(user, category, usage) → { canRename, canDelete }
+                                 (가드는 로그인만 — 서비스가 분류 행을 잠그고 쓰임을 센 뒤에 판정한다)
 ```
 
 - **가드는 판정하지 않는다.** 데이터를 모아 공유 함수에 넘기고 결과만 쓴다. 판정 규칙이 한 곳에 있어야 화면과 서버가 어긋나지 않는다.
 - 응답의 스페이스 객체에 `access`를 실어 보낸다. 화면이 같은 규칙을 다시 구현하지 않고 버튼 노출을 결정한다.
 - 기본 거부. **로그인은 언제나 요구한다** — 예외는 `@Public`을 명시한 핸들러(로그인·가입·계정 찾기·화면 설정(`config`)·비밀번호 규칙(`password-rules`, P13))뿐이다.
-- 그 위에 `@RequireAction`으로 행위를 선언하면 `can()`으로 한 번 더 건다. **행위를 선언하지 않은 핸들러는 "로그인한 사람이면 누구나"의 뜻이다** — 데이터 범위를 스스로 좁히는 핸들러(`/api/auth/me` 등)가 여기 해당한다. 남의 데이터를 다루는 핸들러에 선언을 빼면 그것은 결함이다.
+- 그 위에 `@RequireAction`으로 행위를 선언하면 `can()`으로 한 번 더 건다. **행위를 선언하지 않은 핸들러는 "로그인한 사람이면 누구나"의 뜻이다** — 데이터 범위를 스스로 좁히는 핸들러(`/api/auth/me` 등)가 여기 해당한다. 남의 데이터를 다루는 핸들러에 선언을 빼면 그것은 결함이다. **예외는 판정이 대상의 상태에 달린 핸들러**다 — 스페이스의 상태 바꾸기·지우기(`spaceAccess`), 분류의 이름 바꾸기·지우기(`categoryAccess`, P15)는 행위를 선언하지 않고 서비스가 대상을 읽어(분류는 잠가) 공유 함수로 판정한다. 선언을 두면 판정할 수 있는 사람까지 가드가 먼저 막는다.
 
 ## 5. 문서(본문) 계약
 

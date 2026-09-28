@@ -64,7 +64,7 @@
 | FR-510 | 지운 페이지를 목록으로 보고 **되살린다** | 인수 기준 |
 | FR-511 | 되살리기 권한은 그 스페이스의 쓰기 권한을 따른다 | 기존 판정 재사용 |
 | FR-512 | 부모가 지워진 페이지를 되살리면 **스페이스 최상위로 올린다** | 없는 부모를 가리키면 트리에서 사라진다 |
-| FR-513 | 지운 스페이스는 관리자만 보고 되살린다 | `space.manage` |
+| FR-513 | 지운 스페이스는 관리자만 보고 되살린다 — **정정 2026-09-28 (Phase 15):** 관리자와 **스페이스 관리 전체**를 받은 member가 한다(`space.oversee`, `P15_설계서_Grants` FR-1630) | `space.manage` → `space.oversee` |
 | FR-514 | 되살리기를 감사로그에 남긴다 | `CLAUDE.md` 6절 |
 | FR-515 | 보존 기간(기본 30일)을 넘긴 것은 `pnpm trash:purge`가 **물리 삭제**한다 | 위험 7 |
 | FR-516 | 물리 삭제도 감사로그에 남긴다. 무엇을 몇 건 지웠는지 | |
@@ -140,8 +140,8 @@
 | `POST /api/notifications/read-all` | 로그인 | `{ count }` |
 | `GET /api/trash/pages?limit=` | 스페이스 판정 `canWrite` | `TrashPageView[]` |
 | `POST /api/trash/pages/:id/restore` | 같음 | `{ ok, movedToRoot }` |
-| `GET /api/trash/spaces?limit=` | `space.manage` | `TrashSpaceView[]` |
-| `POST /api/trash/spaces/:id/restore` | `space.manage` | `{ ok }` |
+| `GET /api/trash/spaces?limit=` | `space.manage` (**P15부터 `space.oversee`**) | `TrashSpaceView[]` |
+| `POST /api/trash/spaces/:id/restore` | `space.manage` (**P15부터 `space.oversee`**) | `{ ok }` |
 | `GET /api/settings/policy` | 로그인. **관리자가 아니면 일부만** | `Policy`(부분) + `uploadCeilingMb` |
 | `PATCH /api/settings/policy` | `settings.manage` | `{ ok }` |
 | `GET /api/labels?limit=` | 로그인 | `LabelView[]` |
@@ -150,8 +150,8 @@
 | `POST /api/pages/:id/labels` | `canWrite` | `LabelView` |
 | `DELETE /api/pages/:id/labels/:labelId` | `canWrite` | `{ ok }` |
 | `GET /api/audit?limit=&action=&actorId=&from=&to=` | `audit.read` | `AuditEventView[]` (Phase 11부터 `requestId`로도 거르고 행에 요청 번호 — P11 F절) |
-| `PATCH /api/categories/:id` | `space.manage` | `CategoryView` |
-| `DELETE /api/categories/:id` | `space.manage` | `{ ok }`. 쓰는 스페이스가 있으면 409 |
+| `PATCH /api/categories/:id` | `space.manage` (**P15부터 로그인만 — 판정은 `categoryAccess`, 안 되면 403**) | `CategoryView` |
+| `DELETE /api/categories/:id` | `space.manage` (**P15부터 같음**) | `{ ok }`. 쓰는 스페이스가 있으면 409 — **P15부터 409가 없다: 쓰던 스페이스는 분류 없음이 되고 감사에 `cleared`** (`P15_설계서_Grants` D.4) |
 | `POST /api/users/:id/terminate-sessions` | `user.manage` | `{ count }` |
 
 **상태 코드의 뜻을 고정한다.** 못 보는 것은 **404**다 (403이 아니다 — 403은 "그것이 있다"를
@@ -163,7 +163,7 @@
 ```
 첫 화면(스페이스 목록)
 ├─ 알림 (n)  →  /notifications   읽음 처리 · 모두 읽음 · 대상으로 이동
-├─ 휴지통    →  /trash           지운 페이지 되살리기 / (관리자) 지운 스페이스
+├─ 휴지통    →  /trash           지운 페이지 되살리기 / (관리자 — P15부터 스페이스 관리 전체도) 지운 스페이스
 ├─ 검색      →  /search
 └─ (관리자) 운영 설정 → /admin/policy   숫자 값 · 허용 확장자
                 사용자 관리 → /admin/users    승인 · 잠금 해제 · 초기화 · 역할 · **세션 강제 종료**
