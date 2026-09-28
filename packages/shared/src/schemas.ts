@@ -307,7 +307,7 @@ export type UserView = {
   role: (typeof ROLES)[number];
   status: UserStatusView;
   mustChangePassword: boolean;
-  /** root가 준 행위 — 관리자만 가진다 (P11 D.1) */
+  /** 맡긴 행위 — 받는 역할의 것만 싣는다(관리자는 LLM 연결 관리, member는 셋 — P11 D.1 · P15 D.1) */
   grants: DelegableAction[];
   createdAt: string;
 };
@@ -334,7 +334,7 @@ export type MeView = {
   displayName: string;
   role: (typeof ROLES)[number];
   mustChangePassword: boolean;
-  /** root가 준 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1) */
+  /** 맡긴 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1 · P15 D.1) */
   grants: DelegableAction[];
   /** 비밀번호로 로그인하는 계정인가 — 사내 계정은 아니다. 화면이 **비밀번호 변경**을 보일지 정한다 (P13 FR-1471) */
   hasPassword: boolean;

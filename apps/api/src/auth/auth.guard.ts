@@ -25,7 +25,7 @@ import { UsersService } from '../users/users.service';
  * 판정 규칙이 한 곳에 있어야 화면과 서버가 어긋나지 않는다 (CLAUDE.md 7절).
  */
 
-/** 가드가 요청마다 사용자 행에서 만든다. `grants`는 root가 준 행위 — 판정(`can()`)이 함께 본다 (P11 D.1) */
+/** 가드가 요청마다 사용자 행에서 만든다. `grants`는 root·관리자가 맡긴 행위 — 판정(`can()`)이 함께 본다 (P11 D.1 · P15 D.1) */
 export type SessionUser = {
   id: string;
   username: string;

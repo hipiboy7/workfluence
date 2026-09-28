@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { inspect } from 'node:util';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DELEGABLE_ACTIONS, ROLES, SPACE_KINDS, SPACE_MEMBER_ROLES, SPACE_STATUSES, USER_STATUSES } from '@workfluence/shared';
+import { DELEGABLE_ACTIONS, DELEGATION, ROLES, SPACE_KINDS, SPACE_MEMBER_ROLES, SPACE_STATUSES, USER_STATUSES } from '@workfluence/shared';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 
 /**
@@ -113,7 +113,7 @@ describe('page_versions는 고쳐 쓰지 않는다 (0006)', () => {
 });
 
 describe('위임할 수 있는 행위 — 코드의 목록과 DB의 CHECK (P11 코드 리뷰 5)', () => {
-  it('**`0010_ops`의 CHECK가 `DELEGABLE_ACTIONS`와 같은 목록이다** — 행위를 더하고 CHECK를 잊으면 root의 위임이 날것의 500이 된다', async () => {
+  it('**마이그레이션의 CHECK가 `DELEGABLE_ACTIONS`와 같은 목록이다** — 행위를 더하고 CHECK를 잊으면 위임이 날것의 500이 된다 (`0010_ops` → `0012_grants`)', async () => {
     // 마이그레이션은 손으로 쓴 SQL이라 코드의 목록을 읽을 수 없다(보류 17). 둘이 같은지는 여기서만 본다
     const r = await db.execute<{ def: string }>(
       sql`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'users_grants_known_chk'`,
@@ -121,5 +121,19 @@ describe('위임할 수 있는 행위 — 코드의 목록과 DB의 CHECK (P11 �
     expect(r.rows).toHaveLength(1);
     const inCheck = [...r.rows[0].def.matchAll(/'([^']+)'::text/g)].map((m) => m[1]).sort();
     expect(inCheck).toEqual([...DELEGABLE_ACTIONS].sort());
+  });
+
+  it('**받는 역할 — 규칙표(`DELEGATION`)의 holder만 그 위임을 가진다** — 다른 역할의 행에 적으면 DB가 받지 않는다 (P15 NFR-151)', async () => {
+    let n = 0;
+    for (const action of DELEGABLE_ACTIONS) {
+      for (const role of ['root', 'admin', 'member'] as const) {
+        n += 1;
+        const attempt = db.execute(
+          sql`INSERT INTO users (username, display_name, password_hash, role, status, grants) VALUES (${`grant${n}`}, ${`위임 ${n}`}, 'x', ${role}, 'active', ARRAY[${action}]::text[])`,
+        );
+        if (DELEGATION[action].holder === role) await expect(attempt, `${action} → ${role}`).resolves.toBeDefined();
+        else await expect(attempt, `${action} → ${role}`).rejects.toThrow();
+      }
+    }
   });
 });

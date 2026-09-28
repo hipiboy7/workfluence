@@ -1013,6 +1013,93 @@ describe('위임 — root가 관리자에게 LLM 연결 관리를 준다 (P11 D.
   });
 });
 
+describe('위임 — 관리자가 member에게 셋을 맡긴다 (P15 D.1, FR-1600~1605)', () => {
+  const THREE = ['category.manage', 'space.unsuspend', 'space.oversee'] as const;
+  async function mk(username: string, role: 'admin' | 'member' | 'root') {
+    const [u] = await db.insert(users).values({ username, displayName: `${username} 이름`, passwordHash: 'x', role, status: 'active' }).returning();
+    return u;
+  }
+  const asActor = (u: { id: string; role: string; grants?: string[] }): Principal => ({ id: u.id, role: u.role as Principal['role'], grants: (u.grants ?? []) as Principal['grants'] });
+
+  it('**관리자와 root가 주고 거둔다** — 이전·이후를 돌려주고 행에 남는다 (FR-1600)', async () => {
+    const boss = await mk('boss', 'admin');
+    const m = await mk('mem', 'member');
+    const given = await usersSvc.changeGrants(m.id, [...THREE], asActor(boss));
+    expect([given.before, given.after, given.row.grants, given.changed]).toEqual([[], [...THREE], [...THREE], true]);
+    const partly = await usersSvc.changeGrants(m.id, ['space.oversee'], ROOT);
+    expect([partly.before, partly.after]).toEqual([[...THREE], ['space.oversee']]);
+    expect((await usersSvc.findById(m.id))?.grants).toEqual(['space.oversee']);
+  });
+
+  it('**받는 역할이 아니면 400** — 관리자에게 셋, member에게 LLM 연결 관리, root에게 무엇이든 (FR-1601·1602)', async () => {
+    const boss = await mk('boss', 'admin');
+    const m = await mk('mem', 'member');
+    const r = await mk('root2', 'root');
+    for (const [target, grants] of [
+      [boss, ['category.manage']],
+      [m, ['llm.manage']],
+      [m, ['space.oversee', 'llm.manage']],
+      [r, ['space.unsuspend']],
+    ] as const) {
+      await expect(usersSvc.changeGrants(target.id, [...grants], ROOT)).rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect([(await usersSvc.findById(boss.id))?.grants, (await usersSvc.findById(m.id))?.grants]).toEqual([[], []]);
+  });
+
+  it('**관리자는 LLM 연결 관리를 주지도 거두지도 못한다** — 규칙표의 주는 사람이 root다 (FR-1601)', async () => {
+    const plain = await mk('plain', 'admin');
+    const other = await mk('other', 'admin');
+    await expect(usersSvc.changeGrants(other.id, ['llm.manage'], asActor(plain))).rejects.toBeInstanceOf(ForbiddenException);
+    await usersSvc.changeGrants(other.id, ['llm.manage'], ROOT);
+    // LLM 연결 관리를 가진 관리자도 다른 관리자에게 주지 못한다 — 받은 사람은 다시 맡기지 못한다
+    const holder = asActor({ ...other, grants: ['llm.manage'] });
+    await expect(usersSvc.changeGrants(plain.id, ['llm.manage'], holder)).rejects.toBeInstanceOf(ForbiddenException);
+    // 거두기도 root만 — 위임 없는 관리자는 그 관리자를 관리하지도 못한다
+    await expect(usersSvc.changeGrants(other.id, [], asActor(plain))).rejects.toBeInstanceOf(ForbiddenException);
+    expect((await usersSvc.findById(other.id))?.grants).toEqual(['llm.manage']);
+  });
+
+  it('**받은 member는 다시 맡기지 못한다** — 셋을 모두 받아도 창구가 없다 (FR-1602)', async () => {
+    const m = await mk('mem', 'member');
+    const n = await mk('mem2', 'member');
+    await usersSvc.changeGrants(m.id, [...THREE], ROOT);
+    await expect(usersSvc.changeGrants(n.id, ['category.manage'], asActor({ ...m, grants: [...THREE] }))).rejects.toBeInstanceOf(ForbiddenException);
+    expect((await usersSvc.findById(n.id))?.grants).toEqual([]);
+  });
+
+  it('**관리자는 셋을 받은 member를 관리한다** — 초기화·세션 종료가 된다. 관리자끼리의 규칙(LLM 연결 관리)은 그대로다 (FR-1604)', async () => {
+    const plain = await mk('plain', 'admin');
+    const m = await mk('mem', 'member');
+    await usersSvc.changeGrants(m.id, [...THREE], ROOT);
+    await expect(usersSvc.resetPassword(m.id, asActor(plain))).resolves.toMatchObject({ user: { id: m.id } });
+    await expect(usersSvc.terminateSessions(m.id, asActor(plain))).resolves.toBeTypeOf('number');
+  });
+
+  it('**역할이 바뀌면 받을 수 없는 위임이 사라진다** — member가 관리자가 되면 셋이 역할에 들고, 다시 member가 되어도 돌아오지 않는다 (FR-1603)', async () => {
+    const m = await mk('mem', 'member');
+    await usersSvc.changeGrants(m.id, [...THREE], ROOT);
+    const up = await usersSvc.changeRole(m.id, 'admin', ROOT);
+    expect([up.row.grants, up.clearedGrants]).toEqual([[], [...THREE]]);
+    const down = await usersSvc.changeRole(m.id, 'member', ROOT);
+    expect([down.row.grants, down.clearedGrants]).toEqual([[], []]);
+  });
+
+  it('**DB도 받는 역할을 본다** — 셋을 가진 member를 문장 하나로 관리자로 올리면 거부된다 (NFR-151)', async () => {
+    const m = await mk('mem', 'member');
+    await usersSvc.changeGrants(m.id, ['space.unsuspend'], ROOT);
+    await expect(db.update(users).set({ role: 'admin' }).where(eq(users.id, m.id))).rejects.toThrow();
+    expect((await usersSvc.findById(m.id))?.role).toBe('member');
+  });
+
+  it('**받거나 잃으면 다음 요청부터 먹는다** — 가드가 싣는 사용자 행에 바로 보인다 (FR-1605)', async () => {
+    const m = await mk('mem', 'member');
+    await usersSvc.changeGrants(m.id, ['category.manage'], ROOT);
+    expect(toMeView((await usersSvc.findById(m.id))!).grants).toEqual(['category.manage']);
+    await usersSvc.changeGrants(m.id, [], ROOT);
+    expect(toMeView((await usersSvc.findById(m.id))!).grants).toEqual([]);
+  });
+});
+
 describe('사내 IdP가 실패하면 (P11 FR-1215, 코드 리뷰 8)', () => {
   class FailingProvider implements OidcProvider {
     constructor(private readonly err: unknown) {}

@@ -2,8 +2,11 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import {
   can,
   canAssignRole,
+  canGrant,
   checkPasswordPolicy,
   canManageUser,
+  DELEGABLE_ACTIONS,
+  DELEGATION,
   generateTemporaryPassword,
   grantsForRole,
   suspendProblem,
@@ -113,7 +116,7 @@ export class UsersService {
    * **잠그고** 읽는다(`SELECT … FOR UPDATE`) — 역할·위임을 읽고 그 값으로 다시 쓰는 곳(역할 변경·위임·사내 계정 동기화)이 쓴다.
    *
    * 잠그지 않으면 읽은 뒤 끝난 다른 요청의 위임을 **옛 값으로 덮는다** — 역할을 그대로 두는 변경(admin → admin)도 읽은 `grants`를 다시
-   * 쓰므로, 그 사이 root가 준 것이 사라지거나 거둔 것이 되살아나고, 감사 행의 이전 값도 틀린다 (P11 코드 리뷰 4·보안 검토 후보 1).
+   * 쓰므로, 그 사이 맡긴 것이 사라지거나 거둔 것이 되살아나고, 감사 행의 이전 값도 틀린다 (P11 코드 리뷰 4·보안 검토 후보 1).
    * 잠금은 트랜잭션이 끝날 때 풀린다 — 호출부가 트랜잭션 안에서 부른다
    */
   async lockForUpdate(by: { id: string } | { oidcSub: string }, tx: Db): Promise<UserRow | undefined> {
@@ -376,8 +379,9 @@ export class UsersService {
   }
 
   /**
-   * 위임을 주고 거둔다 (P11_설계서_Ops D.1, FR-1201~1203). **root만** — 가드가 먼저 막고 여기서 한 번 더 본다. **관리자에게만** 준다.
-   * 목록 전체를 받는다(멱등). 이전·이후를 돌려준다 — 호출부가 감사 `user.grants.change`에 싣는다 (FR-1205)
+   * 위임을 주고 거둔다 (P11_설계서_Ops D.1 · P15_설계서_Grants D.1, FR-1600~1603). 창구는 root와 관리자다 — 가드가 먼저 막고 여기서 한 번 더
+   * 본다. **무엇을 줄 수 있는지는 규칙표**(`DELEGATION` — `canGrant`)가 정한다: LLM 연결 관리는 root가 관리자에게, 셋은 관리자·root가
+   * member에게. 목록 전체를 받는다(멱등). 이전·이후를 돌려준다 — 호출부가 감사 `user.grants.change`에 싣는다 (FR-1205)
    */
   async changeGrants(
     id: string,
@@ -385,28 +389,38 @@ export class UsersService {
     actor: Principal,
     tx: Db = this.db,
   ): Promise<{ row: UserRow; before: DelegableAction[]; after: DelegableAction[]; changed: boolean }> {
-    if (!can(actor, 'user.grants.change')) throw new ForbiddenException('위임은 시스템 관리자만 주고 거둔다');
-    return this.inTx(tx, (t) => this.changeGrantsIn(id, grants, t));
+    if (!can(actor, 'user.grants.change')) throw new ForbiddenException('위임은 관리자와 시스템 관리자만 주고 거둔다');
+    return this.inTx(tx, (t) => this.changeGrantsIn(id, grants, actor, t));
   }
 
   private async changeGrantsIn(
     id: string,
     grants: readonly DelegableAction[],
+    actor: Principal,
     tx: Db,
   ): Promise<{ row: UserRow; before: DelegableAction[]; after: DelegableAction[]; changed: boolean }> {
     // **잠그고 읽는다** — 이전 값이 감사 행에 가고, 동시에 바꾸는 두 요청이 서로를 덮지 않게 (`lockForUpdate`)
     const target = await this.lockForUpdate({ id }, tx);
     if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
-    if (target.role !== 'admin') throw new BadRequestException('위임은 관리자에게만 준다 — 관리자가 아니다');
-    const before = grantsForRole('admin', target.grants);
-    const after = grantsForRole('admin', grants);
+    const role = target.role as Role;
+    // 관리할 수 없는 사람의 위임은 건드리지 않는다 — 관리자는 root를, 자기에게 없는 위임을 가진 관리자를 관리하지 못한다 (P11 보안 검토 1)
+    if (!canManageUser(actor, { role, grants: target.grants })) throw new ForbiddenException('이 사용자를 관리할 권한이 없다');
+    // 그 역할이 받지 않는 위임을 보내면 400 — 조용히 버리지 않는다(관리자에게 셋, member에게 LLM 연결 관리, root에게 무엇이든)
+    const unfit = grants.filter((g) => DELEGATION[g].holder !== role);
+    if (unfit.length) throw new BadRequestException(`이 역할(${role})은 받지 않는 위임이다: ${unfit.join(', ')}`);
+    const before = grantsForRole(role, target.grants);
+    const after = grantsForRole(role, grants);
+    // **바뀌는 것마다 줄 수 있어야 한다** — 관리자는 LLM 연결 관리를 주지도 거두지도 못한다(규칙표의 주는 사람이 root다)
+    const moved = DELEGABLE_ACTIONS.filter((a) => before.includes(a) !== after.includes(a));
+    const denied = moved.filter((a) => !canGrant(actor, a, role));
+    if (denied.length) throw new ForbiddenException(`주고 거둘 수 없는 위임이다: ${denied.join(', ')}`);
     // **바뀌는 것이 없으면 쓰지 않는다** — 같은 목록을 다시 보내도 감사 행(1년 남는다)이 쌓이지 않게 (P11 코드 리뷰 9)
-    if (before.length === after.length && before.every((g) => after.includes(g))) return { row: target, before, after, changed: false };
-    // 역할이 관리자인 것은 잠근 행으로 보았다. 조건은 한 번 더 둔다 — 잠그지 않고 부르는 호출부가 생겨도 판정한 상태에서만 쓴다
+    if (!moved.length) return { row: target, before, after, changed: false };
+    // 역할은 잠근 행으로 보았다. 조건은 한 번 더 둔다 — 잠그지 않고 부르는 호출부가 생겨도 판정한 상태에서만 쓴다
     const [row] = await tx
       .update(users)
       .set({ grants: after, updatedAt: sql`now()` })
-      .where(and(eq(users.id, id), eq(users.role, 'admin')))
+      .where(and(eq(users.id, id), eq(users.role, role)))
       .returning();
     if (!row) throw new ConflictException('그 사이 역할이 바뀌었다 — 목록을 다시 본다');
     return { row, before, after, changed: true };

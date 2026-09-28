@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
   DELEGABLE_ACTIONS,
+  DELEGATION,
   LIST_SEARCH_MAX,
   ROLES,
   USER_LIST_FILTERS,
   USER_LIST_MAX,
   USER_LIST_PAGE,
-  can,
+  canGrant,
   canManageUser,
   type DelegableAction,
   type Principal,
@@ -22,7 +23,12 @@ import { useAuth } from '../../auth';
 import { SEARCH_DELAY_MS } from '../../timing';
 
 /** 위임할 수 있는 행위의 이름 — 목록이 늘면 타입이 여기를 채우라고 한다 (P11 D.1) */
-const GRANT_LABELS: Record<DelegableAction, string> = { 'llm.manage': 'LLM 연결 관리' };
+const GRANT_LABELS: Record<DelegableAction, string> = {
+  'llm.manage': 'LLM 연결 관리',
+  'category.manage': '분류 관리',
+  'space.unsuspend': '관리자가 건 중지 풀기',
+  'space.oversee': '스페이스 관리 전체',
+};
 
 /** 상태의 이름 (P13 C.6) — 예전에는 저장값(`active` 등)을 그대로 보였다 */
 const STATUS_LABELS: Record<UserStatusView, string> = { pending: '승인 대기', active: '활성', locked: '잠김', suspended: '정지' };
@@ -43,7 +49,6 @@ const CANNOT_MANAGE = '이 사용자를 관리할 권한이 없다 — 시스템
 export function AdminUsersPage() {
   const { me } = useAuth();
   const principal: Principal | null = me ? { id: me.id, role: me.role, grants: me.grants } : null;
-  const canGrant = can(principal, 'user.grants.change');
   const manageable = (u: UserView) => principal !== null && canManageUser(principal, { role: u.role, grants: u.grants });
   const [rows, setRows] = useState<UserView[]>([]);
   const [total, setTotal] = useState(0);
@@ -174,24 +179,27 @@ export function AdminUsersPage() {
               </td>
               <td><span className={`badge ${u.status === 'active' ? 'ok' : 'fail'}`}>{STATUS_LABELS[u.status]}</span></td>
               <td>
-                {/* 위임은 관리자만 받는다 — 관리자가 아니게 되면 서버가 비운다 (P11 A.1-4) */}
-                {u.role === 'admin'
-                  ? DELEGABLE_ACTIONS.map((a) => (
-                      <label key={a} className="small">
-                        <input
-                          type="checkbox"
-                          aria-label={`${u.username} ${GRANT_LABELS[a]}`}
-                          checked={u.grants.includes(a)}
-                          disabled={!canGrant}
-                          title={canGrant ? undefined : '시스템 관리자만 주고 거둔다'}
-                          onChange={(e) => {
-                            const grants = e.target.checked ? [...u.grants, a] : u.grants.filter((g) => g !== a);
-                            void act(() => api(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants } }));
-                          }}
-                        />{' '}
-                        {GRANT_LABELS[a]}
-                      </label>
-                    ))
+                {/* 그 역할이 받을 수 있는 위임만 — 관리자는 LLM 연결 관리, member는 셋, root는 없다(규칙표, P15 D.1). 역할이 바뀌면 서버가 비운다 */}
+                {DELEGABLE_ACTIONS.some((a) => DELEGATION[a].holder === u.role)
+                  ? DELEGABLE_ACTIONS.filter((a) => DELEGATION[a].holder === u.role).map((a) => {
+                      const allowed = principal !== null && canGrant(principal, a, u.role) && manageable(u);
+                      return (
+                        <label key={a} className="small">
+                          <input
+                            type="checkbox"
+                            aria-label={`${u.username} ${GRANT_LABELS[a]}`}
+                            checked={u.grants.includes(a)}
+                            disabled={!allowed}
+                            title={allowed ? undefined : DELEGATION[a].grantor === 'root' ? '시스템 관리자만 주고 거둔다' : CANNOT_MANAGE}
+                            onChange={(e) => {
+                              const grants = e.target.checked ? [...u.grants, a] : u.grants.filter((g) => g !== a);
+                              void act(() => api(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants } }));
+                            }}
+                          />{' '}
+                          {GRANT_LABELS[a]}
+                        </label>
+                      );
+                    })
                   : <span className="muted small">—</span>}
               </td>
               <td>
