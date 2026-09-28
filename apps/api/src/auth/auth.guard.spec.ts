@@ -121,6 +121,9 @@ describe('AuthGuard', () => {
     await expect(
       new AuthGuard(forged.reflector, usersOf({ ...ACTIVE, role: 'member', grants: ['llm.manage'] }), ENV, POLICY_STUB).canActivate(forged.exec),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    // 가드가 **싣는 값 자체**를 본다 — 403만 보면 `can()`이 받는 역할을 다시 보아 가드가 거르지 않아도 통과했다(좁은 재검토 9)
+    expect((forged.req.user as { grants: string[] }).grants).toEqual([]);
+    expect((managed.req.user as { grants: string[] }).grants).toEqual(['category.manage']);
   });
 
   it('**위임은 요청마다 사용자 행에서 읽는다** — 준 동안은 통과하고, 거두면 다음 요청부터 403 (P11 A.1-5)', async () => {

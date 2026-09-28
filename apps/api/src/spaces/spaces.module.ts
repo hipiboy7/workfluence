@@ -104,7 +104,7 @@ export class SpacesController {
     @Req() req: Request,
   ): Promise<SpaceView> {
     await this.db.transaction(async (tx) => {
-      const { row, changed, takeover, wasByOwner } = await this.spaces.changeStatus(id, dto.status, me, tx);
+      const { row, changed, takeover, wasByOwner } = await this.spaces.changeStatus(id, dto.status, me, tx, { takeover: 'takeover' in dto && dto.takeover });
       // 같은 상태를 다시 보내면 쓰지 않고 감사 행도 남기지 않는다. 중지는 건 사람이 주인이었는지(넘겨받았으면 그것도), 다시 쓰기는 풀린 중지가
       // 누구 것이었는지를 남긴다 — "관리자가 건 중지를 누가 풀었나"를 앞 행을 찾지 않고 본다 (P15 FR-1610, 병합 전 보안 검토 후보 g)
       if (!changed) return;

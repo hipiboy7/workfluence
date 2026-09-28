@@ -101,7 +101,8 @@ export function AdminSpacesPage() {
   // 주인이 건 중지를 관리자가 건 중지로 — 같은 상태를 다시 보내면 서버가 넘겨받는다 (P15 A.1-12, 병합 전 보안 검토 1)
   const takeOver = (s: SpaceView) => {
     if (!window.confirm(confirmTakeoverText(s.name))) return;
-    void act(() => api(`/api/spaces/${s.id}/status`, { method: 'PATCH', json: { status: 'suspended' } }), `"${s.name}"을(를) 관리자가 건 중지로 바꿨다.`);
+    // 화면이 본 상태(주인이 건 중지)를 싣는다 — 그 사이 주인이 풀었으면 서버가 새 중지로 만들지 않고 409다(좁은 재검토 12)
+    void act(() => api(`/api/spaces/${s.id}/status`, { method: 'PATCH', json: { status: 'suspended', takeover: true } }), `"${s.name}"을(를) 관리자가 건 중지로 바꿨다.`);
   };
 
   const addCategory = (e: FormEvent) => {

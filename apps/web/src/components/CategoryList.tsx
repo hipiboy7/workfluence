@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { CategoryView } from '@workfluence/shared';
+import { CATEGORY_NAME_MAX, type CategoryView } from '@workfluence/shared';
 import { api } from '../api';
 
 /** 지우기를 묻는 말 — 쓰던 공간(휴지통 포함)이 몇 개 "분류 없음"이 되는지 말한다 (P15 FR-1624) */
@@ -54,6 +54,8 @@ export function CategoryList({
       onChanged();
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
+      // 그 사이 남의 공간이 쓰기 시작해 거절됐으면(403) 다시 읽는다 — 옛 단추가 남으면 같은 거절이 되풀이된다(좁은 재검토 11)
+      onChanged();
     }
   };
 
@@ -90,6 +92,7 @@ export function CategoryList({
                 <input
                   aria-label={`분류 ${c.name} 이름`}
                   value={value}
+                  maxLength={CATEGORY_NAME_MAX}
                   disabled={!c.access.canRename}
                   onChange={(e) => setRenaming((r) => ({ ...r, [c.id]: e.target.value }))}
                 />{' '}

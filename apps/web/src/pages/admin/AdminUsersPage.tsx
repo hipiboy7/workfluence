@@ -128,15 +128,30 @@ export function AdminUsersPage() {
   const changeGrant = (u: UserView, a: DelegableAction, on: boolean) => {
     const grants = on ? [...u.grants, a] : u.grants.filter((g) => g !== a);
     setGrantPending((p) => new Set(p).add(u.id));
-    // **화면이 본 목록을 함께 보낸다** — 서버의 목록과 다르면 409다. 목록 전체를 보내므로 옛 화면이 방금 남이 거둔 위임을 되살렸다 (병합 전 보안 검토 2)
-    void act(() => api(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants, expected: u.grants } })).finally(() =>
-      setGrantPending((p) => {
-        const next = new Set(p);
-        next.delete(u.id);
-        return next;
-      }),
-    );
+    setError(null);
+    // **화면이 본 목록을 함께 보낸다** — 서버의 목록과 다르면 409다. 목록 전체를 보내므로 옛 화면이 방금 남이 거둔 위임을 되살렸다 (병합 전 보안 검토 2).
+    // **응답으로 그 줄을 곧바로 바꾼 뒤에** 칸을 푼다 — 목록 다시 읽기를 기다리지 않고 풀면 옛 줄로 그려져 연달아 누른 둘째가 거짓 409를 받았다(좁은 재검토 2)
+    api<UserView>(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants, expected: u.grants } })
+      .then((next) => setRows((prev) => prev.map((r) => (r.id === next.id ? next : r))))
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
+        load(Math.min(USER_LIST_MAX, Math.max(USER_LIST_PAGE, rows.length)));
+      })
+      .finally(() =>
+        setGrantPending((p) => {
+          const next = new Set(p);
+          next.delete(u.id);
+          return next;
+        }),
+      );
   };
+
+  /**
+   * 그 역할로 바꾸면 사라지는 위임을 거둘 수 없는가 — 서버가 403으로 막는 선택을 화면이 먼저 막는다(좁은 재검토 14). LLM 연결 관리를 가진 관리자를 member로
+   * 내리는 것은 root만 한다(위임을 거두는 것은 규칙표의 주는 사람)
+   */
+  const blockedRole = (u: UserView, next: Role): boolean =>
+    principal !== null && u.grants.some((g) => DELEGATION[g].holder !== next && !canGrant(principal, g, u.role));
 
   const suspend = (u: UserView) => {
     // 되돌릴 수 있지만 그 사람의 편집이 그 자리에서 끊긴다 — 한 번 묻는다
@@ -192,7 +207,11 @@ export function AdminUsersPage() {
                   title={manageable(u) ? undefined : CANNOT_MANAGE}
                   onChange={(e) => void act(() => api(`/api/users/${u.id}/role`, { method: 'PATCH', json: { role: e.target.value as Role } }))}
                 >
-                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                  {ROLES.map((r) => (
+                    <option key={r} value={r} disabled={r !== u.role && blockedRole(u, r)}>
+                      {r}
+                    </option>
+                  ))}
                 </select>
               </td>
               <td><span className={`badge ${u.status === 'active' ? 'ok' : 'fail'}`}>{STATUS_LABELS[u.status]}</span></td>

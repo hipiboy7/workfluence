@@ -65,14 +65,21 @@ export function SpaceManage({
   useEffect(() => setName(space.name), [space.id, space.name]);
   useEffect(() => setDescription(space.description), [space.id, space.description]);
   useEffect(() => setCategoryId(space.categoryId ?? ''), [space.id, space.categoryId]);
+  // 분류 읽기의 순번 — **늦게 온 옛 목록은 버린다.** 저장 뒤 다시 읽는 사이 새 분류를 만들면, 만들기 전의 목록이 늦게 와 새 분류를 빼고 고른 것을
+  // "분류 없음"으로 돌려 다음 저장이 조용히 분류를 비웠다(좁은 재검토 1). 만들기도 순번을 올린다 — 그 전에 떠난 읽기는 새 분류를 모른다
+  const catSeq = useRef(0);
   const loadCategories = useCallback(() => {
+    const mine = ++catSeq.current;
     api<CategoryView[]>('/api/categories')
       .then((list) => {
+        if (mine !== catSeq.current) return;
         setCategories(list);
         // 고른 채 저장하지 않은 분류가 지워졌으면 고르지 않은 것으로 — 그대로 저장하면 "없는 분류다"였다(병합 전 코드 리뷰 8)
         setCategoryId((cur) => (cur && !list.some((c) => c.id === cur) ? '' : cur));
       })
-      .catch(() => setCategories([]));
+      .catch(() => {
+        if (mine === catSeq.current) setCategories([]);
+      });
   }, []);
   useEffect(() => {
     // 이름·분류를 바꿀 수 있을 때만 읽는다. 분류를 못 읽어도 나머지 관리는 된다 — 화면 오류로 올리지 않는다
@@ -91,7 +98,9 @@ export function SpaceManage({
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      // 그 사이 누가 바꿔 거절됐으면(409·403) 지금 상태를 다시 읽는다 — 옛 단추가 남으면 다시 눌러도 같은 거절이다(병합 전 코드 리뷰 12)
+      // 그 사이 누가 바꿔 거절됐으면(409·403·400 "없는 분류다") 지금 상태를 다시 읽는다 — 옛 단추·옛 선택이 남으면 다시 눌러도 같은 거절이다(병합 전
+      // 코드 리뷰 12 · 좁은 재검토 4)
+      after?.();
       onChanged();
     }
   };
@@ -112,6 +121,8 @@ export function SpaceManage({
     setNotice(null);
     api<CategoryView>('/api/categories', { method: 'POST', json: { name: n } })
       .then((c) => {
+        // 그 전에 떠난 분류 읽기는 이 분류를 모른다 — 늦게 와도 받지 않는다
+        catSeq.current += 1;
         const existed = categories.some((x) => x.id === c.id);
         setCategories((list) => (list.some((x) => x.id === c.id) ? list : [...list, c].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))));
         setCategoryId(c.id);
@@ -136,7 +147,8 @@ export function SpaceManage({
   // 주인이 건 중지를 관리자가 건 중지로 — 같은 상태를 다시 보내면 서버가 넘겨받는다 (P15 A.1-12)
   const takeOver = () => {
     if (!window.confirm(confirmTakeoverText(space.name))) return;
-    void run(() => api(`/api/spaces/${space.id}/status`, { method: 'PATCH', json: { status: 'suspended' } }), '관리자가 건 중지로 바꿨다.');
+    // 화면이 본 상태(주인이 건 중지)를 싣는다 — 그 사이 주인이 풀었으면 서버가 새 중지로 만들지 않고 409다(좁은 재검토 12)
+    void run(() => api(`/api/spaces/${space.id}/status`, { method: 'PATCH', json: { status: 'suspended', takeover: true } }), '관리자가 건 중지로 바꿨다.');
   };
 
   const remove = async () => {

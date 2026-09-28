@@ -276,12 +276,14 @@ export class SpacesService {
       const c = await tx.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, dto.categoryId) });
       if (!c) throw new BadRequestException('없는 분류다');
     }
+    // 판정한 상태에서만 쓴다(A.1-14) — 이름을 바꾸는 사이 관리자가 중지하면 중지된 공간의 이름이 바뀌었다(좁은 재검토 13)
     const [row] = await tx
       .update(spaces)
       .set({ ...dto, updatedAt: sql`now()` })
-      .where(eq(spaces.id, spaceId))
+      .where(and(eq(spaces.id, spaceId), isNull(spaces.deletedAt), eq(spaces.status, 'active')))
       .returning()
       .catch(noSuchCategory);
+    if (!row) throw new ConflictException('그 사이 누가 이 스페이스를 바꿨다 — 다시 본다');
     return row;
   }
 
@@ -303,6 +305,7 @@ export class SpacesService {
     status: 'active' | 'suspended',
     principal: Principal,
     tx: Db = this.db,
+    opts: { takeover?: boolean } = {},
   ): Promise<{ row: SpaceRow; changed: boolean; takeover: boolean; wasByOwner: boolean }> {
     const ctx = await this.manageContext(spaceId, principal, tx);
     const same = ctx.space.status === status;
@@ -313,6 +316,10 @@ export class SpacesService {
       throw new ForbiddenException('상태를 바꿀 권한이 없다');
     }
     const takeover = same && status === 'suspended' && wasByOwner && !ctx.access.isOwner;
+    // **화면이 넘겨받으려 했다**(`takeover`) — 그 사이 주인이 풀었으면 새 중지로 만들지 않는다. 그러면 편집 중인 사람을 모르고 끊고 "넘겨받았다"고
+    // 알렸다(좁은 재검토 12). 주인은 넘겨받지 않는다 — 제 중지다
+    if (opts.takeover && ctx.access.isOwner) throw new BadRequestException('주인은 넘겨받지 않는다 — 그 중지는 주인의 것이다');
+    if (opts.takeover && !takeover) throw new ConflictException('주인이 건 중지가 아니다 — 그 사이 누가 바꿨다. 다시 본다');
     if (same && !takeover) return { row: ctx.space, changed: false, takeover: false, wasByOwner };
     const [row] = await tx
       .update(spaces)

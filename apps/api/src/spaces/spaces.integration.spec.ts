@@ -10,7 +10,7 @@ import { PagesController } from '../pages/pages.module';
 import { PagesService } from '../pages/pages.service';
 import { lockTree } from '../pages/tree-lock';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
-import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
+import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, waitForLockWaiters, type TestDb } from '../test/db';
 import { CategoriesController, SpacesController } from './spaces.module';
 import { ADMIN_SUSPENDED_MESSAGE, SpacesService } from './spaces.service';
 
@@ -41,23 +41,21 @@ async function holdOpen(fn: (tx: Tx) => Promise<unknown>): Promise<{ release: ()
 }
 /** 끝난 결과를 값으로 — 성공이면 `'ok'`, 실패면 그 오류 */
 const settle = (p: Promise<unknown>): Promise<unknown> => p.then(() => 'ok', (e: unknown) => e);
-/** 뒤의 일이 잠금 앞에 설 때까지 기다린다 — 잠금 대기 상한(2초)보다 짧게 */
-const queued = () => new Promise((r) => setTimeout(r, 300));
 
 /**
- * 잠금을 기다리는 요청이 `n`개가 될 때까지 본다 — 앞의 일을 붙잡아 둔 채 뒤의 일이 **실제로 잠금 앞에 섰을 때** 푼다. 시간(`queued`)에 기대면 느린 날엔
- * 뒤의 일이 잠금에 닿기 전에 앞의 일이 끝나 경합 없이 지나간다(P15 병합 전 코드 리뷰 6)
+ * 뒤의 일이 잠금 앞에 선 것(`waiters`개)을 본 뒤에 앞의 일을 커밋한다. **보다가 실패해도 반드시 놓아준다** — 붙잡은 트랜잭션이 남으면 다음 시험의 표 비우기가
+ * 그 잠금을 기다려 한 시험의 실패가 파일 전체로 번졌다(좁은 재검토 6)
  */
-async function lockWaiters(n = 1, timeoutMs = 5000): Promise<void> {
-  const start = Date.now();
-  for (;;) {
-    const r = await db.execute<{ n: number }>(
-      sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`,
-    );
-    if (r.rows[0].n >= n) return;
-    if (Date.now() - start > timeoutMs) throw new Error(`잠금을 기다리는 요청이 ${n}개가 되지 않았다`);
-    await new Promise((res) => setTimeout(res, 20));
+async function releaseAfter(hold: { release: () => void; done: Promise<void> }, waiters: number): Promise<void> {
+  let failed: unknown;
+  try {
+    await waitForLockWaiters(waiters);
+  } catch (e) {
+    failed = e;
   }
+  hold.release();
+  await hold.done;
+  if (failed) throw failed;
 }
 /** 이만큼 기다려도 끝나지 않으면 `'기다리는 중'` — 잠금 앞에 서지 않고 곧바로 끝나야 하는 일을 본다 */
 const within = (p: Promise<unknown>, ms = 1500): Promise<unknown> => Promise.race([settle(p), new Promise((r) => setTimeout(() => r('기다리는 중'), ms))]);
@@ -449,9 +447,7 @@ describe('페이지 트리 (FR-326~330)', () => {
     const m = await mk('M', null);
     const first = await holdOpen((tx) => pagesSvc.softDelete(m.id, owner, tx));
     const second = settle(move(m.id, a.id, 0, owner));
-    await queued();
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     expect(await second).toBeInstanceOf(NotFoundException);
     const row = await db.query.pages.findFirst({ where: eq(pages.id, m.id) });
     expect([row?.parentId, row?.deletedAt === null]).toEqual([null, false]);
@@ -462,9 +458,7 @@ describe('페이지 트리 (FR-326~330)', () => {
     const m = await mk('M', null);
     const first = await holdOpen((tx) => pagesSvc.softDelete(m.id, owner, tx));
     const second = settle(db.transaction((tx) => pagesSvc.softDelete(m.id, owner, tx)));
-    await queued();
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     expect(await second).toBeInstanceOf(NotFoundException);
   });
 
@@ -492,9 +486,7 @@ describe('페이지 트리 (FR-326~330)', () => {
     const m = await mk('M', null);
     const first = await holdOpen((tx) => pagesSvc.move(m.id, { parentId: a.id, position: 0 }, owner, tx));
     const second = move(m.id, b.id, 0, owner);
-    await queued();
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     expect((await second).from.parentId).toBe(a.id);
   });
 
@@ -504,9 +496,7 @@ describe('페이지 트리 (FR-326~330)', () => {
     const make = (title: string) => (tx: Tx) => pagesSvc.create({ spaceId: space.id, parentId: null, title, content: doc(title) }, owner, tx);
     const first = await holdOpen(make('B'));
     const second = db.transaction(make('C'));
-    await queued();
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     await second;
     const got = await pagesSvc.tree(space.id, owner);
     expect(got.map((p) => p.title)).toEqual(['A', 'B', 'C']);
@@ -519,9 +509,7 @@ describe('페이지 트리 (FR-326~330)', () => {
     const x = await mk('X', null);
     const first = await holdOpen((tx) => pagesSvc.move(x.id, { parentId: p.id, position: 0 }, owner, tx));
     const second = settle(db.transaction((tx) => pagesSvc.softDelete(p.id, owner, tx)));
-    await queued();
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     const r = await second;
     expect(r).toBeInstanceOf(BadRequestException);
     expect((r as Error).message).toMatch(/하위 페이지가 있는 페이지는 삭제할 수 없다/);
@@ -775,9 +763,7 @@ describe('분류 관리 (FR-532)', () => {
       (v) => v,
       (e: unknown) => e,
     );
-    await queued();
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     const got = await second;
     const [row] = await db.select().from(spaceCategories).where(eq(spaceCategories.name, '새 분류'));
     expect(got).toMatchObject({ id: row.id, name: '새 분류' });
@@ -852,13 +838,42 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
     const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
     const first = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', owner, tx));
     const second = settle(spacesSvc.changeStatus(s.id, 'suspended', admin));
-    await lockWaiters(1);
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     expect(await second).toBeInstanceOf(ConflictException);
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
     // 주인이 건 중지로 남는다 — 관리자의 요청이 판정 없이 "관리자가 건 것"으로 덮지 않았다
     expect([row?.suspendedBy, row?.suspendedByOwner]).toEqual([owner.id, true]);
+  });
+
+  it('**주인이 제 중지를 다시 걸면 아무것도 바뀌지 않는다** — 넘겨받기는 주인이 아닐 때만. 두 번 누른 주인이 제 중지를 "관리자가 건 것"으로 만들지 않는다 (좁은 재검토 3)', async () => {
+    const owner = await user('owner');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const ctrlS = new SpacesController(spacesSvc, new AuditService(db), db);
+    await ctrlS.changeStatus(s.id, { status: 'suspended' }, owner as never, REQ);
+    await expect(spacesSvc.changeStatus(s.id, 'suspended', owner)).resolves.toMatchObject({ changed: false, takeover: false });
+    const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
+    expect([row?.suspendedBy, row?.suspendedByOwner]).toEqual([owner.id, true]);
+    // 주인이 넘겨받겠다고 보내면 400 — 그 중지는 주인의 것이다
+    await expect(ctrlS.changeStatus(s.id, { status: 'suspended', takeover: true }, owner as never, REQ)).rejects.toBeInstanceOf(BadRequestException);
+    // 주인이 풀면 감사에 풀린 중지가 주인의 것이었다고 남는다
+    await ctrlS.changeStatus(s.id, { status: 'active' }, owner as never, REQ);
+    const rows = await db.select().from(auditEvents).where(eq(auditEvents.action, 'space.status.change'));
+    expect(rows.map((r) => r.detail)).toEqual([{ status: 'suspended', byOwner: true }, { status: 'active', wasByOwner: true }]);
+  });
+
+  it('**넘겨받기는 화면이 본 상태를 확인한다** — 그 사이 주인이 풀었으면 새 중지로 만들지 않고 409 (좁은 재검토 12)', async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    // 관리자가 "주인이 걸었다"를 본 뒤 주인이 풀었다
+    await spacesSvc.changeStatus(s.id, 'active', owner);
+    const ctrlS = new SpacesController(spacesSvc, new AuditService(db), db);
+    await expect(ctrlS.changeStatus(s.id, { status: 'suspended', takeover: true }, admin as never, REQ)).rejects.toThrow('주인이 건 중지가 아니다');
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) }))?.status).toBe('active');
+    // 주인이 건 중지면 넘겨받는다 — 화면이 보내는 모양 그대로
+    await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    await expect(ctrlS.changeStatus(s.id, { status: 'suspended', takeover: true }, admin as never, REQ)).resolves.toMatchObject({ suspendedByOwner: false });
   });
 
   it('**관리자 둘이 동시에 중지하면 뒤의 것은 409** — 상태만 바뀌고 건 사람(주인인가)은 그대로인 경합. 건 사람이 앞사람으로 남는다', { timeout: 30_000 }, async () => {
@@ -868,9 +883,7 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
     const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
     const first = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', a1, tx));
     const second = settle(spacesSvc.changeStatus(s.id, 'suspended', a2));
-    await lockWaiters(1);
-    first.release();
-    await first.done;
+    await releaseAfter(first, 1);
     expect(await second).toBeInstanceOf(ConflictException);
     expect((await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) }))?.suspendedBy).toBe(a1.id);
   });
@@ -920,9 +933,7 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
       await spacesSvc.changeStatus(s.id, 'suspended', admin, tx);
     });
     const resume = settle(spacesSvc.changeStatus(s.id, 'active', owner));
-    await lockWaiters(1);
-    admins.release();
-    await admins.done;
+    await releaseAfter(admins, 1);
     expect(await resume).toBeInstanceOf(ConflictException);
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
     expect([row?.status, row?.suspendedByOwner]).toEqual(['suspended', false]);
@@ -988,15 +999,24 @@ describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
 });
 
 describe('지우기도 판정한 상태에서만 (P15 병합 전 검토)', () => {
+  it('**이름을 바꾸는 사이 관리자가 중지하면 409** — 중지된 공간의 이름이 바뀌지 않는다 (좁은 재검토 13)', { timeout: 30_000 }, async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const suspending = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', admin, tx));
+    const renaming = settle(spacesSvc.update(s.id, { name: '바뀐 이름' }, owner));
+    await releaseAfter(suspending, 1);
+    expect(await renaming).toBeInstanceOf(ConflictException);
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) }))?.name).toBe('팀');
+  });
+
   it('**주인의 지우기(활성으로 판정)와 관리자의 중지가 겹치면 409** — 중지된 공간을 주인이 지우지 않는다', { timeout: 30_000 }, async () => {
     const owner = await user('owner');
     const admin = await user('boss', 'admin');
     const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
     const suspending = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', admin, tx));
     const removing = settle(spacesSvc.softDelete(s.id, owner));
-    await lockWaiters(1);
-    suspending.release();
-    await suspending.done;
+    await releaseAfter(suspending, 1);
     expect(await removing).toBeInstanceOf(ConflictException);
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
     expect([row?.status, row?.deletedAt]).toEqual(['suspended', null]);
@@ -1010,9 +1030,7 @@ describe('지우기도 판정한 상태에서만 (P15 병합 전 검토)', () =>
     const first = await holdOpen((tx) => spacesSvc.softDelete(s.id, admin, tx));
     const second = settle(spacesSvc.softDelete(s.id, admin));
     const resume = settle(spacesSvc.changeStatus(s.id, 'active', admin));
-    await lockWaiters(2);
-    first.release();
-    await first.done;
+    await releaseAfter(first, 2);
     expect(await second).toBeInstanceOf(ConflictException);
     expect(await resume).toBeInstanceOf(ConflictException);
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
@@ -1094,9 +1112,7 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     // 같은 이름을 넣고 커밋하기 전에 이름을 바꾼다 — 앞의 확인에는 보이지 않고, 쓰기가 유일 제약에서 기다렸다가 부딪힌다
     const inserting = await holdOpen((tx) => tx.insert(spaceCategories).values({ name: '인사', createdBy: admin.id }));
     const renaming = settle(ctrl().rename(cat.id, { name: '인사' }, admin as never, REQ));
-    await lockWaiters(1);
-    inserting.release();
-    await inserting.done;
+    await releaseAfter(inserting, 1);
     const got = await renaming;
     expect(got).toBeInstanceOf(ConflictException);
     expect((got as Error).message).toBe('같은 이름의 분류가 이미 있다');
@@ -1126,9 +1142,7 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     const attaching = await holdOpen((tx) => tx.update(spaces).set({ categoryId: cat.id }).where(eq(spaces.id, theirs.id)));
     const removing = settle(ctrl().remove(cat.id, a as never, REQ));
     // 지우기가 분류 행의 잠금 앞에 선 뒤에 푼다 — 먼저 풀면 잠금이 없어도 붙이기가 끝난 뒤에 세어 403이 된다
-    await lockWaiters(1);
-    attaching.release();
-    await attaching.done;
+    await releaseAfter(attaching, 1);
     // 잠그지 않고 세면 쓰임 0(커밋 전)으로 판정하고 지우려다 외래 키로 터진다 — 거절이 아니라 오류였다
     expect(await removing).toBeInstanceOf(ForbiddenException);
     expect(await db.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, cat.id) })).toBeTruthy();
@@ -1158,9 +1172,7 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     const attach = settle(spacesSvc.update(s.id, { categoryId: cat.id }, owner));
     const create = settle(spacesSvc.create({ name: '새 팀', kind: 'team', categoryId: cat.id, description: '' }, owner));
     // 둘 다 외래 키 검사가 분류 행의 잠금 앞에 선 뒤에 푼다 — 먼저 풀면 앞단의 확인이 400을 내어 23503 길을 거치지 않는다
-    await lockWaiters(2);
-    deleting.release();
-    await deleting.done;
+    await releaseAfter(deleting, 2);
     for (const got of [await attach, await create]) {
       expect(got).toBeInstanceOf(BadRequestException);
       expect((got as Error).message).toBe('없는 분류다');

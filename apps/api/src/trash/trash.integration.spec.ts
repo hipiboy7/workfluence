@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { pages, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
-import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
+import { closeTestDb, openTestDb, resetTables, waitForLockWaiters, type TestDb } from '../test/db';
 import { TrashService } from './trash.service';
 
 /** B등급 (P4_설계서_Admin E절). 실제 PostgreSQL. */
@@ -220,6 +220,33 @@ describe('스페이스 휴지통 (FR-513 · P15 FR-1630)', () => {
     expect((await svc.listSpaces(overseer, 50)).map((v) => v.id)).toEqual([sp.id]);
     await svc.restoreSpace(sp.id, overseer);
     expect((await db.query.spaces.findFirst({ where: eq(spaces.id, sp.id) }))?.deletedAt).toBeNull();
+  });
+
+  it('**두 번 누른 되살리기의 뒤의 것은 409** — 감사가 두 줄 남지 않는다 (좁은 재검토 13)', { timeout: 30_000 }, async () => {
+    const admin = await user('adm', 'admin');
+    const sp = await team(admin);
+    await db.update(spaces).set({ deletedAt: new Date() }).where(eq(spaces.id, sp.id));
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let ready!: () => void;
+    const readyNow = new Promise<void>((r) => (ready = r));
+    const first = db.transaction(async (tx) => {
+      await svc.restoreSpace(sp.id, admin, tx);
+      ready();
+      await held;
+    });
+    await readyNow;
+    const second = svc.restoreSpace(sp.id, admin).then(
+      () => 'ok',
+      (e: unknown) => e,
+    );
+    try {
+      await waitForLockWaiters(1);
+    } finally {
+      release();
+      await first;
+    }
+    expect(await second).toBeInstanceOf(ConflictException);
   });
 
   it('휴지통에 없는 것은 되살릴 수 없다', async () => {

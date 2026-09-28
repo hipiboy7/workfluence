@@ -1,6 +1,6 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { databaseUrl, loadEnv } from '../config/config.module';
 import { runMigrations } from '../db/migrate';
 import * as schema from '../db/schema';
@@ -33,6 +33,27 @@ export async function openTestDb(): Promise<{ db: TestDb; pool: Pool }> {
     migrated = true;
   }
   return { db: drizzle(pool, { schema }), pool };
+}
+
+/**
+ * **잠금을 기다리는 요청이 `n`개가 될 때까지 본다** — 앞의 일을 커밋 전에 붙잡아 둔 채 뒤의 일이 실제로 잠금 앞에 섰을 때 풀려고 쓴다. 시간(300ms)에 기대면
+ * 느린 날엔 경합 없이 지나간다(P15 병합 전 코드 리뷰 6). **따로 여는 연결로 본다** — 시험 풀(`TEST_POOL_MAX`)을 나눠 쓰면 대기가 풀을 다 쥔 시험에서
+ * 이 폴링이 연결을 얻지 못해 멈췄다(좁은 재검토 6). 시험 파일은 차례로 돈다(`fileParallelism: false`) — 다른 시험의 대기를 세지 않는다
+ */
+export async function waitForLockWaiters(n: number, timeoutMs = 5000): Promise<void> {
+  const c = new Client({ connectionString: databaseUrl({ ...loadEnv(), WF_ENV: 'test' }) });
+  await c.connect();
+  try {
+    const start = Date.now();
+    for (;;) {
+      const r = await c.query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`);
+      if (r.rows[0].n >= n) return;
+      if (Date.now() - start > timeoutMs) throw new Error(`잠금을 기다리는 요청이 ${n}개가 되지 않았다`);
+      await new Promise((res) => setTimeout(res, 20));
+    }
+  } finally {
+    await c.end();
+  }
 }
 
 export async function closeTestDb(): Promise<void> {

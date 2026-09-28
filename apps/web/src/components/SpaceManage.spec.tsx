@@ -307,7 +307,8 @@ describe('SpaceManage — 넘겨받기·거절 뒤 (P15 병합 전 검토)', () 
     fireEvent.click(screen.getByRole('button', { name: '관리자가 건 중지로 바꾸기' }));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(confirm).toHaveBeenCalledWith(confirmTakeoverText('운영팀'));
-    expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended' } }]);
+    // 화면이 본 상태(주인이 건 중지)를 싣는다 — 그 사이 주인이 풀었으면 서버가 409다
+    expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended', takeover: true } }]);
     unmount();
     // 주인 — 제가 건 중지다. 관리자가 건 중지 — 넘겨받을 것이 없다
     render(<SpaceManage meId="u1" space={space({ ...byOwner, access: { ...NO, canEditInfo: true, canChangeStatus: true, isOwner: true } })} onChanged={vi.fn()} onDeleted={vi.fn()} />);
@@ -331,6 +332,47 @@ describe('SpaceManage — 넘겨받기·거절 뒤 (P15 병합 전 검토)', () 
     fireEvent.click(screen.getByRole('button', { name: '중지' }));
     expect((await screen.findByRole('alert')).textContent).toContain('그 사이 누가 상태를 바꿨다');
     expect(onChanged).toHaveBeenCalled();
+  });
+});
+
+describe('SpaceManage — 분류 읽기의 순번·거절 뒤 (P15 좁은 재검토 1·4)', () => {
+  it('**늦게 온 옛 분류 목록은 버린다** — 저장 뒤 다시 읽는 사이 새 분류를 만들어도 고른 것이 "분류 없음"으로 돌아가지 않는다', async () => {
+    const base = globalThis.fetch;
+    let lateList!: (r: Response) => void;
+    let gets = 0;
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if ((init?.method ?? 'GET') === 'GET' && url === '/api/categories' && ++gets === 2) {
+        // 저장 뒤의 다시 읽기 — 늦게 온다(새 분류를 모르는 옛 목록)
+        calls.push({ method: 'GET', url, body: undefined });
+        return new Promise<Response>((ok) => (lateList = ok));
+      }
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    const onChanged = vi.fn();
+    render(<SpaceManage meId="u1" space={space()} onChanged={onChanged} onDeleted={vi.fn()} />);
+    await screen.findByRole('option', { name: '운영' });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText('새 분류'), { target: { value: '재무' } });
+    fireEvent.click(screen.getByRole('button', { name: '분류 만들기' }));
+    await waitFor(() => expect((screen.getByLabelText('분류') as HTMLSelectElement).value).toBe('c2'));
+    lateList(json(200, [category({})]));
+    await new Promise((r) => setTimeout(r, 30));
+    expect((screen.getByLabelText('분류') as HTMLSelectElement).value).toBe('c2');
+    expect(screen.getByRole('option', { name: '재무' })).toBeTruthy();
+  });
+
+  it('**저장이 거절돼도 분류를 다시 읽는다** — 고른 분류를 남이 지웠으면(400 "없는 분류다") 선택이 풀려 다시 눌러도 같은 거절이 되지 않는다', async () => {
+    categories = [category({}), category({ id: 'c2', name: '곧 지움' })];
+    render(<SpaceManage meId="u1" space={space()} onChanged={vi.fn()} onDeleted={vi.fn()} />);
+    await screen.findByRole('option', { name: '곧 지움' });
+    fireEvent.change(screen.getByLabelText('분류'), { target: { value: 'c2' } });
+    categories = [category({})];
+    answer = { status: 400, body: { message: '없는 분류다' } };
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('없는 분류다');
+    await waitFor(() => expect((screen.getByLabelText('분류') as HTMLSelectElement).value).toBe(''));
   });
 });
 

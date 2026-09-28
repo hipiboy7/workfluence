@@ -140,7 +140,14 @@ export const updateSpaceDto = z.object({
 });
 export type UpdateSpaceDto = z.infer<typeof updateSpaceDto>;
 
-export const spaceStatusDto = z.object({ status: z.enum(SPACE_STATUSES) });
+/**
+ * 상태 바꾸기 (FR-306 · P15 C.2). `takeover`는 **화면이 본 상태**다 — "주인이 건 중지"를 보고 넘겨받으려 한다. 그 사이 주인이 풀었으면 서버는 새 중지로
+ * 만들지 않고 409다(편집 중인 사람을 끊는 일을 모르고 하지 않게 — 좁은 재검토 12). 중지에만 붙는다
+ */
+export const spaceStatusDto = z.union([
+  z.object({ status: z.literal('suspended'), takeover: z.literal(true) }).strict(),
+  z.object({ status: z.enum(SPACE_STATUSES) }).strict(),
+]);
 export type SpaceStatusDto = z.infer<typeof spaceStatusDto>;
 
 export const addMemberDto = z.object({

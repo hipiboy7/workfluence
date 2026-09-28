@@ -321,8 +321,33 @@ describe('AdminSpacesPage — 넘겨받기·쓰임을 보이는 범위 (P15 병�
     expect(rowButtons('운영팀')).toEqual(['다시 쓰기', '관리자가 건 중지로 바꾸기', '지우기']);
     expect(rowButtons('개발팀')).toEqual(['다시 쓰기', '지우기']);
     fireEvent.click(within(within(table()).getByRole('link', { name: '운영팀' }).closest('tr')!).getByRole('button', { name: '관리자가 건 중지로 바꾸기' }));
-    await waitFor(() => expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended' } }]));
+    await waitFor(() => expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended', takeover: true } }]));
     expect(confirm).toHaveBeenCalledWith(confirmTakeoverText('운영팀'));
+  });
+
+  it('**거절되면 목록을 다시 읽는다** — 그 사이 누가 바꿨으면 옛 단추가 남아 같은 거절이 되풀이된다. 분류 칸도 같다 (좁은 재검토 10·11)', async () => {
+    window.confirm = vi.fn(() => true);
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (method === 'PATCH' || method === 'DELETE') {
+        calls.push({ method, url: String(input), body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined });
+        return Promise.resolve(json(method === 'PATCH' ? 409 : 403, { message: method === 'PATCH' ? '그 사이 누가 상태를 바꿨다 — 다시 본다' : "남의 공간이 쓰는 분류는 관리자나 '분류 관리'를 받은 사람이 지운다" }));
+      }
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    renderPage();
+    await screen.findByRole('link', { name: '운영팀' });
+    const lists = () => listCalls().length;
+    const catReads = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/categories').length;
+    const before = lists();
+    fireEvent.click(within(table()).getByRole('button', { name: '중지' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('그 사이 누가 상태를 바꿨다');
+    await waitFor(() => expect(lists()).toBeGreaterThan(before));
+    const catBefore = catReads();
+    fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('남의 공간이 쓰는 분류는'));
+    await waitFor(() => expect(catReads()).toBeGreaterThan(catBefore));
   });
 
   it('**쓰임이 없는 줄은 개수를 말하지 않는다** — 서버는 바꿀 수 있는 사람과 만든 사람에게만 싣는다', async () => {

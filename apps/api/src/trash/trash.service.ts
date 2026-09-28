@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, can, type Principal, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
 import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
@@ -143,7 +143,9 @@ export class TrashService {
     // **안에 있던 페이지는 함께 다시 보인다.** 스페이스 삭제는 `spaces.deleted_at`만 건드리고
     // 페이지는 그대로 두기 때문이다 — 둘을 구분하는 것이 `pages.deleted_at`이다.
     // 따로 지운 페이지만 페이지 휴지통에 남는다 (코드 리뷰 5: 예전 주석은 정반대였다)
-    const [next] = await tx.update(spaces).set({ deletedAt: null }).where(eq(spaces.id, id)).returning();
+    // 휴지통에 있을 때만 — 두 번 누르면 뒤의 것은 409다(감사 `space.restore`가 두 줄 남지 않는다 — 좁은 재검토 13)
+    const [next] = await tx.update(spaces).set({ deletedAt: null }).where(and(eq(spaces.id, id), isNotNull(spaces.deletedAt))).returning();
+    if (!next) throw new ConflictException('그 사이 누가 이 스페이스를 되살렸다 — 다시 본다');
     return next;
   }
 }

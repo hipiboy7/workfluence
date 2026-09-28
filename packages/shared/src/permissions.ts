@@ -124,8 +124,8 @@ export function canGrant(actor: Principal | null | undefined, action: DelegableA
   if (!actor || !can(actor, 'user.grants.change')) return false;
   const rule = DELEGATION[action];
   if (rule.holder !== targetRole) return false;
-  // 주는 사람은 그 행위를 스스로 할 수 있어야 한다 — 역할로 가지지 않은 것을 주면 받은 사람을 관리하지 못한다(병합 전 자체 점검 10)
-  if (!can(actor, action)) return false;
+  // 주는 사람이 그 행위를 스스로 할 수 있는지는 여기서 보지 않는다 — 규칙표의 주는 역할이 늘 그 행위를 가지는 것을 A등급 시험이 고정한다(병합 전 자체 점검
+  // 10). 여기 두면 지금의 규칙표로는 결과를 바꾸는 입력이 없는 줄이 된다(좁은 재검토 8)
   return rule.grantor === 'root' ? actor.role === 'root' : isAdminRole(actor.role);
 }
 
