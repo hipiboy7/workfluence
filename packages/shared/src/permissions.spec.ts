@@ -159,6 +159,7 @@ describe('spaceAccess', () => {
       canChangeStatus: false,
       canDelete: false,
       isOwner: false,
+      crewFrozen: false,
     });
   });
 

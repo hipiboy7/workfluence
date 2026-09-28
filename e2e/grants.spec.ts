@@ -82,6 +82,9 @@ test('**관리자가 건 중지는 권한을 받은 주인만 푼다** — 받�
 
   // 다음 요청부터 먹는다 — 새로 고치면 다시 쓰기가 보이고, 누르면 쓸 수 있다
   await owner.reload();
+  // 받은 뒤에도 풀기 전에는 Crew가 얼어 있다 — 스스로 풀 수 있으니 관리자에게 부탁하라고 하지 않는다 (P16 A.1-2, 병합 전 검토)
+  await expect(owner.getByText('관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 스페이스 관리의 다시 쓰기로 먼저 풀면 바꾼다.')).toBeVisible();
+  await expect(owner.getByLabel('아이디로 Crew 추가')).toHaveCount(0);
   await manage.getByRole('button', { name: '다시 쓰기' }).click();
   await expect(manage.getByRole('status')).toHaveText('다시 쓸 수 있게 했다.');
   await expect(owner.getByLabel('새 페이지 제목')).toBeVisible();

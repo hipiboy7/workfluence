@@ -28,7 +28,7 @@ let categoriesFail = false;
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
 
-const NO = { canRead: true, canWrite: false, canManageMembers: false, canEditInfo: false, canChangeStatus: false, canDelete: false, isOwner: false };
+const NO = { canRead: true, canWrite: false, canManageMembers: false, canEditInfo: false, canChangeStatus: false, canDelete: false, isOwner: false, crewFrozen: false };
 const category = (over: Partial<CategoryView>): CategoryView => ({
   id: 'c1',
   name: '운영',

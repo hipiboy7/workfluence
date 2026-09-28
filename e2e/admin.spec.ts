@@ -58,11 +58,18 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
   await page.goto(pageUrl);
   await page.locator('section[aria-label="댓글"] .editor .ProseMirror').click();
   await page.keyboard.type(`@${MATE.username} 확인 부탁`);
-  await page.getByRole('button', { name: '등록' }).click();
-  await expect(page.locator('section[aria-label="댓글"]').getByText('확인 부탁')).toBeVisible();
+  const [posted] = await Promise.all([
+    page.waitForResponse((r) => /\/api\/pages\/[^/]+\/comments$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST'),
+    page.getByRole('button', { name: '등록' }).click(),
+  ]);
+  expect(posted.ok()).toBe(true);
+  // **저장된 댓글**이 목록에 그려질 때까지 기다린다 — 글자('확인 부탁')만 보면 아직 비우지 않은 쓰기 칸의 글자로도 통과해, 댓글이 저장되기 전에 다음
+  // 단계로 갔다(T-071 — 병합 전 코드 리뷰가 찾은 원인)
+  await expect(page.getByRole('region', { name: '댓글' }).getByRole('button', { name: '삭제', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('region', { name: '댓글' }).getByText('확인 부탁')).toBeVisible();
 
-  // 4) 페이지를 지운다 (휴지통 확인용). 댓글에도 **삭제**가 있다 — 페이지의 것은 늘 머리 줄에 먼저 그려진다. 이름만으로 찾으면 댓글이 그려진 뒤에 누를 때
-  // 둘을 잡아 strict mode로 실패했다(Phase 3·4부터의 흔들림 — T-068과 같은 부류)
+  // 4) 페이지를 지운다 (휴지통 확인용). 댓글에도 **삭제**가 있다 — 3단계가 저장된 댓글을 기다렸으니 여기서는 늘 둘이고, 페이지의 것은 머리 줄이라 문서
+  // 순서로 앞이다(T-071)
   await page.getByRole('button', { name: '삭제', exact: true }).first().click();
   await expect(page).toHaveURL(/\/spaces\//);
 

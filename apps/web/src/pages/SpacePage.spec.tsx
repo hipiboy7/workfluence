@@ -20,6 +20,8 @@ let spaceGets = 0;
 let answerSpace: (n: number) => Promise<Response>;
 // 트리 읽기의 응답 — 그 사이 지워진 페이지를 흉내 낸다
 let answerTree: () => PageSummary[];
+// Crew 넣기의 응답 — 그 사이 관리자가 중지해 거절되는 것을 흉내 낸다
+let answerAddMember: () => Promise<Response>;
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
 
@@ -38,7 +40,7 @@ const space: SpaceView = {
   createdByUsername: 'owner',
   memberCount: 2,
   myRole: 'owner',
-  access: { canRead: true, canWrite: true, canManageMembers: true, canEditInfo: true, canChangeStatus: true, canDelete: false, isOwner: true },
+  access: { canRead: true, canWrite: true, canManageMembers: true, canEditInfo: true, canChangeStatus: true, canDelete: false, isOwner: true, crewFrozen: false },
   createdAt: '2026-09-27T00:00:00.000Z',
   updatedAt: '2026-09-27T00:00:00.000Z',
 };
@@ -63,6 +65,7 @@ beforeEach(() => {
   spaceGets = 0;
   answerSpace = () => Promise.resolve(json(200, space));
   answerTree = () => tree;
+  answerAddMember = () => Promise.resolve(json(200, {}));
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const url = String(input);
@@ -72,6 +75,7 @@ beforeEach(() => {
     if (url === '/api/spaces/s1') return answerSpace(++spaceGets);
     if (url === '/api/pages?spaceId=s1') return Promise.resolve(json(200, answerTree()));
     if (url === '/api/spaces/s1/members' && method === 'GET') return Promise.resolve(json(200, members));
+    if (url === '/api/spaces/s1/members' && method === 'POST') return answerAddMember();
     if (url.startsWith('/api/spaces/s1/members/') && method === 'PATCH') {
       const userId = url.split('/').at(-1);
       members = members.map((m) => (m.userId === userId ? { ...m, role: (body as { role: SpaceMemberView['role'] }).role } : m));
@@ -254,7 +258,7 @@ describe('SpacePage — Crew의 역할 (FR-1512)', () => {
       ...space,
       status: 'suspended',
       suspendedByOwner: false,
-      access: { ...space.access, canWrite: false, canManageMembers: false, canChangeStatus: false },
+      access: { ...space.access, canWrite: false, canManageMembers: false, canChangeStatus: false, crewFrozen: true },
     };
     answerSpace = () => Promise.resolve(json(200, frozen));
     renderAt('/spaces/s1');
@@ -269,5 +273,51 @@ describe('SpacePage — Crew의 역할 (FR-1512)', () => {
     renderAt('/spaces/s1');
     await screen.findByLabelText('아이디로 Crew 추가');
     expect(screen.queryByText(/Crew를 바꾸지 못한다/)).toBeNull();
+  });
+
+  // 병합 전 검토 — 안내의 조건을 두 쪽에서 붙잡는다. 얼었는지는 판정이 말한다(`crewFrozen`) — 화면이 "주인인데 못 바꾼다"를 짐작하지 않는다
+  const adminSuspended = (access: Partial<SpaceView['access']>): SpaceView => ({
+    ...space,
+    status: 'suspended',
+    suspendedByOwner: false,
+    access: { ...space.access, canWrite: false, canManageMembers: false, canChangeStatus: false, crewFrozen: true, ...access },
+  });
+
+  it('**주인이 아닌 사람에게는 그 안내가 없다** — viewer는 원래 Crew를 바꾸지 않는다(관리자가 건 중지여도)', async () => {
+    members = [...crew, { userId: 'u3', username: 'lee', displayName: '이', role: 'viewer', createdAt: '2026-09-27T00:00:00.000Z' }];
+    answerSpace = () =>
+      Promise.resolve(json(200, { ...adminSuspended({ canEditInfo: false, isOwner: false, crewFrozen: false }), createdBy: 'u9', myRole: 'viewer' }));
+    renderAt('/spaces/s1');
+    await screen.findByText(/lee/);
+    expect(screen.queryByText(/Crew를 바꾸지 못한다/)).toBeNull();
+    expect(screen.queryByLabelText('아이디로 Crew 추가')).toBeNull();
+  });
+
+  it('**주인이 스스로 건 중지에서는 안내가 없고 넣기 칸이 있다** — 멈추는 것도 푸는 것도 주인의 일이다 (FR-1701)', async () => {
+    answerSpace = () =>
+      Promise.resolve(json(200, { ...space, status: 'suspended', suspendedByOwner: true, access: { ...space.access, canWrite: false, crewFrozen: false } }));
+    renderAt('/spaces/s1');
+    await screen.findByLabelText('아이디로 Crew 추가');
+    expect(screen.queryByText(/Crew를 바꾸지 못한다/)).toBeNull();
+  });
+
+  it('**스스로 풀 수 있는 주인에게는 관리자에게 부탁하라고 하지 않는다** — 다시 쓰기로 먼저 풀면 바꾼다(관리자가 건 중지 풀기를 받았다)', async () => {
+    answerSpace = () => Promise.resolve(json(200, adminSuspended({ canChangeStatus: true })));
+    renderAt('/spaces/s1');
+    expect(await screen.findByText('관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 스페이스 관리의 다시 쓰기로 먼저 풀면 바꾼다.')).toBeTruthy();
+    expect(screen.queryByText(/관리자에게 부탁한다/)).toBeNull();
+    expect(screen.queryByLabelText('아이디로 Crew 추가')).toBeNull();
+  });
+
+  it('**Crew를 바꾸다 거절되면 지금 상태를 다시 읽는다** — 그 사이 관리자가 중지했으면 까닭이 남고 넣기 칸이 안내로 바뀐다', async () => {
+    answerSpace = (n) => Promise.resolve(json(200, n === 1 ? space : adminSuspended({})));
+    answerAddMember = () => Promise.resolve(json(403, { message: '관리자가 중지한 스페이스다 — Crew는 관리자가 바꾼다' }));
+    renderAt('/spaces/s1');
+    fireEvent.change(await screen.findByLabelText('아이디로 Crew 추가'), { target: { value: 'lee' } });
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    expect(await screen.findByText('관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 관리자에게 부탁한다. 다시 쓰게 되면 주인도 바꾼다.')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe('관리자가 중지한 스페이스다 — Crew는 관리자가 바꾼다');
+    expect(screen.queryByLabelText('아이디로 Crew 추가')).toBeNull();
+    expect(spaceGets).toBe(2);
   });
 });

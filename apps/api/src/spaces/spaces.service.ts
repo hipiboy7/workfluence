@@ -13,6 +13,7 @@ import {
   type UpdateSpaceDto,
 } from '@workfluence/shared';
 import { and, count, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
+import { PgTransaction } from 'drizzle-orm/pg-core';
 import { randomInt } from 'node:crypto';
 import { containsPattern } from '../common/like';
 import { DB, type Db } from '../db/db.module';
@@ -392,22 +393,40 @@ export class SpacesService {
     // 나가는데, 그러면 "권한을 받으면 되나?"로 읽힌다. 실제 이유는 Crew라는 것이 없다는 것이다
     if (ctx.space.kind !== 'team') throw new BadRequestException('개인 스페이스에는 Crew가 없다');
     if (!ctx.access.canManageMembers) {
-      // 팀 공간의 주인이 막히는 것은 관리자가 건 중지뿐이다(P16) — 권한을 잃은 줄 알지 않게 까닭을 나눠 말한다(A.1-3)
-      if (ctx.access.isOwner) throw new ForbiddenException(ADMIN_SUSPENDED_CREW_MESSAGE);
+      // 막힌 주인에게는 권한을 잃은 줄 알지 않게 까닭을 나눠 말한다(P16 A.1-3) — 얼었는지는 판정이 말한다(`crewFrozen`)
+      if (ctx.access.crewFrozen) throw new ForbiddenException(ADMIN_SUSPENDED_CREW_MESSAGE);
       throw new ForbiddenException('Crew를 관리할 권한이 없다');
     }
     return ctx;
   }
 
+  /**
+   * **Crew를 바꾸는 일은 판정한 공간 상태에서만 쓴다** (P16 A.1-5 · P15 A.1-14). Crew를 바꿀 수 있는지가 공간의 상태와 중지를 건 사람에 달리므로
+   * (P16), 판정 전에 공간 행을 **나눠 잠근다**(`FOR SHARE`) — 상태 바꾸기·넘겨받기·지우기는 이 트랜잭션이 끝날 때까지 기다리고, 먼저 와 있던
+   * 것은 이쪽이 기다렸다가 새 상태로 판정한다. Crew를 바꾸는 일끼리는 서로 기다리지 않는다. 처음 판은 잠그지 않아 관리자의 중지가 커밋되는 사이
+   * 주인의 넣기가 들어갔다(병합 전 검토 셋 — T-072). **잠금은 커밋까지 가야 하므로** 받은 것이 트랜잭션이 아니면 새로 연다 — 밖에서 부르면 잠금이 그
+   * 문장 하나로 끝나 줄 세우기가 오류 없이 사라진다(`lockTree`와 같은 까닭)
+   */
+  private async manageMembers(spaceId: string, principal: Principal, tx: Db, write: (tx: Db) => Promise<void>): Promise<void> {
+    const run = async (t: Db) => {
+      await t.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).for('share');
+      await this.assertManage(spaceId, principal, t);
+      await write(t);
+    };
+    if ((tx as unknown) instanceof PgTransaction) return run(tx);
+    return tx.transaction((t) => run(t));
+  }
+
   async addMember(spaceId: string, dto: AddMemberDto, principal: Principal, tx: Db = this.db): Promise<void> {
-    await this.assertManage(spaceId, principal, tx);
-    const target = await tx.query.users.findFirst({ where: eq(users.username, dto.username) });
-    if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
-    const existing = await tx.query.spaceMembers.findFirst({
-      where: and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, target.id)),
+    await this.manageMembers(spaceId, principal, tx, async (t) => {
+      const target = await t.query.users.findFirst({ where: eq(users.username, dto.username) });
+      if (!target) throw new NotFoundException('사용자를 찾을 수 없다');
+      const existing = await t.query.spaceMembers.findFirst({
+        where: and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, target.id)),
+      });
+      if (existing) throw new BadRequestException('이미 Crew에 있다');
+      await t.insert(spaceMembers).values({ spaceId, userId: target.id, role: dto.role, addedBy: principal.id });
     });
-    if (existing) throw new BadRequestException('이미 Crew에 있다');
-    await tx.insert(spaceMembers).values({ spaceId, userId: target.id, role: dto.role, addedBy: principal.id });
   }
 
   /** 마지막 owner를 강등·제거할 수 없다 (FR-312). 주인 없는 스페이스를 만들지 않는다 */
@@ -424,23 +443,25 @@ export class SpacesService {
   }
 
   async changeMemberRole(spaceId: string, userId: string, role: SpaceMemberRole, principal: Principal, tx: Db = this.db): Promise<void> {
-    await this.assertManage(spaceId, principal, tx);
-    await this.assertNotLastOwner(spaceId, userId, tx);
-    const r = await tx
-      .update(spaceMembers)
-      .set({ role })
-      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
-      .returning();
-    if (!r.length) throw new NotFoundException('Crew에 없는 사용자다');
+    await this.manageMembers(spaceId, principal, tx, async (t) => {
+      await this.assertNotLastOwner(spaceId, userId, t);
+      const r = await t
+        .update(spaceMembers)
+        .set({ role })
+        .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
+        .returning();
+      if (!r.length) throw new NotFoundException('Crew에 없는 사용자다');
+    });
   }
 
   async removeMember(spaceId: string, userId: string, principal: Principal, tx: Db = this.db): Promise<void> {
-    await this.assertManage(spaceId, principal, tx);
-    await this.assertNotLastOwner(spaceId, userId, tx);
-    const r = await tx
-      .delete(spaceMembers)
-      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
-      .returning();
-    if (!r.length) throw new NotFoundException('Crew에 없는 사용자다');
+    await this.manageMembers(spaceId, principal, tx, async (t) => {
+      await this.assertNotLastOwner(spaceId, userId, t);
+      const r = await t
+        .delete(spaceMembers)
+        .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
+        .returning();
+      if (!r.length) throw new NotFoundException('Crew에 없는 사용자다');
+    });
   }
 }
