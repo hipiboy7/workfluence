@@ -64,14 +64,14 @@
 ## 5. 컨테이너
 
 이번 Phase는 의존성·Docker·nginx·마이그레이션을 건드리지 않았다. 그래도 이 서버의 기존 스택(Phase 15 이미지 `a542216`)에 새 버전을 들이는 길로 봤다 — 새 잠금
-(`FOR SHARE`)이 앱 계정의 권한으로 도는지가 호스트의 개발 DB로는 보이지 않는다(개발·시험은 앱 계정을 두지 않고 소유 계정으로 붙는다 — P13 FR-1421).
+(`FOR NO KEY UPDATE`)이 앱 계정의 권한으로 도는지가 호스트의 개발 DB로는 보이지 않는다(개발·시험은 앱 계정을 두지 않고 소유 계정으로 붙는다 — P13 FR-1421).
 
 | 무엇 | 결과 |
 |---|---|
-| 이미지(`docker compose … build api`, `GIT_SHA`) | `1ac1604` — 라벨 = HEAD. **380MB**(예산 400MB). 확인용 태그 `workfluence-app:1ac1604` |
-| 표 만들기(`run --rm tools node dist/db/migrate.js`) | `13개 마이그레이션 적용 상태` + `앱 계정 workfluence_app: 권한 적용` — 이번 Phase는 새 마이그레이션이 없다 |
-| 다시 띄우기(`up -d api`) | **14초**에 `HTTP 200` `{"status":"ok","db":"ok",…}`. 컨테이너의 이미지 라벨 `1ac1604` |
-| 앱 계정의 잠금 | 소유 계정 세션에서 `SET LOCAL ROLE workfluence_app` 뒤 `SELECT id FROM spaces FOR SHARE`가 3행을 잠그고 `ROLLBACK` — `FOR SHARE`는 그 표의 UPDATE 권한이 있어야 하는데 앱 계정에 있다 |
+| 이미지(`docker compose … build api`, `GIT_SHA`) | 첫 빌드 `1ac1604`(병합 전 검토 반영 — 그때는 `FOR SHARE`), 마지막 빌드 `1e91d89` — 라벨 = 빌드한 때의 HEAD. **380MB**(예산 400MB). 확인용 태그 `workfluence-app:1e91d89` |
+| 표 만들기(`run --rm tools node dist/db/migrate.js`) | 두 번 모두 `13개 마이그레이션 적용 상태` + `앱 계정 workfluence_app: 권한 적용` — 이번 Phase는 새 마이그레이션이 없다 |
+| 다시 띄우기(`up -d api`) | 마지막 빌드는 **13초**에 `HTTP 200` `{"status":"ok","db":"ok",…}`(첫 빌드 14초). 컨테이너의 이미지 라벨 `1e91d89` |
+| 앱 계정의 잠금 | 소유 계정 세션에서 `SET LOCAL ROLE workfluence_app` 뒤 `SELECT id FROM spaces WHERE deleted_at IS NULL FOR NO KEY UPDATE`가 3행을 잠그고 `ROLLBACK` — 행 잠금은 그 표의 UPDATE 권한이 있어야 하는데 앱 계정에 있다(첫 빌드 때는 `FOR SHARE`로 같은 것을 봤다) |
 | 문서의 명령 | 학습가이드 6.16의 둘과 장애대응 7.37의 첫 명령(새 줄이 가리킨다)을 적힌 그대로 컨테이너의 `psql`로 쳤다 — 모두 돌았다(이 DB에는 중지된 공간도 Crew 변경의 감사도 없어 0행) |
 
 ## 6. 검토
@@ -112,4 +112,5 @@
 
 ## 10. 마지막 확인
 
-(마지막 실측으로 채운다)
+- 마지막 코드 `90d996e`(그 뒤는 문서뿐)에서 `pnpm check` 종료 0 — lint · typecheck · shared 406 · api 1,110 · web 218 · verify:docs(문서 80개, 위반 없음).
+- 브랜치 CI(`gh pr checks`)는 PR 설명에 적는다.
