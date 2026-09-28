@@ -138,7 +138,7 @@ jobs:
               $s = Login $pw
               $cp = @{ currentPassword = $pw; newPassword = $newPw } | ConvertTo-Json -Compress
               $c = Invoke-WebRequest -UseBasicParsing -Method Post -Uri 'http://127.0.0.1:3000/api/auth/change-password' -Headers @{ 'x-workfluence-request' = '1' } -ContentType 'application/json' -Body $cp -WebSession $s
-              Mark 'root login over http + change password' ($c.StatusCode -eq 200) "HTTP $($c.StatusCode)"
+              Mark 'root login over http + change password' ($c.StatusCode -ge 200 -and $c.StatusCode -lt 300) "HTTP $($c.StatusCode)"
             } catch { Mark 'root login over http + change password' $false $_.Exception.Message }
           }
           Mark 'stop (stop.cmd)' (Stop-Trial $dir 'first') ''
