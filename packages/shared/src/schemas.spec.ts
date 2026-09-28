@@ -295,10 +295,12 @@ describe('위임 목록 DTO (P11 F절)', () => {
   it('위임할 수 있는 행위의 목록 전체를 받는다 — 비우면 거둔다', () => {
     expect(userGrantsDto.parse({ grants: ['llm.manage'] })).toEqual({ grants: ['llm.manage'] });
     expect(userGrantsDto.parse({ grants: [] })).toEqual({ grants: [] });
+    // 관리자가 member에게 맡기는 셋 (P15 FR-1600)
+    expect(userGrantsDto.parse({ grants: ['category.manage', 'space.unsuspend', 'space.oversee'] })).toEqual({ grants: ['category.manage', 'space.unsuspend', 'space.oversee'] });
   });
 
   it('**위임할 수 없는 행위·겹친 것·다른 키는 받지 않는다**', () => {
-    for (const bad of [{ grants: ['system.manage'] }, { grants: ['llm.manage', 'llm.manage'] }, { grants: 'llm.manage' }, {}, { grants: [], role: 'root' }]) {
+    for (const bad of [{ grants: ['system.manage'] }, { grants: ['space.manage'] }, { grants: ['llm.manage', 'llm.manage'] }, { grants: 'llm.manage' }, {}, { grants: [], role: 'root' }]) {
       expect(userGrantsDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
   });

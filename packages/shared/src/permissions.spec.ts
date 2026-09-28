@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { PASSWORD_POLICY } from './constants';
 import {
   DELEGABLE_ACTIONS,
+  DELEGATION,
   can,
   canAssignRole,
+  canGrant,
   canManageUser,
+  categoryAccess,
   checkPasswordPolicy,
   countCharClasses,
   grantsForRole,
@@ -42,6 +45,18 @@ describe('can', () => {
     expect(can(member, 'user.manage')).toBe(false);
     expect(can(member, 'audit.read')).toBe(false);
     expect(can(member, 'space.manage')).toBe(false);
+    // 맡길 수 있는 셋은 받아야 한다 (P15 D.1)
+    expect(can(member, 'category.manage')).toBe(false);
+    expect(can(member, 'space.unsuspend')).toBe(false);
+    expect(can(member, 'space.oversee')).toBe(false);
+  });
+
+  it('**관리자와 root는 맡길 수 있는 셋을 역할로 가진다** — 위임 없이 (P15 A.1-2)', () => {
+    for (const p of [admin, root]) {
+      expect(can(p, 'category.manage')).toBe(true);
+      expect(can(p, 'space.unsuspend')).toBe(true);
+      expect(can(p, 'space.oversee')).toBe(true);
+    }
   });
 
   it('비로그인·알 수 없는 역할은 기본 거부', () => {
@@ -72,6 +87,14 @@ describe('canAssignRole / canManageUser', () => {
     expect(canManageUser(admin, { role: 'member' })).toBe(true);
     expect(canManageUser(root, { role: 'root' })).toBe(true);
     expect(canManageUser(member, { role: 'member' })).toBe(false);
+  });
+
+  it('**관리자는 셋을 받은 member도 관리한다** — 셋은 관리자 자신도 가진 권한이라 넘겨받아 얻는 것이 없다 (P15 FR-1604)', () => {
+    const delegated = { role: 'member' as const, grants: ['category.manage', 'space.unsuspend', 'space.oversee'] };
+    expect(canManageUser(admin, delegated)).toBe(true);
+    expect(canManageUser(root, delegated)).toBe(true);
+    // 받은 사람은 관리자가 아니다 — 아무도 관리하지 못한다
+    expect(canManageUser({ ...member, grants: ['space.oversee'] }, { role: 'member' })).toBe(false);
   });
 
   it('**자기에게 없는 위임을 가진 관리자는 관리하지 못한다** — 그 사람의 비밀번호를 초기화해 로그인하면 위임을 얻는다 (P11 보안 검토 1)', () => {
@@ -130,6 +153,87 @@ describe('spaceAccess', () => {
   it('비로그인은 전부 거부', () => {
     expect(spaceAccess(null, team, null, 1)).toEqual({ canRead: false, canWrite: false, canManageMembers: false, canChangeStatus: false, canDelete: false, isOwner: false });
   });
+
+  describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
+    const byOwner = { ...suspendedTeam, suspendedByOwner: true };
+    const byAdmin = { ...suspendedTeam, suspendedByOwner: false };
+    const personalByAdmin = { ...personal, status: 'suspended' as const, suspendedByOwner: false };
+
+    it('**주인이 건 중지는 주인이 푼다** — 지금처럼', () => {
+      expect(spaceAccess(member, byOwner, 'owner', 2).canChangeStatus).toBe(true);
+      expect(spaceAccess(member, { ...personal, status: 'suspended', suspendedByOwner: true }, 'owner', 0).canChangeStatus).toBe(true);
+    });
+
+    it('**관리자가 건 중지는 권한을 받은 주인만 푼다** — 받지 않은 주인은 못 푼다 (FR-1611)', () => {
+      expect(spaceAccess(member, byAdmin, 'owner', 2).canChangeStatus).toBe(false);
+      expect(spaceAccess(member, personalByAdmin, 'owner', 0).canChangeStatus).toBe(false);
+      const unsuspender = { ...member, grants: ['space.unsuspend'] };
+      expect(spaceAccess(unsuspender, byAdmin, 'owner', 2).canChangeStatus).toBe(true);
+      expect(spaceAccess(unsuspender, personalByAdmin, 'owner', 0).canChangeStatus).toBe(true);
+      // 권한을 받아도 주인이 아니면 못 푼다 — 자기 공간만
+      expect(spaceAccess({ ...other, grants: ['space.unsuspend'] }, byAdmin, 'editor', 2).canChangeStatus).toBe(false);
+    });
+
+    it('**모르면 관리자가 건 것으로 친다** — 적힌 것이 없으면(`suspendedByOwner` 없음) 주인도 권한이 있어야 푼다 (D.2)', () => {
+      expect(spaceAccess(member, suspendedTeam, 'owner', 2).canChangeStatus).toBe(false);
+    });
+
+    it('**관리자와 스페이스 관리 전체는 언제나 푼다**', () => {
+      expect(spaceAccess(admin, byAdmin, null, 2).canChangeStatus).toBe(true);
+      expect(spaceAccess(root, byOwner, null, 2).canChangeStatus).toBe(true);
+      expect(spaceAccess({ ...other, grants: ['space.oversee'] }, byAdmin, null, 2).canChangeStatus).toBe(true);
+    });
+
+    it('활성인 공간의 중지는 주인과 관리자·스페이스 관리 전체가 한다 — editor는 못 한다', () => {
+      expect(spaceAccess(member, team, 'owner', 2).canChangeStatus).toBe(true);
+      expect(spaceAccess(other, team, 'editor', 2).canChangeStatus).toBe(false);
+      expect(spaceAccess({ ...other, grants: ['space.oversee'] }, team, null, 2).canChangeStatus).toBe(true);
+    });
+  });
+
+  describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
+    const overseer = { ...other, grants: ['space.oversee'] };
+
+    it('**내용은 읽지 않는다** — Crew가 아닌 팀·남의 개인 공간은 읽지도 쓰지도 Crew를 관리하지도 못한다', () => {
+      expect(spaceAccess(overseer, team, null, 3)).toMatchObject({ canRead: false, canWrite: false, canManageMembers: false });
+      expect(spaceAccess(overseer, personal, null, 0)).toMatchObject({ canRead: false, canWrite: false });
+    });
+
+    it('**중지·다시 쓰기·중지된 것 지우기는 한다**', () => {
+      expect(spaceAccess(overseer, team, null, 3)).toMatchObject({ canChangeStatus: true, canDelete: false });
+      expect(spaceAccess(overseer, suspendedTeam, null, 3)).toMatchObject({ canChangeStatus: true, canDelete: true });
+      expect(spaceAccess(overseer, { ...personal, status: 'suspended' }, null, 0)).toMatchObject({ canChangeStatus: true, canDelete: true });
+    });
+
+    it('Crew면 Crew의 자리대로 읽고 쓴다 — 위임이 읽기를 더하지도 빼지도 않는다', () => {
+      expect(spaceAccess(overseer, team, 'viewer', 3)).toMatchObject({ canRead: true, canWrite: false });
+    });
+  });
+});
+
+describe('categoryAccess — 분류의 이름 바꾸기·지우기 (P15 C.3, 보류 33)', () => {
+  const mine = { createdBy: 'm' };
+
+  it('**만든 사람은 남의 공간이 쓰지 않을 때만** 바꾸고 지운다 — 자기 공간만 쓰면 된다 (FR-1621)', () => {
+    expect(categoryAccess(member, mine, { otherSpaces: 0 })).toEqual({ canRename: true, canDelete: true });
+    expect(categoryAccess(member, mine, { otherSpaces: 1 })).toEqual({ canRename: false, canDelete: false });
+  });
+
+  it('**만들지 않은 member는 못 한다**', () => {
+    expect(categoryAccess(other, mine, { otherSpaces: 0 })).toEqual({ canRename: false, canDelete: false });
+  });
+
+  it('**관리자와 분류 관리를 받은 사람은 남이 써도 한다**', () => {
+    for (const p of [admin, root, { ...other, grants: ['category.manage'] }]) {
+      expect(categoryAccess(p, mine, { otherSpaces: 5 })).toEqual({ canRename: true, canDelete: true });
+    }
+    // 다른 위임은 분류를 주지 않는다
+    expect(categoryAccess({ ...other, grants: ['space.oversee'] }, mine, { otherSpaces: 5 })).toEqual({ canRename: false, canDelete: false });
+  });
+
+  it('비로그인은 못 한다', () => {
+    expect(categoryAccess(null, mine, { otherSpaces: 0 })).toEqual({ canRename: false, canDelete: false });
+  });
 });
 
 describe('checkPasswordPolicy (8자·2종)', () => {
@@ -150,8 +254,18 @@ describe('checkPasswordPolicy (8자·2종)', () => {
   });
 });
 
-describe('위임 — root가 관리자에게 행위 하나를 준다 (P11 D.1, FR-1200~1206)', () => {
+describe('위임 — 규칙표: 받는 역할과 주는 사람 (P11 D.1 · P15 D.1, FR-1600~1605)', () => {
   const granted = { ...admin, grants: ['llm.manage'] };
+
+  it('**규칙표** — LLM 연결 관리는 root가 관리자에게, 셋은 관리자·root가 member에게 (P15 D.1)', () => {
+    expect(DELEGABLE_ACTIONS).toEqual(['llm.manage', 'category.manage', 'space.unsuspend', 'space.oversee']);
+    expect(DELEGATION).toEqual({
+      'llm.manage': { holder: 'admin', grantor: 'root' },
+      'category.manage': { holder: 'member', grantor: 'admin' },
+      'space.unsuspend': { holder: 'member', grantor: 'admin' },
+      'space.oversee': { holder: 'member', grantor: 'admin' },
+    });
+  });
 
   it('**root는 LLM 연결 관리를 늘 한다** — 위임 없이. 위임을 주고 거두는 것도 root다', () => {
     expect(can(root, 'llm.manage')).toBe(true);
@@ -164,29 +278,57 @@ describe('위임 — root가 관리자에게 행위 하나를 준다 (P11 D.1, F
     expect(can(granted, 'llm.manage')).toBe(true);
   });
 
-  it('**위임은 관리자에게만 먹는다** — member·root가 위임 목록을 들고 와도 역할만 본다', () => {
+  it('**위임은 받는 역할에게만 먹는다** — LLM 연결 관리는 관리자, 셋은 member. 다른 역할이 목록을 들고 와도 보지 않는다', () => {
     expect(can({ ...member, grants: ['llm.manage'] }, 'llm.manage')).toBe(false);
     expect(can({ ...root, grants: [] }, 'llm.manage')).toBe(true);
+    expect(can({ ...member, grants: ['category.manage'] }, 'category.manage')).toBe(true);
+    expect(can({ ...member, grants: ['space.unsuspend'] }, 'space.unsuspend')).toBe(true);
+    expect(can({ ...member, grants: ['space.oversee'] }, 'space.oversee')).toBe(true);
+    // 하나를 받았다고 다른 것이 따라오지 않는다
+    expect(can({ ...member, grants: ['space.oversee'] }, 'category.manage')).toBe(false);
+    expect(can({ ...member, grants: ['space.oversee'] }, 'space.unsuspend')).toBe(false);
   });
 
-  it('**위임할 수 있는 행위만 먹는다** — 목록에 시스템 관리·위임 바꾸기를 적어 와도 안 된다', () => {
-    expect(DELEGABLE_ACTIONS).toEqual(['llm.manage']);
-    const forged = { ...admin, grants: ['system.manage', 'user.grants.change', 'llm.manage'] };
+  it('**위임할 수 있는 행위만 먹는다** — 목록에 시스템 관리·위임 바꾸기·스페이스의 내용을 적어 와도 안 된다', () => {
+    const forged = { ...member, grants: ['system.manage', 'user.grants.change', 'space.manage', 'category.manage'] };
     expect(can(forged, 'system.manage')).toBe(false);
     expect(can(forged, 'user.grants.change')).toBe(false);
-    expect(can(forged, 'llm.manage')).toBe(true);
+    // 스페이스 관리 전체(`space.oversee`)도 내용을 읽는 `space.manage`가 아니다 (A.1-1)
+    expect(can({ ...member, grants: ['space.oversee'] }, 'space.manage')).toBe(false);
+    expect(can(forged, 'space.manage')).toBe(false);
+    expect(can(forged, 'category.manage')).toBe(true);
   });
 
-  it('**위임받은 관리자도 다시 주지 못한다** — 주고 거두는 것은 root만 (A.1-3)', () => {
-    expect(can(granted, 'user.grants.change')).toBe(false);
-    expect(can(admin, 'user.grants.change')).toBe(false);
+  it('**canGrant — 주는 사람과 받는 역할이 표와 맞아야 한다** (A.1-3)', () => {
+    // LLM 연결 관리는 root가 관리자에게만
+    expect(canGrant(root, 'llm.manage', 'admin')).toBe(true);
+    expect(canGrant(granted, 'llm.manage', 'admin')).toBe(false);
+    expect(canGrant(admin, 'llm.manage', 'admin')).toBe(false);
+    expect(canGrant(root, 'llm.manage', 'member')).toBe(false);
+    // 셋은 관리자·root가 member에게만
+    for (const a of ['category.manage', 'space.unsuspend', 'space.oversee'] as const) {
+      expect(canGrant(admin, a, 'member'), a).toBe(true);
+      expect(canGrant(root, a, 'member'), a).toBe(true);
+      expect(canGrant(admin, a, 'admin'), a).toBe(false);
+      expect(canGrant(root, a, 'root'), a).toBe(false);
+      // 받은 사람은 다시 맡기지 못한다
+      expect(canGrant({ ...member, grants: [a] }, a, 'member'), a).toBe(false);
+    }
+    expect(canGrant(null, 'category.manage', 'member')).toBe(false);
   });
 
-  it('**grantsForRole — 관리자가 아니게 되면 위임을 비운다**, 관리자면 위임할 수 있는 것만 남긴다 (A.1-4)', () => {
+  it('**위임을 주고 거두는 창구는 관리자와 root다** — 받은 member는 창구가 없다', () => {
+    expect(can(admin, 'user.grants.change')).toBe(true);
+    expect(can(granted, 'user.grants.change')).toBe(true);
+    expect(can({ ...member, grants: ['space.oversee'] }, 'user.grants.change')).toBe(false);
+  });
+
+  it('**grantsForRole — 그 역할이 받을 수 있는 것만 남긴다** (FR-1603). 관리자가 member가 되면 LLM 연결 관리가, member가 관리자가 되면 셋이 사라진다', () => {
     expect(grantsForRole('admin', ['llm.manage'])).toEqual(['llm.manage']);
     expect(grantsForRole('member', ['llm.manage'])).toEqual([]);
-    expect(grantsForRole('root', ['llm.manage'])).toEqual([]);
-    expect(grantsForRole('admin', ['system.manage', 'llm.manage', 'llm.manage'])).toEqual(['llm.manage']);
+    expect(grantsForRole('root', ['llm.manage', 'space.oversee'])).toEqual([]);
+    expect(grantsForRole('admin', ['system.manage', 'llm.manage', 'llm.manage', 'space.oversee'])).toEqual(['llm.manage']);
+    expect(grantsForRole('member', ['space.oversee', 'category.manage', 'llm.manage', 'category.manage'])).toEqual(['category.manage', 'space.oversee']);
   });
 });
 
