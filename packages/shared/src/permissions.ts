@@ -193,6 +193,8 @@ export type SpaceAccess = {
   canRead: boolean;
   canWrite: boolean;
   canManageMembers: boolean;
+  /** 이름·설명·분류를 바꾸는가 — 주인과 관리자. 상태는 보지 않는다(중지된 공간은 `canWrite`가 막는다 — 서버가 까닭을 나눠 말한다) */
+  canEditInfo: boolean;
   canChangeStatus: boolean;
   canDelete: boolean;
   isOwner: boolean;
@@ -202,6 +204,7 @@ const NO_ACCESS: SpaceAccess = {
   canRead: false,
   canWrite: false,
   canManageMembers: false,
+  canEditInfo: false,
   canChangeStatus: false,
   canDelete: false,
   isOwner: false,
@@ -216,7 +219,8 @@ const NO_ACCESS: SpaceAccess = {
  *   있어야해" — 처음 판은 활성 조건을 빠뜨려 중지된 스페이스를 주인이 지울 수 있었다(P14 병합 전 보안 검토 5).
  * - `canChangeStatus`는 **지금 상태에서 바꿀 수 있는가**다 (P15 D.3). 활성이면 중지 — 주인과 `space.oversee`(관리자·root·스페이스 관리
  *   전체). 중지면 다시 쓰기 — `space.oversee`, 그리고 주인이 건 중지면 주인, **관리자가 건 중지면 `space.unsuspend`를 받은 주인만**(보류 32).
- *   중지된 것 지우기도 `space.oversee`다. **읽기·쓰기·Crew 관리는 관리자 역할과 Crew로만 정한다** — 스페이스 관리 전체는 내용을 읽지 않는다
+ *   중지된 것 지우기도 `space.oversee`다. **읽기·쓰기·Crew 관리·이름 바꾸기는 관리자 역할과 Crew로만 정한다** — 스페이스 관리 전체는 내용을
+ *   읽지 않고 이름도 바꾸지 않는다(A.1-1). 이름·설명·분류는 `canEditInfo`(주인과 관리자)다 — 예전에는 `canChangeStatus`를 빌려 썼다
  */
 export function spaceAccess(
   principal: Principal | null | undefined,
@@ -232,15 +236,16 @@ export function spaceAccess(
   const canResume = overseer || (isOwner && (space.suspendedByOwner === true || can(principal, 'space.unsuspend')));
   const canChangeStatus = active ? overseer || isOwner : canResume;
   const canDelete = (isOwner && memberCount < 2 && active) || (overseer && !active);
+  const canEditInfo = admin || isOwner;
 
   if (space.kind === 'personal') {
     const canRead = isOwner || admin;
-    return { canRead, canWrite: canRead && active, canManageMembers: false, canChangeStatus, canDelete, isOwner };
+    return { canRead, canWrite: canRead && active, canManageMembers: false, canEditInfo, canChangeStatus, canDelete, isOwner };
   }
 
   const canRead = admin || membership !== null;
   const canWrite = active && (admin || isOwner || membership === 'editor');
-  return { canRead, canWrite, canManageMembers: admin || isOwner, canChangeStatus, canDelete, isOwner };
+  return { canRead, canWrite, canManageMembers: admin || isOwner, canEditInfo, canChangeStatus, canDelete, isOwner };
 }
 
 export type CategoryAccess = { canRename: boolean; canDelete: boolean };

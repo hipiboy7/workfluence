@@ -1,17 +1,17 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, PAGE_POSITION_GAP, PAGE_TREE_MAX_DEPTH, createPageDto, documentSchemaVersion, movePageDto, spaceListQueryDto, type DocNode, type Principal } from '@workfluence/shared';
-import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { UuidPipe } from '../common/uuid.pipe';
-import { pageVersions, pages, spaceCategories, spaces, users } from '../db/schema';
+import { auditEvents, pageVersions, pages, spaceCategories, spaces, users } from '../db/schema';
 import { PagesController } from '../pages/pages.module';
 import { PagesService } from '../pages/pages.service';
 import { lockTree } from '../pages/tree-lock';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { CategoriesController, SpacesController } from './spaces.module';
-import { SpacesService } from './spaces.service';
+import { ADMIN_SUSPENDED_MESSAGE, SpacesService } from './spaces.service';
 
 /** B등급 통합 테스트 (P2_설계서_Page 6절). **실제 PostgreSQL**을 쓴다. */
 
@@ -764,12 +764,222 @@ describe('분류 관리 (FR-532)', () => {
     expect(got).toMatchObject({ id: row.id, name: '새 분류' });
   });
 
-  it('**쓰는 스페이스가 있으면 지우지 못한다** — 조용히 NULL로 만들면 복구할 수 없다', async () => {
-    const admin = await user('catadm', 'admin');
-    const [cat] = await db.insert(spaceCategories).values({ name: '재무', createdBy: admin.id }).returning();
-    await spacesSvc.create({ name: '팀', kind: 'team', categoryId: cat.id, description: '' }, admin);
+});
 
-    const [{ n }] = await db.select({ n: count() }).from(spaces).where(and(eq(spaces.categoryId, cat.id), isNull(spaces.deletedAt)));
-    expect(n).toBe(1);
+const REQ = { ip: '127.0.0.1' } as never;
+const withGrants = (p: Principal, grants: Principal['grants']): Principal => ({ ...p, grants });
+
+describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
+  it('**주인이 건 중지는 주인이 푼다** — 건 사람이 주인인지 적고 보기에 싣는다 (FR-1610·1612)', async () => {
+    const owner = await user('owner');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const { row } = await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    expect([row.status, row.suspendedBy, row.suspendedByOwner]).toEqual(['suspended', owner.id, true]);
+    expect((await spacesSvc.get(s.id, owner)).suspendedByOwner).toBe(true);
+    const back = await spacesSvc.changeStatus(s.id, 'active', owner);
+    expect([back.row.status, back.row.suspendedBy, back.row.suspendedByOwner]).toEqual(['active', null, false]);
+    expect((await spacesSvc.get(s.id, owner)).suspendedByOwner).toBe(false);
+  });
+
+  it('**관리자가 건 중지는 권한을 받은 주인만 푼다** — 받지 않은 주인은 403이고 까닭을 듣는다. 개인 공간도 같다 (FR-1611)', async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const team = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const mine = await spacesSvc.create({ name: '내 공간', kind: 'personal', categoryId: null, description: '' }, owner);
+    for (const s of [team, mine]) {
+      const { row } = await spacesSvc.changeStatus(s.id, 'suspended', admin);
+      expect(row.suspendedByOwner).toBe(false);
+      await expect(spacesSvc.changeStatus(s.id, 'active', owner)).rejects.toThrow(ADMIN_SUSPENDED_MESSAGE);
+      // 다른 위임은 풀지 못한다 — 분류 관리
+      await expect(spacesSvc.changeStatus(s.id, 'active', withGrants(owner, ['category.manage']))).rejects.toThrow(ForbiddenException);
+      await expect(spacesSvc.changeStatus(s.id, 'active', withGrants(owner, ['space.unsuspend']))).resolves.toMatchObject({ changed: true, row: { status: 'active' } });
+    }
+    // 관리자는 언제나 푼다
+    await spacesSvc.changeStatus(team.id, 'suspended', admin);
+    await expect(spacesSvc.changeStatus(team.id, 'active', admin)).resolves.toMatchObject({ changed: true });
+  });
+
+  it('**권한을 받아도 주인이 아니면 못 푼다** — editor에게 관리자가 건 중지 풀기가 있어도 그 공간은 그의 것이 아니다', async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const ed = await user('ed');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.addMember(s.id, { username: 'ed', role: 'editor' }, owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    await expect(spacesSvc.changeStatus(s.id, 'active', withGrants(ed, ['space.unsuspend']))).rejects.toThrow('상태를 바꿀 권한이 없다');
+  });
+
+  it('**같은 상태를 다시 보내면 쓰지 않는다** — 권한을 받은 주인이 관리자가 건 중지를 제가 건 것으로 바꿔 두지 못한다. 감사 행도 없다', async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    const again = await spacesSvc.changeStatus(s.id, 'suspended', withGrants(owner, ['space.unsuspend']));
+    expect([again.changed, again.row.suspendedBy, again.row.suspendedByOwner]).toEqual([false, admin.id, false]);
+    // 권한을 거두면 다시 못 푼다 — 바꿔 두었다면 풀렸다
+    await expect(spacesSvc.changeStatus(s.id, 'active', owner)).rejects.toThrow(ADMIN_SUSPENDED_MESSAGE);
+
+    const ctrl = new SpacesController(spacesSvc, new AuditService(db), db);
+    await ctrl.changeStatus(s.id, { status: 'suspended' }, admin as never, REQ);
+    await ctrl.changeStatus(s.id, { status: 'active' }, admin as never, REQ);
+    await ctrl.changeStatus(s.id, { status: 'suspended' }, owner as never, REQ);
+    const rows = await db.select().from(auditEvents).where(eq(auditEvents.action, 'space.status.change'));
+    expect(rows.map((r) => r.detail)).toEqual([{ status: 'active' }, { status: 'suspended', byOwner: true }]);
+  });
+
+  it('**동시에 바꾸면 뒤의 것은 409다** — 앞의 것이 커밋하기 전에 읽은 상태로 덮지 않는다', { timeout: 30_000 }, async () => {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    const first = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', owner, tx));
+    const second = settle(spacesSvc.changeStatus(s.id, 'suspended', admin));
+    await queued();
+    first.release();
+    await first.done;
+    expect(await second).toBeInstanceOf(ConflictException);
+    const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
+    // 주인이 건 중지로 남는다 — 관리자의 요청이 판정 없이 "관리자가 건 것"으로 덮지 않았다
+    expect([row?.suspendedBy, row?.suspendedByOwner]).toEqual([owner.id, true]);
+  });
+});
+
+describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
+  it('**Crew가 아닌 공간도 중지·다시 쓰기·중지된 것 지우기를 한다** — 내용은 읽지 못하고, 돌려받는 보기에 설명이 없다 (FR-1630·1631)', async () => {
+    const owner = await user('owner');
+    const overseer = withGrants(await user('ov'), ['space.oversee']);
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '비밀 설명' }, owner);
+    await expect(spacesSvc.context(s.id, overseer)).rejects.toThrow(NotFoundException);
+    await expect(spacesSvc.get(s.id, overseer)).rejects.toThrow(NotFoundException);
+
+    const ctrl = new SpacesController(spacesSvc, new AuditService(db), db);
+    const view = await ctrl.changeStatus(s.id, { status: 'suspended' }, overseer as never, REQ);
+    expect([view.status, view.suspendedByOwner, view.description, view.access.canRead]).toEqual(['suspended', false, '', false]);
+    // 주인은 이제 권한이 있어야 푼다 — 관리자가 건 것과 같다
+    await expect(spacesSvc.changeStatus(s.id, 'active', owner)).rejects.toThrow(ADMIN_SUSPENDED_MESSAGE);
+    await expect(spacesSvc.changeStatus(s.id, 'active', overseer)).resolves.toMatchObject({ changed: true });
+    // 활성인 공간은 지우지 못한다 — 중지된 것만
+    await expect(spacesSvc.softDelete(s.id, overseer)).rejects.toThrow(ForbiddenException);
+    await spacesSvc.changeStatus(s.id, 'suspended', overseer);
+    await expect(ctrl.remove(s.id, overseer as never, REQ)).resolves.toEqual({ ok: true });
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) }))?.deletedAt).not.toBeNull();
+  });
+
+  it('**받지 않았으면 404다** — Crew가 아닌 공간이 있는지도 드러나지 않는다. 다른 위임도 마찬가지', async () => {
+    const owner = await user('owner');
+    const m = await user('m');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    for (const p of [m, withGrants(m, ['category.manage']), withGrants(m, ['space.unsuspend'])]) {
+      await expect(spacesSvc.changeStatus(s.id, 'suspended', p)).rejects.toThrow(NotFoundException);
+      await expect(spacesSvc.softDelete(s.id, p)).rejects.toThrow(NotFoundException);
+      await expect(spacesSvc.getManaged(s.id, p)).rejects.toThrow(NotFoundException);
+    }
+  });
+
+  it('**이름·설명·분류는 바꾸지 않는다** — editor로 있는 공간도 (A.1-1)', async () => {
+    const owner = await user('owner');
+    const ov = await user('ov');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.addMember(s.id, { username: 'ov', role: 'editor' }, owner);
+    await expect(spacesSvc.update(s.id, { name: '바뀐 이름' }, withGrants(ov, ['space.oversee']))).rejects.toThrow('스페이스 정보를 바꿀 권한이 없다');
+    await expect(spacesSvc.update(s.id, { name: '바뀐 이름' }, owner)).resolves.toMatchObject({ name: '바뀐 이름' });
+  });
+
+  it('**모든 스페이스 목록** — 읽지 못하는 공간도 보이고 설명은 빈다. 받지 않은 member는 403 (FR-1630)', async () => {
+    const owner = await user('owner');
+    const ov = await user('ov');
+    const a = await spacesSvc.create({ name: '가팀', kind: 'team', categoryId: null, description: '가 설명' }, owner);
+    await spacesSvc.create({ name: '나 공간', kind: 'personal', categoryId: null, description: '나 설명' }, owner);
+    await spacesSvc.addMember(a.id, { username: 'ov', role: 'viewer' }, owner);
+    const overseer = withGrants(ov, ['space.oversee']);
+    const views = await spacesSvc.list(overseer, 'all', 500);
+    expect(views.map((v) => [v.name, v.description, v.access.canRead, v.access.canChangeStatus])).toEqual([
+      ['가팀', '가 설명', true, true],
+      ['나 공간', '', false, true],
+      // ov의 개인 공간은 없다 — 사용자를 DB에 바로 넣었다
+    ]);
+    await expect(spacesSvc.list(withGrants(ov, ['category.manage']), 'all', 500)).rejects.toThrow(ForbiddenException);
+  });
+});
+
+describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 사람과 관리자 (P15 C.3, 보류 33)', () => {
+  const ctrl = () => new CategoriesController(new AuditService(db), db);
+  const viewOf = async (me: Principal, id: string) => (await ctrl().list(me as never)).find((c) => c.id === id)!;
+
+  it('**목록이 할 수 있는 일과 쓰임을 싣는다** — 휴지통의 공간도, Crew의 owner로 있는 공간은 자기 것으로 센다 (FR-1623)', async () => {
+    const a = await user('a');
+    const b = await user('b');
+    const admin = await user('boss', 'admin');
+    const cat = await ctrl().create({ name: '운영' }, a as never, REQ);
+    expect([cat.createdBy, cat.usage, cat.access]).toEqual([a.id, { spaces: 0, otherSpaces: 0 }, { canRename: true, canDelete: true }]);
+    expect((await viewOf(b, cat.id)).access).toEqual({ canRename: false, canDelete: false });
+
+    await spacesSvc.create({ name: 'a 공간', kind: 'personal', categoryId: cat.id, description: '' }, a);
+    // b가 만든 팀이지만 a가 owner로 있다 — a의 공간이다
+    const shared = await spacesSvc.create({ name: '같이', kind: 'team', categoryId: cat.id, description: '' }, b);
+    await spacesSvc.addMember(shared.id, { username: 'a', role: 'editor' }, b);
+    await spacesSvc.changeMemberRole(shared.id, a.id, 'owner', b);
+    expect((await viewOf(a, cat.id)).usage).toEqual({ spaces: 2, otherSpaces: 0 });
+    expect((await viewOf(a, cat.id)).access).toEqual({ canRename: true, canDelete: true });
+
+    // b 혼자의 팀이 쓰고 휴지통으로 갔다 — 그래도 남의 공간이다
+    const theirs = await spacesSvc.create({ name: 'b 팀', kind: 'team', categoryId: cat.id, description: '' }, b);
+    await spacesSvc.softDelete(theirs.id, b);
+    expect((await viewOf(a, cat.id)).usage).toEqual({ spaces: 3, otherSpaces: 1 });
+    expect((await viewOf(a, cat.id)).access).toEqual({ canRename: false, canDelete: false });
+    expect((await viewOf(admin, cat.id)).access).toEqual({ canRename: true, canDelete: true });
+    expect((await viewOf(withGrants(b, ['category.manage']), cat.id)).access).toEqual({ canRename: true, canDelete: true });
+    expect((await viewOf(withGrants(b, ['space.oversee']), cat.id)).access).toEqual({ canRename: false, canDelete: false });
+  });
+
+  it('**만든 사람은 자기 공간만 쓰면 지운다** — 그 공간은 분류 없음이 되고 감사에 남는다 (FR-1621·1622)', async () => {
+    const a = await user('a');
+    const cat = await ctrl().create({ name: '운영' }, a as never, REQ);
+    const mine = await spacesSvc.create({ name: 'a 공간', kind: 'personal', categoryId: cat.id, description: '' }, a);
+    await expect(ctrl().remove(cat.id, a as never, REQ)).resolves.toEqual({ ok: true });
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, mine.id) }))?.categoryId).toBeNull();
+    expect(await db.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, cat.id) })).toBeUndefined();
+    const [audit] = await db.select().from(auditEvents).where(eq(auditEvents.action, 'category.delete'));
+    expect(audit.detail).toEqual({ name: '운영', cleared: [{ id: mine.id, name: 'a 공간', deleted: false }] });
+  });
+
+  it('**남의 공간이 쓰면 만든 사람도 이름을 못 바꾸고 못 지운다** — 관리자와 분류 관리를 받은 사람은 한다. 휴지통의 공간도 분류 없음이 된다', async () => {
+    const a = await user('a');
+    const b = await user('b');
+    const c = await user('c');
+    const admin = await user('boss', 'admin');
+    const cat = await ctrl().create({ name: '운영' }, a as never, REQ);
+    const theirs = await spacesSvc.create({ name: 'b 팀', kind: 'team', categoryId: cat.id, description: '' }, b);
+    await spacesSvc.softDelete(theirs.id, b);
+
+    await expect(ctrl().remove(cat.id, a as never, REQ)).rejects.toThrow(/남의 공간이 쓰는 분류는/);
+    await expect(ctrl().rename(cat.id, { name: '운영2' }, a as never, REQ)).rejects.toThrow(/남의 공간이 쓰는 분류는/);
+    await expect(ctrl().remove(cat.id, c as never, REQ)).rejects.toThrow(/만든 사람과 관리자가/);
+    await expect(ctrl().rename(cat.id, { name: '운영2' }, withGrants(c, ['category.manage']) as never, REQ)).resolves.toMatchObject({ name: '운영2' });
+    await expect(ctrl().remove(cat.id, admin as never, REQ)).resolves.toEqual({ ok: true });
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, theirs.id) }))?.categoryId).toBeNull();
+    const [audit] = await db.select().from(auditEvents).where(eq(auditEvents.action, 'category.delete'));
+    expect(audit.detail).toEqual({ name: '운영2', cleared: [{ id: theirs.id, name: 'b 팀', deleted: true }] });
+  });
+
+  it('**지우는 사이 공간에 그 분류를 붙이면 400이다** — 분류 행의 잠금 뒤에 줄을 서고, 지워진 분류를 만난다(500이 아니다) (D.4)', { timeout: 30_000 }, async () => {
+    const admin = await user('boss', 'admin');
+    const owner = await user('owner');
+    const [cat] = await db.insert(spaceCategories).values({ name: '곧 지움', createdBy: admin.id }).returning();
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    // 분류 지우기와 같은 순서 — 잠그고, 쓰던 공간을 비우고, 지운다. 커밋하기 전에 붙이기와 만들기가 온다
+    const deleting = await holdOpen(async (tx) => {
+      await tx.select().from(spaceCategories).where(eq(spaceCategories.id, cat.id)).for('update');
+      await tx.update(spaces).set({ categoryId: null }).where(eq(spaces.categoryId, cat.id));
+      await tx.delete(spaceCategories).where(eq(spaceCategories.id, cat.id));
+    });
+    const attach = settle(spacesSvc.update(s.id, { categoryId: cat.id }, owner));
+    const create = settle(spacesSvc.create({ name: '새 팀', kind: 'team', categoryId: cat.id, description: '' }, owner));
+    await queued();
+    deleting.release();
+    await deleting.done;
+    for (const got of [await attach, await create]) {
+      expect(got).toBeInstanceOf(BadRequestException);
+      expect((got as Error).message).toBe('없는 분류다');
+    }
   });
 });

@@ -117,9 +117,9 @@ export class TrashService {
     return depth;
   }
 
-  /** 지운 스페이스는 관리자만 본다 (FR-513) */
+  /** 지운 스페이스는 관리자와 **스페이스 관리 전체**(`space.oversee`)를 받은 사람만 본다 (FR-513 · P15 FR-1630). 안의 페이지는 보이지 않는다 */
   async listSpaces(principal: Principal, limit: number, tx: Db = this.db): Promise<TrashSpaceView[]> {
-    if (!can(principal, 'space.manage')) throw new ForbiddenException('스페이스 휴지통은 관리자만 본다');
+    if (!can(principal, 'space.oversee')) throw new ForbiddenException('스페이스 휴지통은 관리자와 스페이스 관리 전체를 받은 사람이 본다');
     const rows = await tx
       .select({ id: spaces.id, name: spaces.name, key: spaces.key, deletedAt: spaces.deletedAt, createdByName: users.displayName })
       .from(spaces)
@@ -137,7 +137,7 @@ export class TrashService {
   }
 
   async restoreSpace(id: string, principal: Principal, tx: Db = this.db): Promise<SpaceRow> {
-    if (!can(principal, 'space.manage')) throw new ForbiddenException('스페이스 되살리기는 관리자만 한다');
+    if (!can(principal, 'space.oversee')) throw new ForbiddenException('스페이스 되살리기는 관리자와 스페이스 관리 전체를 받은 사람이 한다');
     const row = await tx.query.spaces.findFirst({ where: and(eq(spaces.id, id), isNotNull(spaces.deletedAt)) });
     if (!row) throw new NotFoundException('휴지통에서 찾을 수 없다');
     // **안에 있던 페이지는 함께 다시 보인다.** 스페이스 삭제는 `spaces.deleted_at`만 건드리고

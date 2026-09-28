@@ -18,7 +18,7 @@ import {
 } from './constants';
 import { validateDocument, type DocNode } from './document';
 import { normalizeLlmBaseUrl, type LlmStreamStatus } from './llm';
-import { DELEGABLE_ACTIONS, type DelegableAction } from './permissions';
+import { DELEGABLE_ACTIONS, type CategoryAccess, type DelegableAction, type SpaceAccess } from './permissions';
 import { POLICY_FLOOR } from './policy';
 
 /** API 요청·응답 계약. 서버(zod 파이프)와 클라이언트(타입)가 같은 정의를 쓴다. */
@@ -343,22 +343,36 @@ export type MeView = {
 /** 로그인 전에도 읽는 비밀번호 규칙 — 길이와 문자 종류 수만 (P13 FR-1472). 잠금 기준·세션 시간은 주지 않는다 */
 export type PasswordRulesView = { minLength: number; minCharClasses: number };
 
-export type CategoryView = { id: string; name: string; createdAt: string };
+/**
+ * 분류 (FR-308 · P15 FR-1623). 줄마다 **할 수 있는 일**(`categoryAccess` — 이름 바꾸기·지우기)과 **쓰임**(휴지통을 포함한 공간 수, 그 가운데
+ * 만든 사람이 주인이 아닌 공간 수)을 싣는다 — 화면은 규칙을 다시 만들지 않는다
+ */
+export type CategoryView = {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdAt: string;
+  access: CategoryAccess;
+  usage: { spaces: number; otherSpaces: number };
+};
 
 export type SpaceView = {
   id: string;
   key: string;
   name: string;
+  /** 읽지 못하는 사람(스페이스 관리 전체로 모든 스페이스를 보는 member)에게는 빈 글이다 (P15 A.1-1) */
   description: string;
   kind: (typeof SPACE_KINDS)[number];
   status: (typeof SPACE_STATUSES)[number];
+  /** 중지를 건 사람이 그 공간의 주인이었는가 (P15 FR-1612) — 중지일 때만 참일 수 있다. 거짓인 중지는 관리자가 건 것이다 */
+  suspendedByOwner: boolean;
   categoryId: string | null;
   categoryName: string | null;
   createdBy: string;
   createdByUsername: string;
   memberCount: number;
   myRole: (typeof SPACE_MEMBER_ROLES)[number] | null;
-  access: { canRead: boolean; canWrite: boolean; canManageMembers: boolean; canChangeStatus: boolean; canDelete: boolean; isOwner: boolean };
+  access: SpaceAccess;
   createdAt: string;
   updatedAt: string;
 };

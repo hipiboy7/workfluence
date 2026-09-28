@@ -12,20 +12,21 @@ export function TrashPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const isAdmin = me ? can({ id: me.id, role: me.role }, 'space.manage') : false;
+  // 지운 스페이스는 관리자와 스페이스 관리 전체를 받은 사람이 본다 (FR-513 · P15 FR-1630) — 받은 위임을 함께 넘긴다
+  const overseer = me ? can({ id: me.id, role: me.role, grants: me.grants }, 'space.oversee') : false;
 
   const load = useCallback(() => {
     api<TrashPageView[]>(`/api/trash/pages?limit=${LIST_PAGE_LIMIT}`)
       .then(setPages)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-    if (isAdmin) {
-      // **오류를 삼키지 않는다.** 여기는 이미 관리자만 오므로 실패는 진짜 고장이다 —
+    if (overseer) {
+      // **오류를 삼키지 않는다.** 여기는 이미 볼 수 있는 사람만 오므로 실패는 진짜 고장이다 —
       // 삼키면 "되살릴 스페이스가 없다"로 보여 휴지통이 빈 것으로 오해한다 (코드 리뷰 11)
       api<TrashSpaceView[]>(`/api/trash/spaces?limit=${LIST_PAGE_LIMIT}`)
         .then(setSpaces)
         .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
     }
-  }, [isAdmin]);
+  }, [overseer]);
   useEffect(load, [load]);
 
   const restorePage = (p: TrashPageView) =>
@@ -64,7 +65,7 @@ export function TrashPage() {
         )}
       </section>
 
-      {isAdmin && (
+      {overseer && (
         <section className="card" aria-label="지운 스페이스">
           <h2>지운 스페이스</h2>
           <p className="muted small">스페이스를 되살리면 <strong>안에 있던 문서도 함께 다시 보인다.</strong> 따로 지운 문서만 위 목록에 남는다.</p>

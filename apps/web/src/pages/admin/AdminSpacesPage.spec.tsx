@@ -5,12 +5,14 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../auth';
 import { SEARCH_DELAY_MS } from '../../timing';
+import { confirmDeleteCategoryText } from '../../components/CategoryList';
 import { confirmSuspendText } from '../../components/SpaceManage';
 import { AdminSpacesPage } from './AdminSpacesPage';
 
 /**
- * 컴포넌트 시험 — 관리 콘솔의 스페이스 (P14_설계서_Spaces D.3, FR-1513~1515). **찾기와 상태는 서버에 보낸다**(`q`·`status`) — 화면에서 거르지 않는다.
- * 늦게 온 옛 응답은 버린다. 줄의 조치는 응답의 `access`대로. 분류를 지울 수 없으면 서버의 까닭을 보인다. 서버는 가짜 `fetch`다
+ * 컴포넌트 시험 — 관리 콘솔의 스페이스 (P14_설계서_Spaces D.3, FR-1513~1515 · P15_설계서_Grants D.5). **찾기와 상태는 서버에 보낸다**(`q`·`status`) —
+ * 화면에서 거르지 않는다. 늦게 온 옛 응답은 버린다. 줄의 조치는 응답의 `access`대로. 분류의 이름 바꾸기·지우기도 응답의 `access`대로이고, 지우기는
+ * 몇 개가 분류 없음이 되는지 묻는다. 스페이스 관리 전체·분류 관리를 받은 member도 연다. 서버는 가짜 `fetch`다
  */
 
 type Call = { method: string; url: string; body: unknown };
@@ -27,7 +29,16 @@ let categoriesFail = false;
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
 
-const NO = { canRead: true, canWrite: false, canManageMembers: false, canChangeStatus: false, canDelete: false, isOwner: false };
+const NO = { canRead: true, canWrite: false, canManageMembers: false, canEditInfo: false, canChangeStatus: false, canDelete: false, isOwner: false };
+const category = (over: Partial<CategoryView>): CategoryView => ({
+  id: 'c1',
+  name: '운영',
+  createdBy: 'u9',
+  createdAt: '2026-09-27T00:00:00.000Z',
+  access: { canRename: true, canDelete: true },
+  usage: { spaces: 0, otherSpaces: 0 },
+  ...over,
+});
 const space = (over: Partial<SpaceView>): SpaceView => ({
   id: 's',
   key: 'KEY',
@@ -35,13 +46,14 @@ const space = (over: Partial<SpaceView>): SpaceView => ({
   description: '',
   kind: 'team',
   status: 'active',
+  suspendedByOwner: false,
   categoryId: null,
   categoryName: null,
   createdBy: 'u1',
   createdByUsername: 'owner',
   memberCount: 3,
   myRole: null,
-  access: { ...NO, canWrite: true, canManageMembers: true, canChangeStatus: true },
+  access: { ...NO, canWrite: true, canManageMembers: true, canEditInfo: true, canChangeStatus: true },
   createdAt: '2026-09-27T00:00:00.000Z',
   updatedAt: '2026-09-27T00:00:00.000Z',
   ...over,
@@ -58,7 +70,7 @@ beforeEach(() => {
     space({ id: 's1', key: 'OPS1', name: '운영팀' }),
     space({ id: 's2', key: 'DEV1', name: '개발팀', status: 'suspended', access: { ...NO, canChangeStatus: true, canDelete: true } }),
   ];
-  categories = [{ id: 'c1', name: '운영', createdAt: '2026-09-27T00:00:00.000Z' }];
+  categories = [category({})];
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const url = String(input);
@@ -78,7 +90,7 @@ beforeEach(() => {
       const name = (JSON.parse(init!.body as string) as { name: string }).name;
       const found = categories.find((c) => c.name === name);
       if (found) return answer(json(200, found));
-      const made = { id: `c${categories.length + 1}`, name, createdAt: '2026-09-27T00:00:00.000Z' };
+      const made = category({ id: `c${categories.length + 1}`, name, createdBy: me.id });
       categories = [...categories, made];
       return answer(json(201, made));
     }
@@ -211,7 +223,7 @@ describe('AdminSpacesPage — 모든 스페이스', () => {
   it('관리 권한이 없으면 목록도 분류도 부르지 않는다', async () => {
     me = { ...me, role: 'member' };
     renderPage();
-    expect(await screen.findByText('권한이 없다 — 스페이스 관리는 관리자만 한다.')).toBeTruthy();
+    expect(await screen.findByText('권한이 없다 — 스페이스 관리는 관리자와, 관리자가 스페이스 관리 전체나 분류 관리를 맡긴 사람이 한다.')).toBeTruthy();
     // 이 글은 누구인지 알기 전에도 보인다 — 누구인지 안 뒤, 찾기를 기다리는 시간이 지나도 부르지 않는지 본다
     await waitFor(() => expect(calls.some((c) => c.url === '/api/auth/me')).toBe(true));
     await new Promise((r) => setTimeout(r, SEARCH_DELAY_MS + 200));
@@ -257,13 +269,75 @@ describe('AdminSpacesPage — 분류', () => {
     expect(screen.getAllByLabelText(/^분류 .+ 이름$/)).toHaveLength(1);
   });
 
-  it('**쓰는 스페이스가 있어 지울 수 없으면 서버의 까닭을 보인다** (P4 FR-538)', async () => {
-    window.confirm = vi.fn(() => true);
-    categoryDelete = { status: 409, body: { message: '이 분류를 쓰는 스페이스가 2개 있다(휴지통 포함). 먼저 옮긴 뒤 지운다' } };
+  it('**지우기는 몇 개가 분류 없음이 되는지 묻는다** — 지우면 그렇게 알리고 목록을 다시 읽는다 (P15 FR-1622·1624)', async () => {
+    categories = [category({ usage: { spaces: 2, otherSpaces: 1 } })];
+    const confirm = vi.fn(() => true);
+    window.confirm = confirm;
     renderPage();
     await screen.findByLabelText('분류 운영 이름');
-    const del = screen.getAllByRole('button', { name: '지우기' }).at(-1)!;
-    fireEvent.click(del);
-    expect((await screen.findByRole('alert')).textContent).toContain('이 분류를 쓰는 스페이스가 2개 있다');
+    expect(screen.getByText('공간 2개 (만든 사람의 것이 아닌 공간 1개)')).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
+    expect(confirm).toHaveBeenCalledWith(confirmDeleteCategoryText(categories[0]));
+    expect((await screen.findByRole('status')).textContent).toBe('분류 "운영"을(를) 지웠다 — 쓰던 공간 2개는 분류 없음이 됐다.');
+    expect(writes()).toEqual([{ method: 'DELETE', url: '/api/categories/c1', body: undefined }]);
+  });
+
+  it('서버가 거절하면 그 까닭을 보인다', async () => {
+    window.confirm = vi.fn(() => true);
+    categoryDelete = { status: 403, body: { message: "남의 공간이 쓰는 분류는 관리자나 '분류 관리'를 받은 사람이 지운다" } };
+    renderPage();
+    await screen.findByLabelText('분류 운영 이름');
+    fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('남의 공간이 쓰는 분류는');
+  });
+
+  it('**할 수 없는 분류는 누를 수 없고 까닭이 보인다** — 내가 만들었으면 남의 공간이 써서, 아니면 만든 사람이 아니어서 (FR-1621)', async () => {
+    me = { ...me, id: 'm1', role: 'member', grants: ['space.oversee'] };
+    categories = [
+      category({ id: 'c1', name: '내 것', createdBy: 'm1', access: { canRename: false, canDelete: false }, usage: { spaces: 3, otherSpaces: 1 } }),
+      category({ id: 'c2', name: '남의 것', createdBy: 'u9', access: { canRename: false, canDelete: false } }),
+    ];
+    renderPage();
+    const mine = (await screen.findByLabelText('분류 내 것 이름')).closest('li')!;
+    const theirs = screen.getByLabelText('분류 남의 것 이름').closest('li')!;
+    const del = (li: HTMLElement) => within(li).getByRole('button', { name: '지우기' }) as HTMLButtonElement;
+    await waitFor(() => expect(del(mine).title).toBe("남의 공간이 쓰는 분류는 관리자나 '분류 관리'를 받은 사람이 바꾸고 지운다"));
+    expect([del(mine).disabled, del(theirs).disabled]).toEqual([true, true]);
+    expect(del(theirs).title).toBe('분류는 만든 사람과 관리자가 바꾸고 지운다');
+    expect((within(mine).getByRole('textbox') as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe('AdminSpacesPage — 맡긴 권한으로 연다 (P15 D.5)', () => {
+  it('**분류 관리만 받은 member** — 분류 칸만 보이고, 모든 스페이스는 부르지 않는다', async () => {
+    me = { ...me, id: 'm1', role: 'member', grants: ['category.manage'] };
+    renderPage();
+    await screen.findByLabelText('분류 운영 이름');
+    await new Promise((r) => setTimeout(r, SEARCH_DELAY_MS + 200));
+    expect(screen.queryByRole('table', { name: '모든 스페이스' })).toBeNull();
+    expect(listCalls()).toEqual([]);
+  });
+
+  it('**스페이스 관리 전체를 받은 member** — 모든 스페이스 표가 보인다. 누가 중지했는지도', async () => {
+    me = { ...me, id: 'm1', role: 'member', grants: ['space.oversee'] };
+    spaces = [
+      space({ id: 's1', key: 'OPS1', name: '운영팀', status: 'suspended', suspendedByOwner: true, access: { ...NO, canChangeStatus: true } }),
+      space({ id: 's2', key: 'DEV1', name: '개발팀', status: 'suspended', suspendedByOwner: false, access: { ...NO, canChangeStatus: true, canDelete: true } }),
+    ];
+    renderPage();
+    await screen.findByRole('link', { name: '운영팀' });
+    const row = (name: string) => within(table()).getByRole('link', { name }).closest('tr')!;
+    expect(within(row('운영팀')).getByText('주인이 걸었다')).toBeTruthy();
+    expect(within(row('개발팀')).getByText('관리자가 걸었다')).toBeTruthy();
+    expect(rowButtons('개발팀')).toEqual(['다시 쓰기', '지우기']);
+  });
+
+  it('다른 위임(관리자가 건 중지 풀기)만으로는 열지 못한다', async () => {
+    me = { ...me, id: 'm1', role: 'member', grants: ['space.unsuspend'] };
+    renderPage();
+    expect(await screen.findByText(/권한이 없다 — 스페이스 관리는/)).toBeTruthy();
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/auth/me')).toBe(true));
+    await new Promise((r) => setTimeout(r, SEARCH_DELAY_MS + 200));
+    expect(calls.map((c) => c.url)).toEqual(['/api/auth/me']);
   });
 });
