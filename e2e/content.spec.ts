@@ -37,11 +37,11 @@ test('검색 → 첨부 → 댓글', async ({ page }) => {
   const spaceName = `E2E 내용 ${STAMP}`;
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
 
   await page.getByLabel('새 페이지 제목').fill(TITLE);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   await page.locator('.editor .ProseMirror').click();
   await page.keyboard.type('올해 결산 내용을 적는다');

@@ -34,14 +34,14 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
   const spaceName = `E2E 관리 ${STAMP}`;
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
   await page.getByLabel('아이디로 Crew 추가').fill(MATE.username);
   await page.getByRole('button', { name: '추가' }).click();
   await expect(page.getByText(MATE.displayName)).toBeVisible();
 
   await page.getByLabel('새 페이지 제목').fill(`정책 회의 ${STAMP}`);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.locator('.editor .ProseMirror').click();
   await page.keyboard.type('내용을 적는다');
   await page.getByRole('button', { name: '저장' }).click();

@@ -41,14 +41,14 @@ test('두 사람이 같은 페이지를 동시에 고치면 서로 보이고, �
   const spaceName = `협업 공간 ${Date.now()}`;
   await a.goto('/');
   await a.getByLabel('이름').fill(spaceName);
-  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('button', { name: '만들기', exact: true }).click();
   await a.getByRole('link', { name: spaceName }).click();
   await a.getByLabel('아이디로 Crew 추가').fill(mate.username);
   await a.getByRole('button', { name: '추가' }).click();
 
   const pageTitle = `협업 문서 ${Date.now()}`;
   await a.getByLabel('새 페이지 제목').fill(pageTitle);
-  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('button', { name: '만들기', exact: true }).click();
   // 만들면 **편집 화면으로 바로 간다** (Phase 2의 흐름)
   await expect(a.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   const pageId = /\/pages\/([0-9a-f-]+)/.exec(a.url())?.[1] ?? '';
@@ -101,12 +101,12 @@ test('두 버전을 골라 비교하고 HTML로 내보낸다', async ({ page }) 
   const spaceName = `비교 공간 ${Date.now()}`;
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
 
   const pageTitle = `비교 문서 ${Date.now()}`;
   await page.getByLabel('새 페이지 제목').fill(pageTitle);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   const pageId = /\/pages\/([0-9a-f-]+)/.exec(page.url())?.[1] ?? '';
 
@@ -159,12 +159,12 @@ test('A가 부르고 B가 마지막으로 고쳐도, 알림함은 A가 불렀다
   const spaceName = `멘션 공간 ${Date.now()}`;
   await a.goto('/');
   await a.getByLabel('이름').fill(spaceName);
-  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('button', { name: '만들기', exact: true }).click();
   await a.getByRole('link', { name: spaceName }).click();
   await a.getByLabel('아이디로 Crew 추가').fill(mate.username);
   await a.getByRole('button', { name: '추가' }).click();
   await a.getByLabel('새 페이지 제목').fill(`멘션 문서 ${Date.now()}`);
-  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(a.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   const pageId = /\/pages\/([0-9a-f-]+)/.exec(a.url())?.[1] ?? '';
 
@@ -207,10 +207,10 @@ test('이메일 주소를 치고 정렬된 표·제목 붙은 링크·rel=opener
   const spaceName = `맞춤 공간 ${Date.now()}`;
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
   await page.getByLabel('새 페이지 제목').fill(`맞춤 문서 ${Date.now()}`);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByText(/쓰는 대로 자동으로 저장된다/)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/같이 보는 사람/)).toBeVisible({ timeout: 15_000 });
 
@@ -270,12 +270,12 @@ test('조작한 연결이 보낸 것은 문서에 들어가지 않고 그 연결
   const spaceName = `관문 공간 ${Date.now()}`;
   await a.goto('/');
   await a.getByLabel('이름').fill(spaceName);
-  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('button', { name: '만들기', exact: true }).click();
   await a.getByRole('link', { name: spaceName }).click();
   await a.getByLabel('아이디로 Crew 추가').fill(mate.username);
   await a.getByRole('button', { name: '추가' }).click();
   await a.getByLabel('새 페이지 제목').fill(`관문 문서 ${Date.now()}`);
-  await a.getByRole('button', { name: '만들기' }).click();
+  await a.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(a.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   const pageId = /\/pages\/([0-9a-f-]+)/.exec(a.url())?.[1] ?? '';
 
@@ -400,7 +400,7 @@ test('남은 옛 상태로 자동 저장이 멈추면 화면이 까닭을 말하
   const spaceName = `옛 상태 공간 ${Date.now()}`;
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
   const spaceId = /\/spaces\/([0-9a-f-]+)/.exec(page.url())?.[1] ?? '';
   expect(spaceId).not.toBe('');

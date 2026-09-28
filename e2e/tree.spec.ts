@@ -26,7 +26,7 @@ test('하위 페이지를 만들고 옮긴다 — 트리가 새 자리와 들여
   const spaceName = `E2E 트리 ${Date.now()}`;
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
   await expect(page.getByRole('heading', { name: spaceName })).toBeVisible();
   const spaceUrl = page.url();
@@ -39,7 +39,7 @@ test('하위 페이지를 만들고 옮긴다 — 트리가 새 자리와 들여
   // 맨 위에 둘을 만든다
   for (const title of ['회의록', '규정']) {
     await page.getByLabel('새 페이지 제목').fill(title);
-    await page.getByRole('button', { name: '만들기' }).click();
+    await page.getByRole('button', { name: '만들기', exact: true }).click();
     await expect(page.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
     await page.goto(spaceUrl);
   }
@@ -49,7 +49,7 @@ test('하위 페이지를 만들고 옮긴다 — 트리가 새 자리와 들여
   await page.getByRole('link', { name: '하위 페이지 만들기' }).click();
   await expect(page.getByLabel('위치').locator('option:checked')).toHaveText(/회의록/);
   await page.getByLabel('새 페이지 제목').fill('9월 회의');
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   await page.goto(spaceUrl);
   await expect(tree.getByRole('listitem')).toHaveText([/^회의록/, /^9월 회의/, /^규정/]);

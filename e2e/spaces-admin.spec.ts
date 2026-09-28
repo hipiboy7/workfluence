@@ -34,13 +34,13 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
   await page.getByRole('link', { name: '스페이스 관리' }).click();
   await expect(page.getByRole('heading', { name: '스페이스 관리' })).toBeVisible();
   await page.getByLabel('새 분류').fill(category);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByLabel(`분류 ${category} 이름`)).toBeVisible();
 
   // 2) 팀 스페이스를 만들고 — Crew를 viewer로 넣고 editor로 바꾼다
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
   await page.getByLabel('아이디로 Crew 추가').fill(MATE.username);
   await page.getByLabel('역할', { exact: true }).selectOption('viewer');
