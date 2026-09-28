@@ -207,6 +207,36 @@ describe('spaceAccess', () => {
     });
   });
 
+  describe('관리자가 건 중지 동안 Crew는 관리자만 바꾼다 (P16 C, 보류 35)', () => {
+    const byOwner = { ...suspendedTeam, suspendedByOwner: true };
+    const byAdmin = { ...suspendedTeam, suspendedByOwner: false };
+
+    it('**관리자가 건 중지면 주인은 Crew를 바꾸지 못한다** — 만든 사람도 Crew의 owner도, 관리자가 건 중지 풀기를 받았어도 (FR-1700)', () => {
+      expect(spaceAccess(member, byAdmin, 'owner', 2).canManageMembers).toBe(false);
+      expect(spaceAccess(other, { ...byAdmin, createdBy: 'someone' }, 'owner', 2).canManageMembers).toBe(false);
+      expect(spaceAccess({ ...member, grants: ['space.unsuspend'] }, byAdmin, 'owner', 2).canManageMembers).toBe(false);
+      // 모르면(적힌 것이 없으면) 관리자가 건 것으로 친다 — 푸는 판정과 같은 기준(P15 D.2)
+      expect(spaceAccess(member, suspendedTeam, 'owner', 2).canManageMembers).toBe(false);
+    });
+
+    it('**관리자는 언제나 바꾼다** — 관리자가 건 중지에서도 (FR-1701)', () => {
+      expect(spaceAccess(admin, byAdmin, null, 2).canManageMembers).toBe(true);
+      expect(spaceAccess(root, byAdmin, null, 2).canManageMembers).toBe(true);
+    });
+
+    it('**주인이 스스로 건 중지와 활성인 공간은 그대로** — 주인이 바꾼다 (FR-1701)', () => {
+      expect(spaceAccess(member, byOwner, 'owner', 2).canManageMembers).toBe(true);
+      expect(spaceAccess(member, team, 'owner', 2).canManageMembers).toBe(true);
+      expect(spaceAccess(member, { ...team, suspendedByOwner: false }, 'owner', 2).canManageMembers).toBe(true);
+    });
+
+    it('스페이스 관리 전체는 Crew를 바꾸지 않는다 — 중지·지우기만 맡겼다. 개인 공간에는 Crew가 없다', () => {
+      expect(spaceAccess({ ...other, grants: ['space.oversee'] }, byAdmin, null, 2).canManageMembers).toBe(false);
+      expect(spaceAccess({ ...other, grants: ['space.oversee'] }, team, 'editor', 2).canManageMembers).toBe(false);
+      expect(spaceAccess(member, { ...personal, status: 'suspended', suspendedByOwner: false }, 'owner', 0).canManageMembers).toBe(false);
+    });
+  });
+
   describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
     const overseer = { ...other, grants: ['space.oversee'] };
 
