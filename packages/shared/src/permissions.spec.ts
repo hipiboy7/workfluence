@@ -151,7 +151,15 @@ describe('spaceAccess', () => {
   });
 
   it('비로그인은 전부 거부', () => {
-    expect(spaceAccess(null, team, null, 1)).toEqual({ canRead: false, canWrite: false, canManageMembers: false, canChangeStatus: false, canDelete: false, isOwner: false });
+    expect(spaceAccess(null, team, null, 1)).toEqual({
+      canRead: false,
+      canWrite: false,
+      canManageMembers: false,
+      canEditInfo: false,
+      canChangeStatus: false,
+      canDelete: false,
+      isOwner: false,
+    });
   });
 
   describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
@@ -207,6 +215,31 @@ describe('spaceAccess', () => {
 
     it('Crew면 Crew의 자리대로 읽고 쓴다 — 위임이 읽기를 더하지도 빼지도 않는다', () => {
       expect(spaceAccess(overseer, team, 'viewer', 3)).toMatchObject({ canRead: true, canWrite: false });
+    });
+
+    it('**이름·설명·분류는 바꾸지 않는다** — editor로 있는 공간도. 중지·다시 쓰기·지우기만 맡겼다 (A.1-1)', () => {
+      expect(spaceAccess(overseer, team, 'editor', 3)).toMatchObject({ canWrite: true, canEditInfo: false, canChangeStatus: true });
+      expect(spaceAccess(overseer, team, null, 3).canEditInfo).toBe(false);
+    });
+  });
+
+  describe('이름·설명·분류 바꾸기 (`canEditInfo` — P14 C.2, P15 A.1-1)', () => {
+    it('**주인과 관리자만** — editor·viewer·남은 못 한다. 상태와 무관하다(중지된 공간은 쓰기가 막는다)', () => {
+      expect(spaceAccess(member, team, 'owner', 3).canEditInfo).toBe(true);
+      expect(spaceAccess(member, personal, 'owner', 0).canEditInfo).toBe(true);
+      expect(spaceAccess(admin, team, null, 3).canEditInfo).toBe(true);
+      expect(spaceAccess(root, personal, null, 0).canEditInfo).toBe(true);
+      expect(spaceAccess(other, team, 'editor', 3).canEditInfo).toBe(false);
+      expect(spaceAccess(other, team, 'viewer', 3).canEditInfo).toBe(false);
+      expect(spaceAccess(other, personal, null, 0).canEditInfo).toBe(false);
+      // 중지된 공간 — 칸은 참이고 쓰기가 거짓이다. 서버는 둘을 따로 보고 까닭을 나눠 말한다
+      expect(spaceAccess(member, { ...team, status: 'suspended', suspendedByOwner: false }, 'owner', 3)).toMatchObject({ canEditInfo: true, canWrite: false, canChangeStatus: false });
+    });
+
+    it('권한을 받은 member도 남의 공간은 못 바꾼다 — 분류 관리·관리자가 건 중지 풀기도 이름을 주지 않는다', () => {
+      for (const g of ['category.manage', 'space.unsuspend', 'space.oversee'] as const) {
+        expect(spaceAccess({ ...other, grants: [g] }, team, 'editor', 3).canEditInfo).toBe(false);
+      }
     });
   });
 });
