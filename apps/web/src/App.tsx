@@ -15,6 +15,7 @@ import { TrashPage } from './pages/TrashPage';
 import { SpacePage } from './pages/SpacePage';
 import { SpacesPage } from './pages/SpacesPage';
 import { LoginPage } from './pages/LoginPage';
+import { RootIdHelpPage } from './pages/RootIdHelpPage';
 import { SignupPage } from './pages/SignupPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
 import { AdminLlmPage } from './pages/admin/AdminLlmPage';
@@ -36,6 +37,7 @@ export function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/find-account" element={<FindAccountPage />} />
+          <Route path="/find-account/root" element={<RootIdHelpPage />} />
           <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
           <Route path="/admin/users" element={<RequireAuth><AdminUsersPage /></RequireAuth>} />
           <Route path="/admin/audit" element={<RequireAuth><AdminAuditPage /></RequireAuth>} />

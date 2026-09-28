@@ -52,7 +52,8 @@ export function LoginPage() {
           <a className="button-like" href="/api/auth/oidc/start">사내 계정으로 로그인</a>
         )}
         <p className="muted small">
-          <Link to="/signup">가입 요청</Link> · <Link to="/find-account">아이디·비밀번호 찾기</Link>
+          <Link to="/signup">가입 요청</Link> · <Link to="/find-account">아이디·비밀번호 찾기</Link> ·{' '}
+          <Link to="/find-account/root">시스템 관리자 아이디 찾기</Link>
         </p>
       </form>
     </main>
