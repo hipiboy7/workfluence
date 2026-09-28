@@ -304,8 +304,16 @@ describe('SpacePage — Crew의 역할 (FR-1512)', () => {
   it('**스스로 풀 수 있는 주인에게는 관리자에게 부탁하라고 하지 않는다** — 다시 쓰기로 먼저 풀면 바꾼다(관리자가 건 중지 풀기를 받았다)', async () => {
     answerSpace = () => Promise.resolve(json(200, adminSuspended({ canChangeStatus: true })));
     renderAt('/spaces/s1');
-    expect(await screen.findByText('관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 스페이스 관리의 다시 쓰기로 먼저 풀면 바꾼다.')).toBeTruthy();
+    expect(await screen.findByText('관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 아래 관리 칸의 다시 쓰기로 먼저 풀면 바꾼다.')).toBeTruthy();
     expect(screen.queryByText(/관리자에게 부탁한다/)).toBeNull();
+    expect(screen.queryByLabelText('아이디로 Crew 추가')).toBeNull();
+  });
+
+  it('**안내는 판정의 `crewFrozen`만 본다** — 주인인데 바꾸지 못해도 판정이 얼었다고 하지 않으면 안내를 짐작해 보이지 않는다 (A.1-6, 좁은 재점검)', async () => {
+    answerSpace = () => Promise.resolve(json(200, adminSuspended({ crewFrozen: false })));
+    renderAt('/spaces/s1');
+    await screen.findByText(/kim/);
+    expect(screen.queryByText(/Crew를 바꾸지 못한다/)).toBeNull();
     expect(screen.queryByLabelText('아이디로 Crew 추가')).toBeNull();
   });
 

@@ -1086,7 +1086,7 @@ describe('Crew 쓰기도 판정한 상태에서만 (P16 A.1-5, 병합 전 검토
     ['빼기', (spaceId, owner, mateId, tx) => spacesSvc.removeMember(spaceId, mateId, owner, tx)],
   ];
   for (const [name, act] of acts) {
-    it(`**관리자의 중지가 커밋되기 전에 온 주인의 ${name}는 기다렸다가 새 상태로 판정한다** — 403, Crew가 그대로다(잠그지 않으면 얼린 뒤에 들어갔다)`, { timeout: 30_000 }, async () => {
+    it(`**관리자의 중지가 커밋되기 전에 온 주인의 ${name}는 기다렸다가 새 상태로 판정한다** — 403, Crew가 그대로다`, { timeout: 30_000 }, async () => {
       const { owner, admin, mate, s } = await setup();
       const suspending = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', admin, tx));
       // 화면이 부르는 길과 같게 — 컨트롤러가 트랜잭션을 열고 그 안에서 부른다
@@ -1111,6 +1111,38 @@ describe('Crew 쓰기도 판정한 상태에서만 (P16 A.1-5, 병합 전 검토
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
     expect([row?.status, row?.suspendedByOwner]).toEqual(['suspended', false]);
     expect((await spacesSvc.members(s.id, admin)).map((m) => m.username)).toEqual(['mate', 'newbie', 'owner']);
+  });
+
+  it('**권한 없는 사람은 줄에 서지 않는다** — 공간 행이 잠겨 있어도 Crew가 아닌 사람은 곧바로 404, viewer는 곧바로 403 (좁은 재점검 — T-073)', { timeout: 30_000 }, async () => {
+    const { owner, admin, s } = await setup();
+    const stranger = await user('stranger');
+    const viewer = await user('looker');
+    await spacesSvc.addMember(s.id, { username: 'looker', role: 'viewer' }, owner);
+    const suspending = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', admin, tx));
+    // 실패해도 남은 요청을 끝까지 기다린 뒤 끝낸다 — 줄에 선 채 남으면 다음 시험의 표 비우기와 겹쳐 실패가 번진다(`releaseAfter`와 같은 까닭)
+    const tries: Promise<unknown>[] = [];
+    try {
+      tries.push(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, stranger));
+      expect(await within(tries[0])).toBeInstanceOf(NotFoundException);
+      tries.push(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, viewer));
+      const denied = await within(tries[1]);
+      expect(denied).toBeInstanceOf(ForbiddenException);
+      expect((denied as Error).message).toBe('Crew를 관리할 권한이 없다');
+    } finally {
+      suspending.release();
+      await suspending.done;
+      await Promise.allSettled(tries);
+    }
+  });
+
+  it('**Crew를 바꾸는 일끼리도 한 줄로 선다** — 앞의 것이 끝나면 뒤의 것이 새 상태로 판정한다. 배타 잠금이라 온 순서대로다(나눔 잠금은 기다리는 상태 바꾸기를 끝없이 밀었다 — T-073)', { timeout: 30_000 }, async () => {
+    const { owner, admin, s } = await setup();
+    await user('other');
+    const first = await holdOpen((tx) => spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, owner, tx));
+    const second = settle(spacesSvc.addMember(s.id, { username: 'other', role: 'editor' }, admin));
+    await releaseAfter(first, 1);
+    expect(await second).not.toBeInstanceOf(Error);
+    expect((await spacesSvc.members(s.id, admin)).map((m) => m.username)).toEqual(['mate', 'newbie', 'other', 'owner']);
   });
 
   it('트랜잭션 없이 불러도 된다 — 스스로 트랜잭션을 열고 그 안에서 잠그고 쓴다', async () => {

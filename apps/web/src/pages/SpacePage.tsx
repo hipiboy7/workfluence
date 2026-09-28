@@ -225,7 +225,7 @@ export function SpacePage() {
           {space.access.crewFrozen && (
             <p className="muted small">
               {space.access.canChangeStatus
-                ? '관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 스페이스 관리의 다시 쓰기로 먼저 풀면 바꾼다.'
+                ? '관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 아래 관리 칸의 다시 쓰기로 먼저 풀면 바꾼다.'
                 : '관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 관리자에게 부탁한다. 다시 쓰게 되면 주인도 바꾼다.'}
             </p>
           )}
