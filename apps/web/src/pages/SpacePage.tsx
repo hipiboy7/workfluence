@@ -40,8 +40,9 @@ export function SpacePage() {
   // 늦게 온 옛 응답이 새 읽기를 덮지 않게 — 역할을 연달아 바꾸면 응답 순서가 뒤바뀐다 (병합 전 자체 점검 13)
   const seq = useRef(0);
 
-  const load = useCallback(() => {
-    setError(null);
+  // `keepError` — 거절된 뒤 다시 읽을 때는 그 까닭을 지우지 않는다(아래 `act`)
+  const load = useCallback((keepError = false) => {
+    if (!keepError) setError(null);
     const mine = ++seq.current;
     api<SpaceView>(`/api/spaces/${id}`)
       .then(async (s) => {
@@ -56,7 +57,7 @@ export function SpacePage() {
         if (mine === seq.current) setError(e instanceof Error ? e.message : String(e));
       });
   }, [id]);
-  useEffect(load, [load]);
+  useEffect(() => load(), [load]);
   useEffect(() => {
     // 목록이 없어도 페이지는 만들 수 있어야 한다. 실패를 화면 오류로 올리지 않는다
     api<PageTemplateView[]>('/api/templates')
@@ -97,6 +98,9 @@ export function SpacePage() {
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      // **거절되면 지금 상태를 다시 읽는다** — 화면을 연 사이 관리자가 중지했으면 옛 화면이 넣기 칸을 계속 보여 같은 403을 되풀이했다(P16 병합 전
+      // 검토). 관리 칸(`SpaceManage`)과 같은 원칙이다(P15)
+      load(true);
     }
   };
 
@@ -216,6 +220,15 @@ export function SpacePage() {
               </li>
             ))}
           </ul>
+          {/* 관리자가 건 중지 동안 Crew는 관리자만 바꾼다 — 단추만 사라지면 권한을 잃은 줄 안다 (P16 FR-1702). 얼었는지는 판정이 말한다(`crewFrozen`).
+              스스로 풀 수 있는 주인(관리자가 건 중지 풀기·스페이스 관리 전체를 받았다)에게는 관리자에게 부탁하라고 하지 않는다 */}
+          {space.access.crewFrozen && (
+            <p className="muted small">
+              {space.access.canChangeStatus
+                ? '관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 아래 관리 칸의 다시 쓰기로 먼저 풀면 바꾼다.'
+                : '관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 관리자에게 부탁한다. 다시 쓰게 되면 주인도 바꾼다.'}
+            </p>
+          )}
           {space.access.canManageMembers && (
             <form
               onSubmit={(e) => {

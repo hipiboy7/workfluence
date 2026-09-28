@@ -200,6 +200,12 @@ export type SpaceAccess = {
   canChangeStatus: boolean;
   canDelete: boolean;
   isOwner: boolean;
+  /**
+   * **주인인데 관리자가 건 중지라 Crew를 바꾸지 못한다** (P16 FR-1700·1702). 서버가 거절의 까닭을 가르고 화면이 Crew 칸의 안내를 보이는 것이 이 값
+   * 하나다 — "주인인데 `canManageMembers`가 거짓이면 얼었다"를 두 곳이 따로 짐작하면, 막는 까닭이 하나 더 생길 때 둘 다 조용히 틀린 까닭을 말한다
+   * (병합 전 코드 리뷰). 관리자와 주인이 아닌 사람은 늘 거짓이다
+   */
+  crewFrozen: boolean;
 };
 
 const NO_ACCESS: SpaceAccess = {
@@ -210,6 +216,7 @@ const NO_ACCESS: SpaceAccess = {
   canChangeStatus: false,
   canDelete: false,
   isOwner: false,
+  crewFrozen: false,
 };
 
 /**
@@ -221,8 +228,12 @@ const NO_ACCESS: SpaceAccess = {
  *   있어야해" — 처음 판은 활성 조건을 빠뜨려 중지된 스페이스를 주인이 지울 수 있었다(P14 병합 전 보안 검토 5).
  * - `canChangeStatus`는 **지금 상태에서 바꿀 수 있는가**다 (P15 D.3). 활성이면 중지 — 주인과 `space.oversee`(관리자·root·스페이스 관리
  *   전체). 중지면 다시 쓰기 — `space.oversee`, 그리고 주인이 건 중지면 주인, **관리자가 건 중지면 `space.unsuspend`를 받은 주인만**(보류 32).
- *   중지된 것 지우기도 `space.oversee`다. **읽기·쓰기·Crew 관리·이름 바꾸기는 관리자 역할과 Crew로만 정한다** — 스페이스 관리 전체는 내용을
- *   읽지 않고 이름도 바꾸지 않는다(A.1-1). 이름·설명·분류는 `canEditInfo`(주인과 관리자)다 — 예전에는 `canChangeStatus`를 빌려 썼다
+ *   중지된 것 지우기도 `space.oversee`다. **읽기·쓰기·이름 바꾸기는 관리자 역할과 Crew로만 정한다**(Crew 관리는 아래 — 중지를 건 사람도
+ *   본다) — 스페이스 관리 전체는 내용을 읽지 않고 이름도 바꾸지 않는다(A.1-1). 이름·설명·분류는 `canEditInfo`(주인과 관리자)다 — 예전에는 `canChangeStatus`를 빌려 썼다
+ * - **관리자가 건 중지 동안 Crew는 관리자만 바꾼다**(P16, 보류 35) — 주인은 넣지도 빼지도 자리를 바꾸지도 못한다(관리자가 건 중지 풀기를 받았어도 — 먼저 푼다).
+ *   주인이 스스로 건 중지는 그대로다. 막힌 주인은 `crewFrozen`이다
+ * - **이 판정에 칸을 더하면 그 판정으로 쓰는 곳이 그 칸을 쓰기의 조건이나 잠금으로 보는지 확인한다** — 판정 때와 쓸 때 사이에 그 칸이 바뀌면 판정하지
+ *   않은 상태에 쓴다(T-070, 그리고 Crew 쓰기에서 두 번째 — T-072)
  */
 export function spaceAccess(
   principal: Principal | null | undefined,
@@ -235,19 +246,24 @@ export function spaceAccess(
   const overseer = can(principal, 'space.oversee');
   const isOwner = space.createdBy === principal.id || membership === 'owner';
   const active = space.status === 'active';
-  const canResume = overseer || (isOwner && (space.suspendedByOwner === true || can(principal, 'space.unsuspend')));
+  // 중지를 건 사람이 주인이었나 — 중지일 때만 뜻이 있다. **모르면 관리자가 건 것**(P15 D.2). 푸는 판정과 Crew 판정이 같은 값을 본다
+  const ownerSuspended = space.suspendedByOwner === true;
+  const canResume = overseer || (isOwner && (ownerSuspended || can(principal, 'space.unsuspend')));
   const canChangeStatus = active ? overseer || isOwner : canResume;
   const canDelete = (isOwner && memberCount < 2 && active) || (overseer && !active);
   const canEditInfo = admin || isOwner;
 
   if (space.kind === 'personal') {
     const canRead = isOwner || admin;
-    return { canRead, canWrite: canRead && active, canManageMembers: false, canEditInfo, canChangeStatus, canDelete, isOwner };
+    return { canRead, canWrite: canRead && active, canManageMembers: false, canEditInfo, canChangeStatus, canDelete, isOwner, crewFrozen: false };
   }
 
   const canRead = admin || membership !== null;
   const canWrite = active && (admin || isOwner || membership === 'editor');
-  return { canRead, canWrite, canManageMembers: admin || isOwner, canEditInfo, canChangeStatus, canDelete, isOwner };
+  // **관리자가 건 중지 동안 Crew는 관리자만 바꾼다**(P16, 보류 35) — 조사하려고 멈춘 공간을 주인이 남에게 열지 못하게. 모르면 관리자가 건 것(`canResume`과 같다)
+  const adminSuspended = !active && !ownerSuspended;
+  const crewFrozen = !admin && isOwner && adminSuspended;
+  return { canRead, canWrite, canManageMembers: admin || (isOwner && !adminSuspended), canEditInfo, canChangeStatus, canDelete, isOwner, crewFrozen };
 }
 
 export type CategoryAccess = { canRename: boolean; canDelete: boolean };

@@ -998,6 +998,160 @@ describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
   });
 });
 
+describe('관리자가 건 중지 동안 Crew는 관리자만 바꾼다 (P16, 보류 35)', () => {
+  // 서버의 문구는 글자 그대로 견준다 — 같은 상수로 견주면 글자가 바뀌어도 시험은 초록이고, 그 글자를 옮겨 적은 문서만 조용히 어긋난다(T-069)
+  const FROZEN = '관리자가 중지한 스페이스다 — Crew는 관리자가 바꾼다';
+  /** 막힌 주인의 거절 — 403(ForbiddenException)이고 그 까닭이다 (FR-1700) */
+  async function frozen(p: Promise<unknown>): Promise<void> {
+    const e = await settle(p);
+    expect(e).toBeInstanceOf(ForbiddenException);
+    expect((e as Error).message).toBe(FROZEN);
+  }
+
+  async function setup() {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const mate = await user('mate');
+    await user('newbie');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.addMember(s.id, { username: 'mate', role: 'editor' }, owner);
+    return { owner, admin, mate, s };
+  }
+  const crewOf = async (spaceId: string, viewer: Principal) => (await spacesSvc.members(spaceId, viewer)).map((m) => [m.username, m.role]);
+
+  it('**관리자가 건 중지면 주인은 넣지도 빼지도 자리를 바꾸지도 못한다** — 403과 까닭. 관리자가 건 중지 풀기를 받았어도 (FR-1700)', async () => {
+    const { owner, admin, mate, s } = await setup();
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    for (const actor of [owner, withGrants(owner, ['space.unsuspend'])]) {
+      await frozen(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, actor));
+      await frozen(spacesSvc.changeMemberRole(s.id, mate.id, 'viewer', actor));
+      await frozen(spacesSvc.removeMember(s.id, mate.id, actor));
+    }
+    // Crew 목록은 그대로 본다 — 읽기는 중지와 무관하다. 막힌 셋이 아무것도 바꾸지 않았다
+    expect(await crewOf(s.id, owner)).toEqual([
+      ['mate', 'editor'],
+      ['owner', 'owner'],
+    ]);
+  });
+
+  it('**관리자는 언제나 바꾼다**(넣기·자리 바꾸기·빼기), 주인이 스스로 건 중지와 다시 쓰게 한 뒤에는 주인이 바꾼다 (FR-1701)', async () => {
+    const { owner, admin, mate, s } = await setup();
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    await spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, admin);
+    await spacesSvc.changeMemberRole(s.id, mate.id, 'viewer', admin);
+    const newbie = (await db.query.users.findFirst({ where: eq(users.username, 'newbie') }))!;
+    await spacesSvc.removeMember(s.id, newbie.id, admin);
+    expect(await crewOf(s.id, admin)).toEqual([
+      ['mate', 'viewer'],
+      ['owner', 'owner'],
+    ]);
+    // 다시 쓰게 한 뒤 — 주인이 바꾼다
+    await spacesSvc.changeStatus(s.id, 'active', admin);
+    await spacesSvc.changeMemberRole(s.id, mate.id, 'editor', owner);
+    // 주인이 스스로 건 중지 — 주인이 바꾼다
+    await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    await expect(spacesSvc.removeMember(s.id, mate.id, owner)).resolves.toBeUndefined();
+    expect((await spacesSvc.members(s.id, owner)).map((m) => m.username)).toEqual(['owner']);
+  });
+
+  it('**Crew의 owner로 든 사람도** 관리자가 건 중지 동안은 못 바꾼다 — 보기의 `canManageMembers`가 거짓이고 `crewFrozen`이 참이다', async () => {
+    const { owner, admin, mate, s } = await setup();
+    await spacesSvc.changeMemberRole(s.id, mate.id, 'owner', owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    await frozen(spacesSvc.addMember(s.id, { username: 'newbie', role: 'editor' }, mate));
+    const seen = (await spacesSvc.get(s.id, mate)).access;
+    expect([seen.canManageMembers, seen.crewFrozen]).toEqual([false, true]);
+    const boss = (await spacesSvc.get(s.id, admin)).access;
+    expect([boss.canManageMembers, boss.crewFrozen]).toEqual([true, false]);
+  });
+});
+
+describe('Crew 쓰기도 판정한 상태에서만 (P16 A.1-5, 병합 전 검토 — T-072)', () => {
+  const FROZEN = '관리자가 중지한 스페이스다 — Crew는 관리자가 바꾼다';
+
+  async function setup() {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const mate = await user('mate');
+    await user('newbie');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.addMember(s.id, { username: 'mate', role: 'editor' }, owner);
+    return { owner, admin, mate, s };
+  }
+
+  type Act = (spaceId: string, owner: Principal, mateId: string, tx: Tx) => Promise<void>;
+  const acts: [string, Act][] = [
+    ['넣기', (spaceId, owner, _mateId, tx) => spacesSvc.addMember(spaceId, { username: 'newbie', role: 'viewer' }, owner, tx)],
+    ['자리 바꾸기', (spaceId, owner, mateId, tx) => spacesSvc.changeMemberRole(spaceId, mateId, 'viewer', owner, tx)],
+    ['빼기', (spaceId, owner, mateId, tx) => spacesSvc.removeMember(spaceId, mateId, owner, tx)],
+  ];
+  for (const [name, act] of acts) {
+    it(`**관리자의 중지가 커밋되기 전에 온 주인의 ${name}는 기다렸다가 새 상태로 판정한다** — 403, Crew가 그대로다`, { timeout: 30_000 }, async () => {
+      const { owner, admin, mate, s } = await setup();
+      const suspending = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', admin, tx));
+      // 화면이 부르는 길과 같게 — 컨트롤러가 트랜잭션을 열고 그 안에서 부른다
+      const acting = settle(db.transaction((tx) => act(s.id, owner, mate.id, tx)));
+      await releaseAfter(suspending, 1);
+      const e = await acting;
+      expect(e).toBeInstanceOf(ForbiddenException);
+      expect((e as Error).message).toBe(FROZEN);
+      expect((await spacesSvc.members(s.id, owner)).map((m) => [m.username, m.role])).toEqual([
+        ['mate', 'editor'],
+        ['owner', 'owner'],
+      ]);
+    });
+  }
+
+  it('**주인의 넣기가 커밋되기 전에 온 관리자의 중지는 기다린다** — 둘 다 되고, 끝 상태는 "넣고 나서 얼렸다"다', { timeout: 30_000 }, async () => {
+    const { owner, admin, s } = await setup();
+    const adding = await holdOpen((tx) => spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, owner, tx));
+    const suspending = settle(spacesSvc.changeStatus(s.id, 'suspended', admin));
+    await releaseAfter(adding, 1);
+    expect(await suspending).not.toBeInstanceOf(Error);
+    const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
+    expect([row?.status, row?.suspendedByOwner]).toEqual(['suspended', false]);
+    expect((await spacesSvc.members(s.id, admin)).map((m) => m.username)).toEqual(['mate', 'newbie', 'owner']);
+  });
+
+  it('**권한 없는 사람은 줄에 서지 않는다** — 공간 행이 잠겨 있어도 Crew가 아닌 사람은 곧바로 404, viewer는 곧바로 403 (좁은 재점검 — T-073)', { timeout: 30_000 }, async () => {
+    const { owner, admin, s } = await setup();
+    const stranger = await user('stranger');
+    const viewer = await user('looker');
+    await spacesSvc.addMember(s.id, { username: 'looker', role: 'viewer' }, owner);
+    const suspending = await holdOpen((tx) => spacesSvc.changeStatus(s.id, 'suspended', admin, tx));
+    // 실패해도 남은 요청을 끝까지 기다린 뒤 끝낸다 — 줄에 선 채 남으면 다음 시험의 표 비우기와 겹쳐 실패가 번진다(`releaseAfter`와 같은 까닭)
+    const tries: Promise<unknown>[] = [];
+    try {
+      tries.push(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, stranger));
+      expect(await within(tries[0])).toBeInstanceOf(NotFoundException);
+      tries.push(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, viewer));
+      const denied = await within(tries[1]);
+      expect(denied).toBeInstanceOf(ForbiddenException);
+      expect((denied as Error).message).toBe('Crew를 관리할 권한이 없다');
+    } finally {
+      suspending.release();
+      await suspending.done;
+      await Promise.allSettled(tries);
+    }
+  });
+
+  it('**Crew를 바꾸는 일끼리도 한 줄로 선다** — 앞의 것이 끝나면 뒤의 것이 새 상태로 판정한다. 배타 잠금이라 온 순서대로다(나눔 잠금은 기다리는 상태 바꾸기를 끝없이 밀었다 — T-073)', { timeout: 30_000 }, async () => {
+    const { owner, admin, s } = await setup();
+    await user('other');
+    const first = await holdOpen((tx) => spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, owner, tx));
+    const second = settle(spacesSvc.addMember(s.id, { username: 'other', role: 'editor' }, admin));
+    await releaseAfter(first, 1);
+    expect(await second).not.toBeInstanceOf(Error);
+    expect((await spacesSvc.members(s.id, admin)).map((m) => m.username)).toEqual(['mate', 'newbie', 'other', 'owner']);
+  });
+
+  it('트랜잭션 없이 불러도 된다 — 스스로 트랜잭션을 열고 그 안에서 잠그고 쓴다', async () => {
+    const { owner, s } = await setup();
+    await expect(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, owner)).resolves.toBeUndefined();
+    expect((await spacesSvc.members(s.id, owner)).map((m) => m.username)).toEqual(['mate', 'newbie', 'owner']);
+  });
+});
+
 describe('지우기도 판정한 상태에서만 (P15 병합 전 검토)', () => {
   it('**이름을 바꾸는 사이 관리자가 중지하면 409** — 중지된 공간의 이름이 바뀌지 않는다 (좁은 재검토 13)', { timeout: 30_000 }, async () => {
     const owner = await user('owner');

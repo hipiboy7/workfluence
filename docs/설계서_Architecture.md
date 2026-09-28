@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 15까지 구현 완료** (2026-09-28). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 16까지 구현 완료** (2026-09-28). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -190,7 +190,7 @@ shared  ←  api(config → db → common → 기능 모듈)
          │
          ├─ 시스템 행위 판정:  shared.can(user, action)          → 403
          ├─ 스페이스 판정:     shared.spaceAccess(user, space, membership, memberCount)
-         │                       → { canRead, canWrite, canManageMembers, canEditInfo(P15), canChangeStatus, canDelete, isOwner }
+         │                       → { canRead, canWrite, canManageMembers, canEditInfo(P15), canChangeStatus, canDelete, isOwner, crewFrozen(P16) }
          └─ 분류 판정(P15):    shared.categoryAccess(user, category, usage) → { canRename, canDelete }
                                  (가드는 로그인만 — 서비스가 분류 행을 잠그고 쓰임을 센 뒤에 판정한다)
 ```
@@ -299,6 +299,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 13 | 반입 준비 — 로그인 경로(한 계정씩 줄 `KeyedSerial`, 비밀번호 확인·해시는 트랜잭션 밖 · 프로세스의 argon2 동시 실행 상한 `ConcurrencyGate`, 실패 횟수는 한 문장으로), 계정 정지(`users.status` = `suspended`, 정지하면 세션·편집 연결을 끊는다), 사용자 목록의 찾기·거르기·나누기, DB 계정 둘(앱 `workfluence_app` — 마이그레이션이 만들고 권한을 준다 `apps/api/src/db/app-role.ts`), compose `tools`(마이그레이션·시드·월간 작업 `apps/api/src/cli`), 반입 묶음의 운영 문서와 이미지의 커밋 라벨 |
 | 14 | 페이지 트리와 스페이스를 화면에서(F-007·F-008) — 옮기기의 자리를 형제 가운데 몇 번째로 굳히고 서버가 새 자리 값을 정한다(`placeAt` — 자리에 틈 `PAGE_POSITION_GAP`을 두어 보통 한 줄만, 틈이 없을 때만 한 문장으로 다시 매긴다), 트리를 바꾸는 네 길(옮기기·만들기·지우기·휴지통 되살리기)이 스페이스마다 잠금(`page-tree:<스페이스>`, 대기 2초 뒤 409 — `tree-lock.ts`)을 쓰고 잠근 뒤 대상을 다시 읽는다, 식별자는 경계에서 소문자로(`idSchema`·`parseId`), 모든 스페이스 목록을 DB가 찾고 거른다(`q`·`status`, `SPACE_LIST_MAX`, 보기는 질의 넷), 화면 넷(트리 펼치기 · 옮기기 칸 · 관리 칸 · 관리 콘솔의 스페이스). 마이그레이션 없음 |
 | 15 | 맡기는 권한(보류 32·33) — 위임 규칙표(`DELEGATION`: LLM 연결 관리는 root가 관리자에게, 분류 관리·관리자가 건 중지 풀기·스페이스 관리 전체는 관리자·root가 member에게)와 `canGrant`, 받는 역할의 CHECK와 `spaces.suspended_by_owner`(`0012_grants`), `spaceAccess`의 `canEditInfo`·지금 상태에서 바꿀 수 있는가(`canChangeStatus`), 읽지 못해도 중지·지우기(`manageContext`), `categoryAccess`와 분류의 쓰임·지우면 분류 없음, 공용 `CategoryList` |
+| 16 | 관리자가 건 중지 동안 Crew를 얼린다(보류 35) — `spaceAccess.canManageMembers`에 중지를 건 사람을 넣고(주인은 관리자가 건 중지면 거짓) `crewFrozen`(막힌 주인 — 서버의 까닭과 화면의 안내가 이것 하나를 본다)을 더한다. Crew 쓰기는 판정하고 공간 행을 잠그고 다시 판정한다(`FOR NO KEY UPDATE` — 판정한 상태에서만 쓴다, 권한 없는 사람은 줄에 서지 않는다). 데이터·마이그레이션 없음 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
