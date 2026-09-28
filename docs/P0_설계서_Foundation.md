@@ -355,7 +355,7 @@ canAssignRole(actor, role) / canManageUser(actor, target) → boolean   역할 �
 checkPasswordPolicy(password, policy)                    → string[]  위반 사유 목록
 ```
 
-> **Phase 15가 더한 것** (2026-09-28): 위임 규칙표 `DELEGATION`과 `grantsForRole`·`canGrant`(누가 누구에게 무엇을 주나), `categoryAccess`(분류의 이름 바꾸기·지우기), `spaceAccess`의 `canEditInfo`(이름·설명·분류)와 상태별 `canChangeStatus`(관리자가 건 중지). 중지된 것 지우기는 관리자와 **스페이스 관리 전체**를 받은 member다(`space.oversee`). 지금의 규칙은 [`docs/P15_설계서_Grants.md`](P15_설계서_Grants.md) D.1·D.3·D.4다.
+> **Phase 15가 더한 것** (2026-09-28): 위임 규칙표 `DELEGATION`과 `grantsForRole`·`canGrant`(누가 누구에게 무엇을 주나), `categoryAccess`(분류의 이름 바꾸기·지우기), `spaceAccess`의 `canEditInfo`(이름·설명·분류)와 상태별 `canChangeStatus`(관리자가 건 중지). 중지된 것 지우기는 관리자와 **스페이스 관리 전체**를 받은 member다(`space.oversee`). 지금의 규칙은 [`docs/P15_설계서_Grants.md`](P15_설계서_Grants.md) D.1·D.3·D.4다. **Phase 16이 더한 것**: `spaceAccess`의 `crewFrozen`과, 관리자가 건 중지 동안 주인의 `canManageMembers`가 거짓인 것 — [`docs/P16_설계서_Crew.md`](P16_설계서_Crew.md) D.
 
 - `GRANTS`는 역할 → 허용 행위 집합. **없는 조합은 전부 거부**. 알 수 없는 역할도 거부한다.
 - `spaceAccess`는 **읽기·쓰기·구성원 관리·상태 변경·삭제**를 한 번에 판정해 돌려준다. 호출부가 개별 규칙을 다시 조합하지 않게 한다.
