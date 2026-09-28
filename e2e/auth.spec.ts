@@ -62,9 +62,11 @@ test('가입 요청 → 승인 → 로그인 → 비밀번호 변경', async ({ 
 
   // 6) 비밀번호 변경
   await page.getByRole('link', { name: '비밀번호 변경' }).click();
-  await page.getByLabel('현재 비밀번호').fill(member.password);
-  await page.getByLabel('새 비밀번호').fill('E2e-Changed-2026!');
-  await page.getByRole('button', { name: '변경' }).click();
+  // 칸은 셋이고 칸마다 눈 모양 단추가 있다("… 보이기") — 이름은 정확히 찾는다(T-068)
+  await page.getByLabel('현재 비밀번호', { exact: true }).fill(member.password);
+  await page.getByLabel('새 비밀번호', { exact: true }).fill('E2e-Changed-2026!');
+  await page.getByLabel('새 비밀번호 확인', { exact: true }).fill('E2e-Changed-2026!');
+  await page.getByRole('button', { name: '변경', exact: true }).click();
   await expect(page.getByText(`${member.displayName}님`)).toBeVisible();
 });
 

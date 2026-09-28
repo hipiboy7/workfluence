@@ -85,3 +85,14 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .llm-waiting { color: var(--muted); font-size: .9rem; margin: 0 0 .4rem; }
 .llm-waiting strong { color: inherit; font-weight: 600; }
 .llm-chat textarea, .card textarea { width: 100%; font: inherit; padding: .5rem; border: 1px solid var(--line); border-radius: 6px; }
+
+/* 비밀번호 변경 (P17 F-010 1·9번) — 칸 묶음, 눈 모양 단추, 칸 아래의 까닭, 위의 이동 단추 */
+.field-group { border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem 1rem 1rem; margin: 0 0 1rem; }
+.field-group legend { font-weight: 600; padding: 0 0.4rem; }
+.pw-field { position: relative; display: flex; align-items: center; }
+.pw-field input { flex: 1; padding-right: 2.6rem; }
+.pw-eye { position: absolute; right: 0.35rem; background: none; border: 0; padding: 0.3rem; margin: 0; cursor: pointer; line-height: 0; color: inherit; opacity: 0.7; }
+.pw-eye:hover, .pw-eye:focus-visible { opacity: 1; }
+.field-error { color: #b42318; margin: 0.3rem 0 0.6rem; font-size: 0.9rem; }
+input[aria-invalid='true'] { border-color: #b42318; }
+.page-nav { display: flex; gap: 0.5rem; margin-top: 1rem; }
