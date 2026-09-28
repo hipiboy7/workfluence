@@ -61,8 +61,9 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
   await page.getByRole('button', { name: '등록' }).click();
   await expect(page.locator('section[aria-label="댓글"]').getByText('확인 부탁')).toBeVisible();
 
-  // 4) 페이지를 지운다 (휴지통 확인용)
-  await page.getByRole('button', { name: '삭제' }).click();
+  // 4) 페이지를 지운다 (휴지통 확인용). 댓글에도 **삭제**가 있다 — 페이지의 것은 늘 머리 줄에 먼저 그려진다. 이름만으로 찾으면 댓글이 그려진 뒤에 누를 때
+  // 둘을 잡아 strict mode로 실패했다(Phase 3·4부터의 흔들림 — T-068과 같은 부류)
+  await page.getByRole('button', { name: '삭제', exact: true }).first().click();
   await expect(page).toHaveURL(/\/spaces\//);
 
   // 5) 동료로 들어가 **알림함**을 본다

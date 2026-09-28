@@ -248,4 +248,26 @@ describe('SpacePage — Crew의 역할 (FR-1512)', () => {
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0]).toEqual({ method: 'PATCH', url: '/api/spaces/s1/members/u2', body: { role: 'viewer' } });
   });
+
+  it('**관리자가 건 중지 동안 주인에게는 Crew를 바꾸는 칸이 없고 까닭이 보인다** — Crew 목록은 그대로 보인다 (P16 FR-1702)', async () => {
+    const frozen: SpaceView = {
+      ...space,
+      status: 'suspended',
+      suspendedByOwner: false,
+      access: { ...space.access, canWrite: false, canManageMembers: false, canChangeStatus: false },
+    };
+    answerSpace = () => Promise.resolve(json(200, frozen));
+    renderAt('/spaces/s1');
+    expect(await screen.findByText('관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 관리자에게 부탁한다. 다시 쓰게 되면 주인도 바꾼다.')).toBeTruthy();
+    expect(screen.getByText(/kim/)).toBeTruthy();
+    expect(screen.queryByLabelText('아이디로 Crew 추가')).toBeNull();
+    expect(screen.queryByLabelText('kim 역할')).toBeNull();
+    expect(screen.queryByRole('button', { name: '제거' })).toBeNull();
+  });
+
+  it('주인이 Crew를 바꿀 수 있으면 그 안내가 없다', async () => {
+    renderAt('/spaces/s1');
+    await screen.findByLabelText('아이디로 Crew 추가');
+    expect(screen.queryByText(/Crew를 바꾸지 못한다/)).toBeNull();
+  });
 });

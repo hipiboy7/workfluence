@@ -216,6 +216,10 @@ export function SpacePage() {
               </li>
             ))}
           </ul>
+          {/* 관리자가 건 중지 동안 Crew는 관리자만 바꾼다 — 단추만 사라지면 권한을 잃은 줄 안다 (P16 FR-1702) */}
+          {space.access.isOwner && !space.access.canManageMembers && (
+            <p className="muted small">관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 관리자에게 부탁한다. 다시 쓰게 되면 주인도 바꾼다.</p>
+          )}
           {space.access.canManageMembers && (
             <form
               onSubmit={(e) => {

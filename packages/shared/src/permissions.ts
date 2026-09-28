@@ -223,6 +223,8 @@ const NO_ACCESS: SpaceAccess = {
  *   전체). 중지면 다시 쓰기 — `space.oversee`, 그리고 주인이 건 중지면 주인, **관리자가 건 중지면 `space.unsuspend`를 받은 주인만**(보류 32).
  *   중지된 것 지우기도 `space.oversee`다. **읽기·쓰기·Crew 관리·이름 바꾸기는 관리자 역할과 Crew로만 정한다** — 스페이스 관리 전체는 내용을
  *   읽지 않고 이름도 바꾸지 않는다(A.1-1). 이름·설명·분류는 `canEditInfo`(주인과 관리자)다 — 예전에는 `canChangeStatus`를 빌려 썼다
+ * - **관리자가 건 중지 동안 Crew는 관리자만 바꾼다**(P16, 보류 35) — 주인은 넣지도 빼지도 자리를 바꾸지도 못한다(관리자가 건 중지 풀기를 받았어도 — 먼저 푼다).
+ *   주인이 스스로 건 중지는 그대로다
  */
 export function spaceAccess(
   principal: Principal | null | undefined,
@@ -247,7 +249,9 @@ export function spaceAccess(
 
   const canRead = admin || membership !== null;
   const canWrite = active && (admin || isOwner || membership === 'editor');
-  return { canRead, canWrite, canManageMembers: admin || isOwner, canEditInfo, canChangeStatus, canDelete, isOwner };
+  // **관리자가 건 중지 동안 Crew는 관리자만 바꾼다**(P16, 보류 35) — 조사하려고 멈춘 공간을 주인이 남에게 열지 못하게. 모르면 관리자가 건 것(`canResume`과 같다)
+  const adminSuspended = !active && space.suspendedByOwner !== true;
+  return { canRead, canWrite, canManageMembers: admin || (isOwner && !adminSuspended), canEditInfo, canChangeStatus, canDelete, isOwner };
 }
 
 export type CategoryAccess = { canRename: boolean; canDelete: boolean };

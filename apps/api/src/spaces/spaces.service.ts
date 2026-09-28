@@ -31,6 +31,9 @@ export type SpaceContext = { space: SpaceRow; membership: SpaceMemberRole | null
 /** 관리자가 건 중지를 풀지 못하는 주인에게 주는 까닭 (P15 FR-1611·1612) — 화면(공간의 관리 칸)은 누르기 전에 까닭을 보인다 */
 export const ADMIN_SUSPENDED_MESSAGE = "관리자가 중지한 스페이스다 — 다시 쓰기는 관리자나 '관리자가 건 중지 풀기'를 받은 주인이 한다";
 
+/** 관리자가 건 중지 동안 Crew를 바꾸려는 주인에게 주는 까닭 (P16 FR-1700) — 권한을 잃은 것이 아니라 얼린 것이다 */
+export const ADMIN_SUSPENDED_CREW_MESSAGE = '관리자가 중지한 스페이스다 — Crew는 관리자가 바꾼다';
+
 /** 공간이 분류를 가리키는 외래 키 — `0002_space_page`가 지은 이름이다 */
 const SPACE_CATEGORY_FK = 'spaces_category_id_space_categories_id_fk';
 
@@ -388,7 +391,11 @@ export class SpacesService {
     // 종류를 먼저 본다. 개인 스페이스는 `canManageMembers`가 언제나 false라 권한 오류가 먼저
     // 나가는데, 그러면 "권한을 받으면 되나?"로 읽힌다. 실제 이유는 Crew라는 것이 없다는 것이다
     if (ctx.space.kind !== 'team') throw new BadRequestException('개인 스페이스에는 Crew가 없다');
-    if (!ctx.access.canManageMembers) throw new ForbiddenException('Crew를 관리할 권한이 없다');
+    if (!ctx.access.canManageMembers) {
+      // 팀 공간의 주인이 막히는 것은 관리자가 건 중지뿐이다(P16) — 권한을 잃은 줄 알지 않게 까닭을 나눠 말한다(A.1-3)
+      if (ctx.access.isOwner) throw new ForbiddenException(ADMIN_SUSPENDED_CREW_MESSAGE);
+      throw new ForbiddenException('Crew를 관리할 권한이 없다');
+    }
     return ctx;
   }
 

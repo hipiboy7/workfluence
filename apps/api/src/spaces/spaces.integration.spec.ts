@@ -12,7 +12,7 @@ import { lockTree } from '../pages/tree-lock';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, waitForLockWaiters, type TestDb } from '../test/db';
 import { CategoriesController, SpacesController } from './spaces.module';
-import { ADMIN_SUSPENDED_MESSAGE, SpacesService } from './spaces.service';
+import { ADMIN_SUSPENDED_CREW_MESSAGE, ADMIN_SUSPENDED_MESSAGE, SpacesService } from './spaces.service';
 
 /** B등급 통합 테스트 (P2_설계서_Page 6절). **실제 PostgreSQL**을 쓴다. */
 
@@ -995,6 +995,56 @@ describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
       // ov의 개인 공간은 없다 — 사용자를 DB에 바로 넣었다
     ]);
     await expect(spacesSvc.list(withGrants(ov, ['category.manage']), 'all', 500)).rejects.toThrow(ForbiddenException);
+  });
+});
+
+describe('관리자가 건 중지 동안 Crew는 관리자만 바꾼다 (P16, 보류 35)', () => {
+  async function setup() {
+    const owner = await user('owner');
+    const admin = await user('boss', 'admin');
+    const mate = await user('mate');
+    await user('newbie');
+    const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
+    await spacesSvc.addMember(s.id, { username: 'mate', role: 'editor' }, owner);
+    return { owner, admin, mate, s };
+  }
+
+  it('**관리자가 건 중지면 주인은 넣지도 빼지도 자리를 바꾸지도 못한다** — 까닭을 듣는다. 관리자가 건 중지 풀기를 받았어도 (FR-1700)', async () => {
+    const { owner, admin, mate, s } = await setup();
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    for (const actor of [owner, withGrants(owner, ['space.unsuspend'])]) {
+      await expect(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, actor)).rejects.toThrow(ADMIN_SUSPENDED_CREW_MESSAGE);
+      await expect(spacesSvc.changeMemberRole(s.id, mate.id, 'viewer', actor)).rejects.toThrow(ADMIN_SUSPENDED_CREW_MESSAGE);
+      await expect(spacesSvc.removeMember(s.id, mate.id, actor)).rejects.toThrow(ADMIN_SUSPENDED_CREW_MESSAGE);
+    }
+    // Crew 목록은 그대로 본다 — 읽기는 중지와 무관하다
+    expect((await spacesSvc.members(s.id, owner)).map((m) => [m.username, m.role])).toEqual([
+      ['mate', 'editor'],
+      ['owner', 'owner'],
+    ]);
+  });
+
+  it('**관리자는 언제나 바꾼다**, 주인이 스스로 건 중지와 다시 쓰게 한 뒤에는 주인이 바꾼다 (FR-1701)', async () => {
+    const { owner, admin, mate, s } = await setup();
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    await spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, admin);
+    await spacesSvc.changeMemberRole(s.id, mate.id, 'viewer', admin);
+    // 다시 쓰게 한 뒤 — 주인이 바꾼다
+    await spacesSvc.changeStatus(s.id, 'active', admin);
+    await spacesSvc.changeMemberRole(s.id, mate.id, 'editor', owner);
+    // 주인이 스스로 건 중지 — 주인이 바꾼다
+    await spacesSvc.changeStatus(s.id, 'suspended', owner);
+    await expect(spacesSvc.removeMember(s.id, mate.id, owner)).resolves.toBeUndefined();
+    expect((await spacesSvc.members(s.id, owner)).map((m) => m.username)).toEqual(['newbie', 'owner']);
+  });
+
+  it('**Crew의 owner로 든 사람도** 관리자가 건 중지 동안은 못 바꾼다 — 보기의 `canManageMembers`가 거짓이다', async () => {
+    const { owner, admin, mate, s } = await setup();
+    await spacesSvc.changeMemberRole(s.id, mate.id, 'owner', owner);
+    await spacesSvc.changeStatus(s.id, 'suspended', admin);
+    await expect(spacesSvc.addMember(s.id, { username: 'newbie', role: 'editor' }, mate)).rejects.toThrow(ADMIN_SUSPENDED_CREW_MESSAGE);
+    expect((await spacesSvc.get(s.id, mate)).access.canManageMembers).toBe(false);
+    expect((await spacesSvc.get(s.id, admin)).access.canManageMembers).toBe(true);
   });
 });
 
