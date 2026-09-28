@@ -35,7 +35,7 @@ test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원',
   const spaceName = `E2E 공간 ${Date.now()}`;
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByRole('link', { name: spaceName })).toBeVisible();
   await page.getByRole('link', { name: spaceName }).click();
 
@@ -46,7 +46,7 @@ test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원',
 
   // 3) 페이지를 만든다 → 편집 화면으로 간다
   await page.getByLabel('새 페이지 제목').fill('회의록');
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
 
   // 4) 편집하고 저장한다 (v1 → v2)

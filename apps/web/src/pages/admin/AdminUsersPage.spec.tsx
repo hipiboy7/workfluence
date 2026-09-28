@@ -7,7 +7,7 @@ import { AuthProvider } from '../../auth';
 import { AdminUsersPage } from './AdminUsersPage';
 
 /**
- * 컴포넌트 시험 — 사용자 관리의 위임 (P11_설계서_Ops D.1·G절, FR-1201·1206), 찾기·거르기·더 보기·정지 (P13 C.5·C.6).
+ * 컴포넌트 시험 — 사용자 관리의 위임 (P11_설계서_Ops D.1·G절, FR-1201·1206 · P15_설계서_Grants D.5, FR-1600·1601), 찾기·거르기·더 보기·정지 (P13 C.5·C.6).
  * 서버는 가짜 `fetch`다 — 목록은 서버처럼 찾고 거르고 나눠 준다
  */
 
@@ -56,9 +56,10 @@ beforeEach(() => {
       rows = rows.map((r) => (r.id === id ? { ...r, status: verb === 'suspend' ? 'suspended' : 'active' } : r));
       return Promise.resolve(json(200, rows.find((r) => r.id === id)));
     }
-    if (method === 'PUT' && url === '/api/users/a1/grants') {
-      rows = rows.map((r) => (r.id === 'a1' ? { ...r, grants: (body as { grants: UserView['grants'] }).grants } : r));
-      return Promise.resolve(json(200, rows[0]));
+    if (method === 'PUT' && /^\/api\/users\/[^/]+\/grants$/.test(url)) {
+      const id = url.split('/')[3];
+      rows = rows.map((r) => (r.id === id ? { ...r, grants: (body as { grants: UserView['grants'] }).grants } : r));
+      return Promise.resolve(json(200, rows.find((r) => r.id === id)));
     }
     return Promise.reject(new Error(`시험에 없는 요청: ${method} ${url}`));
   }) as unknown as typeof fetch;
@@ -85,19 +86,96 @@ describe('AdminUsersPage — 위임', () => {
     expect(box.checked).toBe(false);
     fireEvent.click(box);
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
-    expect(calls.find((c) => c.method === 'PUT')).toEqual({ method: 'PUT', url: '/api/users/a1/grants', body: { grants: ['llm.manage'] } });
+    // 화면이 본 목록(`expected`)을 함께 보낸다 — 서버의 목록과 다르면 409다 (P15 병합 전 보안 검토 2)
+    expect(calls.find((c) => c.method === 'PUT')).toEqual({ method: 'PUT', url: '/api/users/a1/grants', body: { grants: ['llm.manage'], expected: [] } });
     await waitFor(() => expect((screen.getByRole('checkbox', { name: 'boss LLM 연결 관리' }) as HTMLInputElement).checked).toBe(true));
     fireEvent.click(screen.getByRole('checkbox', { name: 'boss LLM 연결 관리' }));
-    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ grants: [] }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ grants: [], expected: ['llm.manage'] }));
   });
 
-  it('**관리자가 아닌 행에는 위임이 없다** — member는 받지 않는다', async () => {
+  it('**행마다 그 역할이 받는 위임만 있다** — 관리자 줄에 LLM 연결 관리, member 줄에 셋 (P15 D.5)', async () => {
     renderPage();
     await screen.findByRole('checkbox', { name: 'boss LLM 연결 관리' });
     expect(screen.queryByRole('checkbox', { name: 'alice LLM 연결 관리' })).toBeNull();
+    for (const label of ['분류 관리', '관리자가 건 중지 풀기', '스페이스 관리 전체']) {
+      expect(screen.getByRole('checkbox', { name: `alice ${label}` })).toBeTruthy();
+      expect(screen.queryByRole('checkbox', { name: `boss ${label}` })).toBeNull();
+    }
   });
 
-  it('**다른 관리자에게는 보이기만 한다** — 주고 거두는 것은 root만 (A.1-3)', async () => {
+  it('**관리자는 member에게 셋을 주고 거둔다** — LLM 연결 관리 칸은 보이기만 한다 (P15 FR-1600·1601)', async () => {
+    me = { ...me, id: 'a2', role: 'admin', grants: [] };
+    renderPage();
+    const box = (await screen.findByRole('checkbox', { name: 'alice 분류 관리' })) as HTMLInputElement;
+    await waitFor(() => expect(box.disabled).toBe(false));
+    expect((screen.getByRole('checkbox', { name: 'boss LLM 연결 관리' }) as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(box);
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')).toEqual({ method: 'PUT', url: '/api/users/m1/grants', body: { grants: ['category.manage'], expected: [] } }),
+    );
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: 'alice 분류 관리' }) as HTMLInputElement).checked).toBe(true));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'alice 스페이스 관리 전체' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ grants: ['category.manage', 'space.oversee'], expected: ['category.manage'] }),
+    );
+  });
+
+  it('**연달아 켜도 거짓 409가 없다** — 응답으로 그 줄을 곧바로 바꾼 뒤에 칸을 푼다. 둘째는 첫째의 결과를 본 목록을 보낸다 (좁은 재검토 2)', async () => {
+    me = { ...me, id: 'a2', role: 'admin', grants: [] };
+    renderPage();
+    const first = (await screen.findByRole('checkbox', { name: 'alice 분류 관리' })) as HTMLInputElement;
+    await waitFor(() => expect(first.disabled).toBe(false));
+    fireEvent.click(first);
+    const second = screen.getByRole('checkbox', { name: 'alice 스페이스 관리 전체' }) as HTMLInputElement;
+    await waitFor(() => expect(second.disabled).toBe(false));
+    expect((screen.getByRole('checkbox', { name: 'alice 분류 관리' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(second);
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2));
+    expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([
+      { grants: ['category.manage'], expected: [] },
+      { grants: ['category.manage', 'space.oversee'], expected: ['category.manage'] },
+    ]);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('**역할을 바꾸면 거둘 수 없는 위임이 사라지는 선택은 막는다** — LLM 연결 관리를 가진 관리자를 member로 내리는 것은 root만 (좁은 재검토 14)', async () => {
+    me = { ...me, id: 'a2', role: 'admin', grants: ['llm.manage'] };
+    rows = [user({ id: 'a1', username: 'boss', role: 'admin', grants: ['llm.manage'] }), user({ id: 'm1', username: 'alice', grants: ['category.manage'] })];
+    renderPage();
+    const bossRole = (await screen.findByRole('combobox', { name: 'boss 역할' })) as HTMLSelectElement;
+    await waitFor(() => expect(bossRole.disabled).toBe(false));
+    const option = (sel: HTMLSelectElement, v: string) => [...sel.options].find((o) => o.value === v)!;
+    expect(option(bossRole, 'member').disabled).toBe(true);
+    // 관리자는 셋을 받은 member를 관리자로 올린다 — 셋을 거둘 수 있다
+    expect(option(screen.getByRole('combobox', { name: 'alice 역할' }) as HTMLSelectElement, 'admin').disabled).toBe(false);
+  });
+
+  it('**보내는 동안 그 줄의 칸을 막고, 거절되면 다시 읽는다** — 빨리 둘을 누르면 둘째가 첫째의 결과를 모르는 목록을 보냈다 (P15 병합 전 코드 리뷰 5·12)', async () => {
+    me = { ...me, id: 'a2', role: 'admin', grants: [] };
+    let answerPut!: (r: Response) => void;
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') {
+        calls.push({ method: 'PUT', url: String(input), body: JSON.parse(String(init?.body)) as unknown });
+        return new Promise<Response>((ok) => (answerPut = ok));
+      }
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    renderPage();
+    const first = (await screen.findByRole('checkbox', { name: 'alice 분류 관리' })) as HTMLInputElement;
+    await waitFor(() => expect(first.disabled).toBe(false));
+    fireEvent.click(first);
+    const other = screen.getByRole('checkbox', { name: 'alice 스페이스 관리 전체' }) as HTMLInputElement;
+    await waitFor(() => expect(other.disabled).toBe(true));
+    const listsBefore = calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/users?')).length;
+    answerPut(json(409, { message: '그 사이 누가 이 사람의 위임을 바꿨다 — 목록을 다시 본다' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('그 사이 누가 이 사람의 위임을 바꿨다');
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/users?')).length).toBeGreaterThan(listsBefore));
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: 'alice 스페이스 관리 전체' }) as HTMLInputElement).disabled).toBe(false));
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+  });
+
+  it('**다른 관리자에게는 보이기만 한다** — LLM 연결 관리를 주고 거두는 것은 root만 (A.1-3)', async () => {
     me = { ...me, id: 'a2', role: 'admin', grants: ['llm.manage'] };
     renderPage();
     const box = (await screen.findByRole('checkbox', { name: 'boss LLM 연결 관리' })) as HTMLInputElement;
@@ -124,7 +202,8 @@ describe('AdminUsersPage — 위임', () => {
 describe('AdminUsersPage — 찾기·거르기·더 보기 (P13 C.6, FR-1450~1452)', () => {
   const many = (n: number) => Array.from({ length: n }, (_, i) => user({ id: `u${i}`, username: `user${String(i).padStart(3, '0')}` }));
 
-  it('**처음 100명과 전체 수를 보이고, 더 보기로 끝까지 닿는다** — 예전에는 100명에서 조용히 끊겼다', async () => {
+  // 수백 줄을 그린다 — member 줄마다 위임 칸이 셋이 되어(P15) 커버리지 계측과 함께 돌면 5초를 넘었다. 뜻은 그대로다
+  it('**처음 100명과 전체 수를 보이고, 더 보기로 끝까지 닿는다** — 예전에는 100명에서 조용히 끊겼다', { timeout: 20_000 }, async () => {
     rows = many(250);
     renderPage();
     await screen.findByText('user000');

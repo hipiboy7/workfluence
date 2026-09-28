@@ -6,7 +6,7 @@ const MATE = { username: `e2e-sp-mate-${Date.now()}`, displayName: 'E2E 스페�
 
 /**
  * Phase 14 인수 기준 (P14_설계서_Spaces C.2, F-008). "관리자가 화면에서 스페이스를 관리한다" — 모든 스페이스에서 찾아 중지·다시 쓰기, 분류 만들기·
- * 바꾸기(쓰는 스페이스가 있으면 지우지 못한다), 스페이스 화면의 관리 칸, Crew를 viewer로 넣고 역할을 바꾼다
+ * 바꾸기·지우기(Phase 15부터 쓰던 스페이스는 분류 없음이 된다 — P15 FR-1622), 스페이스 화면의 관리 칸, Crew를 viewer로 넣고 역할을 바꾼다
  */
 
 test.beforeAll(async () => {
@@ -34,13 +34,13 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
   await page.getByRole('link', { name: '스페이스 관리' }).click();
   await expect(page.getByRole('heading', { name: '스페이스 관리' })).toBeVisible();
   await page.getByLabel('새 분류').fill(category);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByLabel(`분류 ${category} 이름`)).toBeVisible();
 
   // 2) 팀 스페이스를 만들고 — Crew를 viewer로 넣고 editor로 바꾼다
   await page.goto('/');
   await page.getByLabel('이름').fill(spaceName);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await page.getByRole('link', { name: spaceName }).click();
   await page.getByLabel('아이디로 Crew 추가').fill(MATE.username);
   await page.getByLabel('역할', { exact: true }).selectOption('viewer');
@@ -52,7 +52,7 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
 
   // 3) 관리 칸 — 분류를 고르고 설명을 적어 저장한다
   const manage = page.getByRole('region', { name: '스페이스 관리' });
-  await manage.getByLabel('분류').selectOption({ label: category });
+  await manage.getByLabel('분류', { exact: true }).selectOption({ label: category });
   await manage.getByLabel('설명').fill('관리 화면에서 적은 설명');
   await manage.getByRole('button', { name: '저장' }).click();
   await expect(manage.getByRole('status')).toHaveText('저장했다.');
@@ -72,19 +72,24 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
   // 상태 칸이 중지로 바뀌고 조치가 다시 쓰기가 된다 — "중지" 글자만 보면 누르기 전의 단추도 맞는다
   await expect(row.getByRole('button', { name: '다시 쓰기' })).toBeVisible();
   await expect(row.getByRole('button', { name: '중지' })).toHaveCount(0);
-  await expect(row.locator('td').nth(3)).toHaveText('중지');
+  // 관리자가 만든 공간이다 — 주인으로서 건 중지다 (P15 A.1-5)
+  await expect(row.locator('td').nth(3)).toHaveText('중지 주인이 걸었다');
 
   // 중지된 스페이스는 읽기만 된다 — 새 페이지 칸이 없다
   await row.getByRole('link', { name: spaceName }).click();
   await expect(page.getByText('중지됨 — 읽기만 된다')).toBeVisible();
   await expect(page.getByLabel('새 페이지 제목')).toHaveCount(0);
 
-  // 5) 분류는 쓰는 스페이스가 있어 지우지 못한다 — 서버의 까닭이 보인다
+  // 5) 분류를 지운다 — 쓰는 스페이스가 몇 개 분류 없음이 되는지 묻고, 그 스페이스는 분류 없음이 된다 (P15 FR-1622·1624)
   await page.goto('/admin/spaces');
   const catItem = page.getByRole('region', { name: '분류' }).getByRole('listitem').filter({ has: page.getByLabel(`분류 ${category} 이름`) });
-  page.once('dialog', (d) => void d.accept());
+  await expect(catItem).toContainText('공간 1개');
+  const asked = new Promise<string>((ok) => page.once('dialog', (d) => { ok(d.message()); void d.accept(); }));
   await catItem.getByRole('button', { name: '지우기' }).click();
-  await expect(page.getByRole('alert')).toContainText('이 분류를 쓰는 스페이스가 1개 있다');
+  expect(await asked).toContain('이 분류를 쓰는 공간 1개(휴지통 포함)가 "분류 없음"이 된다');
+  await expect(page.getByRole('status')).toHaveText(`분류 "${category}"을(를) 지웠다 — 쓰던 공간 1개는 분류 없음이 됐다.`);
+  await page.getByRole('searchbox').fill(spaceName);
+  await expect(row.locator('td').nth(4)).toHaveText('—');
 
   // 6) 다시 쓰게 한다 — 묻지 않는다
   await page.getByRole('searchbox').fill(spaceName);

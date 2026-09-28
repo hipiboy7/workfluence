@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
   DELEGABLE_ACTIONS,
+  DELEGATION,
   LIST_SEARCH_MAX,
   ROLES,
   USER_LIST_FILTERS,
   USER_LIST_MAX,
   USER_LIST_PAGE,
-  can,
+  canGrant,
   canManageUser,
   type DelegableAction,
   type Principal,
@@ -22,7 +23,12 @@ import { useAuth } from '../../auth';
 import { SEARCH_DELAY_MS } from '../../timing';
 
 /** 위임할 수 있는 행위의 이름 — 목록이 늘면 타입이 여기를 채우라고 한다 (P11 D.1) */
-const GRANT_LABELS: Record<DelegableAction, string> = { 'llm.manage': 'LLM 연결 관리' };
+const GRANT_LABELS: Record<DelegableAction, string> = {
+  'llm.manage': 'LLM 연결 관리',
+  'category.manage': '분류 관리',
+  'space.unsuspend': '관리자가 건 중지 풀기',
+  'space.oversee': '스페이스 관리 전체',
+};
 
 /** 상태의 이름 (P13 C.6) — 예전에는 저장값(`active` 등)을 그대로 보였다 */
 const STATUS_LABELS: Record<UserStatusView, string> = { pending: '승인 대기', active: '활성', locked: '잠김', suspended: '정지' };
@@ -43,7 +49,6 @@ const CANNOT_MANAGE = '이 사용자를 관리할 권한이 없다 — 시스템
 export function AdminUsersPage() {
   const { me } = useAuth();
   const principal: Principal | null = me ? { id: me.id, role: me.role, grants: me.grants } : null;
-  const canGrant = can(principal, 'user.grants.change');
   const manageable = (u: UserView) => principal !== null && canManageUser(principal, { role: u.role, grants: u.grants });
   const [rows, setRows] = useState<UserView[]>([]);
   const [total, setTotal] = useState(0);
@@ -106,14 +111,47 @@ export function AdminUsersPage() {
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
+    // **보던 만큼 다시 읽는다** — 처음 100명으로 돌아가면 뒤쪽에서 조치한 사람이 화면에서 사라졌다 (병합 전 코드 리뷰 10). 실패해도 다시 읽는다 —
+    // 그 사이 누가 바꿔 거절됐으면(409) 옛 칸을 그대로 두면 다시 눌러도 같은 거절이다 (P15 병합 전 코드 리뷰 12)
+    const reload = () => load(Math.min(USER_LIST_MAX, Math.max(USER_LIST_PAGE, rows.length)));
     try {
       await fn();
-      // **보던 만큼 다시 읽는다** — 처음 100명으로 돌아가면 뒤쪽에서 조치한 사람이 화면에서 사라졌다 (병합 전 코드 리뷰 10)
-      load(Math.min(USER_LIST_MAX, Math.max(USER_LIST_PAGE, rows.length)));
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      reload();
     }
   };
+
+  // 위임을 보내는 동안 그 줄의 칸을 막는다 — 빨리 둘을 누르면 둘째가 첫째의 결과를 보지 못한 목록을 보낸다(서버는 409로 막는다)
+  const [grantPending, setGrantPending] = useState<ReadonlySet<string>>(new Set());
+  const changeGrant = (u: UserView, a: DelegableAction, on: boolean) => {
+    const grants = on ? [...u.grants, a] : u.grants.filter((g) => g !== a);
+    setGrantPending((p) => new Set(p).add(u.id));
+    setError(null);
+    // **화면이 본 목록을 함께 보낸다** — 서버의 목록과 다르면 409다. 목록 전체를 보내므로 옛 화면이 방금 남이 거둔 위임을 되살렸다 (병합 전 보안 검토 2).
+    // **응답으로 그 줄을 곧바로 바꾼 뒤에** 칸을 푼다 — 목록 다시 읽기를 기다리지 않고 풀면 옛 줄로 그려져 연달아 누른 둘째가 거짓 409를 받았다(좁은 재검토 2)
+    api<UserView>(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants, expected: u.grants } })
+      .then((next) => setRows((prev) => prev.map((r) => (r.id === next.id ? next : r))))
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
+        load(Math.min(USER_LIST_MAX, Math.max(USER_LIST_PAGE, rows.length)));
+      })
+      .finally(() =>
+        setGrantPending((p) => {
+          const next = new Set(p);
+          next.delete(u.id);
+          return next;
+        }),
+      );
+  };
+
+  /**
+   * 그 역할로 바꾸면 사라지는 위임을 거둘 수 없는가 — 서버가 403으로 막는 선택을 화면이 먼저 막는다(좁은 재검토 14). LLM 연결 관리를 가진 관리자를 member로
+   * 내리는 것은 root만 한다(위임을 거두는 것은 규칙표의 주는 사람)
+   */
+  const blockedRole = (u: UserView, next: Role): boolean =>
+    principal !== null && u.grants.some((g) => DELEGATION[g].holder !== next && !canGrant(principal, g, u.role));
 
   const suspend = (u: UserView) => {
     // 되돌릴 수 있지만 그 사람의 편집이 그 자리에서 끊긴다 — 한 번 묻는다
@@ -169,29 +207,33 @@ export function AdminUsersPage() {
                   title={manageable(u) ? undefined : CANNOT_MANAGE}
                   onChange={(e) => void act(() => api(`/api/users/${u.id}/role`, { method: 'PATCH', json: { role: e.target.value as Role } }))}
                 >
-                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                  {ROLES.map((r) => (
+                    <option key={r} value={r} disabled={r !== u.role && blockedRole(u, r)}>
+                      {r}
+                    </option>
+                  ))}
                 </select>
               </td>
               <td><span className={`badge ${u.status === 'active' ? 'ok' : 'fail'}`}>{STATUS_LABELS[u.status]}</span></td>
               <td>
-                {/* 위임은 관리자만 받는다 — 관리자가 아니게 되면 서버가 비운다 (P11 A.1-4) */}
-                {u.role === 'admin'
-                  ? DELEGABLE_ACTIONS.map((a) => (
-                      <label key={a} className="small">
-                        <input
-                          type="checkbox"
-                          aria-label={`${u.username} ${GRANT_LABELS[a]}`}
-                          checked={u.grants.includes(a)}
-                          disabled={!canGrant}
-                          title={canGrant ? undefined : '시스템 관리자만 주고 거둔다'}
-                          onChange={(e) => {
-                            const grants = e.target.checked ? [...u.grants, a] : u.grants.filter((g) => g !== a);
-                            void act(() => api(`/api/users/${encodeURIComponent(u.id)}/grants`, { method: 'PUT', json: { grants } }));
-                          }}
-                        />{' '}
-                        {GRANT_LABELS[a]}
-                      </label>
-                    ))
+                {/* 그 역할이 받을 수 있는 위임만 — 관리자는 LLM 연결 관리, member는 셋, root는 없다(규칙표, P15 D.1). 역할이 바뀌면 서버가 비운다 */}
+                {DELEGABLE_ACTIONS.some((a) => DELEGATION[a].holder === u.role)
+                  ? DELEGABLE_ACTIONS.filter((a) => DELEGATION[a].holder === u.role).map((a) => {
+                      const allowed = principal !== null && canGrant(principal, a, u.role) && manageable(u);
+                      return (
+                        <label key={a} className="small">
+                          <input
+                            type="checkbox"
+                            aria-label={`${u.username} ${GRANT_LABELS[a]}`}
+                            checked={u.grants.includes(a)}
+                            disabled={!allowed || grantPending.has(u.id)}
+                            title={allowed ? undefined : DELEGATION[a].grantor === 'root' ? '시스템 관리자만 주고 거둔다' : CANNOT_MANAGE}
+                            onChange={(e) => changeGrant(u, a, e.target.checked)}
+                          />{' '}
+                          {GRANT_LABELS[a]}
+                        </label>
+                      );
+                    })
                   : <span className="muted small">—</span>}
               </td>
               <td>
@@ -262,7 +304,7 @@ export function AdminUsersPage() {
         정지된 사람은 로그인하지 못한다. 쓴 문서·댓글·공간 소속은 남고, 정지를 풀면 그대로 이어진다.
       </p>
       <p className="muted small">
-        위임은 시스템 관리자가 관리자 한 사람씩 주고 거둔다. 관리자가 아니게 되면 사라진다. 자기에게 없는 위임을 가진 관리자는 시스템 관리자만 관리한다.
+        위임은 사람마다 주고 거둔다 — LLM 연결 관리는 시스템 관리자가 관리자에게, 분류 관리·관리자가 건 중지 풀기·스페이스 관리 전체는 관리자가 일반 사용자에게. 그 역할이 아니게 되면 사라진다. 자기에게 없는 위임을 가진 관리자는 시스템 관리자만 관리한다.
       </p>
     </main>
   );

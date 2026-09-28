@@ -1,10 +1,10 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PAGE_TREE_MAX_DEPTH, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { pages, spaces, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
-import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
+import { closeTestDb, openTestDb, resetTables, waitForLockWaiters, type TestDb } from '../test/db';
 import { TrashService } from './trash.service';
 
 /** B등급 (P4_설계서_Admin E절). 실제 PostgreSQL. */
@@ -192,19 +192,61 @@ describe('페이지 휴지통 (FR-510~512)', () => {
   });
 });
 
-describe('스페이스 휴지통 (FR-513)', () => {
-  it('관리자만 보고 되살린다', async () => {
+describe('스페이스 휴지통 (FR-513 · P15 FR-1630)', () => {
+  it('관리자만 보고 되살린다 — 주인도 못 한다', async () => {
     const owner = await user('owner');
     const admin = await user('adm', 'admin');
     const sp = await team(owner);
     await db.update(spaces).set({ deletedAt: new Date() }).where(eq(spaces.id, sp.id));
 
-    await expect(svc.listSpaces(owner, 50)).rejects.toThrow(/관리자만/);
+    await expect(svc.listSpaces(owner, 50)).rejects.toThrow(ForbiddenException);
     expect(await svc.listSpaces(admin, 50)).toHaveLength(1);
 
-    await expect(svc.restoreSpace(sp.id, owner)).rejects.toThrow(/관리자만/);
+    await expect(svc.restoreSpace(sp.id, owner)).rejects.toThrow(ForbiddenException);
     await svc.restoreSpace(sp.id, admin);
     expect((await db.query.spaces.findFirst({ where: eq(spaces.id, sp.id) }))?.deletedAt).toBeNull();
+  });
+
+  it('**스페이스 관리 전체를 받은 member도 보고 되살린다** — 다른 위임(분류 관리·관리자가 건 중지 풀기)은 아니다', async () => {
+    const owner = await user('owner');
+    const m = await user('ov');
+    const sp = await team(owner);
+    await db.update(spaces).set({ deletedAt: new Date() }).where(eq(spaces.id, sp.id));
+    for (const g of ['category.manage', 'space.unsuspend'] as const) {
+      await expect(svc.listSpaces({ ...m, grants: [g] }, 50)).rejects.toThrow(ForbiddenException);
+      await expect(svc.restoreSpace(sp.id, { ...m, grants: [g] })).rejects.toThrow(ForbiddenException);
+    }
+    const overseer: Principal = { ...m, grants: ['space.oversee'] };
+    expect((await svc.listSpaces(overseer, 50)).map((v) => v.id)).toEqual([sp.id]);
+    await svc.restoreSpace(sp.id, overseer);
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, sp.id) }))?.deletedAt).toBeNull();
+  });
+
+  it('**두 번 누른 되살리기의 뒤의 것은 409** — 감사가 두 줄 남지 않는다 (좁은 재검토 13)', { timeout: 30_000 }, async () => {
+    const admin = await user('adm', 'admin');
+    const sp = await team(admin);
+    await db.update(spaces).set({ deletedAt: new Date() }).where(eq(spaces.id, sp.id));
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let ready!: () => void;
+    const readyNow = new Promise<void>((r) => (ready = r));
+    const first = db.transaction(async (tx) => {
+      await svc.restoreSpace(sp.id, admin, tx);
+      ready();
+      await held;
+    });
+    await readyNow;
+    const second = svc.restoreSpace(sp.id, admin).then(
+      () => 'ok',
+      (e: unknown) => e,
+    );
+    try {
+      await waitForLockWaiters(1);
+    } finally {
+      release();
+      await first;
+    }
+    expect(await second).toBeInstanceOf(ConflictException);
   });
 
   it('휴지통에 없는 것은 되살릴 수 없다', async () => {

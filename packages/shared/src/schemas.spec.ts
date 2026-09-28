@@ -33,7 +33,7 @@ import {
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
-import { COLLAB_LIMITS, LIST_SEARCH_MAX, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
+import { CATEGORY_NAME_MAX, COLLAB_LIMITS, LIST_SEARCH_MAX, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -96,6 +96,15 @@ describe('카테고리·스페이스 DTO', () => {
     expect(addMemberDto.safeParse({ username: 'kim', role: 'owner' }).success).toBe(false);
     expect(spaceListQueryDto.parse({})).toEqual({ scope: 'personal', limit: 200 });
     expect(spaceListQueryDto.parse({ scope: 'all', limit: '5' })).toEqual({ scope: 'all', limit: 5 });
+  });
+
+  it('**넘겨받기는 화면이 본 상태를 싣는다** (`takeover: true`) — 서버가 그 사이 주인이 풀었으면 새 중지로 만들지 않고 409 (P15 좁은 재검토 12)', () => {
+    expect(spaceStatusDto.parse({ status: 'suspended', takeover: true })).toEqual({ status: 'suspended', takeover: true });
+    expect(spaceStatusDto.parse({ status: 'suspended' })).toEqual({ status: 'suspended' });
+    // 넘겨받기는 중지에만 — 다시 쓰기에 붙이면 뜻이 없다. 다른 값은 받지 않는다
+    for (const bad of [{ status: 'active', takeover: true }, { status: 'suspended', takeover: false }, { status: 'suspended', takeover: 'yes' }]) {
+      expect(spaceStatusDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 
   /** **모든 스페이스는 서버가 찾고 거른다** (P14 FR-1514, P4 FR-537 상한 + 검색). 화면에서만 거르면 상한 밖의 스페이스를 찾지 못한다(T-051) */
@@ -295,12 +304,31 @@ describe('위임 목록 DTO (P11 F절)', () => {
   it('위임할 수 있는 행위의 목록 전체를 받는다 — 비우면 거둔다', () => {
     expect(userGrantsDto.parse({ grants: ['llm.manage'] })).toEqual({ grants: ['llm.manage'] });
     expect(userGrantsDto.parse({ grants: [] })).toEqual({ grants: [] });
+    // 관리자가 member에게 맡기는 셋 (P15 FR-1600)
+    expect(userGrantsDto.parse({ grants: ['category.manage', 'space.unsuspend', 'space.oversee'] })).toEqual({ grants: ['category.manage', 'space.unsuspend', 'space.oversee'] });
   });
 
   it('**위임할 수 없는 행위·겹친 것·다른 키는 받지 않는다**', () => {
-    for (const bad of [{ grants: ['system.manage'] }, { grants: ['llm.manage', 'llm.manage'] }, { grants: 'llm.manage' }, {}, { grants: [], role: 'root' }]) {
+    for (const bad of [{ grants: ['system.manage'] }, { grants: ['space.manage'] }, { grants: ['llm.manage', 'llm.manage'] }, { grants: 'llm.manage' }, {}, { grants: [], role: 'root' }]) {
       expect(userGrantsDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
+  });
+
+  it('**화면이 본 목록(`expected`)을 함께 싣는다** — 서버의 목록과 다르면 409다. 없어도 된다(목록 전체를 바꾸는 호출) (병합 전 보안 검토 2)', () => {
+    expect(userGrantsDto.parse({ grants: ['space.oversee'], expected: [] })).toEqual({ grants: ['space.oversee'], expected: [] });
+    expect(userGrantsDto.parse({ grants: [], expected: ['category.manage', 'space.oversee'] })).toEqual({ grants: [], expected: ['category.manage', 'space.oversee'] });
+    expect(userGrantsDto.parse({ grants: [] })).toEqual({ grants: [] });
+    for (const bad of [{ grants: [], expected: ['system.manage'] }, { grants: [], expected: ['llm.manage', 'llm.manage'] }, { grants: [], expected: 'llm.manage' }]) {
+      expect(userGrantsDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+describe('분류 이름의 상한 (`CATEGORY_NAME_MAX` — 병합 전 자체 점검 7)', () => {
+  it('계약과 화면의 입력 칸이 같은 상수를 쓴다 — 넘으면 받지 않는다', () => {
+    expect(CATEGORY_NAME_MAX).toBe(50);
+    expect(createCategoryDto.safeParse({ name: '가'.repeat(CATEGORY_NAME_MAX) }).success).toBe(true);
+    expect(createCategoryDto.safeParse({ name: '가'.repeat(CATEGORY_NAME_MAX + 1) }).success).toBe(false);
   });
 });
 

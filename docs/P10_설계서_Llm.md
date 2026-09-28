@@ -2,7 +2,8 @@
 
 > **Phase 11이 바꾼 것** (2026-09-26): LLM 연결 관리의 요구 행위가 `system.manage`에서 **`llm.manage`**로 바뀌었다 — root가 늘 하고, root가
 > 관리자 한 사람씩 위임한다(확인 필요 F의 답). 이 문서의 "root만(`system.manage`)"은 Phase 10 당시의 판단이다. 지금의 규칙은
-> [`docs/P11_설계서_Ops.md`](P11_설계서_Ops.md) D.1이다.
+> [`docs/P11_설계서_Ops.md`](P11_설계서_Ops.md) D.1이다 — 위임 전체의 규칙은 Phase 15부터 [`docs/P15_설계서_Grants.md`](P15_설계서_Grants.md) D.1이다(LLM
+> 연결 관리를 root가 관리자에게 주는 것은 그대로다).
 
 Phase 10은 **기능백로그 F-002**를 만든다 — 사내에 따로 선 LLM 서버(vLLM, Qwen3)에 위키 안에서 묻는 메뉴다.
 시스템 관리자가 관리 화면에서 LLM을 등록·삭제하고, 사람마다 자기 지시문(시스템 프롬프트)을 여럿 저장해 골라 쓰고,

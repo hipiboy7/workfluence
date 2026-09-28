@@ -252,7 +252,7 @@ test('위키 페이지를 마크다운으로 복사해 질문에 붙인다', asy
   await page.goto('/');
   await page.getByRole('link', { name: `${MEMBER.displayName}의 공간` }).click();
   await page.getByLabel('새 페이지 제목').fill(title);
-  await page.getByRole('button', { name: '만들기' }).click();
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
   await expect(page.getByRole('heading', { name: '페이지 편집' })).toBeVisible();
   await page.locator('.editor .ProseMirror').click();
   await page.keyboard.type('예산 초안을 검토한다');

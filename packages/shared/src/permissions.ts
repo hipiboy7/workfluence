@@ -11,7 +11,8 @@ export type Principal = {
   id: string;
   role: Role;
   /**
-   * root가 준 행위 (P11_설계서_Ops D.1). **관리자에게만 먹는다** — 다른 역할이면 보지 않는다. 가드가 요청마다 사용자 행에서 싣는다
+   * 맡겨 받은 행위 (P11_설계서_Ops D.1 · P15_설계서_Grants D.1). **규칙표의 받는 역할일 때만 먹는다** — 다른 역할이면 보지 않는다. 가드가
+   * 요청마다 사용자 행에서 싣는다 — 받거나 잃으면 다음 요청부터다
    */
   grants?: readonly string[];
 };
@@ -23,21 +24,41 @@ export type Action =
   | 'system.manage' // root 전용
   | 'settings.manage' // 담당자 안내문 등
   | 'space.create'
-  | 'space.manage' // 전체 스페이스 조회·상태 변경·중지 스페이스 삭제
+  | 'space.manage' // 모든 공간의 **내용**을 읽는 관리자 — 검색·라벨·알림·페이지 휴지통·템플릿. 목록·상태·지우기는 `space.oversee`다 (P15 A.1-1)
   | 'category.create'
   | 'page.read'
   | 'page.write'
   | 'page.delete'
   | 'llm.manage' // 사내 LLM 연결 관리 — root, 그리고 root가 위임한 admin (P11 D.1)
-  | 'user.grants.change'; // 위임을 주고 거두기 — root 전용 (P11 A.1-3)
+  | 'category.manage' // 남이 쓰는 분류도 이름을 바꾸고 지운다 — 관리자, 그리고 관리자가 맡긴 member (P15 D.1)
+  | 'space.unsuspend' // 관리자가 건 중지를 자기 공간에서 푼다 — 관리자, 그리고 관리자가 맡긴 member (P15 C.2)
+  | 'space.oversee' // 모든 공간의 목록·중지·다시 쓰기·지우기 — 내용은 읽지 않는다(`space.manage`와 다르다, P15 A.1-1)
+  | 'user.grants.change'; // 위임을 주고 거두는 창구 — root와 관리자. 무엇을 줄 수 있는지는 규칙표(`DELEGATION`)가 정한다 (P15 D.1)
 
 /**
- * **위임할 수 있는 행위** — root가 관리자 한 사람에게 준다 (P11 D.1, A.1-2). 여기 없는 행위는 위임 목록에 적혀 있어도 먹지 않는다.
- * 더하면 마이그레이션의 CHECK(`users_grants_known_chk`)도 고친다
+ * **위임할 수 있는 행위** (P11 D.1 · P15 D.1). 여기 없는 행위는 위임 목록에 적혀 있어도 먹지 않는다. 더하면 규칙표(`DELEGATION`)에 칸을
+ * 두고, 마이그레이션의 CHECK(`users_grants_known_chk`·`users_grants_holder_chk`)도 고친다 — `constraints.integration.spec.ts`가 본다
  */
-export const DELEGABLE_ACTIONS = ['llm.manage'] as const satisfies readonly Action[];
+export const DELEGABLE_ACTIONS = ['llm.manage', 'category.manage', 'space.unsuspend', 'space.oversee'] as const satisfies readonly Action[];
 export type DelegableAction = (typeof DELEGABLE_ACTIONS)[number];
 const DELEGABLE: ReadonlySet<string> = new Set(DELEGABLE_ACTIONS);
+
+/**
+ * **위임 규칙표** — 행위마다 **받는 역할**(`holder`)과 **주는 사람**(`grantor`)이 하나씩이다 (P15 D.1, NFR-150).
+ * - LLM 연결 관리는 root가 관리자에게 준다(P11). 관리자가 아니게 되면 사라진다
+ * - 셋은 관리자·root가 **member에게** 준다 — 관리자·root는 역할로 이미 가진다(A.1-2). member가 관리자가 되면 역할에 든다
+ * - 받은 사람은 다시 주지 못한다 — 창구(`user.grants.change`)는 역할만 가진다(A.1-3)
+ */
+export const DELEGATION: Readonly<Record<DelegableAction, { holder: Role; grantor: 'root' | 'admin' }>> = {
+  'llm.manage': { holder: 'admin', grantor: 'root' },
+  'category.manage': { holder: 'member', grantor: 'admin' },
+  'space.unsuspend': { holder: 'member', grantor: 'admin' },
+  'space.oversee': { holder: 'member', grantor: 'admin' },
+};
+
+function isDelegable(action: string): action is DelegableAction {
+  return DELEGABLE.has(action);
+}
 
 /** 역할별 허용 행위. 기본 거부: 여기 없는 조합은 전부 false. */
 const GRANTS: Record<Role, ReadonlySet<Action>> = {
@@ -54,6 +75,9 @@ const GRANTS: Record<Role, ReadonlySet<Action>> = {
     'page.write',
     'page.delete',
     'llm.manage',
+    'category.manage',
+    'space.unsuspend',
+    'space.oversee',
     'user.grants.change',
   ]),
   admin: new Set<Action>([
@@ -67,6 +91,10 @@ const GRANTS: Record<Role, ReadonlySet<Action>> = {
     'page.read',
     'page.write',
     'page.delete',
+    'category.manage',
+    'space.unsuspend',
+    'space.oversee',
+    'user.grants.change',
   ]),
   member: new Set<Action>(['space.create', 'category.create', 'page.read', 'page.write', 'page.delete']),
 };
@@ -76,17 +104,29 @@ export function can(principal: Principal | null | undefined, action: Action): bo
   const byRole = GRANTS[principal.role];
   if (!byRole) return false;
   if (byRole.has(action)) return true;
-  // 위임 — 관리자이고, 위임할 수 있는 행위이고, root가 준 것일 때만 (P11 D.1)
-  return principal.role === 'admin' && DELEGABLE.has(action) && (principal.grants ?? []).includes(action);
+  // 위임 — 위임할 수 있는 행위이고, 그 사람이 규칙표의 받는 역할이고, 받은 것일 때만 (P11 D.1 · P15 D.1)
+  return isDelegable(action) && DELEGATION[action].holder === principal.role && (principal.grants ?? []).includes(action);
 }
 
 /**
- * 역할에 맞는 위임 목록 — **관리자가 아니면 비운다**(member가 되면 위임이 사라진다 — A.1-4), 관리자면 위임할 수 있는 것만 겹치지
- * 않게 남긴다. 역할이 바뀌는 자리(관리 화면·사내 계정 동기화)가 이것으로 새 목록을 정한다
+ * 역할에 맞는 위임 목록 — **그 역할이 받을 수 있는 것만** 겹치지 않게 남긴다(FR-1603). 관리자가 member가 되면 LLM 연결 관리가, member가
+ * 관리자가 되면 셋이 사라진다(역할에 든다). 역할이 바뀌는 자리(관리 화면·사내 계정 동기화)가 이것으로 새 목록을 정한다
  */
 export function grantsForRole(role: Role, grants: readonly string[]): DelegableAction[] {
-  if (role !== 'admin') return [];
-  return DELEGABLE_ACTIONS.filter((a) => grants.includes(a));
+  return DELEGABLE_ACTIONS.filter((a) => DELEGATION[a].holder === role && grants.includes(a));
+}
+
+/**
+ * **actor가 그 위임을 주고 거둘 수 있는가** (P15 D.1, A.1-3). 창구(`user.grants.change`)가 있어야 하고, 규칙표의 주는 사람이어야 하고
+ * (root면 root만, admin이면 관리자와 root), 대상의 역할이 받는 역할이어야 한다. 받은 사람은 창구가 없어 다시 주지 못한다
+ */
+export function canGrant(actor: Principal | null | undefined, action: DelegableAction, targetRole: Role): boolean {
+  if (!actor || !can(actor, 'user.grants.change')) return false;
+  const rule = DELEGATION[action];
+  if (rule.holder !== targetRole) return false;
+  // 주는 사람이 그 행위를 스스로 할 수 있는지는 여기서 보지 않는다 — 규칙표의 주는 역할이 늘 그 행위를 가지는 것을 A등급 시험이 고정한다(병합 전 자체 점검
+  // 10). 여기 두면 지금의 규칙표로는 결과를 바꾸는 입력이 없는 줄이 된다(좁은 재검토 8)
+  return rule.grantor === 'root' ? actor.role === 'root' : isAdminRole(actor.role);
 }
 
 export function isAdminRole(role: Role): boolean {
@@ -105,16 +145,16 @@ export function canAssignRole(actor: Principal, role: Role): boolean {
 /**
  * actor가 target 사용자를 관리(승인·초기화·잠금 해제·역할 변경·세션 종료)할 수 있는가. admin은 root를 건드릴 수 없다.
  *
- * **자기에게 없는 위임을 가진 관리자도 건드릴 수 없다** (P11 보안 검토 1). 위임이 관리자 사이에 차이를 만들었다 — 위임 없는 관리자가
- * 위임받은 관리자의 비밀번호를 초기화하면 그 계정으로 로그인해 위임을 얻고, 역할을 내렸다 올리면 root가 준 것을 거둔다. 역할의 우열과
- * 같이 **가진 것의 우열**을 본다. root는 모두를 관리한다. 위임은 관리자만 가진다(`grantsForRole`) — member·root 행의 값은 보지 않는다
+ * **자기가 할 수 없는 위임을 가진 사람은 건드릴 수 없다** (P11 보안 검토 1). 위임 없는 관리자가 위임받은 관리자의 비밀번호를 초기화하면
+ * 그 계정으로 로그인해 위임을 얻고, 역할을 내렸다 올리면 root가 맡긴 것을 거둔다. 역할의 우열과 같이 **가진 것의 우열**을 본다 — 대상이 가진
+ * 위임(그 역할이 받을 수 있는 것만 — `grantsForRole`)을 actor가 **모두 할 수 있어야** 한다(`can`). 관리자는 셋을 역할로 가지므로 셋을
+ * 받은 member를 관리한다(P15 FR-1604). root는 모두를 관리한다
  */
 export function canManageUser(actor: Principal, target: { role: Role; grants?: readonly string[] }): boolean {
   if (!isAdminRole(actor.role)) return false;
   if (ROLE_RANK[actor.role] < ROLE_RANK[target.role]) return false;
   if (actor.role === 'root') return true;
-  const mine = grantsForRole(actor.role, actor.grants ?? []);
-  return grantsForRole(target.role, target.grants ?? []).every((g) => mine.includes(g));
+  return grantsForRole(target.role, target.grants ?? []).every((g) => can(actor, g));
 }
 
 /** 정지·해제의 대상 (P13 C.5) */
@@ -144,12 +184,19 @@ export type SpaceLike = {
   kind: SpaceKind;
   status: SpaceStatus;
   createdBy: string;
+  /**
+   * 중지를 건 사람이 그 공간의 주인이었는가 (P15 D.2, `spaces.suspended_by_owner`). 중지일 때만 뜻이 있다. **모르면(없으면) 관리자가 건
+   * 것으로 친다** — 주인도 권한(`space.unsuspend`)이 있어야 푼다
+   */
+  suspendedByOwner?: boolean;
 };
 
 export type SpaceAccess = {
   canRead: boolean;
   canWrite: boolean;
   canManageMembers: boolean;
+  /** 이름·설명·분류를 바꾸는가 — 주인과 관리자. 상태는 보지 않는다(중지된 공간은 `canWrite`가 막는다 — 서버가 까닭을 나눠 말한다) */
+  canEditInfo: boolean;
   canChangeStatus: boolean;
   canDelete: boolean;
   isOwner: boolean;
@@ -159,6 +206,7 @@ const NO_ACCESS: SpaceAccess = {
   canRead: false,
   canWrite: false,
   canManageMembers: false,
+  canEditInfo: false,
   canChangeStatus: false,
   canDelete: false,
   isOwner: false,
@@ -171,6 +219,10 @@ const NO_ACCESS: SpaceAccess = {
  * - 중지 상태: 누구도 쓰기 불가(읽기 전용).
  * - 삭제: 생성자는 Crew가 본인뿐(memberCount < 2)이고 **활성일 때**, 관리자는 중지 상태일 때. 원문 "'중지'하게되면, admin만 삭제할 수
  *   있어야해" — 처음 판은 활성 조건을 빠뜨려 중지된 스페이스를 주인이 지울 수 있었다(P14 병합 전 보안 검토 5).
+ * - `canChangeStatus`는 **지금 상태에서 바꿀 수 있는가**다 (P15 D.3). 활성이면 중지 — 주인과 `space.oversee`(관리자·root·스페이스 관리
+ *   전체). 중지면 다시 쓰기 — `space.oversee`, 그리고 주인이 건 중지면 주인, **관리자가 건 중지면 `space.unsuspend`를 받은 주인만**(보류 32).
+ *   중지된 것 지우기도 `space.oversee`다. **읽기·쓰기·Crew 관리·이름 바꾸기는 관리자 역할과 Crew로만 정한다** — 스페이스 관리 전체는 내용을
+ *   읽지 않고 이름도 바꾸지 않는다(A.1-1). 이름·설명·분류는 `canEditInfo`(주인과 관리자)다 — 예전에는 `canChangeStatus`를 빌려 썼다
  */
 export function spaceAccess(
   principal: Principal | null | undefined,
@@ -180,31 +232,35 @@ export function spaceAccess(
 ): SpaceAccess {
   if (!principal) return NO_ACCESS;
   const admin = isAdminRole(principal.role);
+  const overseer = can(principal, 'space.oversee');
   const isOwner = space.createdBy === principal.id || membership === 'owner';
   const active = space.status === 'active';
+  const canResume = overseer || (isOwner && (space.suspendedByOwner === true || can(principal, 'space.unsuspend')));
+  const canChangeStatus = active ? overseer || isOwner : canResume;
+  const canDelete = (isOwner && memberCount < 2 && active) || (overseer && !active);
+  const canEditInfo = admin || isOwner;
 
   if (space.kind === 'personal') {
     const canRead = isOwner || admin;
-    return {
-      canRead,
-      canWrite: canRead && active,
-      canManageMembers: false,
-      canChangeStatus: canRead,
-      canDelete: (isOwner && memberCount < 2 && active) || (admin && !active),
-      isOwner,
-    };
+    return { canRead, canWrite: canRead && active, canManageMembers: false, canEditInfo, canChangeStatus, canDelete, isOwner };
   }
 
   const canRead = admin || membership !== null;
   const canWrite = active && (admin || isOwner || membership === 'editor');
-  return {
-    canRead,
-    canWrite,
-    canManageMembers: admin || isOwner,
-    canChangeStatus: admin || isOwner,
-    canDelete: (isOwner && memberCount < 2 && active) || (admin && !active),
-    isOwner,
-  };
+  return { canRead, canWrite, canManageMembers: admin || isOwner, canEditInfo, canChangeStatus, canDelete, isOwner };
+}
+
+export type CategoryAccess = { canRename: boolean; canDelete: boolean };
+
+/**
+ * **분류의 이름 바꾸기·지우기** (P15 D.4, FR-1621 — 보류 33). 관리자와 분류 관리(`category.manage`)를 받은 사람은 늘 한다. 만든 사람은
+ * **남의 공간이 쓰지 않을 때만** 한다 — 자기 공간만 쓰면 된다(그 공간들이 분류 없음이 된다). 남의 공간은 분류를 만든 사람이 주인이 아닌
+ * 공간이다(휴지통 포함 — 호출부가 센다). 이름 바꾸기도 같은 규칙이다(A.1-7)
+ */
+export function categoryAccess(principal: Principal | null | undefined, category: { createdBy: string }, usage: { otherSpaces: number }): CategoryAccess {
+  if (!principal) return { canRename: false, canDelete: false };
+  const ok = can(principal, 'category.manage') || (category.createdBy === principal.id && usage.otherSpaces === 0);
+  return { canRename: ok, canDelete: ok };
 }
 
 /** 비밀번호 정책 판정. 통과하면 빈 배열, 아니면 위반 사유 목록. */

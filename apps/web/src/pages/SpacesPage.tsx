@@ -48,8 +48,8 @@ export function SpacesPage() {
         {me.displayName}님 ({me.role})
         {can(principal, 'user.manage') && <> · <Link to="/admin/users">사용자 관리</Link></>}
         {can(principal, 'audit.read') && <> · <Link to="/admin/audit">감사로그</Link></>}
-        {/* 모든 스페이스와 분류 (P14 FR-1513~1515) */}
-        {can(principal, 'space.manage') && <> · <Link to="/admin/spaces">스페이스 관리</Link></>}
+        {/* 모든 스페이스와 분류 (P14 FR-1513~1515) — 스페이스 관리 전체나 분류 관리를 받은 member에게도 보인다 (P15 D.5) */}
+        {(can(principal, 'space.oversee') || can(principal, 'category.manage')) && <> · <Link to="/admin/spaces">스페이스 관리</Link></>}
         {' · '}<Link to="/search">검색</Link>
         {' · '}<Link to="/notifications">알림{unread > 0 ? ` (${unread})` : ''}</Link>
         {' · '}<Link to="/trash">휴지통</Link>

@@ -64,7 +64,7 @@
 | FR-510 | 지운 페이지를 목록으로 보고 **되살린다** | 인수 기준 |
 | FR-511 | 되살리기 권한은 그 스페이스의 쓰기 권한을 따른다 | 기존 판정 재사용 |
 | FR-512 | 부모가 지워진 페이지를 되살리면 **스페이스 최상위로 올린다** | 없는 부모를 가리키면 트리에서 사라진다 |
-| FR-513 | 지운 스페이스는 관리자만 보고 되살린다 | `space.manage` |
+| FR-513 | 지운 스페이스는 관리자만 보고 되살린다 — **정정 2026-09-28 (Phase 15):** 관리자와 **스페이스 관리 전체**를 받은 member가 한다(`space.oversee`, `P15_설계서_Grants` FR-1630) | `space.manage` → `space.oversee` |
 | FR-514 | 되살리기를 감사로그에 남긴다 | `CLAUDE.md` 6절 |
 | FR-515 | 보존 기간(기본 30일)을 넘긴 것은 `pnpm trash:purge`가 **물리 삭제**한다 | 위험 7 |
 | FR-516 | 물리 삭제도 감사로그에 남긴다. 무엇을 몇 건 지웠는지 | |
@@ -91,13 +91,13 @@
 |---|---|---|
 | FR-530 | 관리자가 **모든 스페이스**를 보고 상태를 바꾼다 | 인수 기준. `space.manage`는 Phase 2에 이미 있다 |
 | FR-531 | 감사로그를 행위·행위자·기간으로 거른다 | "추적한다"는 거를 수 있어야 성립한다 |
-| FR-532 | 카테고리를 관리자가 이름 변경·삭제한다. 쓰는 스페이스가 있으면 삭제 거부 | `scope-definition` 7.2절의 "남용되면 Phase 4" |
+| FR-532 | 카테고리를 관리자가 이름 변경·삭제한다. 쓰는 스페이스가 있으면 삭제 거부 — **정정 2026-09-28 (Phase 15):** 만든 사람도 남의 공간이 쓰지 않을 때 바꾸고 지운다. 관리자와 "분류 관리"를 받은 사람은 늘 한다(`P15_설계서_Grants` FR-1621) | `scope-definition` 7.2절의 "남용되면 Phase 4" |
 | FR-533 | 라벨을 페이지에 붙이고 뗀다. 이름은 유일 | Phase 3 인계 1항 |
 | FR-534 | 라벨로 페이지를 찾는다 | 붙이기만 하고 못 찾으면 쓸모가 없다 |
 | FR-535 | 라벨 권한은 그 페이지의 스페이스 판정을 따른다 | |
 | FR-536 | 라벨 작업을 감사로그에 남긴다 | |
 | FR-537 | 관리 화면의 모든 목록은 페이지네이션 대신 **상한 + 검색**이다 — **정정 2026-09-27 (Phase 13 FR-1451):** 사용자 목록은 100명씩 **더 보기**로 받는다. 상한만 두니 300명 규모에서 100명 밖을 화면에서 관리하지 못했다(T-051) | 300명 규모에서 목록이 수천을 넘지 않는다. 넘으면 그때 만든다 |
-| FR-538 | 카테고리 삭제는 **쓰는 스페이스가 있으면 거부**한다 | 조용히 `NULL`로 만들면 그 스페이스들이 어느 분류였는지 복구할 수 없다 |
+| FR-538 | 카테고리 삭제는 **쓰는 스페이스가 있으면 거부**한다 — **정정 2026-09-28 (Phase 15):** 사용자가 바꿨다 — 지우면 쓰던 스페이스(휴지통 포함)는 분류 없음이 되고, 어느 스페이스였는지 감사 `category.delete`에 남는다(`P15_설계서_Grants` FR-1622) | 조용히 `NULL`로 만들면 그 스페이스들이 어느 분류였는지 복구할 수 없다 — Phase 15는 그 목록을 감사에 남겨 이 까닭을 푼다 |
 | FR-539 | 관리자가 **다른 사용자의 세션을 강제 종료**한다. 서버측 세션을 파기한다 | `scope-definition` 4.1절 #4가 Phase 4로 둔 것. 쿠키만 지우게 하면 훔친 세션이 산다 (FR-224와 같은 판단) |
 
 ## 비기능 (NFR-40 ~ NFR-43)
@@ -140,8 +140,8 @@
 | `POST /api/notifications/read-all` | 로그인 | `{ count }` |
 | `GET /api/trash/pages?limit=` | 스페이스 판정 `canWrite` | `TrashPageView[]` |
 | `POST /api/trash/pages/:id/restore` | 같음 | `{ ok, movedToRoot }` |
-| `GET /api/trash/spaces?limit=` | `space.manage` | `TrashSpaceView[]` |
-| `POST /api/trash/spaces/:id/restore` | `space.manage` | `{ ok }` |
+| `GET /api/trash/spaces?limit=` | `space.manage` (**P15부터 `space.oversee`**) | `TrashSpaceView[]` |
+| `POST /api/trash/spaces/:id/restore` | `space.manage` (**P15부터 `space.oversee`**) | `{ ok }` |
 | `GET /api/settings/policy` | 로그인. **관리자가 아니면 일부만** | `Policy`(부분) + `uploadCeilingMb` |
 | `PATCH /api/settings/policy` | `settings.manage` | `{ ok }` |
 | `GET /api/labels?limit=` | 로그인 | `LabelView[]` |
@@ -150,8 +150,8 @@
 | `POST /api/pages/:id/labels` | `canWrite` | `LabelView` |
 | `DELETE /api/pages/:id/labels/:labelId` | `canWrite` | `{ ok }` |
 | `GET /api/audit?limit=&action=&actorId=&from=&to=` | `audit.read` | `AuditEventView[]` (Phase 11부터 `requestId`로도 거르고 행에 요청 번호 — P11 F절) |
-| `PATCH /api/categories/:id` | `space.manage` | `CategoryView` |
-| `DELETE /api/categories/:id` | `space.manage` | `{ ok }`. 쓰는 스페이스가 있으면 409 |
+| `PATCH /api/categories/:id` | `space.manage` (**P15부터 로그인만 — 판정은 `categoryAccess`, 안 되면 403**) | `CategoryView` |
+| `DELETE /api/categories/:id` | `space.manage` (**P15부터 같음**) | `{ ok }`. 쓰는 스페이스가 있으면 409 — **P15부터 409가 없다: 쓰던 스페이스는 분류 없음이 되고 감사에 `cleared`** (`P15_설계서_Grants` D.4) |
 | `POST /api/users/:id/terminate-sessions` | `user.manage` | `{ count }` |
 
 **상태 코드의 뜻을 고정한다.** 못 보는 것은 **404**다 (403이 아니다 — 403은 "그것이 있다"를
@@ -163,7 +163,7 @@
 ```
 첫 화면(스페이스 목록)
 ├─ 알림 (n)  →  /notifications   읽음 처리 · 모두 읽음 · 대상으로 이동
-├─ 휴지통    →  /trash           지운 페이지 되살리기 / (관리자) 지운 스페이스
+├─ 휴지통    →  /trash           지운 페이지 되살리기 / (관리자 — P15부터 스페이스 관리 전체도) 지운 스페이스
 ├─ 검색      →  /search
 └─ (관리자) 운영 설정 → /admin/policy   숫자 값 · 허용 확장자
                 사용자 관리 → /admin/users    승인 · 잠금 해제 · 초기화 · 역할 · **세션 강제 종료**

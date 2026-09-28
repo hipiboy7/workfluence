@@ -2,6 +2,7 @@ import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
   ASSIGNABLE_MEMBER_ROLES,
+  CATEGORY_NAME_MAX,
   COLLAB_LIMITS,
   LIST_PAGE_LIMIT,
   LIST_SEARCH_MAX,
@@ -18,7 +19,7 @@ import {
 } from './constants';
 import { validateDocument, type DocNode } from './document';
 import { normalizeLlmBaseUrl, type LlmStreamStatus } from './llm';
-import { DELEGABLE_ACTIONS, type DelegableAction } from './permissions';
+import { DELEGABLE_ACTIONS, type CategoryAccess, type DelegableAction, type SpaceAccess } from './permissions';
 import { POLICY_FLOOR } from './policy';
 
 /** API 요청·응답 계약. 서버(zod 파이프)와 클라이언트(타입)가 같은 정의를 쓴다. */
@@ -121,7 +122,7 @@ export type UpdateUserRoleDto = z.infer<typeof updateUserRoleDto>;
 
 // ---- 카테고리·스페이스 ----
 
-export const createCategoryDto = z.object({ name: z.string().trim().min(1).max(50) });
+export const createCategoryDto = z.object({ name: z.string().trim().min(1).max(CATEGORY_NAME_MAX) });
 export type CreateCategoryDto = z.infer<typeof createCategoryDto>;
 
 export const createSpaceDto = z.object({
@@ -139,7 +140,14 @@ export const updateSpaceDto = z.object({
 });
 export type UpdateSpaceDto = z.infer<typeof updateSpaceDto>;
 
-export const spaceStatusDto = z.object({ status: z.enum(SPACE_STATUSES) });
+/**
+ * 상태 바꾸기 (FR-306 · P15 C.2). `takeover`는 **화면이 본 상태**다 — "주인이 건 중지"를 보고 넘겨받으려 한다. 그 사이 주인이 풀었으면 서버는 새 중지로
+ * 만들지 않고 409다(편집 중인 사람을 끊는 일을 모르고 하지 않게 — 좁은 재검토 12). 중지에만 붙는다
+ */
+export const spaceStatusDto = z.union([
+  z.object({ status: z.literal('suspended'), takeover: z.literal(true) }).strict(),
+  z.object({ status: z.enum(SPACE_STATUSES) }).strict(),
+]);
 export type SpaceStatusDto = z.infer<typeof spaceStatusDto>;
 
 export const addMemberDto = z.object({
@@ -276,9 +284,16 @@ export type AttachLabelDto = z.infer<typeof attachLabelDto>;
 /**
  * 위임 목록 전체 (P11 F절) — 켜고 끄는 두 상태뿐이라 목록을 통째로 보낸다(멱등). 위임할 수 있는 행위만, 겹치지 않게
  */
+const delegableList = z.array(z.enum(DELEGABLE_ACTIONS)).refine((a) => new Set(a).size === a.length, '같은 위임을 두 번 적었다');
+
+/**
+ * 위임 목록 (P11 F절 · P15 F절). 목록 전체를 받는다. **`expected`는 화면이 본 목록**이다 — 서버의 목록과 다르면 409(그 사이 누가 바꿨다). 목록
+ * 전체를 보내므로, 옛 화면이 방금 거둔 위임을 조용히 되살리는 길을 막는다(병합 전 보안 검토 2). 없으면 보지 않는다(목록 전체를 바꾸는 호출)
+ */
 export const userGrantsDto = z
   .object({
-    grants: z.array(z.enum(DELEGABLE_ACTIONS)).refine((a) => new Set(a).size === a.length, '같은 위임을 두 번 적었다'),
+    grants: delegableList,
+    expected: delegableList.optional(),
   })
   .strict();
 export type UserGrantsDto = z.infer<typeof userGrantsDto>;
@@ -307,7 +322,7 @@ export type UserView = {
   role: (typeof ROLES)[number];
   status: UserStatusView;
   mustChangePassword: boolean;
-  /** root가 준 행위 — 관리자만 가진다 (P11 D.1) */
+  /** 맡긴 행위 — 받는 역할의 것만 싣는다(관리자는 LLM 연결 관리, member는 셋 — P11 D.1 · P15 D.1) */
   grants: DelegableAction[];
   createdAt: string;
 };
@@ -334,7 +349,7 @@ export type MeView = {
   displayName: string;
   role: (typeof ROLES)[number];
   mustChangePassword: boolean;
-  /** root가 준 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1) */
+  /** 맡긴 행위 — 화면이 `can()`에 함께 넘긴다 (P11 D.1 · P15 D.1) */
   grants: DelegableAction[];
   /** 비밀번호로 로그인하는 계정인가 — 사내 계정은 아니다. 화면이 **비밀번호 변경**을 보일지 정한다 (P13 FR-1471) */
   hasPassword: boolean;
@@ -343,22 +358,37 @@ export type MeView = {
 /** 로그인 전에도 읽는 비밀번호 규칙 — 길이와 문자 종류 수만 (P13 FR-1472). 잠금 기준·세션 시간은 주지 않는다 */
 export type PasswordRulesView = { minLength: number; minCharClasses: number };
 
-export type CategoryView = { id: string; name: string; createdAt: string };
+/**
+ * 분류 (FR-308 · P15 FR-1623). 줄마다 **할 수 있는 일**(`categoryAccess` — 이름 바꾸기·지우기)과 **쓰임**(휴지통을 포함한 공간 수, 그 가운데
+ * 만든 사람이 주인이 아닌 공간 수)을 싣는다 — 화면은 규칙을 다시 만들지 않는다
+ */
+export type CategoryView = {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdAt: string;
+  access: CategoryAccess;
+  /** 바꿀 수 있는 사람과 만든 사람에게만 — 다른 사람에게는 `null`이다(남의 비공개 공간·휴지통까지 센 수라서, P15 병합 전 검토) */
+  usage: { spaces: number; otherSpaces: number } | null;
+};
 
 export type SpaceView = {
   id: string;
   key: string;
   name: string;
+  /** 읽지 못하는 사람(스페이스 관리 전체로 모든 스페이스를 보는 member)에게는 빈 글이다 (P15 A.1-1) */
   description: string;
   kind: (typeof SPACE_KINDS)[number];
   status: (typeof SPACE_STATUSES)[number];
+  /** 중지를 건 사람이 그 공간의 주인이었는가 (P15 FR-1612) — 중지일 때만 참일 수 있다. 거짓인 중지는 관리자가 건 것이다 */
+  suspendedByOwner: boolean;
   categoryId: string | null;
   categoryName: string | null;
   createdBy: string;
   createdByUsername: string;
   memberCount: number;
   myRole: (typeof SPACE_MEMBER_ROLES)[number] | null;
-  access: { canRead: boolean; canWrite: boolean; canManageMembers: boolean; canChangeStatus: boolean; canDelete: boolean; isOwner: boolean };
+  access: SpaceAccess;
   createdAt: string;
   updatedAt: string;
 };

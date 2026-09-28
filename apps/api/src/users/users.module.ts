@@ -155,7 +155,10 @@ export class UsersController {
     });
   }
 
-  /** 위임을 주고 거둔다 — root만 (P11_설계서_Ops D.1·F절, FR-1201·1205). 목록 전체를 받는다 */
+  /**
+   * 위임을 주고 거둔다 (P11_설계서_Ops D.1·F절 · P15_설계서_Grants D.1·F절). 창구는 root와 관리자 — 무엇을 줄 수 있는지는 서비스가 규칙표로 본다.
+   * 목록 전체를 받고, 화면이 본 목록(`expected`)이 서버의 것과 다르면 409다
+   */
   @Put(':id/grants')
   @RequireAction('user.grants.change')
   async changeGrants(
@@ -165,7 +168,7 @@ export class UsersController {
     @Req() req: Request,
   ): Promise<UserView> {
     return this.db.transaction(async (tx) => {
-      const { row, before, after, changed } = await this.users.changeGrants(id, dto.grants, actor, tx);
+      const { row, before, after, changed } = await this.users.changeGrants(id, dto.grants, actor, tx, dto.expected);
       // 바뀐 것이 없으면 남기지 않는다 — 같은 목록을 다시 보낸 것은 권한 변경이 아니다 (P11 코드 리뷰 9)
       if (changed) {
         await this.audit.record(

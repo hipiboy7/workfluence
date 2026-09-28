@@ -45,7 +45,7 @@ export const users = pgTable(
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     approvedBy: uuid('approved_by'),
-    /** root가 준 행위 (P11 D.1) — 관리자만 가진다. 판정은 shared `can()`, 역할이 바뀌면 `grantsForRole`로 다시 정한다 */
+    /** 맡겨 받은 행위 (P11 D.1 · P15 D.1) — 받는 역할은 규칙표(`DELEGATION`)가 정한다. 판정은 shared `can()`, 역할이 바뀌면 `grantsForRole`로 다시 정한다 */
     grants: text('grants').array().notNull().default(sql`'{}'::text[]`),
     ...timestamps,
   },
@@ -57,7 +57,11 @@ export const users = pgTable(
     // 목록은 코드의 것(`DELEGABLE_ACTIONS`)이다. 마이그레이션(손으로 쓴 SQL)의 CHECK가 같은 목록인지는 `constraints.integration.spec.ts`가 본다
     // — 위임할 행위를 더하고 CHECK를 잊으면 root의 위임이 날것의 500이 된다 (P11 코드 리뷰 5)
     check('users_grants_known_chk', sql`${t.grants} <@ ARRAY[${sql.raw(DELEGABLE_ACTIONS.map((a) => `'${a}'`).join(', '))}]::text[]`),
-    check('users_grants_admin_chk', sql`cardinality(${t.grants}) = 0 OR ${t.role} = 'admin'`),
+    // 행위마다 받는 역할 — 규칙표(`DELEGATION`)의 holder다. LLM 연결 관리는 관리자, 셋은 member (P15 D.2)
+    check(
+      'users_grants_holder_chk',
+      sql`(NOT (${t.grants} && ARRAY['llm.manage']::text[]) OR ${t.role} = 'admin') AND (NOT (${t.grants} && ARRAY['category.manage', 'space.unsuspend', 'space.oversee']::text[]) OR ${t.role} = 'member')`,
+    ),
   ],
 );
 
@@ -130,6 +134,8 @@ export const spaces = pgTable(
       .references(() => users.id),
     suspendedAt: timestamp('suspended_at', { withTimezone: true }),
     suspendedBy: uuid('suspended_by'),
+    /** 중지를 건 사람이 그 공간의 주인이었는가 (P15 D.2) — 중지일 때만 뜻이 있다. 관리자가 건 중지는 권한을 받은 주인만 푼다(보류 32) */
+    suspendedByOwner: boolean('suspended_by_owner').notNull().default(false),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     ...timestamps,
   },

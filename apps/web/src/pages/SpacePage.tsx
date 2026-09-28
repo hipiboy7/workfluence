@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ASSIGNABLE_MEMBER_ROLES, type PageTemplateView, type PageSummary, type SpaceMemberView, type SpaceView } from '@workfluence/shared';
 import { api } from '../api';
+import { useAuth } from '../auth';
 import { EMPTY_DOC } from '../components/Editor';
 import { flattenTree, indentedTitle, type TreeRow } from '../components/pageTree';
 import { SpaceManage } from '../components/SpaceManage';
@@ -23,6 +24,7 @@ export function SpacePage() {
   const { id = '' } = useParams();
   const [search] = useSearchParams();
   const nav = useNavigate();
+  const { me } = useAuth();
   const [space, setSpace] = useState<SpaceView | null>(null);
   const [tree, setTree] = useState<PageSummary[]>([]);
   const [crew, setCrew] = useState<SpaceMemberView[]>([]);
@@ -240,7 +242,7 @@ export function SpacePage() {
         </section>
       )}
 
-      <SpaceManage space={space} onChanged={load} onDeleted={() => nav('/')} />
+      <SpaceManage space={space} meId={me?.id} onChanged={load} onDeleted={() => nav('/')} />
     </main>
   );
 }

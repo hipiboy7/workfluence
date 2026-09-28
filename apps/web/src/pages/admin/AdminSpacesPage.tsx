@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { LIST_SEARCH_MAX, SPACE_LIST_MAX, SPACE_STATUSES, can, type CategoryView, type SpaceStatus, type SpaceView } from '@workfluence/shared';
+import { CATEGORY_NAME_MAX, LIST_SEARCH_MAX, SPACE_LIST_MAX, SPACE_STATUSES, can, type CategoryView, type SpaceStatus, type SpaceView } from '@workfluence/shared';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
-import { confirmSuspendText } from '../../components/SpaceManage';
+import { CategoryList } from '../../components/CategoryList';
+import { canTakeOver, confirmSuspendText, confirmTakeoverText } from '../../components/SpaceManage';
 import { SEARCH_DELAY_MS } from '../../timing';
 
 const STATUS_LABELS: Record<SpaceStatus, string> = { active: '활성', suspended: '중지' };
 
 /**
- * 관리 콘솔의 **스페이스** (P14_설계서_Spaces D.3, FR-1513~1515). 모든 스페이스를 이름·키로 찾고 상태로 거른다 — **서버가 찾고 거른다**(`q`·`status`,
- * 한 번에 `SPACE_LIST_MAX`개). 화면에서만 거르면 상한 밖의 스페이스를 찾지 못한다(T-051). 줄마다 중지·다시 쓰기·지우기 — 보이는 조건은 응답의
- * `access`다(관리자는 중지된 것만 지운다 — P2 `spaceAccess`). 아래에 **분류** — 만들기·이름 바꾸기·지우기(쓰는 스페이스가 있으면 서버가 거절한다)
+ * 관리 콘솔의 **스페이스** (P14_설계서_Spaces D.3, FR-1513~1515 · P15_설계서_Grants D.5). 모든 스페이스를 이름·키로 찾고 상태로 거른다 — **서버가
+ * 찾고 거른다**(`q`·`status`, 한 번에 `SPACE_LIST_MAX`개). 화면에서만 거르면 상한 밖의 스페이스를 찾지 못한다(T-051). 줄마다 중지·다시 쓰기·지우기 —
+ * 보이는 조건은 응답의 `access`다(중지된 것만 지운다 — P2 `spaceAccess`). 아래에 **분류** — 만들기와 이름 바꾸기·지우기(`CategoryList` — 줄마다
+ * 할 수 있는지는 응답이 말한다. 지우면 쓰던 공간은 분류 없음이 된다).
+ *
+ * 여는 사람은 관리자·root와, 관리자가 **스페이스 관리 전체**나 **분류 관리**를 맡긴 member다. 모든 스페이스 표는 스페이스 관리 전체일 때만 보인다
  */
 export function AdminSpacesPage() {
   const { me } = useAuth();
-  const allowed = me ? can({ id: me.id, role: me.role, grants: me.grants }, 'space.manage') : false;
+  const principal = me ? { id: me.id, role: me.role, grants: me.grants } : null;
+  const overseer = principal ? can(principal, 'space.oversee') : false;
+  const allowed = overseer || (principal ? can(principal, 'category.manage') : false);
   const [rows, setRows] = useState<SpaceView[]>([]);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<SpaceStatus | ''>('');
@@ -25,7 +31,6 @@ export function AdminSpacesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryView[]>([]);
   const [newCategory, setNewCategory] = useState('');
-  const [renaming, setRenaming] = useState<Record<string, string>>({});
   // 만들기를 두 번 누르면 같은 이름이 두 번 간다 — 앞의 것이 끝날 때까지 받지 않는다
   const creating = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -56,12 +61,12 @@ export function AdminSpacesPage() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  // 입력을 멈추면 찾는다 — 글자마다 서버를 부르지 않는다
+  // 입력을 멈추면 찾는다 — 글자마다 서버를 부르지 않는다. 모든 스페이스는 스페이스 관리 전체만 읽는다(분류 관리만 받은 사람은 403이다)
   useEffect(() => {
-    if (!allowed) return;
+    if (!overseer) return;
     const t = setTimeout(load, SEARCH_DELAY_MS);
     return () => clearTimeout(t);
-  }, [allowed, load]);
+  }, [overseer, load]);
   useEffect(() => {
     if (allowed) loadCategories();
   }, [allowed, loadCategories]);
@@ -75,6 +80,8 @@ export function AdminSpacesPage() {
       after();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      // 그 사이 누가 바꿔 거절됐으면(409) 지금 상태를 다시 읽는다 — 옛 단추가 남으면 다시 눌러도 같은 거절이다(P15 병합 전 코드 리뷰 12)
+      after();
     }
   };
 
@@ -89,6 +96,13 @@ export function AdminSpacesPage() {
   const remove = (s: SpaceView) => {
     if (!window.confirm(`"${s.name}"을(를) 지운다. 스페이스와 그 안의 페이지가 보이지 않게 된다 — 휴지통에서 되살린다.`)) return;
     void act(() => api(`/api/spaces/${s.id}`, { method: 'DELETE' }), `"${s.name}"을(를) 지웠다 — 휴지통에 있다.`);
+  };
+
+  // 주인이 건 중지를 관리자가 건 중지로 — 같은 상태를 다시 보내면 서버가 넘겨받는다 (P15 A.1-12, 병합 전 보안 검토 1)
+  const takeOver = (s: SpaceView) => {
+    if (!window.confirm(confirmTakeoverText(s.name))) return;
+    // 화면이 본 상태(주인이 건 중지)를 싣는다 — 그 사이 주인이 풀었으면 서버가 새 중지로 만들지 않고 409다(좁은 재검토 12)
+    void act(() => api(`/api/spaces/${s.id}/status`, { method: 'PATCH', json: { status: 'suspended', takeover: true } }), `"${s.name}"을(를) 관리자가 건 중지로 바꿨다.`);
   };
 
   const addCategory = (e: FormEvent) => {
@@ -113,30 +127,11 @@ export function AdminSpacesPage() {
       });
   };
 
-  const renameCategory = (c: CategoryView) => {
-    const name = (renaming[c.id] ?? c.name).trim();
-    if (!name || name === c.name) return;
-    void act(() => api(`/api/categories/${c.id}`, { method: 'PATCH', json: { name } }), `분류 이름을 "${name}"(으)로 바꿨다.`, () => {
-      setRenaming((r) => {
-        const next = { ...r };
-        delete next[c.id];
-        return next;
-      });
-      loadCategories();
-      load();
-    });
-  };
-
-  const removeCategory = (c: CategoryView) => {
-    if (!window.confirm(`분류 "${c.name}"을(를) 지운다.`)) return;
-    void act(() => api(`/api/categories/${c.id}`, { method: 'DELETE' }), `분류 "${c.name}"을(를) 지웠다.`, loadCategories);
-  };
-
   if (!allowed) {
     return (
       <main className="shell">
         <h1>스페이스 관리</h1>
-        <p className="badge fail" role="alert">권한이 없다 — 스페이스 관리는 관리자만 한다.</p>
+        <p className="badge fail" role="alert">권한이 없다 — 스페이스 관리는 관리자와, 관리자가 스페이스 관리 전체나 분류 관리를 맡긴 사람이 한다.</p>
         <p className="muted small"><Link to="/">← 홈</Link></p>
       </main>
     );
@@ -145,88 +140,110 @@ export function AdminSpacesPage() {
   return (
     <main className="shell">
       <h1>스페이스 관리</h1>
-      <p className="muted small"><Link to="/">← 홈</Link> · 지운 스페이스는 <Link to="/trash">휴지통</Link>에서 되살린다</p>
+      <p className="muted small">
+        <Link to="/">← 홈</Link>
+        {/* 지운 스페이스는 스페이스 관리 전체가 되살린다 — 분류 관리만 받은 사람의 휴지통에는 그 칸이 없다 (병합 전 문서 정합성 24) */}
+        {overseer && (
+          <>
+            {' '}· 지운 스페이스는 <Link to="/trash">휴지통</Link>에서 되살린다
+          </>
+        )}
+      </p>
       {error && <p className="badge fail" role="alert">{error}</p>}
       {notice && <p className="badge" role="status">{notice}</p>}
       {listError && <p className="badge fail" role="alert">{listError}</p>}
 
-      <form className="card row" role="search" onSubmit={(e) => e.preventDefault()}>
-        <label>
-          찾기{' '}
-          <input type="search" value={q} placeholder="이름·키" maxLength={LIST_SEARCH_MAX} onChange={(e) => setQ(e.target.value)} />
-        </label>
-        <label>
-          상태{' '}
-          <select value={status} onChange={(e) => setStatus(e.target.value as SpaceStatus | '')}>
-            <option value="">전체</option>
-            {SPACE_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {STATUS_LABELS[s]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="muted small" aria-live="polite">
-          {rows.length}개{rows.length >= SPACE_LIST_MAX ? ` — 한 번에 ${SPACE_LIST_MAX}개까지 보인다. 찾기로 좁힌다` : ''}
-        </span>
-      </form>
+      {overseer && (
+        <>
+          <form className="card row" role="search" onSubmit={(e) => e.preventDefault()}>
+            <label>
+              찾기{' '}
+              <input type="search" value={q} placeholder="이름·키" maxLength={LIST_SEARCH_MAX} onChange={(e) => setQ(e.target.value)} />
+            </label>
+            <label>
+              상태{' '}
+              <select value={status} onChange={(e) => setStatus(e.target.value as SpaceStatus | '')}>
+                <option value="">전체</option>
+                {SPACE_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="muted small" aria-live="polite">
+              {rows.length}개{rows.length >= SPACE_LIST_MAX ? ` — 한 번에 ${SPACE_LIST_MAX}개까지 보인다. 찾기로 좁힌다` : ''}
+            </span>
+          </form>
 
-      <table className="card" aria-label="모든 스페이스">
-        <thead>
-          <tr><th>이름</th><th>키</th><th>종류</th><th>상태</th><th>분류</th><th>Crew</th><th>만든 사람</th><th>조치</th></tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr key={s.id}>
-              <td><Link to={`/spaces/${s.id}`}>{s.name}</Link></td>
-              <td>{s.key}</td>
-              <td>{s.kind === 'personal' ? '개인' : '팀'}</td>
-              <td>{s.status === 'active' ? STATUS_LABELS.active : <span className="badge fail">{STATUS_LABELS.suspended}</span>}</td>
-              <td>{s.categoryName ?? '—'}</td>
-              <td>{s.kind === 'team' ? s.memberCount : '—'}</td>
-              <td>{s.createdByUsername}</td>
-              <td>
-                {s.access.canChangeStatus &&
-                  (s.status === 'active' ? (
-                    <button type="button" onClick={() => changeStatus(s, 'suspended')}>중지</button>
-                  ) : (
-                    <button type="button" onClick={() => changeStatus(s, 'active')}>다시 쓰기</button>
-                  ))}
-                {s.access.canDelete && (
-                  <>
-                    {' '}
-                    <button type="button" onClick={() => remove(s)}>지우기</button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length === 0 && <p className="muted">맞는 스페이스가 없다.</p>}
+          <table className="card" aria-label="모든 스페이스">
+            <thead>
+              <tr><th>이름</th><th>키</th><th>종류</th><th>상태</th><th>분류</th><th>Crew</th><th>만든 사람</th><th>조치</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id}>
+                  <td><Link to={`/spaces/${s.id}`}>{s.name}</Link></td>
+                  <td>{s.key}</td>
+                  <td>{s.kind === 'personal' ? '개인' : '팀'}</td>
+                  <td>
+                    {s.status === 'active' ? (
+                      STATUS_LABELS.active
+                    ) : (
+                      <>
+                        <span className="badge fail">{STATUS_LABELS.suspended}</span>{' '}
+                        {/* 누가 걸었나 — 관리자가 건 중지는 권한을 받은 주인만 푼다 (P15 FR-1612) */}
+                        <span className="muted small">{s.suspendedByOwner ? '주인이 걸었다' : '관리자가 걸었다'}</span>
+                      </>
+                    )}
+                  </td>
+                  <td>{s.categoryName ?? '—'}</td>
+                  <td>{s.kind === 'team' ? s.memberCount : '—'}</td>
+                  <td>{s.createdByUsername}</td>
+                  <td>
+                    {s.access.canChangeStatus &&
+                      (s.status === 'active' ? (
+                        <button type="button" onClick={() => changeStatus(s, 'suspended')}>중지</button>
+                      ) : (
+                        <button type="button" onClick={() => changeStatus(s, 'active')}>다시 쓰기</button>
+                      ))}
+                    {canTakeOver(s) && (
+                      <>
+                        {' '}
+                        <button type="button" onClick={() => takeOver(s)}>관리자가 건 중지로 바꾸기</button>
+                      </>
+                    )}
+                    {s.access.canDelete && (
+                      <>
+                        {' '}
+                        <button type="button" onClick={() => remove(s)}>지우기</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && <p className="muted">맞는 스페이스가 없다.</p>}
+        </>
+      )}
 
       <section className="card" aria-label="분류">
         <h2>분류</h2>
-        <p className="muted small">스페이스가 쓰는 분류는 지울 수 없다 — 먼저 그 스페이스들의 분류를 바꾼다.</p>
-        <ul>
-          {categories.map((c) => (
-            <li key={c.id}>
-              <input
-                aria-label={`분류 ${c.name} 이름`}
-                value={renaming[c.id] ?? c.name}
-                onChange={(e) => setRenaming((r) => ({ ...r, [c.id]: e.target.value }))}
-              />{' '}
-              <button type="button" onClick={() => renameCategory(c)} disabled={(renaming[c.id] ?? c.name).trim() === c.name}>
-                이름 바꾸기
-              </button>{' '}
-              <button type="button" onClick={() => removeCategory(c)}>지우기</button>
-            </li>
-          ))}
-        </ul>
-        {categories.length === 0 && <p className="muted">분류가 없다.</p>}
+        <p className="muted small">분류를 지우면 쓰던 스페이스(휴지통 포함)는 분류 없음이 된다 — 어느 스페이스였는지 감사로그에 남는다.</p>
+        <CategoryList
+          categories={categories}
+          meId={me?.id}
+          onNotice={setNotice}
+          onError={setError}
+          onChanged={() => {
+            loadCategories();
+            if (overseer) load();
+          }}
+        />
         <form onSubmit={addCategory}>
           <label htmlFor="cat-new">새 분류</label>
-          <input id="cat-new" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} required />
+          <input id="cat-new" value={newCategory} maxLength={CATEGORY_NAME_MAX} onChange={(e) => setNewCategory(e.target.value)} required />
           <button type="submit" disabled={busy}>
             만들기
           </button>
