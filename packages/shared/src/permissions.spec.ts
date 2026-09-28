@@ -235,6 +235,36 @@ describe('spaceAccess', () => {
       expect(spaceAccess({ ...other, grants: ['space.oversee'] }, team, 'editor', 2).canManageMembers).toBe(false);
       expect(spaceAccess(member, { ...personal, status: 'suspended', suspendedByOwner: false }, 'owner', 0).canManageMembers).toBe(false);
     });
+
+    it('**판정의 칸을 다 본다** — 위임 받은 주인은 활성·주인이 건 중지에서 바꾸고, 관리자는 주인이 건 중지·모름에서도 바꾼다. 스페이스 관리 전체를 받은 주인도 관리자가 건 중지면 먼저 푼다 (NFR-160, 병합 전 검토)', () => {
+      const unsuspender = { ...member, grants: ['space.unsuspend' as const] };
+      const overseer = { ...member, grants: ['space.oversee' as const] };
+      expect(spaceAccess(unsuspender, team, 'owner', 2).canManageMembers).toBe(true);
+      expect(spaceAccess(unsuspender, byOwner, 'owner', 2).canManageMembers).toBe(true);
+      expect(spaceAccess(unsuspender, suspendedTeam, 'owner', 2).canManageMembers).toBe(false);
+      expect(spaceAccess(admin, byOwner, null, 2).canManageMembers).toBe(true);
+      expect(spaceAccess(admin, suspendedTeam, null, 2).canManageMembers).toBe(true);
+      expect(spaceAccess(overseer, byAdmin, 'owner', 2).canManageMembers).toBe(false);
+      expect(spaceAccess(overseer, byOwner, 'owner', 2).canManageMembers).toBe(true);
+    });
+
+    it('**얼었는지는 판정이 말한다**(`crewFrozen`) — 주인인데 관리자가 건 중지라 Crew를 바꾸지 못할 때만 참이다. 서버의 까닭과 화면의 안내가 이 값 하나를 본다 (FR-1700·1702, 병합 전 코드 리뷰)', () => {
+      // 참 — 만든 사람, Crew의 owner, 위임을 받은 주인, 건 사람을 모르는 중지
+      expect(spaceAccess(member, byAdmin, 'owner', 2).crewFrozen).toBe(true);
+      expect(spaceAccess(other, { ...byAdmin, createdBy: 'someone' }, 'owner', 2).crewFrozen).toBe(true);
+      expect(spaceAccess({ ...member, grants: ['space.unsuspend'] }, byAdmin, 'owner', 2).crewFrozen).toBe(true);
+      expect(spaceAccess({ ...member, grants: ['space.oversee'] }, byAdmin, 'owner', 2).crewFrozen).toBe(true);
+      expect(spaceAccess(member, suspendedTeam, 'owner', 2).crewFrozen).toBe(true);
+      // 거짓 — 관리자(주인이어도 바꾼다), 주인이 아닌 사람(원래 못 바꾼다 — 까닭이 다르다), 주인이 건 중지·활성, 개인 공간, 로그인하지 않음
+      expect(spaceAccess(admin, byAdmin, 'owner', 2).crewFrozen).toBe(false);
+      expect(spaceAccess(root, byAdmin, null, 2).crewFrozen).toBe(false);
+      expect(spaceAccess(other, byAdmin, 'editor', 2).crewFrozen).toBe(false);
+      expect(spaceAccess({ ...other, grants: ['space.oversee'] }, byAdmin, null, 2).crewFrozen).toBe(false);
+      expect(spaceAccess(member, byOwner, 'owner', 2).crewFrozen).toBe(false);
+      expect(spaceAccess(member, team, 'owner', 2).crewFrozen).toBe(false);
+      expect(spaceAccess(member, { ...personal, status: 'suspended', suspendedByOwner: false }, 'owner', 0).crewFrozen).toBe(false);
+      expect(spaceAccess(null, byAdmin, null, 2).crewFrozen).toBe(false);
+    });
   });
 
   describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
