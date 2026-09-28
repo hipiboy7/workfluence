@@ -10,7 +10,6 @@ export function SpacesPage() {
   const [rows, setRows] = useState<SpaceView[]>([]);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [unread, setUnread] = useState(0);
 
   const load = useCallback(() => {
     Promise.all([api<SpaceView[]>('/api/spaces?scope=personal'), api<SpaceView[]>('/api/spaces?scope=team')])
@@ -18,12 +17,7 @@ export function SpacesPage() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(load, [load]);
-  // 안 읽은 알림 수를 머리말에 보여 준다 (FR-505). 실패해도 화면을 막지 않는다
-  useEffect(() => {
-    api<{ count: number }>('/api/notifications/unread-count')
-      .then((r) => setUnread(r.count))
-      .catch(() => undefined);
-  }, []);
+  // 안 읽은 알림 수(FR-505)는 모든 화면의 알림 영역이 보인다 — 예전에는 이 머리말에만 있었다 (P17 F-010 8번, `NotificationBell`)
 
   if (!me) return null;
   // 위임까지 함께 넘긴다 — "LLM 연결"은 root, 그리고 root가 위임한 관리자 (P11 D.1)
@@ -51,7 +45,6 @@ export function SpacesPage() {
         {/* 모든 스페이스와 분류 (P14 FR-1513~1515) — 스페이스 관리 전체나 분류 관리를 받은 member에게도 보인다 (P15 D.5) */}
         {(can(principal, 'space.oversee') || can(principal, 'category.manage')) && <> · <Link to="/admin/spaces">스페이스 관리</Link></>}
         {' · '}<Link to="/search">검색</Link>
-        {' · '}<Link to="/notifications">알림{unread > 0 ? ` (${unread})` : ''}</Link>
         {' · '}<Link to="/trash">휴지통</Link>
         {' · '}<Link to="/llm">LLM 질문</Link>
         {can(principal, 'settings.manage') && <> · <Link to="/admin/policy">운영 설정</Link></>}

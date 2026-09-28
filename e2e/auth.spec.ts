@@ -132,6 +132,51 @@ test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한�
   cleanupExtra.push(target.username);
 });
 
+/**
+ * **비밀번호 초기화 요청이 관리자의 알림에 온다** (P17 F-010 8번, FR-1801·1803). 예전에는 감사로그에만 남아 관리자가 알 길이 없었다.
+ * 다른 화면에 있어도 맨 위의 알림 영역에서 보고, 그 링크로 사용자 관리에 가서(찾기 칸에 아이디가 들어간다) 초기화하면 그 알림은 읽음이 된다
+ */
+test('비밀번호 찾기의 초기화 요청이 관리자의 알림 영역에 오고, 초기화하면 읽음이 된다', async ({ page }) => {
+  const stamp = Date.now();
+  const asker = { username: `e2e-ask-${stamp}`, displayName: 'E2E 요청자', password: 'E2e-Asker-2026!', email: `e2e-ask-${stamp}@example.internal` };
+  made.push(asker.username);
+  await createMember(asker);
+  const said = `${asker.displayName} (${asker.username})님이 비밀번호 초기화를 요청했다`;
+
+  await page.goto('/find-account');
+  const form = page.locator('form').filter({ has: page.getByRole('heading', { name: '비밀번호 찾기' }) });
+  await form.getByLabel('아이디').fill(asker.username);
+  await form.getByLabel('email').fill(asker.email);
+  await form.getByRole('button', { name: '초기화 요청' }).click();
+  await expect(form.getByText('요청을 접수했다', { exact: false })).toBeVisible();
+
+  await page.goto('/login');
+  await page.getByLabel('아이디').fill(ADMIN.username);
+  await page.getByLabel('비밀번호').fill(ADMIN.password);
+  await page.getByRole('button', { name: '로그인' }).click();
+  await expect(page.getByText('E2E 관리자님')).toBeVisible();
+  // 스페이스 목록이 아닌 화면에서도 보인다
+  await page.goto('/search');
+  const bell = page.getByRole('button', { name: /^알림 — 안 읽은 것 \d+건$/ });
+  await expect(bell).toBeVisible();
+  await bell.click();
+  const item = page.getByRole('region', { name: '최근 알림' }).getByRole('listitem').filter({ hasText: said });
+  await expect(item).toBeVisible();
+  await item.getByRole('link', { name: '사용자 관리에서 초기화' }).click();
+
+  await expect(page).toHaveURL(/\/admin\/users\?q=/);
+  await expect(page.getByRole('searchbox')).toHaveValue(asker.username);
+  const row = page.getByRole('row').filter({ hasText: asker.username });
+  await row.getByRole('button', { name: '비밀번호 초기화' }).click();
+  await expect(page.getByText('임시 비밀번호')).toBeVisible();
+
+  // 초기화했으니 그 알림은 읽음이다 — 읽음 단추가 없다
+  await page.goto('/notifications');
+  const done = page.getByRole('listitem').filter({ hasText: said });
+  await expect(done).toContainText('· 읽음');
+  await expect(done.getByRole('button', { name: '읽음' })).toHaveCount(0);
+});
+
 /** afterAll이 지울 추가 계정 */
 const cleanupExtra: string[] = [];
 test.afterAll(() => cleanup(cleanupExtra));

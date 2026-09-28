@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { AuthProvider, RequireAuth } from './auth';
+import { NotificationBell } from './components/NotificationBell';
 import { RequireUuidParam } from './components/RequireUuidParam';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { FindAccountPage } from './pages/FindAccountPage';
@@ -33,6 +34,8 @@ export function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        {/* 모든 화면의 알림 영역 (P17 F-010 8번) — 로그인한 사람에게만 그린다 */}
+        <NotificationBell />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />

@@ -64,7 +64,7 @@ export function FindAccountPage() {
         <input id="fp-email" type="email" value={pw.email} onChange={(e) => setPw({ ...pw, email: e.target.value })} required />
         <button type="submit">초기화 요청</button>
         {pwSent && (
-          <p aria-live="polite">요청을 접수했다. 관리자에게 문의하면 임시 비밀번호를 받을 수 있다.</p>
+          <p aria-live="polite">요청을 접수했다. 아이디와 email이 맞으면 관리자의 알림에 간다 — 관리자가 초기화한 임시 비밀번호를 받아 로그인한다.</p>
         )}
       </form>
       <p className="muted small"><Link to="/login">로그인 화면으로</Link></p>

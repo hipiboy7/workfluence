@@ -3,8 +3,13 @@ import { Link } from 'react-router';
 import type { NotificationView } from '@workfluence/shared';
 import { LIST_PAGE_LIMIT } from '@workfluence/shared';
 import { api } from '../api';
+import { NOTIFICATIONS_CHANGED } from '../components/NotificationBell';
+import { NotificationText } from '../components/NotificationText';
 
-/** 알림함 (P4_설계서_Admin C절). **자기 것만 본다** — 서버에 남의 것을 볼 경로가 없다 */
+/**
+ * 알림함 (P4_설계서_Admin C절). **자기 것만 본다** — 서버에 남의 것을 볼 경로가 없다. 글은 모든 화면의 알림 영역과 같다(`NotificationText`, P17).
+ * 멘션과 비밀번호 초기화 요청(관리자·시스템 관리자에게만)이 온다
+ */
 export function NotificationsPage() {
   const [rows, setRows] = useState<NotificationView[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +23,11 @@ export function NotificationsPage() {
 
   const act = (path: string) =>
     void api(path, { method: 'POST' })
-      .then(load)
+      .then(() => {
+        load();
+        // 모든 화면의 알림 영역이 안 읽은 수를 곧바로 다시 묻는다 (P17)
+        window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED));
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
 
   const unread = rows.filter((r) => !r.readAt).length;
@@ -44,15 +53,7 @@ export function NotificationsPage() {
           {rows.map((n) => (
             <li key={n.id} className="card">
               <p className="small">
-                {/* 부른 사람을 모르면 이름을 지어내지 않는다 (P8 FR-901) — 실시간 편집에서
-                    그 멘션을 누가 만들었는지 확실하지 않을 때다 */}
-                {n.actorName ? <><strong>{n.actorName}</strong>님이 불렀다</> : <>{n.commentId ? '댓글' : '문서'}에서 불렸다</>}
-                {/* 대상이 지워지면 제목이 없다 (FR-506). 알림은 남되 갈 곳이 없음을 말한다 */}
-                {n.pageTitle && n.pageId ? (
-                  <> · <Link to={`/pages/${n.pageId}`}>{n.pageTitle}</Link></>
-                ) : (
-                  <> · <span className="muted">(지워진 글)</span></>
-                )}
+                <NotificationText n={n} />
               </p>
               <p className="muted small">
                 {new Date(n.createdAt).toLocaleString('ko-KR')}

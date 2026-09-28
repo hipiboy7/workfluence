@@ -45,16 +45,16 @@ export async function createAdmin(admin: { username: string; password: string },
  * 스펙이 늘어날수록 뒤에 도는 테스트가 먼저 막힌다. 가입 흐름 자체를 보는 것은
  * `auth.spec.ts`의 일이고, 다른 스펙은 "이미 있는 사용자"만 필요하다.
  */
-export async function createMember(m: { username: string; password: string; displayName?: string }): Promise<void> {
+export async function createMember(m: { username: string; password: string; displayName?: string; email?: string }): Promise<void> {
   const c = new Client(url());
   await c.connect();
   try {
     const display = m.displayName ?? m.username;
     const { rows } = await c.query<{ id: string }>(
-      `INSERT INTO users (username, display_name, password_hash, role, status, must_change_password, approved_at)
-       VALUES ($1, $3, $2, 'member', 'active', false, now())
+      `INSERT INTO users (username, display_name, password_hash, role, status, must_change_password, approved_at, email)
+       VALUES ($1, $3, $2, 'member', 'active', false, now(), $4)
        RETURNING id`,
-      [m.username, await argon2.hash(m.password, { type: argon2.argon2id }), display],
+      [m.username, await argon2.hash(m.password, { type: argon2.argon2id }), display, m.email ?? null],
     );
     // **승인이 만드는 상태를 그대로 만든다.** 개인 스페이스는 승인 시 생긴다(FR-309).
     // 여기서 빼면 "화면을 안 거쳤을 뿐"인데 계정 상태가 달라져, 그것을 전제한 테스트가 깨진다

@@ -81,14 +81,19 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
   await page.goto('/');
   await page.getByRole('button', { name: '로그아웃' }).click();
   await login(page, MATE.username, MATE.password);
-  await expect(page.getByRole('link', { name: /알림 \(1\)/ })).toBeVisible();
-  await page.getByRole('link', { name: /알림/ }).click();
+  // 알림은 **모든 화면 맨 위의 알림 영역**에 온다 (P17 F-010 8번) — 예전에는 스페이스 목록의 머리말 링크였다
+  const bell = page.getByRole('button', { name: '알림 — 안 읽은 것 1건' });
+  await expect(bell).toBeVisible();
+  await bell.click();
+  await page.getByRole('region', { name: '최근 알림' }).getByRole('link', { name: '알림함에서 모두 보기' }).click();
   // 화면은 아이디가 아니라 **이름**을 보여 준다 — 부른 사람이 누구인지는 사람이 읽는 이름이다
   await expect(page.getByText('E2E 관리자님이 불렀다')).toBeVisible();
   // 페이지가 지워졌으므로 갈 곳이 없다고 말한다 (FR-506)
   await expect(page.getByText('(지워진 글)')).toBeVisible();
   await page.getByRole('button', { name: '모두 읽음' }).click();
   await expect(page.getByText('안 읽은 것 0건')).toBeVisible();
+  // 알림 영역도 곧바로 따라온다 — 다 읽었으니 수가 없다
+  await expect(page.getByRole('button', { name: '알림', exact: true })).toBeVisible();
 
   // 6) **휴지통에서 되살린다**
   await page.goto('/trash');

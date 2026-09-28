@@ -5,8 +5,9 @@ import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { errors as jose } from 'jose';
 import { AuditService } from '../audit/audit.service';
-import { auditEvents, users } from '../db/schema';
+import { auditEvents, notifications, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
+import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { loadEnv } from '../config/config.module';
 import { SettingsService } from '../settings/settings.service';
 import { UsersController } from '../users/users.module';
@@ -50,11 +51,12 @@ let bus: RevocationBus;
 let audit: AuditService;
 let auth: AuthService;
 let spacesSvc: SpacesService;
+let notifySvc: NotificationsService;
 
 const ROOT: Principal = { id: '00000000-0000-0000-0000-000000000000', role: 'root' };
 
 function makeAuth(provider: OidcProvider | null = new StubProvider()): AuthService {
-  return new AuthService(usersSvc, audit, spacesSvc, db, ENV as never, provider);
+  return new AuthService(usersSvc, audit, spacesSvc, notifySvc, db, ENV as never, provider);
 }
 
 beforeAll(async () => {
@@ -62,6 +64,7 @@ beforeAll(async () => {
   bus = new RevocationBus();
   usersSvc = new UsersService(db, new SettingsService(db, loadEnv()), bus);
   spacesSvc = new SpacesService(db);
+  notifySvc = new NotificationsService(db, new InAppChannel());
   audit = new AuditService(db);
   auth = makeAuth();
 });
@@ -231,7 +234,7 @@ describe('OIDC (인수 기준 2)', () => {
   });
 
   it('OIDC가 꺼져 있으면 404다 (FR-219)', async () => {
-    const off = new AuthService(usersSvc, audit, spacesSvc, db, { ...ENV, WF_OIDC_ENABLED: false } as never, null);
+    const off = new AuthService(usersSvc, audit, spacesSvc, notifySvc, db, { ...ENV, WF_OIDC_ENABLED: false } as never, null);
     await expect(off.oidcStart()).rejects.toThrow(/OIDC/);
   });
 });
@@ -346,6 +349,70 @@ describe('계정 복구 — 미인증 경로는 비밀번호를 발급하지 않
     await auth.recoverPassword({ username: 'alice', email: SIGNUP.email });
     const e = (await audit.list({ limit: 10 })).find((x) => x.action === 'auth.password.recover');
     expect(e?.detail).toMatchObject({ found: true, requested: true });
+  });
+});
+
+describe('비밀번호 초기화 요청은 관리자의 알림함에 간다 (P17 F-010 8번)', () => {
+  const addUser = async (username: string, role: 'root' | 'admin' | 'member', status: 'active' | 'suspended' = 'active', grants: string[] = []) =>
+    (await db.insert(users).values({ username, displayName: username, passwordHash: 'x', role, status, grants }).returning())[0];
+  const resetRows = () => db.select().from(notifications).where(eq(notifications.kind, 'password.reset.request'));
+
+  it('맞는 계정이면 **그 사람을 관리할 수 있는 활성 관리자·시스템 관리자에게만** 간다 — 맞지 않으면 아무에게도 가지 않는다 (FR-1801)', async () => {
+    await approvedAlice();
+    const root = await addUser('root1', 'root');
+    const admin = await addUser('admin1', 'admin');
+    await addUser('bob', 'member');
+    await addUser('admin-off', 'admin', 'suspended');
+
+    await auth.recoverPassword({ username: 'alice', email: 'wrong@example.internal' });
+    await auth.recoverPassword({ username: 'nobody', email: SIGNUP.email });
+    expect(await resetRows()).toEqual([]);
+
+    // 응답은 알림을 기다리지 않는다 — 알림은 따로 돌아 곧 생긴다
+    expect(await auth.recoverPassword({ username: 'alice', email: SIGNUP.email })).toEqual({ ok: true });
+    await vi.waitFor(async () => expect(await resetRows()).toHaveLength(2), { timeout: 5000 });
+    expect(new Set((await resetRows()).map((r) => r.userId))).toEqual(new Set([root.id, admin.id]));
+
+    // 관리자는 누가 요청했는지 본다 — 사용자 관리에서 찾을 아이디까지. 페이지는 없다
+    const [n] = await notifySvc.list({ id: admin.id, role: 'admin' }, 10);
+    expect(n).toMatchObject({ kind: 'password.reset.request', actorName: '앨리스', actorUsername: 'alice', pageId: null, pageTitle: null, readAt: null });
+  });
+
+  it('위임까지 본다 — 요청한 관리자가 가진 위임을 못 하는 관리자에게는 가지 않고, 자기 자신에게도 가지 않는다 (FR-1801)', async () => {
+    const root = await addUser('root1', 'root');
+    await addUser('admin-plain', 'admin');
+    const llm = await addUser('admin-llm', 'admin', 'active', ['llm.manage']);
+    expect(await notifySvc.notifyPasswordResetRequest({ id: llm.id, role: 'admin', grants: ['llm.manage'] })).toBe(1);
+    expect((await resetRows()).map((r) => r.userId)).toEqual([root.id]);
+  });
+
+  it('읽지 않은 같은 요청은 또 만들지 않고, 관리자에서 내려가면 보이지 않으며, 누가 초기화하면 **모두의 알림함에서** 읽음이 된다 (FR-1802~1804)', async () => {
+    const alice = await approvedAlice();
+    const root = await addUser('root1', 'root');
+    const admin = await addUser('admin1', 'admin');
+    const asRoot = { id: root.id, role: 'root' as const };
+    const asAdmin = { id: admin.id, role: 'admin' as const };
+    const target = { id: alice.id, role: 'member' as const, grants: [] };
+
+    expect(await notifySvc.notifyPasswordResetRequest(target)).toBe(2);
+    expect(await notifySvc.notifyPasswordResetRequest(target)).toBe(0);
+    // 한 사람이 읽으면 그 사람에게만 다시 간다
+    const [mine] = await notifySvc.list(asAdmin, 10);
+    await notifySvc.markRead(mine.id, asAdmin);
+    expect(await notifySvc.notifyPasswordResetRequest(target)).toBe(1);
+
+    // 관리자에서 내려가면 목록에도 안 읽은 수에도 없다 — 다시 올라가면 그대로 있다
+    const demoted = { id: admin.id, role: 'member' as const };
+    expect(await notifySvc.list(demoted, 10)).toEqual([]);
+    expect(await notifySvc.unreadCount(demoted)).toBe(0);
+    expect(await notifySvc.unreadCount(asAdmin)).toBe(1);
+
+    // 관리 화면의 초기화 — 받은 관리자 모두의 것이 읽음이 된다
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
+    await ctrl.resetPassword(alice.id, asRoot as never, { ip: '127.0.0.1' } as never);
+    expect(await notifySvc.unreadCount(asRoot)).toBe(0);
+    expect(await notifySvc.unreadCount(asAdmin)).toBe(0);
+    expect((await resetRows()).every((r) => r.readAt !== null)).toBe(true);
   });
 });
 
@@ -604,7 +671,7 @@ describe('비밀번호를 확인하는 동안 DB 연결을 쥐지 않는다 (P13
   });
 
   it('관리자 생성·비밀번호 초기화 — 컨트롤러가 해시를 트랜잭션을 열기 전에 만든다', async () => {
-    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
     const req = { ip: '127.0.0.1' } as never;
     const dto = { username: 'made-by-admin', displayName: '관리자가 만듦', email: 'made@example.internal', password: 'Made-pw-2026', role: 'member' as const };
     expect(await borrowedWhileHashing(() => ctrl.create(dto, ROOT as never, req))).toBe(0);
@@ -707,7 +774,7 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
 
   it('**컨트롤러는 커밋한 뒤에 알린다** — 정지와 세션 강제 종료. 먼저 울리면 커밋 전 틈에 다시 붙은 연결이 옛 상태로 살아남는다', async () => {
     const alice = await approvedAlice();
-    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
     let committed = false;
     const realTx = db.transaction.bind(db);
     const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
@@ -741,7 +808,7 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
     }
     expect(revoked).toEqual([]);
 
-    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus);
+    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
     let committed = false;
     const realTx = db.transaction.bind(db);
     const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {

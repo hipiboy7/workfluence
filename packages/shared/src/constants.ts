@@ -152,6 +152,8 @@ export const LOG_EVENTS = [
   'health.db_failed',
   // 사내 인증(OIDC) — 사내 IdP와의 처리가 실패했다(닿지 않음·거절·검증 실패). 바깥 탓이라 warn (FR-1215)
   'auth.oidc_failed',
+  // 비밀번호 찾기 — 초기화 요청을 관리자의 알림으로 만들지 못했다. 우리 쪽 결함이라 error — 요청은 감사 기록에 남았다 (P17 NFR-170)
+  'auth.recover_notify_failed',
   // 세션 파기 버스
   'session.revoke_failed',
   // 메일
@@ -256,6 +258,20 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
  * 간다. 넘기 시작하면 그때 만든다 — 지금 만들면 쓰이지 않는 코드가 된다.
  */
 export const LIST_PAGE_LIMIT = 200;
+
+/**
+ * 알림의 종류 (P4_설계서_Admin C절 · P17 F-010 8번). DB의 `notifications.kind`는 `text`다(CHECK 없음 — `0004_admin`) — 종류는 이 목록이 정한다.
+ * - `mention` — 문서·댓글에서 불렸다
+ * - `password.reset.request` — 누가 로그인 화면의 비밀번호 찾기로 초기화를 요청했다. 그 사람을 **관리할 수 있는** 관리자·시스템 관리자에게
+ *   간다(`canManageUser`). 요청한 사람이 `actor_id`이고 페이지는 없다
+ */
+export const NOTIFICATION_KINDS = ['mention', 'password.reset.request'] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+/** 모든 화면의 알림 영역 (P17 F-010 8번) — 안 읽은 수를 이 간격마다, 그리고 화면을 옮길 때 다시 묻는다. 서버가 밀어 주는 길은 없다 */
+export const NOTIFICATION_POLL_MS = 30_000;
+/** 알림 영역을 펼치면 보이는 최근 알림 수. 나머지는 알림함(`/notifications`)에서 본다 */
+export const NOTIFICATION_PANEL_LIMIT = 5;
 
 /**
  * 스페이스 목록을 한 번에 받는 상한 (P14 FR-1514). 관리 콘솔의 모든 스페이스 화면이 이만큼 받고, 채우면 "찾기로 좁힌다"를 말한다 — 찾기와 상태

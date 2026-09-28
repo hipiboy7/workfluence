@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import {
   DELEGABLE_ACTIONS,
   DELEGATION,
@@ -52,7 +52,13 @@ export function AdminUsersPage() {
   const manageable = (u: UserView) => principal !== null && canManageUser(principal, { role: u.role, grants: u.grants });
   const [rows, setRows] = useState<UserView[]>([]);
   const [total, setTotal] = useState(0);
-  const [q, setQ] = useState('');
+  // 알림의 "사용자 관리에서 초기화"가 찾기 칸에 아이디를 넣어 연다 (P17 F-010 8번, `?q=`)
+  const [params] = useSearchParams();
+  const asked = params.get('q');
+  const [q, setQ] = useState(asked ?? '');
+  useEffect(() => {
+    if (asked !== null) setQ(asked);
+  }, [asked]);
   const [filter, setFilter] = useState<UserListFilter | ''>('');
   const [error, setError] = useState<string | null>(null);
   const [temporary, setTemporary] = useState<{ username: string; password: string } | null>(null);
