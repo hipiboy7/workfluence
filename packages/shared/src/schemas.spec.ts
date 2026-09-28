@@ -33,7 +33,7 @@ import {
   updatePageDto,
   updateSpaceDto,
 } from './schemas';
-import { COLLAB_LIMITS, LIST_SEARCH_MAX, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
+import { CATEGORY_NAME_MAX, COLLAB_LIMITS, LIST_SEARCH_MAX, LLM_LIMITS, SPACE_LIST_MAX, USER_LIST_MAX, USER_LIST_PAGE } from './constants';
 
 const uuid = '0f6b2c1e-6d4a-4c3b-9a8e-1b2c3d4e5f60';
 
@@ -303,6 +303,23 @@ describe('위임 목록 DTO (P11 F절)', () => {
     for (const bad of [{ grants: ['system.manage'] }, { grants: ['space.manage'] }, { grants: ['llm.manage', 'llm.manage'] }, { grants: 'llm.manage' }, {}, { grants: [], role: 'root' }]) {
       expect(userGrantsDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
+  });
+
+  it('**화면이 본 목록(`expected`)을 함께 싣는다** — 서버의 목록과 다르면 409다. 없어도 된다(목록 전체를 바꾸는 호출) (병합 전 보안 검토 2)', () => {
+    expect(userGrantsDto.parse({ grants: ['space.oversee'], expected: [] })).toEqual({ grants: ['space.oversee'], expected: [] });
+    expect(userGrantsDto.parse({ grants: [], expected: ['category.manage', 'space.oversee'] })).toEqual({ grants: [], expected: ['category.manage', 'space.oversee'] });
+    expect(userGrantsDto.parse({ grants: [] })).toEqual({ grants: [] });
+    for (const bad of [{ grants: [], expected: ['system.manage'] }, { grants: [], expected: ['llm.manage', 'llm.manage'] }, { grants: [], expected: 'llm.manage' }]) {
+      expect(userGrantsDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+describe('분류 이름의 상한 (`CATEGORY_NAME_MAX` — 병합 전 자체 점검 7)', () => {
+  it('계약과 화면의 입력 칸이 같은 상수를 쓴다 — 넘으면 받지 않는다', () => {
+    expect(CATEGORY_NAME_MAX).toBe(50);
+    expect(createCategoryDto.safeParse({ name: '가'.repeat(CATEGORY_NAME_MAX) }).success).toBe(true);
+    expect(createCategoryDto.safeParse({ name: '가'.repeat(CATEGORY_NAME_MAX + 1) }).success).toBe(false);
   });
 });
 

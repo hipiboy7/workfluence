@@ -172,6 +172,14 @@ describe('spaceAccess', () => {
       expect(spaceAccess(member, { ...personal, status: 'suspended', suspendedByOwner: true }, 'owner', 0).canChangeStatus).toBe(true);
     });
 
+    it('**주인이 건 중지도 주인이 아닌 Crew는 못 푼다** — editor·viewer, 관리자가 건 중지 풀기를 받았어도 (병합 전 코드 리뷰 1)', () => {
+      for (const role of ['editor', 'viewer'] as const) {
+        expect(spaceAccess(other, byOwner, role, 2).canChangeStatus, role).toBe(false);
+        expect(spaceAccess({ ...other, grants: ['space.unsuspend'] }, byOwner, role, 2).canChangeStatus, `${role} + 위임`).toBe(false);
+      }
+      expect(spaceAccess(other, { ...personal, status: 'suspended', suspendedByOwner: true }, null, 0).canChangeStatus).toBe(false);
+    });
+
     it('**관리자가 건 중지는 권한을 받은 주인만 푼다** — 받지 않은 주인은 못 푼다 (FR-1611)', () => {
       expect(spaceAccess(member, byAdmin, 'owner', 2).canChangeStatus).toBe(false);
       expect(spaceAccess(member, personalByAdmin, 'owner', 0).canChangeStatus).toBe(false);
@@ -288,6 +296,13 @@ describe('checkPasswordPolicy (8자·2종)', () => {
 });
 
 describe('위임 — 규칙표: 받는 역할과 주는 사람 (P11 D.1 · P15 D.1, FR-1600~1605)', () => {
+  it('**주는 사람은 그 행위를 스스로 할 수 있다** — 규칙표의 주는 사람(root·admin)이 역할로 가지지 않은 것을 주면 받은 사람을 관리하지 못한다 (병합 전 자체 점검 10)', () => {
+    for (const a of DELEGABLE_ACTIONS) {
+      expect(can(root, a), `root → ${a}`).toBe(true);
+      if (DELEGATION[a].grantor === 'admin') expect(can(admin, a), `admin → ${a}`).toBe(true);
+    }
+  });
+
   const granted = { ...admin, grants: ['llm.manage'] };
 
   it('**규칙표** — LLM 연결 관리는 root가 관리자에게, 셋은 관리자·root가 member에게 (P15 D.1)', () => {
