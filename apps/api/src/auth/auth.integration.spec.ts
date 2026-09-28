@@ -1124,6 +1124,18 @@ describe('위임 — 관리자가 member에게 셋을 맡긴다 (P15 D.1, FR-160
     await expect(usersSvc.changeRole(m.id, 'admin', peerActor)).resolves.toMatchObject({ clearedGrants: [...THREE] });
   });
 
+  it('**사내 계정의 역할 동기화도 받을 수 없는 위임을 비운다** — member가 관리자 그룹에 들면 셋이 사라지고(관리자는 원래 한다) 로그인 감사 행에 남는다 (FR-1603)', async () => {
+    const s1 = await auth.oidcStart();
+    const first = await auth.oidcCallback({ code: encodeMockCode(DEV_IDENTITY), state: s1.state }, { state: s1.state, nonce: s1.nonce });
+    expect(first.role).toBe('member');
+    await usersSvc.changeGrants(first.id, [...THREE], ROOT);
+    const s2 = await auth.oidcStart();
+    const again = await auth.oidcCallback({ code: encodeMockCode({ ...DEV_IDENTITY, groups: ['wf-admins'] }), state: s2.state }, { state: s2.state, nonce: s2.nonce });
+    expect([again.role, again.grants]).toEqual(['admin', []]);
+    const logins = await db.select().from(auditEvents).where(eq(auditEvents.action, 'auth.login.success'));
+    expect(logins.map((e) => (e.detail as { clearedGrants?: string[] }).clearedGrants ?? null)).toEqual([null, [...THREE]]);
+  });
+
   it('**받거나 잃으면 다음 요청부터 먹는다** — 가드가 싣는 사용자 행에 바로 보인다 (FR-1605)', async () => {
     const m = await mk('mem', 'member');
     await usersSvc.changeGrants(m.id, ['category.manage'], ROOT);
