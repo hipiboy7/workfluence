@@ -98,6 +98,15 @@ describe('카테고리·스페이스 DTO', () => {
     expect(spaceListQueryDto.parse({ scope: 'all', limit: '5' })).toEqual({ scope: 'all', limit: 5 });
   });
 
+  it('**넘겨받기는 화면이 본 상태를 싣는다** (`takeover: true`) — 서버가 그 사이 주인이 풀었으면 새 중지로 만들지 않고 409 (P15 좁은 재검토 12)', () => {
+    expect(spaceStatusDto.parse({ status: 'suspended', takeover: true })).toEqual({ status: 'suspended', takeover: true });
+    expect(spaceStatusDto.parse({ status: 'suspended' })).toEqual({ status: 'suspended' });
+    // 넘겨받기는 중지에만 — 다시 쓰기에 붙이면 뜻이 없다. 다른 값은 받지 않는다
+    for (const bad of [{ status: 'active', takeover: true }, { status: 'suspended', takeover: false }, { status: 'suspended', takeover: 'yes' }]) {
+      expect(spaceStatusDto.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
   /** **모든 스페이스는 서버가 찾고 거른다** (P14 FR-1514, P4 FR-537 상한 + 검색). 화면에서만 거르면 상한 밖의 스페이스를 찾지 못한다(T-051) */
   it('spaceListQueryDto — 찾기(`q`)와 상태(`status`)', () => {
     expect(spaceListQueryDto.parse({ scope: 'all', q: '  운영팀  ', status: 'suspended' })).toEqual({ scope: 'all', limit: 200, q: '운영팀', status: 'suspended' });
