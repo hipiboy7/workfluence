@@ -240,6 +240,8 @@ export const policyPatchDto = z
     sessionIdleMinutes: z.number().int().optional(),
     sessionAbsoluteHours: z.number().int().optional(),
     passwordMinLength: z.number().int().optional(),
+    // 감사 기록 단계 — 시스템 관리자만 바꾼다(`PolicyController.update`, P17 FR-1841)
+    auditLevel: z.number().int().optional(),
     passwordMinCharClasses: z.number().int().optional(),
     lockoutThreshold: z.number().int().optional(),
     lockoutMinutes: z.number().int().optional(),

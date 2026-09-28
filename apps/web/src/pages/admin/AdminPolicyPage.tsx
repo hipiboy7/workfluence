@@ -27,7 +27,8 @@ export function AdminPolicyPage() {
   if (!policy) return <main className="shell"><p className="muted">불러오는 중…</p></main>;
 
   const numberKeys = (Object.keys(policy) as (keyof PolicyView)[]).filter(
-    (k) => typeof policy[k] === 'number' && k !== 'uploadCeilingMb',
+    // 감사 기록 단계는 감사로그 화면에서 시스템 관리자가 고른다 (P17 FR-1842) — 여기서는 보이지 않는다
+    (k) => typeof policy[k] === 'number' && k !== 'uploadCeilingMb' && k !== 'auditLevel',
   ) as (keyof Policy)[];
 
   const submit = async (e: FormEvent) => {
@@ -63,6 +64,7 @@ export function AdminPolicyPage() {
       <form onSubmit={submit}>
         <section className="card">
           <h2>숫자 값</h2>
+          <p className="muted small">감사 기록 단계는 <Link to="/admin/audit">감사로그</Link> 화면에서 시스템 관리자가 고른다.</p>
           {numberKeys.map((k) => (
             <p key={k}>
               <label htmlFor={k}>{k}</label>

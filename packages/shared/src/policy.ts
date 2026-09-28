@@ -1,4 +1,4 @@
-import { ALLOWED_UPLOAD_EXTENSIONS, PASSWORD_POLICY } from './constants';
+import { ALLOWED_UPLOAD_EXTENSIONS, PASSWORD_POLICY, type AuditAction } from './constants';
 
 /**
  * 운영 정책값 (A등급, P4_설계서_Admin E절, FR-520~527).
@@ -25,6 +25,9 @@ export const POLICY_DEFAULTS = {
   llmRetentionDays: 7,
   llmConversationMax: 100,
   llmPinnedMax: 20,
+  // Phase 17 (P17_설계서_Ui I절) — 감사 기록 단계. 3 전체 · 2 줄임 · 1 최소. 사용자 결정 2026-09-28 "필수는 늘, 나머지만 단계" → "10번 제안대로".
+  // 바꾸는 사람은 시스템 관리자뿐이고(감사로그 화면), 기본은 지금처럼 모두 남긴다
+  auditLevel: 3,
 };
 
 /**
@@ -67,7 +70,29 @@ const RANGES: Record<string, { min: number; max: number }> = {
   llmConversationMax: { min: 1, max: 1000 },
   // 0이면 고정을 쓰지 않는다. **대화 수보다 작아야 한다**는 짝 규칙은 `policyConsistencyProblems`가 본다
   llmPinnedMax: { min: 0, max: 999 },
+  auditLevel: { min: 1, max: 3 },
 };
+
+/**
+ * **단계를 낮추면 빠지는 감사 행위**와, 그 행위가 아직 남는 가장 낮은 단계 (P17 I절, FR-1840). 양이 많은 것만 여기 있다 — 여기 없는 행위는
+ * **필수**라 단계와 무관하게 늘 남는다(로그인·계정·권한·관리·설정·만들기·고치기·지우기·옮기기·되살리기, 관문 거절, 메일 실패 등 — `CLAUDE.md` 6절).
+ * - 3에서만 남는다 — 실시간 편집의 자동 저장(한 사람이 쓰는 동안 몇 초마다)
+ * - 2부터 남는다 — 첨부 받기·HTML 내보내기·메일 발송 성공·LLM 질문(보는 사람 수만큼)
+ */
+export const AUDIT_MIN_LEVEL: Readonly<Partial<Record<AuditAction, 2 | 3>>> = {
+  'page.collab.save': 3,
+  'page.collab.flush': 3,
+  'page.collab.title': 3,
+  'attachment.download': 2,
+  'page.export': 2,
+  'mail.send': 2,
+  'llm.ask': 2,
+};
+
+/** 이 단계에서 그 행위를 남기는가. 필수 행위는 늘 참이다 */
+export function auditRecorded(action: AuditAction, level: number): boolean {
+  return level >= (AUDIT_MIN_LEVEL[action] ?? 1);
+}
 
 const isValidInt = (key: string, v: unknown): v is number => {
   const r = RANGES[key];

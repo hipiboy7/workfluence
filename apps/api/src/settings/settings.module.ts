@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Global, Inject, Module, Patch, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Global, Inject, Module, Patch, Req, UseGuards } from '@nestjs/common';
 import { can, policyPatchDto, type Policy, type PolicyPatchDto } from '@workfluence/shared';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
@@ -41,6 +41,8 @@ export class PolicyController {
   @Patch()
   @RequireAction('settings.manage')
   async update(@Body(new ZodPipe(policyPatchDto)) patch: PolicyPatchDto, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
+    // 감사 기록 단계는 **시스템 관리자만** 바꾼다 (P17 FR-1841 — 사용자 원문 "시스템 관리자가 감사로그 화면에서 … 지정"). 판정은 `can` — root 전용 행위다
+    if (patch.auditLevel !== undefined && !can(me, 'system.manage')) throw new ForbiddenException('감사 기록 단계는 시스템 관리자만 바꾼다');
     await this.db.transaction(async (tx) => {
       const { before, after } = await this.svc.update(patch, me, tx);
       // **바뀐 키의 이전·이후를 남긴다** (FR-525). "누가 바꿨다"만으로는 되돌릴 수 없다

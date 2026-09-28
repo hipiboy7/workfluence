@@ -3,7 +3,10 @@ import { Link } from 'react-router';
 import type { AuditEventView } from '@workfluence/shared';
 import { AUDIT_ACTIONS } from '@workfluence/shared';
 import { LIST_PAGE_LIMIT, REQUEST_ID_PATTERN } from '@workfluence/shared';
+import { can } from '@workfluence/shared';
 import { api } from '../../api';
+import { useAuth } from '../../auth';
+import { AuditLevelCard } from '../../components/AuditLevelCard';
 
 /**
  * 감사로그 (FR-237, FR-243). append-only라 화면에도 조회만 있다.
@@ -12,6 +15,7 @@ import { api } from '../../api';
  * 누를 때** 보낸다(치는 도중의 반쪽 번호로 요청하지 않는다). 모양은 서버와 같은 판정(`REQUEST_ID_PATTERN`)으로 먼저 본다
  */
 export function AdminAuditPage() {
+  const { me } = useAuth();
   const [rows, setRows] = useState<AuditEventView[]>([]);
   const [error, setError] = useState<string | null>(null);
   // 거르는 조건 (FR-531). **거를 수 없으면 "추적한다"가 성립하지 않는다** — 수만 건에서 눈으로 찾을 수는 없다
@@ -55,6 +59,8 @@ export function AdminAuditPage() {
       <h1>감사로그</h1>
       <p className="muted small"><Link to="/">← 홈</Link> · 기록은 추가만 된다. 고치거나 지울 수 없다.</p>
       {error && <p className="badge fail" role="alert">{error}</p>}
+      {/* 감사 기록 단계 (P17 F-010 10번) — 사용자 원문 "시스템 관리자가 감사로그 화면에서 … 지정". 판정은 `can` — root 전용 행위다 */}
+      <AuditLevelCard canChange={!!me && can({ id: me.id, role: me.role, grants: me.grants }, 'system.manage')} />
 
       <form onSubmit={submit} className="card">
         <label htmlFor="action">행위</label>

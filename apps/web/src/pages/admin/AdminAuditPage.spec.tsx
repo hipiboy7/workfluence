@@ -3,6 +3,7 @@ import type { AuditEventView } from '@workfluence/shared';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AuthProvider } from '../../auth';
 import { AdminAuditPage } from './AdminAuditPage';
 
 /** 컴포넌트 시험 — 감사로그를 요청 번호로 거른다 (P11_설계서_Ops G절, FR-1212 · 종료 루틴 자체 점검 9). 서버는 가짜 `fetch`다 */
@@ -36,6 +37,9 @@ beforeEach(() => {
       const q = new URL(url, 'http://x').searchParams;
       return Promise.resolve(json(200, q.get('requestId') === RID ? [row({})] : [row({}), row({ id: 'e2', action: 'auth.login.success', requestId: null })]));
     }
+    // P17 — 화면 맨 위의 감사 기록 단계와 로그인한 사람(시스템 관리자만 단계를 고른다)
+    if (url === '/api/settings/policy') return Promise.resolve(json(200, { auditLevel: 3 }));
+    if (url === '/api/auth/me') return Promise.resolve(json(200, { id: 'u1', username: 'root', displayName: '관리자', role: 'root', mustChangePassword: false, grants: [], hasPassword: true }));
     return Promise.reject(new Error(`시험에 없는 요청: ${url}`));
   }) as unknown as typeof fetch;
 });
@@ -47,7 +51,9 @@ afterEach(() => {
 const renderPage = () =>
   render(
     <MemoryRouter>
-      <AdminAuditPage />
+      <AuthProvider>
+        <AdminAuditPage />
+      </AuthProvider>
     </MemoryRouter>,
   );
 const withRequestId = () => urls.filter((u) => new URL(u, 'http://x').searchParams.has('requestId'));
