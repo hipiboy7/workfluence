@@ -13,7 +13,6 @@ import {
   type UpdateSpaceDto,
 } from '@workfluence/shared';
 import { and, count, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
-import { PgTransaction } from 'drizzle-orm/pg-core';
 import { randomInt } from 'node:crypto';
 import { containsPattern } from '../common/like';
 import { DB, type Db } from '../db/db.module';
@@ -404,17 +403,16 @@ export class SpacesService {
    * **Crew를 바꾸는 일은 판정한 공간 상태에서만 쓴다** (P16 A.1-5 · P15 A.1-14). Crew를 바꿀 수 있는지가 공간의 상태와 중지를 건 사람에 달리므로
    * (P16), 판정 전에 공간 행을 **나눠 잠근다**(`FOR SHARE`) — 상태 바꾸기·넘겨받기·지우기는 이 트랜잭션이 끝날 때까지 기다리고, 먼저 와 있던
    * 것은 이쪽이 기다렸다가 새 상태로 판정한다. Crew를 바꾸는 일끼리는 서로 기다리지 않는다. 처음 판은 잠그지 않아 관리자의 중지가 커밋되는 사이
-   * 주인의 넣기가 들어갔다(병합 전 검토 셋 — T-072). **잠금은 커밋까지 가야 하므로** 받은 것이 트랜잭션이 아니면 새로 연다 — 밖에서 부르면 잠금이 그
-   * 문장 하나로 끝나 줄 세우기가 오류 없이 사라진다(`lockTree`와 같은 까닭)
+   * 주인의 넣기가 들어갔다(병합 전 검토 셋 — T-072). **잠금은 커밋까지 가야 하므로 늘 트랜잭션 안에서 한다** — 받은 것이 트랜잭션이면 그 안의
+   * 저장점(저장점에서 잡은 행 잠금은 바깥 트랜잭션이 끝날 때까지 간다), 아니면 새 트랜잭션이다. 밖에서 그냥 부르면 잠금이 그 문장 하나로 끝나 줄
+   * 세우기가 오류 없이 사라진다(`lockTree`와 같은 까닭)
    */
   private async manageMembers(spaceId: string, principal: Principal, tx: Db, write: (tx: Db) => Promise<void>): Promise<void> {
-    const run = async (t: Db) => {
+    await tx.transaction(async (t) => {
       await t.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).for('share');
       await this.assertManage(spaceId, principal, t);
       await write(t);
-    };
-    if ((tx as unknown) instanceof PgTransaction) return run(tx);
-    return tx.transaction((t) => run(t));
+    });
   }
 
   async addMember(spaceId: string, dto: AddMemberDto, principal: Principal, tx: Db = this.db): Promise<void> {

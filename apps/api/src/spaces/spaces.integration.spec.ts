@@ -1113,7 +1113,7 @@ describe('Crew 쓰기도 판정한 상태에서만 (P16 A.1-5, 병합 전 검토
     expect((await spacesSvc.members(s.id, admin)).map((m) => m.username)).toEqual(['mate', 'newbie', 'owner']);
   });
 
-  it('트랜잭션 없이 불러도 스스로 열어 그 안에서 한다 — 잠금이 문장 하나로 끝나지 않는다', async () => {
+  it('트랜잭션 없이 불러도 된다 — 스스로 트랜잭션을 열고 그 안에서 잠그고 쓴다', async () => {
     const { owner, s } = await setup();
     await expect(spacesSvc.addMember(s.id, { username: 'newbie', role: 'viewer' }, owner)).resolves.toBeUndefined();
     expect((await spacesSvc.members(s.id, owner)).map((m) => m.username)).toEqual(['mate', 'newbie', 'owner']);
