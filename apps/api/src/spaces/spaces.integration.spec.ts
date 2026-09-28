@@ -961,6 +961,23 @@ describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 
     expect(audit.detail).toEqual({ name: '운영2', cleared: [{ id: theirs.id, name: 'b 팀', deleted: true }] });
   });
 
+  it('**남이 붙이는 사이 만든 사람이 지우면 기다렸다가 다시 센다** — 분류 행을 잠그므로 붙이기가 끝난 뒤의 쓰임으로 판정한다(403) (D.4)', { timeout: 30_000 }, async () => {
+    const a = await user('a');
+    const b = await user('b');
+    const cat = await ctrl().create({ name: '곧 남의 것' }, a as never, REQ);
+    const theirs = await spacesSvc.create({ name: 'b 팀', kind: 'team', categoryId: null, description: '' }, b);
+    // b가 분류를 붙이고 아직 커밋하지 않았다 — 외래 키 검사가 분류 행을 잡고 있다
+    const attaching = await holdOpen((tx) => tx.update(spaces).set({ categoryId: cat.id }).where(eq(spaces.id, theirs.id)));
+    const removing = settle(ctrl().remove(cat.id, a as never, REQ));
+    await queued();
+    attaching.release();
+    await attaching.done;
+    // 잠그지 않고 세면 쓰임 0(커밋 전)으로 판정하고 지우려다 외래 키로 터진다 — 거절이 아니라 오류였다
+    expect(await removing).toBeInstanceOf(ForbiddenException);
+    expect(await db.query.spaceCategories.findFirst({ where: eq(spaceCategories.id, cat.id) })).toBeTruthy();
+    expect((await db.query.spaces.findFirst({ where: eq(spaces.id, theirs.id) }))?.categoryId).toBe(cat.id);
+  });
+
   it('**지우는 사이 공간에 그 분류를 붙이면 400이다** — 분류 행의 잠금 뒤에 줄을 서고, 지워진 분류를 만난다(500이 아니다) (D.4)', { timeout: 30_000 }, async () => {
     const admin = await user('boss', 'admin');
     const owner = await user('owner');

@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 14까지 구현 완료** (2026-09-28). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 15까지 구현 완료** (2026-09-28). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -121,7 +121,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `env.ts` | `WF_*` 환경 스키마(strict), 파싱, `.env.example` 키 추출 | 서버가 쓰고, 테스트가 `.env.example`과 대조한다 |
 | `constants.ts` | 역할·상태·Crew 역할·감사 이벤트·문서 스키마 버전·정책 기본값·CSRF 헤더 | 화면 문구와 서버 판정이 같은 목록을 봐야 한다 |
 | `document.ts` | 문서 JSON 허용 목록(노드·속성·마크·자식·노드별 마크), 검증, 속성·마크 판정 함수, 텍스트 추출 | **서버 검증 · 실시간 편집의 관문 · 편집기가 같은 목록을 본다.** 편집기 쪽은 대조 테스트(`apps/web/src/components/extensions.spec.ts`)가 강제한다 — 어긋나면 편집기가 만든 문서를 서버가 받지 않는다 (P9 D.7) |
-| `permissions.ts` | `can()`·`spaceAccess()`·역할과 위임의 우열(`canManageUser` — Phase 11부터 위임도 본다)·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
+| `permissions.ts` | `can()`·`spaceAccess()`·`categoryAccess()`·위임 규칙표(`DELEGATION` — 받는 역할과 주는 사람, `canGrant`)·역할과 위임의 우열(`canManageUser` — Phase 11부터 위임도 본다)·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
 | `security.ts` | ID·email 마스킹, 임시 비밀번호·식별자 생성 (난수 소스 주입) | 난수를 주입받아 순수 함수로 두면 테스트가 결정적이다 |
 | `schemas.ts` | API 요청 DTO(zod) + 응답 뷰 타입 | 서버 검증과 클라이언트 타입이 한 정의에서 나온다 |
 | `release.ts` | 반입 묶음의 필수 구성 목록 | 문서가 아니라 코드가 단일 출처다 (`CLAUDE.md` 8.3절) |
@@ -143,10 +143,10 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 테이블 | 핵심 컬럼 | 도입 | 비고 |
 |---|---|---|---|
 | `settings` | `key` PK, `value` jsonb, `updated_by`, `updated_at` | **P0** | 운영 조절값 (`CLAUDE.md` 5절 세 번째 분류) |
-| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by`, `grants`(P11 — root가 준 행위) | P1 | `status`: `pending`/`active`/`suspended`(P13 — 정지). **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
+| `users` | `id`, `username` uq, `display_name`, `email` uq, `password_hash`, `oidc_sub` uq, `role`, `status`, `must_change_password`, `failed_attempts`, `locked_until`, `approved_at/by`, `grants`(P11 — 맡겨 받은 행위. P15부터 행위마다 받는 역할이 CHECK다: LLM 연결 관리는 admin, 셋은 member) | P1 | `status`: `pending`/`active`/`suspended`(P13 — 정지). **`잠김`은 저장하지 않고 `locked_until`로 파생**. `password_hash`와 `oidc_sub`는 각각 null 가능하지만 **둘 다 null인 행은 CHECK로 막는다** — 로컬 계정과 IdP 계정을 구분한다 |
 | `sessions` | (connect-pg-simple 관리) | P1 | 서버측 세션 |
 | `space_categories` | `id`, `name` uq, `created_by` | P2 | |
-| `spaces` | `id`, `key` uq(자동), `name`, `description`, `kind`, `status`, `category_id`, `created_by`, `suspended_at/by`, `deleted_at` | P2 | `kind`: `personal`/`team`, `status`: `active`/`suspended` |
+| `spaces` | `id`, `key` uq(자동), `name`, `description`, `kind`, `status`, `category_id`, `created_by`, `suspended_at/by`, `suspended_by_owner`(P15), `deleted_at` | P2 | `kind`: `personal`/`team`, `status`: `active`/`suspended`. `suspended_by_owner`는 중지를 건 사람이 주인이었는가 — 관리자가 건 중지는 권한을 받은 주인만 푼다(보류 32) |
 | `space_members` | (`space_id`,`user_id`) PK, `role`, `added_by` | P2 | Crew. `owner`/`editor`/`viewer` |
 | `pages` | `id`, `space_id`, `parent_id`, `title`, `position`, `current_version_no`, `search_text`, `created_by`, `updated_by`, `deleted_at` | P2 | `search_text`는 파생 데이터 |
 | `page_versions` | `id`, `page_id`, `version_no`, `title`, `content_json`, `content_text`, `created_by` — (`page_id`,`version_no`) uq | P2 | **append-only** |
@@ -295,6 +295,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 12 | 답을 기다리는 표시·문서 모양의 한계 — LLM 질문 화면의 기다린 초와 "답변이 늦어지고 있습니다."(흐름 상태 기계 `waitingSince`), 편집기 스키마의 순서·개수 규칙(`NON_EMPTY_NODES`·`FIRST_CHILD` — 정본 검증과 실시간 상태의 변환, 대조 시험이 증명. 목록 항목의 첫 자식은 관문 `gate.ts`가 적용한 뒤로 본다), 실시간 편집 프레임 16MiB(`COLLAB_LIMITS`, 넘으면 1009와 감사)·표 칸 값의 범위(`TABLE_LIMITS`, 편집기가 붙여 넣은 값을 줄이고 범위를 넘는 표 명령은 하지 않는다) |
 | 13 | 반입 준비 — 로그인 경로(한 계정씩 줄 `KeyedSerial`, 비밀번호 확인·해시는 트랜잭션 밖 · 프로세스의 argon2 동시 실행 상한 `ConcurrencyGate`, 실패 횟수는 한 문장으로), 계정 정지(`users.status` = `suspended`, 정지하면 세션·편집 연결을 끊는다), 사용자 목록의 찾기·거르기·나누기, DB 계정 둘(앱 `workfluence_app` — 마이그레이션이 만들고 권한을 준다 `apps/api/src/db/app-role.ts`), compose `tools`(마이그레이션·시드·월간 작업 `apps/api/src/cli`), 반입 묶음의 운영 문서와 이미지의 커밋 라벨 |
 | 14 | 페이지 트리와 스페이스를 화면에서(F-007·F-008) — 옮기기의 자리를 형제 가운데 몇 번째로 굳히고 서버가 새 자리 값을 정한다(`placeAt` — 자리에 틈 `PAGE_POSITION_GAP`을 두어 보통 한 줄만, 틈이 없을 때만 한 문장으로 다시 매긴다), 트리를 바꾸는 네 길(옮기기·만들기·지우기·휴지통 되살리기)이 스페이스마다 잠금(`page-tree:<스페이스>`, 대기 2초 뒤 409 — `tree-lock.ts`)을 쓰고 잠근 뒤 대상을 다시 읽는다, 식별자는 경계에서 소문자로(`idSchema`·`parseId`), 모든 스페이스 목록을 DB가 찾고 거른다(`q`·`status`, `SPACE_LIST_MAX`, 보기는 질의 넷), 화면 넷(트리 펼치기 · 옮기기 칸 · 관리 칸 · 관리 콘솔의 스페이스). 마이그레이션 없음 |
+| 15 | 맡기는 권한(보류 32·33) — 위임 규칙표(`DELEGATION`: LLM 연결 관리는 root가 관리자에게, 분류 관리·관리자가 건 중지 풀기·스페이스 관리 전체는 관리자·root가 member에게)와 `canGrant`, 받는 역할의 CHECK와 `spaces.suspended_by_owner`(`0012_grants`), `spaceAccess`의 `canEditInfo`·지금 상태에서 바꿀 수 있는가(`canChangeStatus`), 읽지 못해도 중지·지우기(`manageContext`), `categoryAccess`와 분류의 쓰임·지우면 분류 없음, 공용 `CategoryList` |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
@@ -330,7 +331,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 검색 엔진 교체 | 6절 축 | M | 같음. 색인은 파생 데이터라 재생성 가능하다 |
 | 외부 시스템 알림 (메일·메신저) | ③ + 설정 | M | 폐쇄망에서 닿는 곳인지 먼저 확인 |
 | 사내 LLM의 형식이 다르다 (다른 게이트웨이) | 6절 축 | M | `LLM_CLIENT` 뒤의 어댑터(`apps/api/src/llm/openai.client.ts`)와 형식 읽기(`domain/openai.ts`)만 바꾼다 |
-| root가 관리자에게 **다른 행위도** 위임한다 | 권한 판정 | L | `DELEGABLE_ACTIONS`(`packages/shared/src/permissions.ts`)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`를 고친다 — 잊으면 `apps/api/src/db/constraints.integration.spec.ts`가 둘이 다르다고 막는다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다. 위임받은 관리자는 자기에게 없는 위임을 가진 셈이 되므로 관리의 우열(`canManageUser`)이 저절로 따라간다 |
+| 사람에게 **다른 행위도** 맡긴다 | 권한 판정 | L | `DELEGABLE_ACTIONS`와 규칙표 `DELEGATION`(`packages/shared/src/permissions.ts` — 받는 역할과 주는 사람)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`·`users_grants_holder_chk`를 고친다 — 잊으면 `apps/api/src/db/constraints.integration.spec.ts`가 둘이 다르다고 막는다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다. 받은 사람은 행위자가 할 수 없는 위임을 가진 셈이 되므로 관리의 우열(`canManageUser`)이 저절로 따라간다 |
 | 새 로그 줄을 더한다 | 로그 | S | `LOG_EVENTS`(`packages/shared/src/constants.ts`)에 코드를 더하고 `logLine()`으로 남긴다. 장애대응 가이드 7.28절 표에 한 줄 — 빠뜨리면 `verify:docs`가 막는다 |
 
 ### 11.3 값을 추가할 때 함께 고쳐야 하는 짝

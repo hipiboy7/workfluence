@@ -5,7 +5,6 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../auth';
 import { SEARCH_DELAY_MS } from '../../timing';
-import { confirmDeleteCategoryText } from '../../components/CategoryList';
 import { confirmSuspendText } from '../../components/SpaceManage';
 import { AdminSpacesPage } from './AdminSpacesPage';
 
@@ -277,7 +276,8 @@ describe('AdminSpacesPage — 분류', () => {
     await screen.findByLabelText('분류 운영 이름');
     expect(screen.getByText('공간 2개 (만든 사람의 것이 아닌 공간 1개)')).toBeTruthy();
     fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
-    expect(confirm).toHaveBeenCalledWith(confirmDeleteCategoryText(categories[0]));
+    // 글자 그대로 본다 — 같은 함수로 만든 말과 견주면 그 함수가 틀려도 참이다(돌연변이 W4가 빠져나갔다)
+    expect(confirm).toHaveBeenCalledWith('분류 "운영"을(를) 지운다. 이 분류를 쓰는 공간 2개(휴지통 포함)가 "분류 없음"이 된다. 되살릴 수 없다 — 어느 공간이었는지는 감사로그에 남는다.');
     expect((await screen.findByRole('status')).textContent).toBe('분류 "운영"을(를) 지웠다 — 쓰던 공간 2개는 분류 없음이 됐다.');
     expect(writes()).toEqual([{ method: 'DELETE', url: '/api/categories/c1', body: undefined }]);
   });

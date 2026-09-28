@@ -32,6 +32,9 @@ Phase 15는 보류 32·33을 사용자의 답으로 닫는다. 보류 32는 관�
 | 8 | 관리 칸에서 만든 새 분류는 **고른 상태**가 된다. 공간에 붙는 것은 **저장**을 눌렀을 때다 | 이름·설명과 같은 흐름이다. 만들자마자 붙이면 저장하지 않은 이름·설명과 따로 논다. 같은 이름이 있으면 있던 것을 고른다(P2 FR-308의 "만들거나 고른다") | — |
 | 9 | 분류를 지우면 쓰던 공간들은 분류 없음이 된다. 감사 `category.delete`에 그 공간들(id·이름·휴지통 여부)을 남긴다. 지우기 전에 몇 개가 분류 없음이 되는지 묻는다 | 사용자가 FR-538을 바꿨다(착수 쟁점 3). FR-538이 막았던 까닭은 "어느 분류였는지 복구할 수 없다"였다. 감사에 목록을 남겨 다시 붙일 길을 둔다 | — |
 | 10 | 권한을 받거나 잃으면 **다음 요청부터** 먹는다. 다시 로그인하지 않아도 된다 | 가드가 요청마다 사용자 행에서 위임을 싣는다(P11). 화면은 새로고침하면 그 권한의 단추를 보인다 | — |
+| 11 | **이름·설명·분류 바꾸기는 주인과 관리자만**이다(`canEditInfo`). 스페이스 관리 전체를 받은 사람은 editor로 있는 공간에서도 이름을 바꾸지 않는다 | 맡긴 것은 중지·다시 쓰기·지우기·되살리기다(A.1-1). 전에는 이름 바꾸기가 `canChangeStatus`를 빌려 썼다 — 그 값이 "지금 상태를 바꿀 수 있는가"가 되며(D.3) 스페이스 관리 전체가 들어와 따로 둔다 | — |
+| 12 | **같은 상태를 다시 보내면 쓰지 않는다** — 건 사람이 바뀌지 않고 감사 행도 없다 | 다시 걸어 건 사람을 바꾸게 두면, 권한을 받은 주인이 관리자가 건 중지를 제가 건 것으로 바꿔 두고 권한을 거둔 뒤에도 푼다. 관리자가 주인이 건 중지를 "관리자가 건 것"으로 바꾸려면 다시 쓰기 → 중지로 한다(D.6) | 한 번에 바꾸는 길이 필요하다는 요청이 오면 |
+| 13 | 공간의 관리 칸의 **분류 관리**에는 **내가 만들었고** 바꿀 수 있는 분류만 보인다 | 관리자는 모든 분류를 바꾼다 — 그것을 공간마다 늘어놓으면 관리 칸이 사내 분류 목록이 된다. 모든 분류는 관리 콘솔의 스페이스 관리가 보인다 | — |
 
 ## B. Confluence 대조 (`CLAUDE.md` 4절)
 
@@ -123,6 +126,7 @@ Phase 15는 보류 32·33을 사용자의 답으로 닫는다. 보류 32는 관�
 
 - **`spaceAccess`** — 스페이스의 모양(`SpaceLike`)에 `suspendedByOwner`를 더한다. `overseer = can(principal, 'space.oversee')`(관리자·root와 받은 사람)이다.
   - **읽기·쓰기·Crew 관리는 그대로** 관리자 역할과 Crew로 정한다(FR-1631).
+  - **`canEditInfo`**(이름·설명·분류) = `admin || isOwner` — 상태는 보지 않는다(중지된 공간은 `canWrite`가 막고, 서버가 까닭을 나눠 말한다). A.1-11
   - `canChangeStatus`는 **지금 상태에서 바꿀 수 있는가**다.
     - 활성이면 중지: `overseer || isOwner`
     - 중지면 다시 쓰기: `overseer || (isOwner && (suspendedByOwner || can(principal, 'space.unsuspend')))`
@@ -131,9 +135,11 @@ Phase 15는 보류 32·33을 사용자의 답으로 닫는다. 보류 32는 관�
   - 상태 바꾸기와 지우기는 **읽지 못해도** 판정한다(`manageContext`) — 스페이스 관리 전체를 받은 사람은 Crew가 아닌 공간도 중지한다.
     - 읽을 수도 바꿀 수도 지울 수도 없으면 지금처럼 404다(있는지 드러내지 않는다).
     - 읽기 경로(`context`)는 그대로 읽기를 요구한다.
-  - 중지할 때 `suspended_by_owner = access.isOwner`, 다시 쓰게 하면 false로 적는다.
+  - 중지할 때 `suspended_by_owner = access.isOwner`, 다시 쓰게 하면 false로 적는다. 감사 `space.status.change`의 중지에는 `byOwner`가 붙는다.
   - 풀지 못하는 주인에게는 403 "관리자가 중지한 스페이스다 — 다시 쓰기는 관리자나 '관리자가 건 중지 풀기'를 받은 주인이 한다"를 준다.
-  - 모든 스페이스 목록(`scope=all`)은 `space.oversee`가 부른다. **읽기로 거르지 않는다** — 받은 사람에게는 읽지 못하는 공간도 보여야 한다(목록의 칸만).
+  - **상태가 같으면 쓰지 않는다**(`changed: false` — 호출부는 감사 행을 남기지 않는다, A.1-12). **바꾸는 문장은 읽은 상태를 조건에 둔다** — 두 사람이 동시에 바꾸면 뒤의 것은 앞의 결과를 판정하지 않고 덮지 않고 409다.
+  - 바꾼 뒤 돌려주는 보기도 읽지 못하는 사람에게 404를 주지 않는다(`getManaged`).
+  - 모든 스페이스 목록(`scope=all`)은 `space.oversee`가 부른다. **읽기로 거르지 않는다** — 받은 사람에게는 읽지 못하는 공간도 보여야 한다(목록의 칸만). 읽지 못하는 사람의 보기에는 **설명을 싣지 않는다**(A.1-1).
   - `SpaceView`에 `suspendedByOwner`를 싣는다(FR-1612).
 - **휴지통의 지운 공간**(목록·되살리기)도 `space.oversee`가 한다(FR-1630).
 
@@ -150,21 +156,23 @@ Phase 15는 보류 32·33을 사용자의 답으로 닫는다. 보류 32는 관�
   2. `categoryAccess`로 판정한다. 안 되면 403이다.
   3. 지우기는 그 분류를 쓰는 공간(휴지통 포함)을 모두 `category_id = NULL`로 적은 뒤 분류를 지운다. 감사 `category.delete`에 `{ name, cleared: [{ id, name, deleted }] }`를 남긴다(FR-1622).
 - 공간에 분류를 붙이는 쓰기가 그 잠금을 기다렸다가 분류가 지워진 것을 만나면(외래 키 `23503`) 400 "없는 분류다"를 준다. 500이 아니다.
+- 이름 바꾸기가 확인과 쓰기 사이에 같은 이름을 만나면(유일 제약 `23505`) 409 "같은 이름의 분류가 이미 있다"다.
+- 거절의 까닭은 둘이다 — 만든 사람이면 "남의 공간이 쓰는 분류는 관리자나 '분류 관리'를 받은 사람이 …", 아니면 "분류는 만든 사람과 관리자가 …"(화면의 `title`도 같은 말이다).
 
 ### D.5 화면
 
 - **사용자 관리**(`apps/web/src/pages/admin/AdminUsersPage.tsx`)의 위임 칸
   - member 줄에 셋, 관리자 줄에 LLM 연결 관리를 둔다.
-  - 켤 수 있는지는 `canGrant`와 `canManageUser`로 정한다. 끌 수 없는 칸은 까닭을 `title`로 보인다.
+  - 켤 수 있는지는 `canGrant`와 `canManageUser`로 정한다. 끌 수 없는 칸은 까닭을 `title`로 보인다. 표 아래 안내문이 누가 누구에게 무엇을 주는지 말한다.
 - **공간의 관리 칸**(`apps/web/src/components/SpaceManage.tsx`)
-  - **새 분류** — 이름을 넣고 **만들기**를 누르면 고른 상태가 된다.
-  - **분류 관리** — 내가 이름을 바꾸거나 지울 수 있는 분류들이다. 공용 apps/web/src/components/CategoryList.tsx(새로)를 쓴다.
-  - 중지된 공간에 **"관리자가 중지했다"** 를 보인다. 풀지 못하는 주인에게는 그 까닭을 보인다.
-  - 칸이 보이는 조건에 **중지된 공간의 주인**을 더한다(FR-1612).
+  - **새 분류** — 이름을 넣고 **분류 만들기**(스페이스 화면에 페이지의 **만들기**가 따로 있다)를 누르면 고른 상태가 된다. 이 칸의 Enter는 저장이 아니라 만들기다.
+  - **분류 관리** — **내가 만들었고** 이름을 바꾸거나 지울 수 있는 분류들이다(A.1-13). 공용 `apps/web/src/components/CategoryList.tsx`를 쓴다 — 알림과 거절의 까닭은 관리 칸의 알림 칸에 싣는다.
+  - 중지된 공간에 누가 중지했는지(**주인이 중지한 스페이스다.** / **관리자가 중지한 스페이스다.**)를 보인다. 풀지 못하는 주인에게는 그 까닭을 보인다.
+  - 칸이 보이는 조건은 `canEditInfo || canChangeStatus || canDelete`다 — **중지된 공간의 주인**이 들어온다(FR-1612). 이름·분류 칸은 `canEditInfo`일 때만 있다 — 스페이스 관리 전체만 가진 사람에게는 중지 단추만 보인다.
 - **스페이스 관리**(`apps/web/src/pages/admin/AdminSpacesPage.tsx`)
   - 스페이스 관리 전체를 받은 사람이나 분류 관리를 받은 사람이 연다.
-  - 모든 스페이스 표는 스페이스 관리 전체일 때만 보인다.
-  - 분류 칸은 `CategoryList`를 쓴다. 지우기 확인이 몇 개가 분류 없음이 되는지 말한다(FR-1624).
+  - 모든 스페이스 표는 스페이스 관리 전체일 때만 보인다(분류 관리만 받은 사람에게는 부르지도 않는다 — 403이다). 중지된 줄의 상태에 **주인이 걸었다** / **관리자가 걸었다**가 붙는다.
+  - 분류 칸은 `CategoryList`를 쓴다 — 줄마다 쓰임(공간 수 · 만든 사람의 것이 아닌 공간 수)이 보인다. 지우기 확인이 몇 개가 분류 없음이 되는지 말한다(FR-1624).
 - **첫 화면의 메뉴**(`apps/web/src/pages/SpacesPage.tsx`) — 둘 가운데 하나를 가지면 **스페이스 관리**를 보인다.
 - **휴지통**(`apps/web/src/pages/TrashPage.tsx`) — 지운 스페이스 칸은 `space.oversee`일 때 보인다.
 
@@ -174,22 +182,23 @@ Phase 15는 보류 32·33을 사용자의 답으로 닫는다. 보류 32는 관�
 |---|---|---|
 | 스페이스 관리 전체를 받은 사람이 목록에서 공간을 누르면 "스페이스를 찾을 수 없다" | 내용은 맡기지 않았다(A.1-1). 목록의 이름을 누를 수 없게 하면 관리자와 화면이 갈린다 — 누르면 까닭이 보이는 쪽을 골랐다 | A.1-1의 되돌릴 조건 |
 | 지운 분류를 되살리는 화면은 없다 | 감사의 목록을 보고 다시 만들어 붙인다(A.1-9). 되살리기 화면은 쓰임이 드물다 | 요청이 오면 |
+| 주인이 건 중지를 관리자가 "관리자가 건 것"으로 바꾸려면 **다시 쓰기 → 중지** 두 번이다 — 그 사이 잠깐 쓸 수 있다 | 같은 상태를 다시 보내면 쓰지 않는다(A.1-12) — 한 번에 바꾸게 두면 권한을 받은 주인이 반대로 바꿔 두는 길도 열린다 | A.1-12의 되돌릴 조건 |
 
 ---
 
 ## E. 데이터 모델
 
-apps/api/drizzle/0012_grants.sql(새로) — D.2. `apps/api/src/db/schema.ts`의 `users` CHECK 둘과 `spaces.suspendedByOwner`를 같게 둔다.
+`apps/api/drizzle/0012_grants.sql` — D.2. `apps/api/src/db/schema.ts`의 `users` CHECK 둘과 `spaces.suspendedByOwner`를 같게 둔다.
 
 ## F. API 계약
 
 | 경로 | 바뀜 |
 |---|---|
 | `PUT /api/users/:id/grants` | 관리자도 부른다. 넣고 빼는 위임마다 `canGrant`로 판정한다 — 줄 수 없는 것이 섞이면 403, 받을 수 없는 역할이면 400 |
-| `PATCH /api/spaces/:id/status` | 스페이스 관리 전체는 읽지 못하는 공간도 바꾼다. 관리자가 건 중지를 권한 없는 주인이 풀면 403 |
+| `PATCH /api/spaces/:id/status` | 스페이스 관리 전체는 읽지 못하는 공간도 바꾼다. 관리자가 건 중지를 권한 없는 주인이 풀면 403. 같은 상태면 쓰지 않고(200, 감사 없음), 동시에 바꾸면 뒤의 것은 409 |
 | `DELETE /api/spaces/:id` | 스페이스 관리 전체는 읽지 못하는 중지된 공간도 지운다 |
-| `GET /api/spaces?scope=all` | `space.oversee`면 부른다. 읽기로 거르지 않는다 |
-| `GET /api/spaces/:id` 등 `SpaceView` | `suspendedByOwner` |
+| `GET /api/spaces?scope=all` | `space.oversee`면 부른다. 읽기로 거르지 않는다 — 읽지 못하는 공간의 설명은 빈 글이다 |
+| `GET /api/spaces/:id` 등 `SpaceView` | `suspendedByOwner`, `access.canEditInfo` |
 | `GET /api/categories` | 줄마다 `createdBy`·`access { canRename, canDelete }`·`usage { spaces, otherSpaces }` |
 | `PATCH /api/categories/:id` · `DELETE /api/categories/:id` | 로그인한 누구나 부른다. 판정은 `categoryAccess`다. 지우기는 쓰던 공간을 분류 없음으로 만든다 |
 | `GET /api/trash/spaces` · `POST /api/trash/spaces/:id/restore` | `space.oversee`면 부른다 |
@@ -206,14 +215,14 @@ D.5와 같다.
 
 | 모듈 | 경로 | 등급 | 하는 일 |
 |---|---|---|---|
-| 위임 규칙·판정 | `packages/shared/src/permissions.ts` | **A** | 규칙표, `can`·`grantsForRole`·`canGrant`·`canManageUser`, `spaceAccess`, `categoryAccess`(D.1·D.3·D.4) |
+| 위임 규칙·판정 | `packages/shared/src/permissions.ts` | **A** | 규칙표, `can`·`grantsForRole`·`canGrant`·`canManageUser`, `spaceAccess`(`canEditInfo` 포함), `categoryAccess`(D.1·D.3·D.4) |
 | 계약 | `packages/shared/src/schemas.ts` | **A** | `userGrantsDto`의 넷, `SpaceView.suspendedByOwner`, `CategoryView`의 칸 |
-| 마이그레이션 | apps/api/drizzle/0012_grants.sql(새로) · `apps/api/src/db/schema.ts` | B | D.2 |
+| 마이그레이션 | `apps/api/drizzle/0012_grants.sql` · `apps/api/src/db/schema.ts` | B | D.2 |
 | 사용자 서비스 | `apps/api/src/users/users.service.ts` | B | 맡기고 거두기(`canGrant`) |
 | 스페이스 서비스 | `apps/api/src/spaces/spaces.service.ts` | B | 읽지 못해도 바꾸기·지우기, 중지를 건 사람, 모든 스페이스(D.3) |
 | 분류 | `apps/api/src/spaces/spaces.module.ts`(`CategoriesController`) | B | 쓰임·판정·지우면 분류 없음(D.4) |
 | 휴지통 | `apps/api/src/trash/trash.service.ts` | B | 지운 공간은 `space.oversee` |
-| 화면 | `apps/web/src/pages/admin/AdminUsersPage.tsx` · `apps/web/src/components/SpaceManage.tsx` · apps/web/src/components/CategoryList.tsx(새로) · `apps/web/src/pages/admin/AdminSpacesPage.tsx` · `apps/web/src/pages/SpacesPage.tsx` · `apps/web/src/pages/TrashPage.tsx` | B | D.5 |
+| 화면 | `apps/web/src/pages/admin/AdminUsersPage.tsx` · `apps/web/src/components/SpaceManage.tsx` · `apps/web/src/components/CategoryList.tsx` · `apps/web/src/pages/admin/AdminSpacesPage.tsx` · `apps/web/src/pages/SpacesPage.tsx` · `apps/web/src/pages/TrashPage.tsx` | B | D.5 |
 
 ## I. 설정 항목
 
