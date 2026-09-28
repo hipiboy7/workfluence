@@ -6,6 +6,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,8 @@ const DATA = join(ROOT, 'data');
 const PGDATA = join(DATA, 'pgdata');
 const SETTINGS = join(DATA, 'settings.env');
 const PIDFILE = join(DATA, 'launcher.pid');
+// 첫 관리자를 만들었다는 표시 — 처음 실행이 중간에 멈춰도 다음 실행이 이어서 만든다
+const SEEDED = join(DATA, 'seeded');
 // 처음 설정의 기본값 — 만든 뒤에는 data\settings.env가 정한다. 데이터베이스는 개발용(5433)과 겹치지 않는 자리
 const DEFAULT_DB_PORT = 5439;
 const DEFAULT_APP_PORT = 3000;
@@ -32,11 +35,32 @@ function fail(msg) {
   process.exit(1);
 }
 
+// PostgreSQL은 Windows의 코드 페이지로 경로를 읽는다 — 그 코드 페이지에 없는 글자(영어 Windows의 한글 등)가 든 경로에서는 뜨지 않는다(F-009 러너 실측)
+const PATH_HINT = /[^ -~]/.test(ROOT) ? ' — 이 폴더의 경로에 영문이 아닌 글자가 있다. C:\\workfluence 같은 영문 경로로 옮겨 다시 누른다' : '';
+
 function runOrFail(cmd, args, msg, opts = {}) {
   const r = spawnSync(cmd, args, { stdio: 'inherit', ...opts });
   if (r.error) fail(`${msg} — ${r.error.message}`);
   if (r.status === DLL_NOT_FOUND) fail(`${msg} — VC++ 런타임 DLL을 찾지 못했다(pgsql\\bin). 묶음을 새로 받아 푼다`);
-  if (r.status !== 0) fail(`${msg} (종료 코드 ${r.status})`);
+  if (r.status !== 0) fail(`${msg} (종료 코드 ${r.status})${opts.hint ?? ''}`);
+}
+
+/** 앱의 데이터베이스가 없으면 만든다 — 묶음의 PostgreSQL에는 createdb가 없어 api의 pg로 한다(scripts/dev-db.ts와 같다) */
+async function ensureDatabase(settings) {
+  const { Client } = createRequire(join(API, 'package.json'))('pg');
+  const client = new Client({
+    host: '127.0.0.1',
+    port: Number(settings.WF_PG_EMBEDDED_PORT),
+    user: 'workfluence',
+    password: settings.WF_PG_EMBEDDED_PASSWORD,
+    database: 'postgres',
+  });
+  await client.connect();
+  try {
+    if (!(await client.query("SELECT 1 FROM pg_database WHERE datname = 'workfluence'")).rowCount) await client.query('CREATE DATABASE workfluence');
+  } finally {
+    await client.end();
+  }
 }
 
 /** KEY=VALUE 한 줄씩. 따옴표로 싼 값은 벗긴다 */
@@ -138,20 +162,30 @@ async function start(openBrowser) {
     const pw = join(DATA, 'pw.tmp');
     writeFileSync(pw, settings.WF_PG_EMBEDDED_PASSWORD);
     try {
-      runOrFail(exe('initdb'), ['-D', PGDATA, '-U', 'workfluence', `--pwfile=${pw}`, '-A', 'scram-sha-256', '-E', 'UTF8', '--locale=C'], '데이터베이스를 만들지 못했다');
+      runOrFail(exe('initdb'), ['-D', PGDATA, '-U', 'workfluence', `--pwfile=${pw}`, '-A', 'scram-sha-256', '-E', 'UTF8', '--locale=C'], '데이터베이스를 만들지 못했다', {
+        hint: PATH_HINT,
+      });
     } finally {
       rmSync(pw, { force: true });
     }
   }
   if (dbRunning()) say('데이터베이스가 이미 떠 있다 — 그대로 쓴다');
-  else runOrFail(exe('pg_ctl'), ['start', '-D', PGDATA, '-o', `-p ${dbPort}`, '-l', join(DATA, 'postgres.log'), '-w', '-t', '120'], `데이터베이스를 띄우지 못했다 — ${join(DATA, 'postgres.log')}를 본다`);
-  if (fresh) {
-    runOrFail(exe('createdb'), ['-h', '127.0.0.1', '-p', dbPort, '-U', 'workfluence', 'workfluence'], '데이터베이스(workfluence)를 만들지 못했다', {
-      env: { ...process.env, PGPASSWORD: settings.WF_PG_EMBEDDED_PASSWORD },
+  else {
+    runOrFail(exe('pg_ctl'), ['start', '-D', PGDATA, '-o', `-p ${dbPort}`, '-l', join(DATA, 'postgres.log'), '-w', '-t', '120'], `데이터베이스를 띄우지 못했다 — ${join(DATA, 'postgres.log')}를 본다`, {
+      hint: PATH_HINT,
     });
   }
+  try {
+    await ensureDatabase(settings);
+  } catch (e) {
+    fail(`데이터베이스(workfluence)를 만들지 못했다 — ${e instanceof Error ? e.message : String(e)}`);
+  }
   runOrFail(process.execPath, [join(API, 'dist', 'db', 'migrate.js')], '표를 만들지 못했다', { cwd: API, env });
-  if (fresh) runOrFail(process.execPath, [join(API, 'dist', 'db', 'seed.js')], '첫 관리자를 만들지 못했다', { cwd: API, env });
+  const seeding = !existsSync(SEEDED);
+  if (seeding) {
+    runOrFail(process.execPath, [join(API, 'dist', 'db', 'seed.js')], '첫 관리자를 만들지 못했다', { cwd: API, env });
+    writeFileSync(SEEDED, new Date().toISOString());
+  }
 
   writeFileSync(PIDFILE, String(process.pid));
   const app = spawn(process.execPath, ['--enable-source-maps', join(API, 'dist', 'main.js')], { cwd: API, env, stdio: 'inherit' });
@@ -178,7 +212,7 @@ async function start(openBrowser) {
     try {
       if ((await fetch(`${url}/api/health`)).ok) {
         say(`위키가 떴다 — 브라우저에서 ${url}`);
-        if (fresh) say(`처음 로그인: 아이디 ${settings.WF_ROOT_USERNAME} / 비밀번호 ${settings.WF_ROOT_PASSWORD}  (첫 로그인에서 바꾸게 된다)`);
+        if (seeding) say(`처음 로그인: 아이디 ${settings.WF_ROOT_USERNAME} / 비밀번호 ${settings.WF_ROOT_PASSWORD}  (첫 로그인에서 바꾸게 된다)`);
         say('멈추려면 이 창에서 Ctrl+C (창을 그냥 닫았으면 멈추기.cmd)');
         if (openBrowser) spawn('explorer.exe', [url], { detached: true, stdio: 'ignore' }).unref();
         return;
