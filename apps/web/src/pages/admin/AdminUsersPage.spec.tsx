@@ -199,11 +199,12 @@ describe('AdminUsersPage — 위임', () => {
   });
 });
 
-describe('AdminUsersPage — 찾기·거르기·더 보기 (P13 C.6, FR-1450~1452)', () => {
+// 수백 줄을 그린다 — member 줄마다 위임 칸이 셋이 되어(P15) 커버리지 계측과 함께 돌면 5초를 넘었다. 처음에는 한 시험에만 20초를 줬는데 같은 모양의 형제
+// 둘이 api 통합 시험과 함께 돈 날 넘었다(T-074) — 이 묶음 전체에 준다. 뜻은 그대로다
+describe('AdminUsersPage — 찾기·거르기·더 보기 (P13 C.6, FR-1450~1452)', { timeout: 20_000 }, () => {
   const many = (n: number) => Array.from({ length: n }, (_, i) => user({ id: `u${i}`, username: `user${String(i).padStart(3, '0')}` }));
 
-  // 수백 줄을 그린다 — member 줄마다 위임 칸이 셋이 되어(P15) 커버리지 계측과 함께 돌면 5초를 넘었다. 뜻은 그대로다
-  it('**처음 100명과 전체 수를 보이고, 더 보기로 끝까지 닿는다** — 예전에는 100명에서 조용히 끊겼다', { timeout: 20_000 }, async () => {
+  it('**처음 100명과 전체 수를 보이고, 더 보기로 끝까지 닿는다** — 예전에는 100명에서 조용히 끊겼다', async () => {
     rows = many(250);
     renderPage();
     await screen.findByText('user000');
