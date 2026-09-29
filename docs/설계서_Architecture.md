@@ -86,7 +86,7 @@ workfluence/
 │   │   │                         LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
-│       └── src/{components,pages,api.ts,auth.tsx}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기) ·
+│       └── src/{components,layout,pages,api.ts,auth.tsx,styles.css}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기) ·
 │                                 [P10] components/RequireUuidParam.tsx (주소의 id가 식별자 모양일 때만 화면을 그린다)
 │                                 [P14] components/pageTree.ts (트리 펼치기 하나 — 트리·위치 고르기·옮기기) · components/{MovePage,SpaceManage}.tsx ·
 │                                 pages/admin/AdminSpacesPage.tsx (모든 스페이스 + 분류)
