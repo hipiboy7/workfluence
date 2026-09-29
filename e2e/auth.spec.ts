@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
+import { confirmInDialog, cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
 const ADMIN = newAdmin('auth');
 
@@ -46,8 +46,7 @@ test('가입 요청 → 승인 → 로그인 → 비밀번호 변경', async ({ 
   await row.getByRole('button', { name: '승인' }).click();
   await expect(row.getByText('활성')).toBeVisible();
 
-  // 관리 화면에는 로그아웃 버튼이 없다. 홈으로 돌아가서 누른다
-  await page.goto('/');
+  // 로그아웃은 모든 화면의 위 막대에 있다 (P17 J.3.2)
   await page.getByRole('button', { name: '로그아웃' }).click();
 
   // 4) 승인 후 로그인된다
@@ -94,7 +93,8 @@ test('사내 계정(모의 OIDC)으로 로그인한다', async ({ page }) => {
   await button.click();
   // start → callback → / 까지 서버 리다이렉트를 따라간다
   await expect(page.getByText('idp.dev님')).toBeVisible();
-  await expect(page.getByText('member')).toBeVisible();
+  // 위 막대의 역할은 한글이다 (P17 J.9-9)
+  await expect(page.getByText('일반 사용자')).toBeVisible();
 });
 
 test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한다', async ({ page }) => {
@@ -199,8 +199,8 @@ test('관리자가 찾아서 정지하면 로그인되지 않고, 정지를 풀�
   const row = page.getByRole('row').filter({ hasText: leaver.username });
   await expect(row).toHaveCount(1);
   await expect(page.getByText(/전체 1명/)).toBeVisible();
-  page.once('dialog', (d) => void d.accept());
   await row.getByRole('button', { name: '정지', exact: true }).click();
+  await confirmInDialog(page, '멈춘다');
   // **상태 칸의 뱃지를 본다** — 글자 '정지'는 누르기 전부터 있는 정지 단추에도 걸려 늘 참이었다 (병합 전 자체 점검 10)
   await expect(row.locator('td .badge').filter({ hasText: /^정지$/ })).toBeVisible();
   await expect(row.getByRole('button', { name: '정지 해제' })).toBeVisible();

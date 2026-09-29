@@ -150,8 +150,8 @@ button.subtle:disabled { background: transparent; border-color: transparent; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
 
 /* ---------- 4. 뼈대 — 한 틀·카드 틀 (J.3) ---------- */
-.skip-link { position: absolute; left: 8px; top: -48px; z-index: 50; background: var(--surface); padding: 8px 12px; border-radius: 4px; box-shadow: var(--shadow-float); }
-.skip-link:focus { top: 8px; }
+.skip-link { position: absolute; left: 8px; top: -100px; z-index: 50; background: var(--surface); padding: 8px 12px; border-radius: 4px; }
+.skip-link:focus { top: 8px; box-shadow: var(--shadow-float); }
 
 .topbar {
   position: sticky; top: 0; z-index: 30;
@@ -220,8 +220,8 @@ button.subtle:disabled { background: transparent; border-color: transparent; }
 .auth-card a.btn { width: 100%; }
 
 /* ---------- 5. 머리·빵부스러기 (J.3.5) ---------- */
-.page > h2, .page > section > h2:first-child { margin-top: 24px; }
-.page > .page-header + h2, .page > .page-header + section > h2:first-child { margin-top: 0; }
+.page > h2, .page > section:not(.card):not(.form-section) > h2:first-child { margin-top: 24px; }
+.page > .page-header + h2, .page > .page-header + section:not(.card):not(.form-section) > h2:first-child { margin-top: 0; }
 /* 붙어 있는 위 막대가 닻으로 옮긴 자리를 가리지 않게 (#new-page 등) */
 [id] { scroll-margin-top: calc(var(--topbar-h) + 16px); }
 .page-header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; margin: 0 0 16px; }

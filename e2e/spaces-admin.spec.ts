@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
+import { confirmInDialog, cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
 const ADMIN = newAdmin('spaces');
 const MATE = { username: `e2e-sp-mate-${Date.now()}`, displayName: 'E2E 스페이스 동료', password: 'E2e-Mate-2026!' };
@@ -56,7 +56,8 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
   await manage.getByLabel('설명').fill('관리 화면에서 적은 설명');
   await manage.getByRole('button', { name: '저장' }).click();
   await expect(manage.getByRole('status')).toHaveText('저장했다.');
-  await expect(page.getByText(`팀 · `).first()).toContainText(category);
+  // 왼쪽 칸에도 "팀 · 키"가 있다 — 본문의 메타만 본다 (P17 J.3.3)
+  await expect(page.getByRole('main').getByText(`팀 · `).first()).toContainText(category);
 
   // 4) 모든 스페이스에서 찾아 중지한다 — 한 번 더 묻는다. **찾기가 줄을 좁힌다** — 찾기 전에는 여럿(관리자의 개인 스페이스만 해도 하나 더), 찾은 뒤에는 하나
   await page.goto('/admin/spaces');
@@ -67,8 +68,8 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
   await expect(bodyRows).toHaveCount(1);
   const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: spaceName }) });
   await expect(row).toHaveCount(1);
-  page.once('dialog', (d) => void d.accept());
   await row.getByRole('button', { name: '중지' }).click();
+  await confirmInDialog(page, '멈춘다');
   // 상태 칸이 중지로 바뀌고 조치가 다시 쓰기가 된다 — "중지" 글자만 보면 누르기 전의 단추도 맞는다
   await expect(row.getByRole('button', { name: '다시 쓰기' })).toBeVisible();
   await expect(row.getByRole('button', { name: '중지' })).toHaveCount(0);
@@ -84,9 +85,8 @@ test('관리자가 스페이스를 찾아 중지하고 다시 쓰게 하며, 분
   await page.goto('/admin/spaces');
   const catItem = page.getByRole('region', { name: '분류' }).getByRole('listitem').filter({ has: page.getByLabel(`분류 ${category} 이름`) });
   await expect(catItem).toContainText('공간 1개');
-  const asked = new Promise<string>((ok) => page.once('dialog', (d) => { ok(d.message()); void d.accept(); }));
   await catItem.getByRole('button', { name: '지우기' }).click();
-  expect(await asked).toContain('이 분류를 쓰는 공간 1개(휴지통 포함)가 "분류 없음"이 된다');
+  expect(await confirmInDialog(page, '지운다')).toContain('이 분류를 쓰는 공간 1개(휴지통 포함)가 "분류 없음"이 된다');
   await expect(page.getByRole('status')).toHaveText(`분류 "${category}"을(를) 지웠다 — 쓰던 공간 1개는 분류 없음이 됐다.`);
   await page.getByRole('searchbox').fill(spaceName);
   await expect(row.locator('td').nth(4)).toHaveText('—');

@@ -85,8 +85,10 @@ test('스페이스 → Crew → 페이지 작성·편집 → 충돌 → 복원',
 
   // 6) 이력에서 v1으로 복원 → 새 버전이 생긴다
   await page.goto(`${pageUrl}/history`);
-  await expect(page.getByText('v3')).toBeVisible();
-  await page
+  // 왼쪽 칸의 트리에도 "v3"가 있다 — 버전 목록 안에서만 본다 (P17 J.5.11)
+  const versions = page.getByRole('list', { name: '버전 목록' });
+  await expect(versions.getByText('v3')).toBeVisible();
+  await versions
     .getByRole('listitem')
     .filter({ hasText: /^v1/ })
     .getByRole('button', { name: '이 버전으로 복원' })

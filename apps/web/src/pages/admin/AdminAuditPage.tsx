@@ -172,7 +172,7 @@ export function AdminAuditPage() {
                   const name = auditActionName(e.action);
                   return (
                     <tr key={e.id}>
-                      <td className="num">{new Date(e.createdAt).toLocaleString('ko-KR')}</td>
+                      <td className="num nowrap">{new Date(e.createdAt).toLocaleString('ko-KR')}</td>
                       <td>
                         {name && <>{name} </>}
                         <code>{e.action}</code>

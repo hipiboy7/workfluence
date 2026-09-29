@@ -147,7 +147,8 @@ test('관리자가 감사로그를 거르고 세션을 끊는다', async ({ page
   // 거른 뒤에는 그 행위만 남는다. **거른 응답이 올 때까지 다시 본다** — 누르자마자 읽으면 처음 목록(거르기 전)을 읽을 수 있다
   // (P11 종료 전 E2E에서 한 번 그렇게 실패했다 — 감사 행이 쌓여 목록 응답이 느려지면 드러난다)
   await expect(async () => {
-    const actions = await page.locator('tbody tr td:nth-child(2)').allInnerTexts();
+    // 행위 칸은 "한글 이름 + 코드"다 (P17 J.9-9) — 코드만 읽는다
+    const actions = await page.locator('tbody tr td:nth-child(2) code').allInnerTexts();
     expect(actions.length).toBeGreaterThan(0);
     expect(new Set(actions)).toEqual(new Set(['auth.login.success']));
   }).toPass();

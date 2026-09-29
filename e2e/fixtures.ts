@@ -1,5 +1,19 @@
+import { expect, type Page } from '@playwright/test';
 import * as argon2 from 'argon2';
 import { Client } from 'pg';
+
+/**
+ * 화면 안의 확인 대화(P17 설계서 J.5.10)에서 확정 단추를 누르고 대화의 글을 돌려준다. 예전의 브라우저 확인 창(`page.once('dialog')`)을 대신한다 —
+ * 확정 단추의 이름은 부른 단추의 이름을 품지 않게 지었다(대화 **안에서만** 찾는다)
+ */
+export async function confirmInDialog(page: Page, confirmLabel: string): Promise<string> {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  const text = await dialog.innerText();
+  await dialog.getByRole('button', { name: confirmLabel, exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  return text;
+}
 
 /**
  * E2E는 **자기가 필요한 상태를 직접 만든다** (P0_설계서 13절 인계, CLAUDE.md 3절).
