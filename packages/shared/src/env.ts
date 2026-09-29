@@ -150,7 +150,7 @@ export const envSchema = z
       .string()
       .max(MAIL_LIMITS.senderNameMaxChars, `${MAIL_LIMITS.senderNameMaxChars}자까지`)
       // eslint-disable-next-line no-control-regex -- 제어 글자를 막는 것이 이 판정이다
-      .regex(/^[^\u0000-\u001F\u007F]+$/, '줄바꿈·제어 글자를 넣지 않는다')
+      .regex(/^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$/, '줄바꿈·제어 글자를 넣지 않는다')
       .refine((v) => v.trim().length > 0, '빈칸만 적지 않는다 — 비우면 "위키"다')
       .default('위키'),
     /** 인증 헤더 이름 — 예 `Authorization`, `X-API-Key`. 비면 인증 없음. 값(`WF_MAIL_AUTH_VALUE`)과 함께 있어야 한다 (FR-1902) */

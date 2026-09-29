@@ -1,6 +1,6 @@
 import { BadGatewayException, BadRequestException, HttpException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import {
-  emailSchema,
+  isSingleMailAddress,
   maskEmail,
   maskUsername,
   grantsForRole,
@@ -334,13 +334,18 @@ export class AuthService {
    * 보고 정리하도록 남긴다.
    */
   private async freeEmail(raw: string | undefined, selfId: string | undefined, tx: Db): Promise<string | null> {
-    // **email의 모양을 본다** — 로컬 가입과 같은 판정(`emailSchema`). 사내 IdP가 준 값이 쉼표 목록이면 멘션 메일이 여럿에게 갔다(P18 병합 전 보안 검토 2 —
-    // 사내 메일 API는 받는 사람 칸의 쉼표를 목록으로 읽는다). 모양이 아니면 email 없이 들인다(로그인은 막지 않는다)
-    const parsed = emailSchema.safeParse(raw ?? '');
-    const email = parsed.success ? parsed.data : null;
-    if (!email) return null;
-    const owner = await this.users.findByEmail(email, tx);
-    if (!owner || owner.id === selfId) return email;
+    // **주소 하나인지 본다**(`isSingleMailAddress`) — 사내 IdP가 준 값이 쉼표 목록이면 멘션 메일이 여럿에게 갔다(P18 병합 전 보안 검토 2 — 사내 메일
+    // API는 받는 사람 칸의 쉼표를 목록으로 읽는다). **모양은 까다롭게 보지 않는다** — 가입 검사(`emailSchema`)는 `user@corp` 같은 한 단어 도메인을 거절해,
+    // 그것으로 보면 그 조직의 부르기 메일이 신호 없이 멈춘다(좁은 재점검 보통 1). 버리면 **경고 한 줄**을 남긴다(바깥 입력의 실패 — 7절). 로그인은 막지 않는다
+    const trimmed = raw?.trim().toLowerCase() ?? '';
+    if (!trimmed) return null;
+    if (!isSingleMailAddress(trimmed)) {
+      this.log.warn(logLine('auth.oidc_email_dropped', '사내 계정의 email이 주소 하나가 아니라 email 없이 들였다', { reason: 'invalid', ...(selfId ? { userId: selfId } : {}) }));
+      return null;
+    }
+    const owner = await this.users.findByEmail(trimmed, tx);
+    if (!owner || owner.id === selfId) return trimmed;
+    this.log.warn(logLine('auth.oidc_email_dropped', '사내 계정의 email을 로컬 계정이 쓰고 있어 email 없이 들였다', { reason: 'taken', ...(selfId ? { userId: selfId } : {}) }));
     return null;
   }
 

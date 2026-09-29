@@ -152,6 +152,7 @@ export const LOG_EVENTS = [
   'health.db_failed',
   // 사내 인증(OIDC) — 사내 IdP와의 처리가 실패했다(닿지 않음·거절·검증 실패). 바깥 탓이라 warn (FR-1215)
   'auth.oidc_failed',
+  'auth.oidc_email_dropped',
   // 비밀번호 찾기 — 초기화 요청을 관리자의 알림으로 만들지 못했다. 우리 쪽 결함이라 error — 요청은 감사 기록에 남았다 (P17 NFR-170)
   'auth.recover_notify_failed',
   // 세션 파기 버스

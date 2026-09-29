@@ -1,4 +1,4 @@
-import { emailSchema, type AppEnv, type MailFormat } from '@workfluence/shared';
+import { isSingleMailAddress, type AppEnv, type MailFormat } from '@workfluence/shared';
 
 /**
  * 사내 메일 API에 보내는 요청 (A등급, P18_설계서_Mail C절·FR-1900·1902). 모양은 **사용자가 준 설명 그대로**다(`docs/prompts/phase17/scope.md`):
@@ -41,11 +41,11 @@ export function oneLine(s: string): string {
 
 /**
  * 받는 사람이 **주소 하나**인가 (A.1-3) — 사내 API의 `receivers`는 쉼표로 이은 여럿을 받는다. 사내 계정의 email은 로그인 때 받아 적는데, 그 값이
- * 쉼표 목록이면 한 사람에게 가야 할 멘션 메일이 여럿에게 간다(P18 병합 전 보안 검토 2). 앞뒤 빈칸도 받지 않는다 — 고쳐 보내지 않고 그 한 통을 실패로 친다
+ * 쉼표 목록이면 한 사람에게 가야 할 멘션 메일이 여럿에게 간다(P18 병합 전 보안 검토 2). 판정은 공유 `isSingleMailAddress` — 모양은 까다롭게 보지 않는다.
+ * 고쳐 보내지 않고 그 한 통을 실패로 친다
  */
 export function isSingleRecipient(to: string): boolean {
-  const parsed = emailSchema.safeParse(to);
-  return parsed.success && parsed.data === to.toLowerCase() && to === to.trim();
+  return isSingleMailAddress(to);
 }
 
 export function mailRequest(cfg: MailConfig, mail: OutgoingMail): { url: string; headers: Record<string, string>; body: string } {
@@ -73,7 +73,9 @@ export function hideSecret(text: string, raw: string): string {
   const bare = [secret, secret.replace(/^\S+\s+/, '')];
   const json = bare.flatMap((p) => {
     const escaped = JSON.stringify(p).slice(1, -1);
-    return [escaped, escaped.replace(/\//g, '\\/')];
+    // `/`를 `\/`로, `<`·`>`·`&`를 `\u003c`처럼 적는 서버도 있다(좁은 재점검 6)
+    const html = escaped.replace(/[<>&]/g, (c) => `\\u00${c.charCodeAt(0).toString(16)}`);
+    return [escaped, escaped.replace(/\//g, '\\/'), html, html.replace(/\//g, '\\/')];
   });
   const parts = [...bare, ...json].filter((p, i, all) => p.length > 0 && all.indexOf(p) === i).sort((a, b) => b.length - a.length);
   return parts.reduce((out, p) => out.split(p).join('***'), text);
@@ -93,7 +95,7 @@ export function failureHint(e: unknown): string {
   if (e instanceof DOMException && e.name === 'TimeoutError') return `${MAIL_TIMEOUT_MS / 1000}초 안에 답이 없다 — 주소·포트가 맞는지, 방화벽이 막는지 본다`;
   const cause = e instanceof Error ? (e.cause as { code?: unknown; message?: unknown } | undefined) : undefined;
   // 원인이 없는 TypeError는 요청을 만들지 못한 것이다(헤더 값에 보낼 수 없는 글자 등) — **문장을 싣지 않는다**: 비밀 값의 몇째 글자가 무엇인지가 들어 있다(코드 리뷰 2)
-  if (e instanceof TypeError && cause === undefined) return '요청을 만들지 못했다 — WF_MAIL_AUTH_VALUE·WF_MAIL_SENDER_NAME에 보낼 수 없는 글자가 없는지 본다';
+  if (e instanceof TypeError && cause === undefined) return '요청을 만들지 못했다 — WF_MAIL_AUTH_VALUE(인증 헤더 값)에 보낼 수 없는 글자가 없는지 본다';
   const code = typeof cause?.code === 'string' ? cause.code : '';
   const message = typeof cause?.message === 'string' ? cause.message : '';
   // 코드가 있으면 코드로 먼저 가린다 — 문장에는 호스트 이름이 들어 있어 문장만 보면 오진한다(호스트 이름에 "redirect"가 든 경우 — 자체 점검 5)

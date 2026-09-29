@@ -20,8 +20,9 @@ const mdText = (s: string): string => markdownText(s.replace(/&/g, '&amp;').repl
 export function mentionMail(input: { callerName: string | null; where: '댓글' | '문서'; pageTitle: string; pageUrl: string | null }): MailContent {
   // **이름·제목은 한 줄이다** — 줄바꿈(CR 하나·유니코드 줄 구분자)이 새 줄을 만들면 마크다운에서 줄 머리 표기가 되고, 제목은 메일 머리말로 간다
   // (P18 병합 전 보안 검토 3, P7 C.4.1)
-  const name = input.callerName === null ? null : oneLine(input.callerName);
-  const pageTitle = oneLine(input.pageTitle);
+  // 한 줄로 만든 뒤 앞뒤 빈칸을 뗀다 — `**x **`는 굵게가 풀린다. 남는 것이 없으면 이름을 모르는 것이다(좁은 재점검 4)
+  const name = input.callerName === null ? null : oneLine(input.callerName).trim() || null;
+  const pageTitle = oneLine(input.pageTitle).trim();
   const { where, pageUrl } = input;
   const closing = '내용은 위키에서 확인해 주세요.';
   const text = [

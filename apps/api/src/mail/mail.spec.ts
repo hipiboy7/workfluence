@@ -31,6 +31,12 @@ beforeAll(async () => {
       got.push({ method: req.method, url: req.url, headers: req.headers, body });
       if (req.url === '/reset') return req.socket.destroy();
       if (req.url === '/hang') return; // 답하지 않는다 — 시간 제한을 본다
+      if (req.url === '/ok-endless') {
+        // 200을 주고 본문을 끝내지 않는다 — 성공이면 본문을 읽지 않아야 한다
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.write('{"message":');
+        return;
+      }
       if (req.url === '/endless') {
         // 끝나지 않는 본문 — 읽는 쪽이 앞부분에서 멈춰야 한다
         res.writeHead(500, { 'content-type': 'text/plain' });
@@ -156,6 +162,11 @@ describe('postMail — 앱과 시험 명령이 함께 쓰는 보내는 길 (FR-1
     expect([r.ok, r.status]).toEqual([false, 400]);
     expect(r.body.length).toBe(MAIL_BODY_READ_MAX);
     expect((await postMail({ url: `${base}/big`, headers: {}, body: '{}' })).body).toBe('');
+  });
+
+  it('**받았으면(2xx) 본문을 읽지 않는다** — 200을 주고 본문을 끝내지 않아도 성공이다(좁은 재점검 2 — 시험 명령만 "보내지 못했다"로 오진했다)', async () => {
+    const r = await postMail({ url: `${base}/ok-endless`, headers: {}, body: '{}' }, { readBody: true, timeoutMs: 1000 });
+    expect(r).toEqual({ ok: true, status: 200, body: '' });
   });
 
   it('**끝나지 않는 본문도 앞부분에서 멈춘다** — 끝까지 읽으려 하면 시간 제한까지 매달린다', async () => {

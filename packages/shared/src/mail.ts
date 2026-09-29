@@ -62,3 +62,18 @@ export function mailHeaderValueProblem(value: string): string | null {
   if (!value.trim()) return '헤더 값이 비었다';
   return null;
 }
+
+/** 받는 주소의 길이 상한 — SMTP의 주소 상한(RFC 5321) */
+const MAIL_ADDRESS_MAX = 254;
+
+/**
+ * 받는 사람이 **주소 하나**인가 (P18 A.1-11) — 사내 메일 API의 `receivers`는 쉼표로 이은 여럿을 받는다. 여기서는 **여럿이 되거나 머리말을 만드는 글자**만
+ * 막는다: 쉼표·세미콜론·빈칸·꺾쇠·따옴표·괄호·제어 글자, `@`가 하나가 아닌 것. **모양은 까다롭게 보지 않는다** — 사내 IdP가 주는 주소(한 단어 도메인
+ * `user@corp` 등)는 가입 검사(`emailSchema`)보다 느슨할 수 있고, 막으면 그 조직의 부르기 메일이 신호 없이 멈춘다(좁은 재점검 보통 1)
+ */
+export function isSingleMailAddress(value: string): boolean {
+  if (value.length === 0 || value.length > MAIL_ADDRESS_MAX) return false;
+  // eslint-disable-next-line no-control-regex -- 제어 글자를 막는 것이 이 판정이다
+  return /^[^\s,;<>"()\\@\u0000-\u001F\u007F-\u009F]+@[^\s,;<>"()\\@\u0000-\u001F\u007F-\u009F]+$/.test(value);
+}
+

@@ -29,7 +29,8 @@ export class HttpMailSender implements MailSender {
       return false;
     }
     if (!isSingleRecipient(message.to)) {
-      // 주소는 싣지 않는다(개인정보, 7절) — 누구의 것인지는 감사의 멘션 기록으로 찾는다
+      // 주소는 싣지 않는다(개인정보, 7절) — 사용자 관리에서 email에 쉼표·빈칸이 든 계정을 찾는다. 새 사내 계정은 로그인 때 걸러지므로(`freeEmail`)
+      // 이것은 그 전에 들어온 값이다
       this.log.warn(logLine('mail.bad_recipient', '받는 사람이 주소 하나가 아니라 보내지 않았다'));
       return false;
     }

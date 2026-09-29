@@ -223,13 +223,25 @@ describe('OIDC (인수 기준 2)', () => {
     expect((await usersSvc.findByUsername('alice'))?.email).toBe('shared@example.internal');
   });
 
-  it('**email 클레임이 email 모양이 아니면(쉼표 목록 등) email 없이 들인다** — 로그인은 막지 않는다. 사내 메일 API는 받는 사람의 쉼표를 목록으로 읽는다(P18 병합 전 보안 검토 2)', async () => {
+  it('**email 클레임이 주소 하나가 아니면(쉼표 목록 등) email 없이 들이고 경고를 남긴다** — 로그인은 막지 않는다. 사내 메일 API는 받는 사람의 쉼표를 목록으로 읽는다(P18 병합 전 보안 검토 2)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
     for (const bad of ['me@example.internal, other@example.internal', 'not-an-address']) {
       const s = await start();
       const user = await auth.oidcCallback({ code: encodeMockCode({ ...DEV_IDENTITY, email: bad }), state: s.state }, { state: s.state, nonce: s.nonce });
       expect(user.oidcSub, bad).toBe(DEV_IDENTITY.sub);
       expect(user.email, bad).toBeNull();
     }
+    const said = JSON.stringify(warn.mock.calls);
+    expect(said).toContain('auth.oidc_email_dropped');
+    // 값은 싣지 않는다(개인정보, 7절)
+    expect(said).not.toContain('other@example.internal');
+    warn.mockRestore();
+  });
+
+  it('**한 단어 도메인(`user@corp`)·대문자 주소는 그대로 들인다**(소문자로) — 가입 검사보다 느슨한 사내 주소를 막으면 부르기 메일이 신호 없이 멈춘다(좁은 재점검 보통 1)', async () => {
+    const s = await start();
+    const user = await auth.oidcCallback({ code: encodeMockCode({ ...DEV_IDENTITY, email: 'Hong.GilDong@Corp' }), state: s.state }, { state: s.state, nonce: s.nonce });
+    expect(user.email).toBe('hong.gildong@corp');
   });
 
   it('자기 email은 그대로 유지한다 (재로그인이 자기 자신과 충돌하지 않는다)', async () => {
