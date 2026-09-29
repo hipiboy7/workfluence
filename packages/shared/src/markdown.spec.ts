@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DocMark, DocNode } from './document';
-import { markdownText, pageMarkdown, pageText, renderDocMarkdown } from './markdown';
+import { markdownLinkTarget, markdownText, pageMarkdown, pageText, renderDocMarkdown } from './markdown';
 
 /**
  * A등급 — **테스트 먼저** (3절, P10_설계서_Llm D.7·FR-1140~1142).
@@ -381,3 +381,9 @@ describe('markdownText — 마크다운 안에 넣을 글자 (P18_설계서_Mail
   });
 });
 
+describe('markdownLinkTarget — 마크다운 링크의 주소 (P18 코드 리뷰 7)', () => {
+  it('괄호·빈칸은 퍼센트로 — 링크가 중간에서 끊기지 않게. 문서 복사의 링크와 메일의 링크가 같은 규칙이다', () => {
+    expect(markdownLinkTarget('https://wiki.example.internal/a (b)/p')).toBe('https://wiki.example.internal/a%20%28b%29/p');
+    expect(markdownLinkTarget('https://wiki.example.internal/pages/x')).toBe('https://wiki.example.internal/pages/x');
+  });
+});

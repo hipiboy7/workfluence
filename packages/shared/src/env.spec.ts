@@ -260,6 +260,7 @@ describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
     expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X API Key', WF_MAIL_AUTH_VALUE: 'k-1' })).toThrow(/WF_MAIL_AUTH_HEADER/);
     expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: 'k\r\nX-Evil: 1' })).toThrow(/WF_MAIL_AUTH_VALUE/);
     expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: '토큰' })).toThrow(/WF_MAIL_AUTH_VALUE/);
+    expect(() => mail({ WF_MAIL_AUTH_HEADER: 'Content-Type', WF_MAIL_AUTH_VALUE: 'text/plain' })).toThrow(/WF_MAIL_AUTH_HEADER/);
   });
 
   it('보내는 이름은 100자까지, 줄바꿈 없이', () => {

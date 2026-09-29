@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAIL_FORMATS, isHttpHeaderName, mailApiUrlProblem, mailHeaderValueProblem } from './mail';
+import { MAIL_FORMATS, isHttpHeaderName, mailApiUrlProblem, mailAuthHeaderProblem, mailHeaderValueProblem } from './mail';
 
 /**
  * A등급 — **테스트 먼저** (3절, P18_설계서_Mail FR-1904). 사내 메일 API의 설정은 폐쇄망 현장에서 사람이 적는다 — 틀린 값은 기동에서 막는다.
@@ -32,6 +32,13 @@ describe('인증 헤더 (FR-1902)', () => {
   it('헤더 이름은 HTTP 토큰 글자만 — 빈칸·콜론·줄바꿈·한글은 아니다', () => {
     for (const ok of ['Authorization', 'X-API-Key', 'x-api-key', 'X_Token.v2']) expect(isHttpHeaderName(ok), ok).toBe(true);
     for (const bad of ['', 'X API Key', 'X-Key:', 'X-Key\r\nX-Evil', '인증', 'X-Key\t']) expect(isHttpHeaderName(bad), JSON.stringify(bad)).toBe(false);
+  });
+
+  it('**인증 헤더로 쓸 수 없는 이름은 받지 않는다** — 요청의 모양을 바꾸는 머리말(Host·Content-Type·Content-Length·Transfer-Encoding 등)을 덮어쓰지 못하게(P18 코드 리뷰 12). 대소문자 무관', () => {
+    for (const ok of ['Authorization', 'X-API-Key', 'X-Auth-Token']) expect(mailAuthHeaderProblem(ok), ok).toBeNull();
+    for (const bad of ['Host', 'content-type', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Expect', 'Upgrade', 'TE', 'Trailer', 'Keep-Alive', 'Proxy-Authorization'])
+      expect(mailAuthHeaderProblem(bad), bad).toMatch(/쓸 수 없/);
+    expect(mailAuthHeaderProblem('X API Key')).toMatch(/헤더 이름/);
   });
 
   it('**헤더 값에 줄바꿈을 받지 않는다** — 다른 헤더를 끼워 넣는 길이다. 빈 값도 아니다', () => {

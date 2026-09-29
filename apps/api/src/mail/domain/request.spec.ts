@@ -33,6 +33,8 @@ describe('mailRequest', () => {
     expect(JSON.parse(r.body).subject).toBe('[위키] 홍길동 Bcc: x@example.internal 님이 회원님을 불렀습니다');
     // 유니코드 줄 구분자도 줄바꿈이다(병합 전 보안 검토 6)
     expect(JSON.parse(mailRequest(cfg, { ...msg, subject: 'a\u0085b\u2028c\u2029d' }).body).subject).toBe('a b c d');
+    // C1 제어 글자(터미널이 명령으로 읽는 CSI 등)도 — 시험 명령이 창에 찍는 남의 글도 이것을 지난다(코드 리뷰 10)
+    expect(JSON.parse(mailRequest(cfg, { ...msg, subject: 'a\u009b31mb' }).body).subject).toBe('a 31mb');
     // 본문의 줄바꿈은 그대로다 — 본문은 여러 줄이다
     expect(JSON.parse(mailRequest(cfg, { ...msg, text: '한 줄\n두 줄' }).body).content).toBe('한 줄\n두 줄');
   });
@@ -89,5 +91,15 @@ describe('시험 명령의 까닭 (FR-1905)', () => {
     expect(failureHint(Object.assign(new TypeError('fetch failed'), { cause: new Error('unexpected redirect') }))).toMatch(/넘겨주기/);
     expect(failureHint(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))).toMatch(/10초/);
     expect(failureHint(new Error('무언가'))).toMatch(/닿지 않/);
+  });
+
+  it('**원인을 가려 말한다** — 요청을 만들지 못함(헤더 값의 글자), fetch가 막는 포트, 인증서 만료·호스트 이름 불일치는 "ca.pem"이 아니다(코드 리뷰 2·5·6)', () => {
+    const err = (code: string | undefined, message: string) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), code ? { code } : {}) });
+    expect(failureHint(new TypeError('Cannot convert argument to a ByteString because the character at index 13 has a value of 54620'))).toMatch(/요청을 만들지 못했다/);
+    expect(failureHint(new TypeError('Cannot convert argument to a ByteString because the character at index 13 has a value of 54620'))).not.toMatch(/54620|13/);
+    expect(failureHint(err(undefined, 'bad port'))).toMatch(/포트/);
+    expect(failureHint(err('CERT_HAS_EXPIRED', 'certificate has expired'))).toMatch(/만료/);
+    expect(failureHint(err('CERT_HAS_EXPIRED', 'certificate has expired'))).not.toMatch(/ca\.pem/);
+    expect(failureHint(err('ERR_TLS_CERT_ALTNAME_INVALID', "Hostname/IP does not match certificate's altnames"))).toMatch(/호스트 이름/);
   });
 });
