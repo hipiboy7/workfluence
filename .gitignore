@@ -18,3 +18,6 @@ npm-debug.log*
 deploy/certs/
 # 사내 CA 인증서는 현장의 것이다 (P11 D.7) — 자리 안내(README.md)만 넣는다
 deploy/ca/*.pem
+
+# Claude Code 워크플로가 만드는 임시 작업 트리 (저장소 밖의 일)
+.claude/worktrees/

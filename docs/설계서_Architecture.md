@@ -91,6 +91,9 @@ workfluence/
 │                                 [P14] components/pageTree.ts (트리 펼치기 하나 — 트리·위치 고르기·옮기기) · components/{MovePage,SpaceManage}.tsx ·
 │                                 pages/admin/AdminSpacesPage.tsx (모든 스페이스 + 분류)
 │                                 [P15] components/CategoryList.tsx (분류의 이름 바꾸기·지우기 — 관리 칸과 관리 콘솔이 같이 쓴다)
+│                                 [P17] styles.css (토큰·요소 기본값·부품 — 화면별 CSS 없음) · layout/{AppLayout,AuthLayout,SpaceSideNav}.tsx
+│                                 (한 틀 = 위 막대·왼쪽 칸(SideSlot)·본문, 카드 틀, 스페이스 문맥의 왼쪽 칸과 페이지 트리) ·
+│                                 components/{ui,ConfirmDialog,icons,labels,LlmSideNav,NotificationBell,auditNames,policyNames}.ts(x)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown}.ts
 ├── e2e/                          Playwright
@@ -300,6 +303,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 14 | 페이지 트리와 스페이스를 화면에서(F-007·F-008) — 옮기기의 자리를 형제 가운데 몇 번째로 굳히고 서버가 새 자리 값을 정한다(`placeAt` — 자리에 틈 `PAGE_POSITION_GAP`을 두어 보통 한 줄만, 틈이 없을 때만 한 문장으로 다시 매긴다), 트리를 바꾸는 네 길(옮기기·만들기·지우기·휴지통 되살리기)이 스페이스마다 잠금(`page-tree:<스페이스>`, 대기 2초 뒤 409 — `tree-lock.ts`)을 쓰고 잠근 뒤 대상을 다시 읽는다, 식별자는 경계에서 소문자로(`idSchema`·`parseId`), 모든 스페이스 목록을 DB가 찾고 거른다(`q`·`status`, `SPACE_LIST_MAX`, 보기는 질의 넷), 화면 넷(트리 펼치기 · 옮기기 칸 · 관리 칸 · 관리 콘솔의 스페이스). 마이그레이션 없음 |
 | 15 | 맡기는 권한(보류 32·33) — 위임 규칙표(`DELEGATION`: LLM 연결 관리는 root가 관리자에게, 분류 관리·관리자가 건 중지 풀기·스페이스 관리 전체는 관리자·root가 member에게)와 `canGrant`, 받는 역할의 CHECK와 `spaces.suspended_by_owner`(`0012_grants`), `spaceAccess`의 `canEditInfo`·지금 상태에서 바꿀 수 있는가(`canChangeStatus`), 읽지 못해도 중지·지우기(`manageContext`), `categoryAccess`와 분류의 쓰임·지우면 분류 없음, 공용 `CategoryList` |
 | 16 | 관리자가 건 중지 동안 Crew를 얼린다(보류 35) — `spaceAccess.canManageMembers`에 중지를 건 사람을 넣고(주인은 관리자가 건 중지면 거짓) `crewFrozen`(막힌 주인 — 서버의 까닭과 화면의 안내가 이것 하나를 본다)을 더한다. Crew 쓰기는 판정하고 공간 행을 잠그고 다시 판정한다(`FOR NO KEY UPDATE` — 판정한 상태에서만 쓴다, 권한 없는 사람은 줄에 서지 않는다). 데이터·마이그레이션 없음 |
+| 17 | PC 화면과 한 체계의 UI(F-010) — 한 틀(`AppLayout`: 위 막대·왼쪽 칸·본문, 화면이 `SideSlot`으로 왼쪽 칸을 채운다 — 스페이스 안은 페이지 트리, LLM은 대화 목록)과 카드 틀(`AuthLayout`)을 중첩 경로가 씌운다, 토큰·요소 기본값·부품은 `styles.css` 한 파일(화면별 CSS 없음), 공통 부품(`ui.tsx` — 머리·알림띠·Field·구획 폼·거르기 줄·빈 상태·배지)과 확인 대화(`<dialog>`), 역할·운영 설정·감사 행위의 한글 이름. 비밀번호 초기화 요청을 관리자의 알림으로(`password.reset.request` — 받는 사람은 `canManageUser`), 모든 화면의 알림 영역, 감사 기록 단계(운영 설정 `auditLevel`, `AUDIT_MIN_LEVEL` — 필수 기록은 늘). 새 의존성·마이그레이션 없음 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
@@ -311,7 +315,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 ① 계약      packages/shared/src/{constants,schemas,permissions,document}.ts
 ② 데이터     apps/api/src/db/schema.ts + apps/api/drizzle/ 마이그레이션 SQL
 ③ 서버      apps/api/src/<모듈>/ (컨트롤러 → 서비스 → 리포지토리)
-④ 화면      apps/web/src/{pages,components}
+④ 화면      apps/web/src/{pages,components,layout} — 공통 부품(ui.tsx)과 styles.css의 부품 클래스만 쓴다(P17 NFR-171)
 ⑤ 검증      각 층의 *.spec.ts + e2e/
 ⑥ 문서      P{N}_설계서 설정·API 표 → 학습가이드 → 운영가이드
 ```
