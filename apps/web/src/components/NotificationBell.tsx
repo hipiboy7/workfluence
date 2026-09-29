@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { BACKGROUND_HEADER, BACKGROUND_HEADER_VALUE, NOTIFICATION_PANEL_LIMIT, NOTIFICATION_POLL_MS, type NotificationView } from '@workfluence/shared';
+import { BACKGROUND_HEADER, BACKGROUND_HEADER_VALUE, BACKGROUND_POLL_PATH, NOTIFICATION_PANEL_LIMIT, NOTIFICATION_POLL_MS, type NotificationView } from '@workfluence/shared';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { BellIcon } from './icons';
@@ -34,7 +34,7 @@ export function NotificationBell() {
   const box = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(() => {
-    api<{ count: number }>('/api/notifications/unread-count', { headers: { [BACKGROUND_HEADER]: BACKGROUND_HEADER_VALUE } })
+    api<{ count: number }>(BACKGROUND_POLL_PATH, { headers: { [BACKGROUND_HEADER]: BACKGROUND_HEADER_VALUE } })
       .then((r) => setCount(r.count))
       .catch(() => undefined);
   }, []);

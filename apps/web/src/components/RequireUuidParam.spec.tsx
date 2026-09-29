@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RequireUuidParam } from './RequireUuidParam';
 
@@ -29,6 +29,30 @@ describe('RequireUuidParam', () => {
   it('식별자면 그 화면을 그린다', () => {
     renderAt('/pages/3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b');
     expect(screen.getByText('페이지 화면')).toBeTruthy();
+  });
+
+  it('**대문자가 든 식별자는 소문자 주소로 바꿔 연다** — 서버가 돌려주는 id(소문자)와 견주는 화면이 멈추지 않게. 질의·조각은 그대로 (좁은 재점검 N2)', async () => {
+    function Where() {
+      const l = useLocation();
+      return <output>{`${l.pathname}${l.search}${l.hash}`}</output>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/pages/3F2A7B1C-9D4E-4F60-8A1B-2C3D4E5F6A7B/edit?x=1#c']}>
+        <Where />
+        <Routes>
+          <Route
+            path="/pages/:id/edit"
+            element={
+              <RequireUuidParam>
+                <p>편집 화면</p>
+              </RequireUuidParam>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText('편집 화면');
+    expect(screen.getByRole('status').textContent).toBe('/pages/3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b/edit?x=1#c');
   });
 
   it('**`%2F`로 하위 경로를 붙인 id는 그리지 않는다** — 화면이 그 id로 API를 부르지 않는다', () => {

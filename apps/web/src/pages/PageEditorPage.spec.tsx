@@ -237,7 +237,7 @@ describe('PageEditorPage — 편집 화면의 모양 (P17 J.6 · FR-1860)', () =
     expect(screen.queryByText('쓰는 대로 자동으로 저장된다')).toBeNull();
   });
 
-  it('**실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫기 전에 묻는다** — 고치지 않았거나 되돌렸으면 묻지 않는다 (병합 전 검토 18)', async () => {
+  it('**실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫기 전에 묻는다** — 고치지 않았거나 제목을 되돌렸으면 묻지 않는다. 본문은 한 번 고치면 되돌려도 묻는다 (병합 전 검토 18)', async () => {
     collabEnabled = false;
     renderPage();
     const box = await screen.findByRole('textbox', { name: '본문' });

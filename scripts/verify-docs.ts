@@ -24,7 +24,7 @@
  *
  * 종료 코드: 0 이상 없음 / 1 위반 있음
  */
-import { LOG_EVENTS } from '@workfluence/shared';
+import { BACKGROUND_POLL_PATH, LOG_EVENTS } from '@workfluence/shared';
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
@@ -271,6 +271,21 @@ function checkUploadLimits(findings: Finding[]): void {
 }
 
 /**
+ * **nginx가 접근 로그에서 빼는 배경 요청의 경로가 공유 상수와 같은지 본다** (P17 설계서 A.1-8). 앱(`accessLogEntry`)은 `BACKGROUND_POLL_PATH`를 쓰고
+ * nginx는 설정 파일에 글로 적는다 — 한쪽만 바뀌면 알림 수 물음이 한쪽 로그에만 30초마다 쌓이거나, 넓어지면 표시 하나로 다른 요청이 로그에서 빠진다
+ */
+function checkBackgroundPoll(findings: Finding[]): void {
+  const conf = resolve(ROOT, 'deploy/nginx.conf');
+  if (!existsSync(conf)) return;
+  const lines = readFileSync(conf, 'utf8').split(/\r?\n/);
+  const at = lines.findIndex((l) => /^\s*map\s+"\$http_x_wf_background:\$request_method:\$uri:\$status"\s+\$wf_loggable/.test(l));
+  const entry = at < 0 ? undefined : lines[at + 1];
+  if (entry === undefined || !entry.includes(`"~^1:GET:${BACKGROUND_POLL_PATH}:`)) {
+    findings.push({ file: 'deploy/nginx.conf', line: at + 2, kind: '배경 요청 경로 불일치', detail: `$wf_loggable의 첫 줄이 GET ${BACKGROUND_POLL_PATH}(BACKGROUND_POLL_PATH)를 빼지 않는다` });
+  }
+}
+
+/**
  * 7. 로그 event 코드 (P11_설계서_Ops D.4, FR-1218). 코드 목록(`LOG_EVENTS`)이 정본이고 운영자가 읽는 표는 장애대응 가이드 한 곳이다 —
  * 코드를 더하고 가이드를 잊으면 운영자가 그 줄을 만났을 때 찾을 곳이 없다. 백틱으로 적힌 코드를 찾는다
  */
@@ -305,6 +320,7 @@ function main(): void {
   if (argPath < 0) {
     checkShellScripts(findings);
     checkUploadLimits(findings);
+    checkBackgroundPoll(findings);
     checkLogEvents(findings);
   }
 
