@@ -1,6 +1,7 @@
 import { isUuid } from '@workfluence/shared';
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
+import { Notice, Page, useDocumentTitle } from './ui';
 
 /**
  * 주소의 `:id`가 **식별자 모양일 때만** 그 화면을 그린다 (P10 종료 루틴 — 경로 조작).
@@ -14,17 +15,19 @@ import { Link, useParams } from 'react-router';
  */
 export function RequireUuidParam({ children }: { children: ReactNode }) {
   const { id } = useParams();
-  if (id !== undefined && !isUuid(id)) {
-    return (
-      <main className="shell">
-        <p className="badge fail" role="alert">
-          주소가 올바르지 않다 — 찾을 수 없다
-        </p>
-        <p className="muted small">
-          <Link to="/">← 홈</Link>
-        </p>
-      </main>
-    );
-  }
+  if (id !== undefined && !isUuid(id)) return <NotFoundPage />;
   return <>{children}</>;
+}
+
+/** 잘못된 주소 — 한 틀 안에 알림띠와 **← 홈** (P17 설계서 J.6). 식별자 모양이 아닌 id와 없는 경로가 같이 쓴다 */
+export function NotFoundPage() {
+  useDocumentTitle('찾을 수 없다');
+  return (
+    <Page>
+      <Notice kind="error">주소가 올바르지 않다 — 찾을 수 없다</Notice>
+      <p>
+        <Link to="/">← 홈</Link>
+      </p>
+    </Page>
+  );
 }

@@ -1,51 +1,419 @@
-/* 외부 폰트·CDN 없음 (CLAUDE.md 7절). 시스템 폰트만. */
+/*
+ * workfluence 화면 체계 (P17 설계서 J절). 이 파일 한 곳에 토큰 · 요소 기본값 · 공통 부품을 둔다 — 화면별 CSS는 두지 않는다(NFR-171).
+ * 외부 폰트·CDN 없음(CLAUDE.md 7절) — 시스템 글꼴만. 수치의 까닭은 설계서 J.3~J.5에 있다.
+ */
+
+/* ---------- 1. 토큰 (J.4) ---------- */
 :root {
-  --bg: #f6f7f9;
-  --fg: #1d2330;
-  --muted: #6b7380;
-  --line: #d9dee6;
+  --surface: #ffffff;
+  --sunken: #f7f8fa;
+  --canvas: #f4f5f7;
+  --text: #1d2330;
+  --text-subtle: #505866;
+  --muted: #5e6673;
+  --line: #dde1e6;
+  --border-strong: #7d8594;
   --accent: #1f5eff;
-  --ok-bg: #eaf7ee;
-  --ok-fg: #1d7a3a;
-  --fail-bg: #fde8e8;
-  --fail-fg: #c62828;
-  --card: #ffffff;
-  font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
-  color: var(--fg);
-  background: var(--bg);
+  --accent-strong: #1a4fd6;
+  --accent-press: #1741b0;
+  --accent-soft: #e8efff;
+  --ok-fg: #1b6e35;
+  --ok-bg: #eaf6ee;
+  --fail-fg: #b42318;
+  --fail-bg: #fdecea;
+  --warn-fg: #8a4b00;
+  --warn-bg: #fff4d6;
+  --info-fg: #1d4ed8;
+  --info-bg: #ebf1ff;
+  --disabled-fg: #8b929c;
+  --shadow-float: 0 8px 24px rgba(16, 24, 40, 0.14);
+
+  /* 폭 (J.3.4 — 이 표 한 곳) */
+  --topbar-h: 48px;
+  --side-w: 256px;
+  --pad-x: 32px;
+  --w-read: 760px;
+  --w-read-wide: 1200px;
+  --w-form: 800px;
+  --w-wide: 1440px;
+
+  --font: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  --mono: Consolas, "Courier New", monospace;
+
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text);
+  background: var(--surface);
 }
+
+/* ---------- 2. 요소 기본값 (J.5.1) — 부품을 잊은 화면도 틀리지 않게 ---------- */
 * { box-sizing: border-box; }
-body { margin: 0; }
-h1 { font-size: 1.6rem; margin: 0 0 0.3rem; }
-h2 { font-size: 1.05rem; margin: 0 0 0.8rem; }
+body { margin: 0; min-width: 1024px; word-break: keep-all; overflow-wrap: break-word; }
+h1 { font-size: 24px; line-height: 32px; font-weight: 700; margin: 0; }
+h2 { font-size: 16px; line-height: 24px; font-weight: 700; margin: 0 0 12px; }
+h3 { font-size: 14px; line-height: 20px; font-weight: 700; margin: 16px 0 8px; }
+p { margin: 0 0 8px; }
+a { color: var(--accent-strong); }
+a:hover { color: var(--accent-press); }
+code, pre, kbd { font-family: var(--mono); font-size: 13px; }
+code { background: var(--sunken); border-radius: 4px; padding: 0 4px; }
+pre { background: var(--sunken); border-radius: 8px; padding: 12px 16px; overflow-x: auto; margin: 0 0 12px; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 .muted { color: var(--muted); }
-.small { font-size: 0.85rem; }
+.small { font-size: 12px; line-height: 16px; }
+.mono { font-family: var(--mono); }
+.break-any { overflow-wrap: anywhere; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-.shell { max-width: 560px; margin: 0 auto; padding: 3rem 1.2rem; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1.2rem; margin: 1.2rem 0; }
+label { display: block; margin: 0 0 4px; font-weight: 700; }
+label:has(> input[type='checkbox']), label:has(> input[type='radio']) { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 0 16px 0 0; }
 
-dl.meta { display: grid; grid-template-columns: 7rem 1fr; gap: 0.4rem 0.8rem; margin: 0 0 1rem; }
-dl.meta dt { color: var(--muted); }
-dl.meta dd { margin: 0; }
-
-.badge { display: inline-block; padding: 0.05rem 0.6rem; border-radius: 999px; font-size: 0.85rem; }
-.badge.ok { background: var(--ok-bg); color: var(--ok-fg); }
-.badge.fail { background: var(--fail-bg); color: var(--fail-fg); }
-
-.reason { background: #0f172a; color: #e2e8f0; padding: 0.7rem 0.9rem; border-radius: 6px; overflow: auto; font-size: 0.85rem; }
-
-button {
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']), select, textarea {
   font: inherit;
-  padding: 0.45rem 0.8rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fff;
-  cursor: pointer;
-  color: var(--fg);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  height: 36px;
+  padding: 0 8px;
+  max-width: 100%;
 }
-button:hover { border-color: var(--accent); color: var(--accent); }
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not(.w-s):not(.w-m):not(.w-l):not(.w-full), select:not(.w-s):not(.w-m):not(.w-l):not(.w-full) { width: 320px; }
+textarea { height: auto; min-height: 80px; padding: 8px; width: 100%; resize: vertical; line-height: 20px; }
+input[type='checkbox'], input[type='radio'] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+input[type='file'] { font: inherit; }
+input:hover:not(:disabled):not(:focus), select:hover:not(:disabled):not(:focus), textarea:hover:not(:disabled):not(:focus) { background: var(--sunken); }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 94, 255, 0.2);
+  /* 고대비 모드는 그림자와 테두리색을 지운다 — 투명 윤곽선은 남는다 (J.4.3) */
+  outline: 2px solid transparent;
+}
+input:disabled, select:disabled, textarea:disabled { background: var(--canvas); color: var(--disabled-fg); cursor: not-allowed; }
+[aria-invalid='true'] { border-color: var(--fail-fg) !important; }
+input::placeholder, textarea::placeholder { color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* --- Phase 6: 버전 비교 (P6_설계서_Collab FR-720~725) --- */
+fieldset { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+legend { font-weight: 700; padding: 0; margin: 0 0 8px; }
+
+ul.plain, ol.plain { list-style: none; margin: 0; padding: 0; }
+
+/* 칸 폭 (J.5.3) — 값 길이에 맞춘다 */
+.w-s { width: 160px; }
+.w-m { width: 320px; }
+.w-l { width: 560px; }
+.w-full { width: 100%; }
+
+/* ---------- 3. 단추 (J.5.2) ---------- */
+button, a.btn {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  line-height: 20px;
+  vertical-align: middle;
+}
+button:hover:not(:disabled), a.btn:hover { background: var(--canvas); color: var(--text); }
+button:active:not(:disabled) { background: var(--line); }
+button.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled), a.btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
+button.primary:active:not(:disabled) { background: var(--accent-press); }
+button.danger { color: var(--fail-fg); }
+button.danger:hover:not(:disabled) { background: var(--fail-bg); color: var(--fail-fg); }
+button.danger.solid { background: var(--fail-fg); border-color: var(--fail-fg); color: #fff; }
+button.danger.solid:hover:not(:disabled) { background: #93190f; color: #fff; }
+button.subtle, a.btn.subtle { border-color: transparent; background: transparent; color: var(--accent-strong); padding: 0 6px; }
+button.subtle:hover:not(:disabled), a.btn.subtle:hover { background: transparent; text-decoration: underline; color: var(--accent-press); }
+button.sm, a.btn.sm { height: 28px; padding: 0 8px; }
+button.subtle.sm { padding: 0 4px; }
+button.icon { width: 32px; height: 32px; padding: 0; border-color: transparent; background: transparent; }
+button.icon:hover:not(:disabled) { background: var(--canvas); }
+button:disabled { background: var(--canvas); color: var(--disabled-fg); border-color: var(--line); cursor: not-allowed; }
+button.subtle:disabled { background: transparent; border-color: transparent; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+
+/* ---------- 4. 뼈대 — 한 틀·카드 틀 (J.3) ---------- */
+.skip-link { position: absolute; left: 8px; top: -48px; z-index: 50; background: var(--surface); padding: 8px 12px; border-radius: 4px; box-shadow: var(--shadow-float); }
+.skip-link:focus { top: 8px; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  height: var(--topbar-h);
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .brand { font-weight: 700; font-size: 16px; color: var(--text); text-decoration: none; margin: 0 16px 0 4px; }
+.mainnav ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 4px; }
+.mainnav a { display: inline-flex; align-items: center; height: var(--topbar-h); padding: 0 10px; color: var(--text-subtle); text-decoration: none; border-bottom: 2px solid transparent; }
+.mainnav a:hover { color: var(--text); background: var(--sunken); }
+.mainnav a[aria-current='page'] { color: var(--accent-strong); font-weight: 700; border-bottom-color: var(--accent); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.topbar-right .me { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-right a { white-space: nowrap; }
+
+.app-body { display: flex; align-items: flex-start; min-height: calc(100vh - var(--topbar-h)); }
+.side {
+  position: sticky; top: var(--topbar-h);
+  flex: 0 0 var(--side-w); width: var(--side-w);
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  background: var(--sunken);
+  border-right: 1px solid var(--line);
+  padding: 12px 8px 24px;
+}
+.app-body.side-collapsed .side { display: none; }
+.app-main { flex: 1 1 auto; min-width: 0; padding: 20px var(--pad-x) 48px; }
+
+/* 왼쪽 칸 항목 (J.3.3) — 제목(heading)을 두지 않는다 */
+.side-group { margin: 0 0 16px; }
+.side-label { font-size: 12px; line-height: 16px; color: var(--muted); padding: 0 8px; margin: 0 0 4px; }
+.side-title { font-weight: 700; padding: 0 8px; margin: 0; overflow-wrap: anywhere; }
+.side-meta { font-size: 12px; line-height: 16px; color: var(--muted); padding: 0 8px; margin: 2px 0 8px; }
+.side a.side-item, .side-item {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 32px; padding: 6px 8px; border-radius: 4px;
+  color: var(--text-subtle); text-decoration: none;
+  border-left: 2px solid transparent;
+}
+.side a.side-item:hover { background: var(--canvas); color: var(--text); }
+.side a.side-item[aria-current='page'] { background: var(--accent-soft); color: var(--accent-strong); border-left-color: var(--accent); font-weight: 700; }
+.side ul { list-style: none; margin: 0; padding: 0; }
+
+/* 폭 (J.3.4) */
+.page { max-width: var(--w-wide); }
+.page.w-read-page { max-width: var(--w-read); }
+.page.w-form-page { max-width: var(--w-form); }
+.page.w-full-page { max-width: none; }
+
+/* 카드 틀 (J.3.1) */
+.auth { min-height: 100vh; background: var(--canvas); display: flex; flex-direction: column; align-items: center; padding: 48px 16px; }
+.auth-brand { font-size: 24px; line-height: 32px; font-weight: 700; margin: 0 0 16px; text-align: center; }
+.auth-card { width: 400px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 24px; }
+.auth-card.wide { width: 480px; }
+.auth-card.guide { width: 720px; }
+.auth-cards { display: flex; gap: 16px; align-items: flex-start; }
+.auth-card h1, .auth-card h2 { font-size: 20px; line-height: 28px; margin: 0 0 16px; }
+.auth-card .form-actions button { width: 100%; }
+.auth-links { margin-top: 16px; text-align: center; color: var(--muted); }
+.auth-or { display: flex; align-items: center; gap: 8px; color: var(--muted); margin: 12px 0; }
+.auth-or::before, .auth-or::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+.auth-card a.btn { width: 100%; }
+
+/* ---------- 5. 머리·빵부스러기 (J.3.5) ---------- */
+.page-header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; margin: 0 0 16px; }
+.page-header .titles { flex: 1 1 auto; min-width: 0; }
+.page-header .description { color: var(--muted); margin: 4px 0 0; }
+.page-header .actions { flex: 0 0 auto; }
+.crumbs ol { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-wrap: wrap; color: var(--text-subtle); }
+.crumbs li + li::before { content: '/'; margin: 0 6px; color: var(--muted); }
+.crumbs a { color: var(--text-subtle); }
+.crumbs [aria-current] { color: var(--text); }
+
+/* ---------- 6. 폼 (J.5.3·J.5.4) ---------- */
+.field { margin: 0 0 16px; }
+.field-help { font-size: 12px; line-height: 16px; color: var(--muted); margin: 4px 0 0; }
+.field-error { font-size: 12px; line-height: 16px; color: var(--fail-fg); margin: 4px 0 0; }
+.field-error::before { content: '× '; font-weight: 700; }
+.req { font-size: 12px; font-weight: 400; color: var(--fail-fg); margin-left: 6px; }
+.form-note { color: var(--muted); margin: 0 0 12px; }
+
+/* 구획 폼 — 한 항목 = 한 줄, 라벨 열 160 / 칸 열, 줄마다 선 (착수 쟁점 6) */
+.form-section { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px 20px; margin: 0 0 24px; max-width: var(--w-form); }
+.form-section > h2, .form-section > legend { font-size: 16px; line-height: 24px; font-weight: 700; margin: 0 0 12px; float: none; }
+.form-section > legend { padding: 0; }
+.form-section fieldset.form-section { border: 0; padding: 0; margin: 0; }
+.form-rows { border-top: 2px solid var(--border-strong); }
+.form-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); border-bottom: 1px solid var(--line); min-height: 52px; }
+.form-row > .row-label { background: var(--sunken); padding: 8px 12px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.form-row.top > .row-label { align-items: flex-start; padding-top: 16px; }
+.form-row > .row-label label, .form-row > .row-label .label-text { margin: 0; font-weight: 700; }
+.form-row > .row-field { padding: 8px 0 8px 16px; min-width: 0; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.form-row > .row-field > .inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.form-section .form-actions { margin-top: 16px; }
+.form-description { color: var(--muted); margin: -4px 0 12px; }
+
+/* 위 라벨 (FormStack) */
+.form-stack .field:last-of-type { margin-bottom: 0; }
+.form-stack input:not([type='checkbox']):not([type='radio']):not([type='file']) { width: 100%; }
+
+/* 칸 + 단추 한 줄 */
+.inline-form { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.inline-form .field { margin: 0; }
+.inline-form label { margin-bottom: 4px; }
+
+/* 거르기 줄 (FilterBar) */
+.filter-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 0 0 16px; }
+.filter-bar .field { margin: 0; }
+.filter-bar .count { margin-left: auto; color: var(--muted); align-self: center; }
+
+/* 비밀번호 칸 (P17 F-010 1·9번) — 칸 묶음, 눈 모양 단추 */
+.field-group { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px 16px; margin: 0 0 16px; }
+.field-group legend { padding: 0 6px; margin: 0; }
+.pw-field { position: relative; display: flex; align-items: center; width: 100%; max-width: 400px; }
+.pw-field input { flex: 1; width: 100% !important; padding-right: 40px; }
+.pw-eye { position: absolute; right: 2px; width: 32px; height: 32px; padding: 0; border: 0; background: none; color: var(--text-subtle); }
+.pw-eye:hover:not(:disabled) { background: none; color: var(--text); }
+
+/* ---------- 7. 알림띠·배지 (J.5.7·J.5.8) ---------- */
+.notice { position: relative; border-radius: 8px; padding: 12px 16px 12px 16px; margin: 0 0 16px; border-left: 4px solid; background: var(--info-bg); border-left-color: var(--info-fg); }
+.notice::before { font-weight: 700; margin-right: 8px; }
+.notice.error { background: var(--fail-bg); border-left-color: var(--fail-fg); }
+.notice.error::before { content: '× 오류'; color: var(--fail-fg); }
+.notice.success { background: var(--ok-bg); border-left-color: var(--ok-fg); }
+.notice.success::before { content: '✓ 완료'; color: var(--ok-fg); }
+.notice.warning { background: var(--warn-bg); border-left-color: var(--warn-fg); }
+.notice.warning::before { content: '! 주의'; color: var(--warn-fg); }
+.notice.info { background: var(--info-bg); border-left-color: var(--info-fg); }
+.notice.info::before { content: 'i 안내'; color: var(--info-fg); }
+.notice > :last-child { margin-bottom: 0; }
+
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; font-size: 12px; line-height: 18px; font-weight: 700; border: 1px solid var(--line); background: var(--sunken); color: var(--text-subtle); white-space: nowrap; vertical-align: middle; }
+.badge.ok { border-color: #9ccfab; background: var(--ok-bg); color: var(--ok-fg); }
+.badge.ok::before { content: '✓'; }
+.badge.fail { border-color: #f0a8a0; background: var(--fail-bg); color: var(--fail-fg); }
+.badge.fail::before { content: '⊘'; }
+.badge.wait { border-color: #a9c0f5; background: var(--info-bg); color: var(--info-fg); }
+.badge.wait::before { content: '○'; }
+.badge.paused { border-color: #e7c27a; background: var(--warn-bg); color: var(--warn-fg); }
+.badge.paused::before { content: '‖'; }
+
+/* ---------- 8. 카드·구획 (J.5.6) ---------- */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin: 0 0 24px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+.card-head h2 { margin: 0; }
+.card.danger-zone { border-color: #f0a8a0; }
+.doc-section { border-top: 1px solid var(--line); padding: 16px 0 0; margin: 24px 0 0; }
+.doc-section > h2 { margin: 0 0 12px; }
+
+/* ---------- 9. 표와 목록 (J.5.5) ---------- */
+.table-scroll { overflow-x: auto; margin: 0 0 24px; }
+table { border-collapse: collapse; width: 100%; background: var(--surface); }
+table caption { text-align: left; font-weight: 700; margin: 0 0 8px; }
+th, td { text-align: left; vertical-align: middle; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+thead th { background: var(--sunken); font-size: 12px; line-height: 16px; font-weight: 700; color: var(--text-subtle); border-top: 2px solid var(--border-strong); white-space: nowrap; }
+tbody tr { height: 40px; }
+tbody tr:hover { background: var(--sunken); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.actions-cell { text-align: right; white-space: nowrap; }
+td.actions-cell .actions { justify-content: flex-end; flex-wrap: nowrap; }
+td.empty { color: var(--muted); text-align: center; padding: 24px 12px; }
+table.card { padding: 0; display: table; }
+
+.row-list { list-style: none; margin: 0 0 24px; padding: 0; border-top: 2px solid var(--border-strong); }
+.row-list > li { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 10px 12px; min-height: 40px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.row-list > li:hover { background: var(--sunken); }
+.row-list > li.card { border-radius: 0; border: 0; border-bottom: 1px solid var(--line); margin: 0; }
+.row-list .grow { flex: 1 1 auto; min-width: 0; }
+.row-list .row-title { font-weight: 700; }
+.row-list > li.unread { border-left: 3px solid var(--accent); padding-left: 9px; }
+.result-list > li { display: block; }
+.result-list .snippet { color: var(--text-subtle); margin: 4px 0 0; }
+
+/* ---------- 10. 빈 상태·불러오기·코드 (J.5.9·J.5.12) ---------- */
+.empty-state { text-align: center; padding: 48px 16px; color: var(--muted); }
+.empty-state .actions { justify-content: center; }
+.empty-state .empty-title { font-size: 16px; line-height: 24px; font-weight: 700; color: var(--text); margin: 0 0 4px; }
+.loading { color: var(--muted); padding: 16px 0; }
+.code-block { display: flex; align-items: flex-start; gap: 8px; }
+.code-block pre { flex: 1; margin: 0; }
+dl.meta { display: grid; grid-template-columns: 10rem 1fr; margin: 0 0 16px; border-top: 1px solid var(--line); }
+dl.meta dt, dl.meta dd { margin: 0; padding: 8px 0; border-bottom: 1px solid var(--line); }
+dl.meta dt { color: var(--muted); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0 0 12px; padding: 0; }
+.chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 4px; padding: 0 2px 0 8px; background: var(--sunken); }
+
+/* ---------- 11. 페이지 트리 (J.5.11) ---------- */
+.tree { list-style: none; margin: 0; padding: 0; }
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.tree-row { display: flex; align-items: center; gap: 2px; min-height: 30px; border-radius: 4px; }
+.tree-row:hover { background: var(--canvas); }
+.tree-toggle { flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; background: none; color: var(--text-subtle); }
+.tree-toggle:hover:not(:disabled) { background: var(--line); }
+.tree-spacer { flex: 0 0 24px; }
+.tree-row a { flex: 1 1 auto; min-width: 0; padding: 4px 6px; border-radius: 4px; color: var(--text-subtle); text-decoration: none; border-left: 2px solid transparent; overflow-wrap: anywhere; }
+.tree-row a:hover { color: var(--text); }
+.tree-row a[aria-current='page'] { background: var(--accent-soft); color: var(--accent-strong); border-left-color: var(--accent); font-weight: 700; }
+.tree-version { font-size: 12px; color: var(--muted); padding-right: 4px; }
+.page-body .tree { margin: 0 0 16px; }
+
+/* ---------- 12. 문서 보기·편집 (J.6 스페이스 문맥) ---------- */
+.doc-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-height: 40px; margin: 0 0 12px; }
+.doc { max-width: var(--w-read); margin: 0 auto; }
+.doc.wide { max-width: var(--w-read-wide); }
+.doc > h1 { font-size: 28px; line-height: 36px; margin: 8px 0 4px; }
+.doc-meta { color: var(--muted); margin: 0 0 8px; }
+.doc-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 16px; padding: 0 0 12px; border-bottom: 1px solid var(--line); }
+
+/* 위키 본문 — 사람이 오래 읽는 글은 16px (J.4.2) */
+.editor .ProseMirror { font-size: 16px; line-height: 27px; overflow-wrap: anywhere; }
+.editor .ProseMirror p { margin: 0 0 12px; }
+.editor .ProseMirror h1 { font-size: 24px; line-height: 32px; margin: 24px 0 12px; }
+.editor .ProseMirror h2 { font-size: 20px; line-height: 28px; margin: 20px 0 10px; }
+.editor .ProseMirror h3 { font-size: 17px; line-height: 26px; margin: 16px 0 8px; }
+.editor .ProseMirror h4, .editor .ProseMirror h5, .editor .ProseMirror h6 { font-size: 16px; line-height: 24px; margin: 16px 0 8px; }
+.editor .ProseMirror ul, .editor .ProseMirror ol { padding-left: 28px; margin: 0 0 12px; }
+.editor .ProseMirror blockquote { border-left: 3px solid var(--line); margin: 0 0 12px; padding: 0 0 0 12px; color: var(--text-subtle); }
+.editor .ProseMirror table { border-collapse: collapse; margin: 0 0 12px; width: auto; }
+.editor .ProseMirror th, .editor .ProseMirror td { border: 1px solid var(--line); padding: 6px 10px; }
+.editor .ProseMirror th { background: var(--sunken); border-top: 1px solid var(--line); font-size: 14px; color: var(--text); }
+.editor .ProseMirror pre { font-size: 13px; }
+.editor .ProseMirror > :first-child { margin-top: 0; }
+.editor .ProseMirror > :last-child { margin-bottom: 0; }
+.editor.readonly .ProseMirror { outline: none; }
+.doc .editor.readonly table { display: block; overflow-x: auto; }
+
+/* 편집기의 쓰는 칸 (P17 F-010 4·5번) — 테두리와 높이가 있고 어디를 눌러도 쓴다. 처음 판은 모양이 없어 빈 칸이 보이지 않는 한 줄 띠였다(T-077) */
+.editor:not(.readonly) .ProseMirror { min-height: 18rem; border: 1px solid var(--border-strong); border-radius: 4px; padding: 12px 14px; background: var(--surface); cursor: text; outline: 2px solid transparent; }
+.editor:not(.readonly) .ProseMirror:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 94, 255, 0.2); }
+.comment-editor .editor:not(.readonly) .ProseMirror { min-height: 5rem; font-size: 14px; line-height: 22px; }
+
+/* 편집 화면 — 회색 바탕 위 흰 종이 (FR-1860) */
+.app-main.editing { background: var(--canvas); padding-top: 0; }
+.edit-bar { position: sticky; top: var(--topbar-h); z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 48px; margin: 0 calc(-1 * var(--pad-x)) 16px; padding: 6px var(--pad-x); background: var(--surface); border-bottom: 1px solid var(--line); }
+.edit-bar .grow { flex: 1 1 auto; }
+.paper { max-width: calc(var(--w-read) + 48px); margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 20px 24px 24px; }
+.paper.wide { max-width: calc(var(--w-read-wide) + 48px); }
+.paper h1 { margin: 0 0 16px; }
+.paper .title-input { width: 100% !important; height: 44px; font-size: 20px; line-height: 28px; }
+.paper .editor:not(.readonly) .ProseMirror { min-height: 60vh; }
+
+/* 댓글 (답글 들여쓰기는 클래스로) */
+.comment { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.comment.reply { margin-left: 24px; }
+.comment-meta { color: var(--muted); font-size: 12px; margin: 0 0 4px; }
+
+/* ---------- 13. 알림 영역 (P17 F-010 8번, FR-1800) ---------- */
+.notify { position: relative; }
+.notify-button .notify-count { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--fail-fg); color: #fff; font-size: 12px; line-height: 20px; text-align: center; }
+.notify-panel { position: absolute; right: 0; top: calc(100% + 6px); width: 384px; z-index: 40; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-float); padding: 12px 16px; }
+.notify-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 0 8px; }
+.notify-list { list-style: none; margin: 0; padding: 0; }
+.notify-list li { border-top: 1px solid var(--line); padding: 8px 0; }
+.notify-list li p { margin: 2px 0; }
+.notify-list li.unread { border-left: 3px solid var(--accent); padding-left: 8px; }
+
+/* ---------- 14. 확인 대화 (J.5.10) ---------- */
+dialog.confirm { width: 440px; max-width: calc(100vw - 32px); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; box-shadow: var(--shadow-float); color: var(--text); }
+dialog.confirm::backdrop { background: rgba(16, 24, 40, 0.4); }
+dialog.confirm h2 { font-size: 20px; line-height: 28px; margin: 0 0 8px; }
+dialog.confirm .form-actions { justify-content: flex-end; margin-top: 20px; }
+
+/* ---------- 15. 버전 비교 (P6_설계서_Collab FR-720~725) ---------- */
 /* **색만으로 구분하지 않는다.** 왼쪽 막대와 기호를 함께 둔다 — 색각 이상이 있어도 읽힌다 */
 .diff p { margin: .3em 0; padding: .3em .6em; border-left: 3px solid transparent; white-space: pre-wrap }
 .diff-added { border-left-color: #16a34a; background: #f0fdf4 }
@@ -58,7 +426,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .w-added { background: #bbf7d0; border-radius: 2px }
 .w-removed { background: #fecaca; border-radius: 2px; text-decoration: line-through }
 
-/* --- Phase 6: 실시간 편집 커서 --- */
+/* ---------- 16. 실시간 편집 커서 (P6) ---------- */
 /* 남의 커서는 **이름표와 함께** 보여야 한다. 색만 있으면 누구인지 모른다 */
 .collaboration-carets__caret { border-left: 1px solid; border-right: 1px solid; margin-left: -1px; margin-right: -1px; position: relative; word-break: normal }
 .collaboration-carets__label {
@@ -66,52 +434,22 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   left: -1px; line-height: 1; padding: .1rem .3rem; position: absolute; top: -1.3em; user-select: none; white-space: nowrap;
 }
 
-/* --- Phase 10: 사내 LLM 질문 (P10_설계서_Llm G절) --- */
-.shell.wide { max-width: 1100px; }
-.llm-layout { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 1.2rem; align-items: start; }
-@media (max-width: 800px) { .llm-layout { grid-template-columns: 1fr; } }
-.llm-list ul { list-style: none; padding: 0; margin: 0 0 1rem; }
-.llm-list li { padding: .3rem 0; border-bottom: 1px solid var(--line); }
-.llm-list li.current { font-weight: 600; }
-.llm-messages { list-style: none; padding: 0; margin: 0 0 1rem; }
-.llm-msg { padding: .6rem .8rem; border-radius: 6px; margin: .5rem 0; }
-.llm-msg p { margin: 0 0 .3rem; }
-.llm-user { background: #eef3ff; }
-.llm-assistant { background: #fafafa; border: 1px solid var(--line); }
+/* ---------- 17. 사내 LLM 질문 (P10_설계서_Llm G절) ---------- */
+.llm-list ul { list-style: none; padding: 0; margin: 0 0 12px; }
+.llm-list li { display: flex; align-items: center; gap: 2px; border-radius: 4px; }
+.llm-list li > a { flex: 1 1 auto; min-width: 0; padding: 6px 8px; color: var(--text-subtle); text-decoration: none; border-left: 2px solid transparent; border-radius: 4px; overflow-wrap: anywhere; }
+.llm-list li > a:hover { color: var(--text); background: var(--canvas); }
+.llm-list li.current > a { background: var(--accent-soft); color: var(--accent-strong); border-left-color: var(--accent); font-weight: 700; }
+.llm-chat { max-width: var(--w-read); }
+.llm-messages { list-style: none; padding: 0; margin: 0 0 16px; }
+.llm-msg { padding: 12px 14px; border-radius: 8px; margin: 8px 0; }
+.llm-msg p { margin: 0 0 4px; }
+.llm-user { background: var(--accent-soft); }
+.llm-assistant { background: var(--surface); border: 1px solid var(--line); }
 /* **답은 평문이다** — 줄바꿈을 지키고 HTML로 그리지 않는다 (A.1-4) */
-.llm-text { white-space: pre-wrap; word-break: break-word; }
-.llm-thinking { color: var(--muted); font-size: .9rem; margin: 0 0 .4rem; }
+.llm-text { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 24px; }
+.llm-thinking { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
 /* 첫 답을 기다리는 동안 (P12 FR-1300·1301) — 기다린 초와 늦어진다는 알림 */
-.llm-waiting { color: var(--muted); font-size: .9rem; margin: 0 0 .4rem; }
-.llm-waiting strong { color: inherit; font-weight: 600; }
-.llm-chat textarea, .card textarea { width: 100%; font: inherit; padding: .5rem; border: 1px solid var(--line); border-radius: 6px; }
-
-/* 비밀번호 변경 (P17 F-010 1·9번) — 칸 묶음, 눈 모양 단추, 칸 아래의 까닭, 위의 이동 단추 */
-.field-group { border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem 1rem 1rem; margin: 0 0 1rem; }
-.field-group legend { font-weight: 600; padding: 0 0.4rem; }
-.pw-field { position: relative; display: flex; align-items: center; }
-.pw-field input { flex: 1; padding-right: 2.6rem; }
-.pw-eye { position: absolute; right: 0.35rem; background: none; border: 0; padding: 0.3rem; margin: 0; cursor: pointer; line-height: 0; color: inherit; opacity: 0.7; }
-.pw-eye:hover, .pw-eye:focus-visible { opacity: 1; }
-.field-error { color: #b42318; margin: 0.3rem 0 0.6rem; font-size: 0.9rem; }
-input[aria-invalid='true'] { border-color: #b42318; }
-.page-nav { display: flex; gap: 0.5rem; margin-top: 1rem; }
-
-/* 편집기의 쓰는 칸 (P17 F-010 4·5번) — 테두리와 높이가 있고 어디를 눌러도 쓴다. 처음 판은 모양이 없어 빈 칸이 보이지 않는 한 줄 띠였다(T-077) */
-.editor:not(.readonly) .ProseMirror { min-height: 18rem; border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 0.9rem; background: #fff; cursor: text; outline: none; }
-.editor:not(.readonly) .ProseMirror:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
-.comment-editor .editor:not(.readonly) .ProseMirror { min-height: 5rem; }
-.editor .ProseMirror > :first-child { margin-top: 0; }
-.editor .ProseMirror > :last-child { margin-bottom: 0; }
-
-/* 모든 화면의 알림 영역 (P17 F-010 8번, `NotificationBell`) — 화면 맨 위 오른쪽. 펼친 목록은 화면 위에 뜬다 */
-.global-bar { display: flex; justify-content: flex-end; max-width: 1100px; margin: 0 auto; padding: 0.6rem 1.2rem 0; }
-.notify { position: relative; }
-.notify-button { display: inline-flex; align-items: center; gap: 0.35rem; }
-.notify-count { display: inline-block; min-width: 1.3rem; padding: 0 0.35rem; border-radius: 999px; background: var(--fail-fg); color: #fff; font-size: 0.78rem; line-height: 1.3rem; text-align: center; }
-.notify-panel { position: absolute; right: 0; top: calc(100% + 0.4rem); width: min(24rem, 90vw); z-index: 20; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 0.8rem 1rem; }
-.notify-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6rem; margin: 0 0 0.5rem; }
-.notify-list { list-style: none; margin: 0; padding: 0; }
-.notify-list li { border-top: 1px solid var(--line); padding: 0.45rem 0; }
-.notify-list li p { margin: 0.1rem 0; }
-.notify-list li.unread { border-left: 3px solid var(--accent); padding-left: 0.5rem; }
+.llm-waiting { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+.llm-waiting strong { color: inherit; font-weight: 700; }
+.llm-compose { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px 16px; }

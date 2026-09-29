@@ -59,7 +59,7 @@ export function useAuth(): AuthState {
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
   const location = useLocation();
-  if (loading) return <p className="muted">로그인 상태 확인 중…</p>;
+  if (loading) return <div className="auth"><p className="loading">로그인 상태 확인 중…</p></div>;
   if (!me) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   if (me.mustChangePassword && location.pathname !== '/change-password') return <Navigate to="/change-password" replace />;
   return <>{children}</>;
