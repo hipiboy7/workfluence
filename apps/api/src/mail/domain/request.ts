@@ -69,13 +69,19 @@ export function hideSecret(text: string, raw: string): string {
   // 보낼 때 앞뒤 빈칸이 떼어진다 — 서버가 되읊는 값에는 없다(병합 전 보안 검토 4)
   const secret = raw.trim();
   if (!secret) return text;
-  const parts = [secret, secret.replace(/^\S+\s+/, '')].filter((p, i, all) => p.length > 0 && all.indexOf(p) === i).sort((a, b) => b.length - a.length);
+  // 그대로·`Bearer ` 같은 앞말을 뗀 토큰·그 둘을 JSON으로 이스케이프한 것(`/`는 `\/`로 적는 서버도 있다 — 자체 점검 3)
+  const bare = [secret, secret.replace(/^\S+\s+/, '')];
+  const json = bare.flatMap((p) => {
+    const escaped = JSON.stringify(p).slice(1, -1);
+    return [escaped, escaped.replace(/\//g, '\\/')];
+  });
+  const parts = [...bare, ...json].filter((p, i, all) => p.length > 0 && all.indexOf(p) === i).sort((a, b) => b.length - a.length);
   return parts.reduce((out, p) => out.split(p).join('***'), text);
 }
 
 /** 시험 명령 — 받지 않은 상태 코드마다 무엇을 볼지 (FR-1905). 사내 API 설명: 400 필수 파라미터 누락, 500 메일 발송 오류 */
 export function statusHint(status: number): string {
-  if (status === 400) return '필수 값이 빠졌거나 틀렸다(사내 API 설명: 필수 파라미터 누락) — 받는 주소와 WF_MAIL_SENDER_NAME을 본다. 형식과 주소가 맞는지(markdown이면 …/send_markdown)도 본다';
+  if (status === 400 || status === 422) return '필수 값이 빠졌거나 틀렸다(사내 API 설명: 필수 파라미터 누락) — 받는 주소와 WF_MAIL_SENDER_NAME을 본다. 형식과 주소가 맞는지(markdown이면 …/send_markdown)도 본다';
   if (status === 401 || status === 403) return '인증을 받지 않았다 — WF_MAIL_AUTH_HEADER·WF_MAIL_AUTH_VALUE(헤더 이름과 값 전체)를 메일 API 담당에게 받은 대로 적는다';
   if (status === 404 || status === 405) return '그 주소에 보내는 곳이 없다 — WF_MAIL_API_URL을 끝의 /api/v1/email/send(마크다운이면 …/send_markdown)까지 적었는지 본다';
   if (status >= 500) return '메일 서버가 보내지 못했다(사내 API 설명: 메일 발송 오류) — 메일 API 담당에게 그 시각을 알린다';
