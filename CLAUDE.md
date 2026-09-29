@@ -294,7 +294,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 운영 중 관리자가 조절하는 정책값인가 | 기본값은 `constants`. 조절은 Phase 1은 `.env`, **Phase 4부터 DB `settings` + 관리 화면** | 비밀번호 규칙, 세션 타임아웃, 업로드 크기·확장자, 감사로그 보존 기간 |
 
 - **모든 앱 환경변수는 `WF_` 접두사.** `packages/shared`의 zod 스키마가 `WF_*`만 골라 파싱하고, 스키마에 없는 `WF_` 키가 있으면 **기동 실패**. 잘못된 타입도 기동 실패.
-- `.env.example`의 키 집합 == 스키마 키 집합을 **테스트로 강제**한다. 키를 추가·삭제·개명하면 같은 커밋에서 ① `.env.example` ② 해당 설계서의 설정 항목 표 ③ `deploy/compose.yml`을 함께 갱신한다.
+- `.env.example`의 키 집합 == 스키마 키 집합을 **테스트로 강제**한다. 키를 추가·삭제·개명하면 같은 커밋에서 ① `.env.example` ② 해당 설계서의 설정 항목 표 ③ `deploy/compose.yml` ④ `scripts/win-launcher.mjs`(Windows 체험 묶음이 설정 파일을 만들며 키 이름을 쓴다 — F-009)를 함께 갱신한다.
 - **설정 키를 만들었으면 코드가 그 값을 실제로 쓰는지 확인한다.** 로그는 "읽었다"를 보여주지 "썼다"를 보여주지 않는다. 테스트는 값이 소비 지점에 전달되는지를 본다.
 - `.env`는 커밋 금지. `.env.example`은 **placeholder만** (12.3절).
 - 매직 넘버·URL·경로·시크릿을 코드에 리터럴로 쓰지 않는다. 예외: 수학 상수, HTTP 상태코드, 테스트 fixture 값.
@@ -419,7 +419,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `docs/P{N}_검증기록_<Topic>.md` | 실측·실호출·확인 못 한 것 | Phase 종료 |
 | [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md) | 폐쇄망 반입 당일의 순서와 사후 검증, 새 버전 들여오기 | 반입 구성이 바뀔 때 |
 | [`docs/운영가이드_운영이관.md`](docs/운영가이드_운영이관.md) | 날마다·주마다·달마다 하는 일, 하지 말 것, 연락 경로 | 운영 절차가 바뀔 때 |
-| [`docs/운영가이드_윈도우체험.md`](docs/운영가이드_윈도우체험.md) | 인터넷이 되는 Windows에서 띄워 써 보는 길 — 폐쇄망 반입과 무관한 체험이다(F-006). GitHub의 Windows 러너가 같은 길을 돌린다(`.github/workflows/windows.yml`). 받아서 푸는 묶음(F-009)은 `main`에 들어오는 커밋마다 러너가 만든다(`.github/workflows/windows-local.yml`) | 체험 길(설치·실행 명령)이나 묶음의 구성이 바뀔 때 |
+| [`docs/운영가이드_윈도우체험.md`](docs/운영가이드_윈도우체험.md) | 인터넷이 되는 Windows에서 띄워 써 보는 길 — 폐쇄망 반입과 무관한 체험이다(F-006). GitHub의 Windows 러너가 같은 길을 돌린다(`.github/workflows/windows.yml`). 받아서 푸는 묶음(F-009)은 코드가 바뀐 `main` 커밋마다 러너가 만들고 띄워 본다(`.github/workflows/windows-local.yml`) | 체험 길(설치·실행 명령)이나 묶음의 구성이 바뀔 때 |
 
 ### 10.2 `docs/internal/` — 작업 기록 (운영 담당자는 안 읽어도 된다)
 
