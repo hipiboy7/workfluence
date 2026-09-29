@@ -1,5 +1,6 @@
 import { BadGatewayException, BadRequestException, HttpException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import {
+  emailSchema,
   maskEmail,
   maskUsername,
   grantsForRole,
@@ -333,7 +334,10 @@ export class AuthService {
    * 보고 정리하도록 남긴다.
    */
   private async freeEmail(raw: string | undefined, selfId: string | undefined, tx: Db): Promise<string | null> {
-    const email = raw?.toLowerCase() ?? null;
+    // **email의 모양을 본다** — 로컬 가입과 같은 판정(`emailSchema`). 사내 IdP가 준 값이 쉼표 목록이면 멘션 메일이 여럿에게 갔다(P18 병합 전 보안 검토 2 —
+    // 사내 메일 API는 받는 사람 칸의 쉼표를 목록으로 읽는다). 모양이 아니면 email 없이 들인다(로그인은 막지 않는다)
+    const parsed = emailSchema.safeParse(raw ?? '');
+    const email = parsed.success ? parsed.data : null;
     if (!email) return null;
     const owner = await this.users.findByEmail(email, tx);
     if (!owner || owner.id === selfId) return email;

@@ -3,7 +3,9 @@ import type { AddressInfo } from 'node:net';
 import { Logger } from '@nestjs/common';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '@workfluence/shared';
+import { MAIL_TIMEOUT_MS } from './domain/request';
 import { HttpMailSender } from './http.sender';
+import { MAIL_BODY_READ_MAX, postMail } from './post';
 import { MockMailSender } from './mock.sender';
 
 /**
@@ -28,6 +30,11 @@ beforeAll(async () => {
     req.on('end', () => {
       got.push({ method: req.method, url: req.url, headers: req.headers, body });
       if (req.url === '/reset') return req.socket.destroy();
+      if (req.url === '/hang') return; // 답하지 않는다 — 시간 제한을 본다
+      if (req.url === '/big') {
+        res.writeHead(400, { 'content-type': 'text/plain' });
+        return res.end('x'.repeat(100_000));
+      }
       res.writeHead(answer.status, { 'content-type': 'application/json', ...answer.headers });
       res.end(answer.body ?? '{"message":"Email sent successfully"}');
     });
@@ -41,6 +48,15 @@ afterEach(() => {
   answer = { status: 200 };
   vi.restoreAllMocks();
 });
+
+/** 열었다 닫은 포트 — 연결이 거절된다(ECONNREFUSED). 포트 1 같은 것은 fetch가 막아 연결을 시도하지도 않는다 */
+const closedPort = async (): Promise<number> => {
+  const s = createServer();
+  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+  const port = (s.address() as AddressInfo).port;
+  await new Promise<void>((r) => s.close(() => r()));
+  return port;
+};
 
 const env = (over: Partial<AppEnv> = {}): AppEnv =>
   ({
@@ -105,6 +121,33 @@ describe('HttpMailSender (P18 FR-1900~1903)', () => {
 
   it('**연결이 끊기거나 닿지 않아도 던지지 않는다** — false', async () => {
     expect(await new HttpMailSender(env({ WF_MAIL_API_URL: `${base}/reset` })).send(msg)).toBe(false);
-    expect(await new HttpMailSender(env({ WF_MAIL_API_URL: 'http://127.0.0.1:1/api/v1/email/send' })).send(msg)).toBe(false);
+    expect(await new HttpMailSender(env({ WF_MAIL_API_URL: `http://127.0.0.1:${await closedPort()}/api/v1/email/send` })).send(msg)).toBe(false);
+  });
+
+  it('**시간 제한을 건다** — 메일 서버가 답하지 않으면 알림 처리가 묶인다(T-026). 앱은 MAIL_TIMEOUT_MS로 보낸다(코드 리뷰 1)', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    await new HttpMailSender(env()).send(msg);
+    expect(timeout).toHaveBeenCalledWith(MAIL_TIMEOUT_MS);
+  });
+
+  it('**받는 사람이 주소 하나가 아니면 보내지 않는다** — 쉼표 목록은 사내 API가 여럿으로 읽는다(병합 전 보안 검토 2). 주소는 로그에 싣지 않는다', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    expect(await new HttpMailSender(env()).send({ ...msg, to: 'a@example.internal, b@example.internal' })).toBe(false);
+    expect(got).toHaveLength(0);
+    expect(JSON.stringify(warn.mock.calls)).toContain('mail.bad_recipient');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('b@example.internal');
+  });
+});
+
+describe('postMail — 앱과 시험 명령이 함께 쓰는 보내는 길 (FR-1903)', () => {
+  it('**답이 없으면 시간 제한으로 끝난다**(TimeoutError) — 매달리지 않는다', async () => {
+    await expect(postMail({ url: `${base}/hang`, headers: {}, body: '{}' }, { timeoutMs: 150 })).rejects.toMatchObject({ name: 'TimeoutError' });
+  });
+
+  it('본문은 readBody일 때만, 앞의 MAIL_BODY_READ_MAX 바이트까지 읽는다', async () => {
+    const r = await postMail({ url: `${base}/big`, headers: {}, body: '{}' }, { readBody: true });
+    expect([r.ok, r.status]).toEqual([false, 400]);
+    expect(r.body.length).toBe(MAIL_BODY_READ_MAX);
+    expect((await postMail({ url: `${base}/big`, headers: {}, body: '{}' })).body).toBe('');
   });
 });

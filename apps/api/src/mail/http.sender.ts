@@ -1,13 +1,16 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import type { MailMessage, MailSender } from './mail.provider';
-import { MAIL_TIMEOUT_MS, mailConfigOf, mailRequest } from './domain/request';
+import { isSingleRecipient, mailConfigOf, mailRequest } from './domain/request';
+import { postMail } from './post';
 import { logLine } from '../common/log-line';
 
 /**
  * 사내 메일 API 어댑터 (P6 FR-751 → P18_설계서_Mail FR-1900~1903). 요청의 모양은 `domain/request.ts`가 만든다 — 사용자가 준 사내 API 설명 그대로다.
  *
- * - **넘겨주기를 따르지 않는다** — 인증 헤더가 다른 곳으로 따라가지 않게 (A.1-7)
+ * - 보내는 길(넘겨주기를 따르지 않는다·시간 제한)은 `post.ts` 한 곳이다 — 시험 명령과 같다
+ * - **받는 사람이 주소 하나가 아니면 보내지 않는다**(`isSingleRecipient`) — 사내 API는 쉼표 목록을 여럿으로 읽는다. 사내 계정의 email은 로그인 때 받아
+ *   적는다(병합 전 보안 검토 2)
  * - 2xx만 성공. **응답 본문을 로그에 담지 않는다** — 무엇이 들었는지 모르는 남의 응답이다(상태만)
  * - **던지지 않는다** — 실패는 `false` (FR-753)
  *
@@ -25,24 +28,21 @@ export class HttpMailSender implements MailSender {
       this.log.warn(logLine('mail.unconfigured', '메일이 켜져 있는데 WF_MAIL_API_URL이 비었다'));
       return false;
     }
-    const req = mailRequest(mailConfigOf(this.env), message);
+    if (!isSingleRecipient(message.to)) {
+      // 주소는 싣지 않는다(개인정보, 7절) — 누구의 것인지는 감사의 멘션 기록으로 찾는다
+      this.log.warn(logLine('mail.bad_recipient', '받는 사람이 주소 하나가 아니라 보내지 않았다'));
+      return false;
+    }
     try {
-      const res = await fetch(req.url, {
-        method: 'POST',
-        headers: req.headers,
-        body: req.body,
-        redirect: 'error',
-        signal: AbortSignal.timeout(MAIL_TIMEOUT_MS),
-      });
-      // 연결을 오래 쥐지 않게 본문을 비운다 — 읽은 것은 쓰지 않는다
-      await res.body?.cancel().catch(() => undefined);
+      // 요청을 만드는 것도 try 안이다 — "던지지 않는다"가 그 함수가 던지지 않는다는 사실에 기대지 않게(코드 리뷰 8)
+      const res = await postMail(mailRequest(mailConfigOf(this.env), message));
       if (!res.ok) {
         this.log.warn(logLine('mail.rejected', '메일 API가 받지 않았다', { status: res.status }));
         return false;
       }
       return true;
     } catch (e) {
-      // 오류 문장에 주소·헤더가 섞이지 않게 공통 로거가 거른다(`errorText`) — 인증 값은 헤더라 오류 문장에 오지 않는다
+      // 오류는 공통 로거(`errorText`)가 코드와 원인 문장(호스트:포트)만 싣는다 — 인증 값은 헤더라 오류 문장에 오지 않고, 헤더 값의 글자는 기동 검사가 막는다
       this.log.warn(logLine('mail.failed', '메일 API 호출 실패', {}, e));
       return false;
     }

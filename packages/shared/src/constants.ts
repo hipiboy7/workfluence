@@ -161,6 +161,7 @@ export const LOG_EVENTS = [
   'mail.rejected',
   'mail.failed',
   'mail.mock_sent',
+  'mail.bad_recipient',
   'mail.mention_failed',
   // 사내 LLM
   'llm.ask_failed',

@@ -100,7 +100,7 @@ describe('mail:test — 시험 메일 한 통 (FR-1905)', () => {
     });
     expect(all()).toContain(`주소: ${base}/api/v1/email/send`);
     expect(all()).toMatch(/형식: text · 보내는 이름: 위키 · 인증: 없음/);
-    expect(all()).toMatch(/지금 앱은 메일을 보내지 않는다\(WF_MAIL_ENABLED=false/);
+    expect(all()).toMatch(/설정\(\.env\)대로면 앱은 메일을 보내지 않는다\(WF_MAIL_ENABLED=false.*--force-recreate api/);
     expect(all()).toMatch(/보냈다 — HTTP 200/);
     expect(await audits()).toEqual([['mail.send', { kind: 'test', recipients: 1, sent: 1 }]]);
   });
@@ -114,6 +114,23 @@ describe('mail:test — 시험 메일 한 통 (FR-1905)', () => {
     expect(all()).toContain('응답: {"message":"invalid key ***"}');
     expect(all()).not.toContain('k-secret-1');
     expect(await audits()).toEqual([['mail.fail', { kind: 'test', recipients: 1, sent: 0 }]]);
+  });
+
+  it('**http 주소에 인증을 실으면 평문으로 간다고 알린다** — https면 알리지 않는다(병합 전 보안 검토 5)', async () => {
+    expect(await run(['a@example.internal'], { WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: 'k-1' })).toBe(0);
+    expect(all()).toMatch(/주의: 주소가 http라 인증 값이 암호화되지 않고/);
+    lines = { log: [], error: [] };
+    expect(await run(['a@example.internal'])).toBe(0);
+    expect(all()).not.toMatch(/암호화되지 않고/);
+  });
+
+  it('**응답 본문의 제어 글자는 창에 그대로 찍지 않는다** — 터미널이 명령으로 읽는 글자(ESC·CSI)를 빈칸으로(코드 리뷰 10)', async () => {
+    answer = { status: 400, body: 'bad\u001b[2Jreq\u009b31m' };
+    expect(await run(['a@example.internal'])).toBe(1);
+    const shown = lines.error.find((l) => l.includes('응답: '))!;
+    // eslint-disable-next-line no-control-regex -- 제어 글자가 없는지 보는 것이 이 시험이다
+    expect(shown).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/);
+    expect(shown).toContain('bad [2Jreq 31m');
   });
 
   it('400이면 필수 값을 보라고 말한다 — 응답 본문은 200자까지', async () => {

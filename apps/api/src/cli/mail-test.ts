@@ -3,7 +3,11 @@ import { Client } from 'pg';
 import { databaseUrl, loadEnv } from '../config/config.module';
 import { describeDatabaseUrl } from '../common/db-url';
 import { testMail } from '../mail/domain/compose';
-import { MAIL_TIMEOUT_MS, failureHint, hideSecret, mailConfigOf, mailRequest, statusHint } from '../mail/domain/request';
+import { failureHint, hideSecret, mailConfigOf, mailRequest, oneLine, statusHint } from '../mail/domain/request';
+import { postMail } from '../mail/post';
+
+/** 감사 기록을 넣으러 DB에 붙을 때 기다리는 상한 */
+const AUDIT_CONNECT_TIMEOUT_MS = 5_000;
 
 /** 받지 않았을 때 창에 보이는 응답 본문의 길이 (P18_설계서_Mail A.1-9) */
 const RESPONSE_SNIPPET_MAX = 200;
@@ -44,23 +48,27 @@ export async function mailTest(
   const markdownPath = /markdown/i.test(new URL(cfg.url).pathname);
   if (cfg.format === 'markdown' && !markdownPath) out.log('[mail-test] 주의: 형식이 markdown인데 주소에 markdown이 없다 — …/send_markdown을 적었는지 본다');
   if (cfg.format === 'text' && markdownPath) out.log('[mail-test] 주의: 형식이 text인데 주소가 markdown 쪽이다 — WF_MAIL_FORMAT=markdown이거나 …/send를 적는다');
+  // http 주소에 인증 값을 실으면 평문으로 사내망을 지난다 — 사내 LLM 등록 화면과 같은 알림(병합 전 보안 검토 5)
+  if (cfg.authHeader && new URL(cfg.url).protocol === 'http:') out.log('[mail-test] 주의: 주소가 http라 인증 값이 암호화되지 않고 사내망을 지난다 — 메일 API가 https를 받으면 https 주소를 적는다');
+  // 이 명령이 읽은 설정(.env)이다 — 떠 있는 앱의 상태가 아니다. .env를 고친 뒤 앱을 다시 만들지 않았으면 앱은 옛 설정이다(자체 점검 2)
   out.log(
-    `[mail-test] 지금 앱은 ${
+    `[mail-test] 설정(.env)대로면 앱은 ${
       !env.WF_MAIL_ENABLED ? '메일을 보내지 않는다(WF_MAIL_ENABLED=false — 이 시험이 되면 켠다)' : env.WF_MAIL_MOCK ? '모의 발송이다(보내지 않는다 — WF_MAIL_MOCK=false로)' : '메일을 보낸다'
-    }`,
+    } — 떠 있는 앱에 반영하려면 up -d --force-recreate api`,
   );
 
-  const req = mailRequest(cfg, { to, ...testMail(now().toISOString()) });
   let ok = false;
   try {
-    const res = await fetch(req.url, { method: 'POST', headers: req.headers, body: req.body, redirect: 'error', signal: AbortSignal.timeout(MAIL_TIMEOUT_MS) });
-    const body = await res.text().catch(() => '');
+    // 앱과 같은 길(`postMail`)로 보낸다 — 본문은 앞부분만 읽는다
+    const res = await postMail(mailRequest(cfg, { to, ...testMail(now().toISOString()) }), { readBody: true });
+    const body = res.body;
     if (res.ok) {
       ok = true;
       out.log(`[mail-test] 보냈다 — HTTP ${res.status}. ${to}의 메일함에서 "[위키] 시험 메일"을 찾는다(보이지 않으면 스팸함도)`);
     } else {
       out.error(`[mail-test] 받지 않았다 — HTTP ${res.status}. ${statusHint(res.status)}`);
-      const snippet = hideSecret(body, cfg.authValue).replace(/\s+/g, ' ').trim().slice(0, RESPONSE_SNIPPET_MAX);
+      // 남의 글이다 — 제어 글자(터미널이 명령으로 읽는 것 포함)를 빈칸으로, 인증 값은 가리고, 한 줄로(코드 리뷰 10)
+      const snippet = oneLine(hideSecret(body, cfg.authValue)).replace(/\s+/g, ' ').trim().slice(0, RESPONSE_SNIPPET_MAX);
       if (snippet) out.error(`[mail-test] 응답: ${snippet}`);
     }
   } catch (e) {
@@ -73,7 +81,8 @@ export async function mailTest(
 /** 감사 기록 — 휴지통 정리 명령처럼 소유 계정으로 직접 넣는다. 감사 기록 단계는 운영 설정의 값을 따른다(P17) */
 async function recordAudit(env: AppEnv, url: string, ok: boolean, out: MailTestOutput): Promise<void> {
   const action = ok ? 'mail.send' : 'mail.fail';
-  const c = new Client(url);
+  // DB가 패킷을 버려도 오래 매달리지 않게 — 메일 시험은 이미 끝났다(자체 점검 10)
+  const c = new Client({ connectionString: url, connectionTimeoutMillis: AUDIT_CONNECT_TIMEOUT_MS });
   try {
     await c.connect();
     const stored = await c.query<{ value: unknown }>('SELECT value FROM settings WHERE key = $1', [SETTINGS_KEYS.policy]);
