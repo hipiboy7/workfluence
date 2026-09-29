@@ -19,14 +19,14 @@
 | FR-1840~1842 | 감사 기록 단계 — 3·2·1, 필수는 늘 남음, **2는 실시간 편집의 자동 저장만 뺀다**(사람이 누른 저장·제목 바꾸기는 필수 — 병합 전 검토), 시스템 관리자만 바꿈, 감사로그 화면의 구획 | A등급 `packages/shared/src/policy.spec.ts` · 통합 `apps/api/src/settings/settings.integration.spec.ts` · 컴포넌트 `apps/web/src/components/AuditLevelCard.spec.tsx` |
 | FR-1850~1851 | 한 틀과 카드 틀, 1280px에서 본문 900px 이상·가로 스크롤 없음, 1920px에서 표 화면 1440px, 글 칸 760px·넓게 보기 1200px(저장소를 쓰지 못해도 그 화면에서는 바뀐다 — 병합 전 검토) | E2E `e2e/layout.spec.ts`(12화면 × 1280·1920, **데이터가 온 뒤에 잰다** — 병합 전 검토) · 컴포넌트 `apps/web/src/components/ui.spec.tsx` |
 | FR-1852~1853 | 위 막대(관리 권한이 없으면 "관리" 없음, `aria-current`), 왼쪽 칸 문맥 셋, 접기·기억·1280px 미만 처음 접힘·Ctrl+[, 트리 펼치기·접기·지금 페이지. **트리를 읽지 못하면 그렇게 말하고 다시 읽기**(병합 전 검토) | 컴포넌트 `apps/web/src/layout/AppLayout.spec.tsx`·`apps/web/src/layout/SpaceSideNav.spec.tsx` · E2E `e2e/tree.spec.ts`·`e2e/layout.spec.ts` |
-| FR-1854 | 화면마다 h1 하나(잘못된 주소 화면도 — 병합 전 검토), 빵부스러기는 스페이스 안에서만, 탭 제목 | 컴포넌트(`apps/web/src/components/RequireUuidParam.spec.tsx` 등) · E2E |
+| FR-1854 | 화면마다 h1 하나(잘못된 주소 화면도 — 병합 전 검토), 빵부스러기는 스페이스 안에서만, 탭 제목. 대문자가 든 식별자 주소는 소문자 주소로 바꿔 연다(좁은 재점검 N2 — 페이지 보기가 멈췄다) | 컴포넌트(`apps/web/src/components/RequireUuidParam.spec.tsx` 등) · E2E |
 | FR-1855~1857 | 구획 폼·라벨 위 폼, 도움말·오류의 `aria-describedby`·`aria-invalid`, 필수 칸은 `required`와 라벨 **밖**의 "필수"(병합 전 검토 — 칸마다 따로 적던 `required`를 `Field`가 싣는다), 요소 기본값, 알림띠·배지 | 컴포넌트 `apps/web/src/components/ui.spec.tsx` · E2E `e2e/layout.spec.ts`(편집 칸 테두리 대비 3:1 이상) |
 | FR-1858 | 확인 대화 — 처음 초점 그만두기, Esc, **닫은 뒤 초점은 부른 단추로**(부른 단추가 사라졌으면 돌려보내지 않는다 — 병합 전 검토). 묻는 곳은 설계서 J.5.10(비밀번호 초기화를 더해 16) | 컴포넌트 `apps/web/src/components/ConfirmDialog.spec.tsx`·`apps/web/src/pages/admin/AdminUsersPage.spec.tsx` · E2E(`confirmInDialog` — `e2e/spaces-admin.spec.ts`·`e2e/grants.spec.ts`·`e2e/auth.spec.ts`) |
 | FR-1859 | 표 모양, "한글 (코드)". 감사로그 **대상** 칸은 종류·그 대상 자신의 이름·자르지 않은 식별자, **상세**의 글 값은 따옴표째(병합 전 검토) | 컴포넌트 `apps/web/src/pages/admin/AdminAuditPage.spec.tsx`·`apps/web/src/components/auditNames.spec.ts` |
 | FR-1860 | 편집 화면 — 회색 바탕 위 흰 종이, 편집 줄. **두 막대 뒤로 커서가 숨지 않는다**(`scrollMargin`), **다른 페이지로 옮기면 앞 페이지의 제목을 들고 가지 않는다**, 실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫기 전에 묻는다(병합 전 검토) | 컴포넌트 `apps/web/src/pages/PageEditorPage.spec.tsx`·`apps/web/src/components/Editor.spec.tsx` · E2E `e2e/layout.spec.ts`·`e2e/collab.spec.ts` |
 | FR-1861 | 빈 상태·불러오기, 운영 설정의 불러오기 실패. **페이지 보기·이력은 주소의 페이지를 읽은 뒤에만 그 페이지를 그린다**(병합 전 검토 — 앞 페이지의 제목을 보인 채 삭제가 새 페이지로 갔다) | 컴포넌트 `apps/web/src/pages/PageViewPage.spec.tsx`·`apps/web/src/pages/PageHistoryPage.spec.tsx` |
 | NFR-171 | 새 의존성 0, 런타임 외부 자원 0, CSS 한 파일 | `pnpm check` · CI(외부 URL 검사) · lockfile 변경 없음(`git diff main -- pnpm-lock.yaml` 비었다) |
-| 배경 요청(설계서 A.1-8·H, `CLAUDE.md` 7절 세션) | 배경 표시가 붙은 요청은 세션의 만료를 밀지 않고(쿠키도 다시 보내지 않는다) 접근 로그(앱·nginx)에 남지 않는다 — 5xx는 남는다 | 통합 `apps/api/src/auth/session-middleware.integration.spec.ts`(`sessions.expire`와 `Set-Cookie`) · A등급 `apps/api/src/common/domain/access-log.spec.ts` · 컨테이너(5절) |
+| 배경 요청(설계서 A.1-8·H, `CLAUDE.md` 7절 세션) | 배경 표시가 붙은 요청은 세션의 만료를 밀지 않는다(쿠키도 다시 보내지 않는다). 접근 로그(앱·nginx)에서 빼는 것은 **표시가 붙은 알림 수 물음(`GET /api/notifications/unread-count`) 하나뿐**이고 5xx는 남는다 — 다른 경로·메서드는 표시가 붙어도 남는다(좁은 재점검 N1). nginx의 경로는 `pnpm verify:docs`가 공유 상수와 대조한다 | 통합 `apps/api/src/auth/session-middleware.integration.spec.ts`(`sessions.expire`와 `Set-Cookie`) · A등급 `apps/api/src/common/domain/access-log.spec.ts` · 컨테이너(5절) |
 
 ## 2. 자동 검사
 
@@ -36,11 +36,12 @@
 | 패키지 | 시험 파일 | 시험 | 라인 | 브랜치 | 함수 |
 |---|---|---|---|---|---|
 | shared (A) | 12 | 411 | 99.87% | 97.00% | 99.39% |
-| api (A+B) | 68 | 1,119 | 96.24% | 91.61% | 94.79% |
-| web (측정만) | 42 | 364 | 93.56% | 83.87% | 88.15% |
+| api (A+B) | 68 | 1,120 | 96.21% | 91.62% | 94.79% |
+| web (측정만) | 42 | 366 | 93.56% | 83.91% | 88.15% |
 
-병합 전 검토 반영(`37a3e1a`)의 코드에서 잰 것이다. Phase 16 끝(shared 406 · api 1,110 · web 218)에서 shared 5 · api 9 · web 146이 늘었다 — web은 화면 전면이
-시험 파일 21개를 새로 들였다(틀·왼쪽 칸·부품·확인 대화·카드 틀 화면). 그 뒤 돌연변이가 빠져나간 곳에 컴포넌트 시험 하나를 더했다(`f0cce6e`, web 365 — 3절).
+좁은 재점검 반영(`37fbe73`)의 코드에서 잰 것이다 — 그 뒤 `main`(F-009)을 들였고 이 표의 코드는 바뀌지 않았다(10절). Phase 16 끝(shared 406 · api 1,110 · web 218)에서
+shared 5 · api 10 · web 148이 늘었다 — web은 화면 전면이 시험 파일 21개를 새로 들였다(틀·왼쪽 칸·부품·확인 대화·카드 틀 화면). 병합 전 검토 반영(`37a3e1a`)에서 잰 첫
+수치는 api 1,119 · web 364였다 — 돌연변이가 빠져나간 곳의 시험 하나(`f0cce6e`)와 좁은 재점검 반영의 시험 둘(A등급 한 건, 대문자 주소 한 건)이 더해졌다.
 
 이번 Phase가 만진 모듈:
 
@@ -66,14 +67,15 @@ web(측정만 — `clover.xml`의 문장·조건·함수): `components/ui.tsx` 9
 
 ## 3. 돌연변이 — 고친 곳을 옛 코드로 되돌려 봤다
 
-**29개, 모두 시험이 실패했다** — 병합 전 검토 반영분 23(P1~P23), 그 전의 Phase 17 동작 6(P24~P29). 스크립트가 저장소 밖의 작업 폴더(같은 커밋)에서 파일을 바꾸고
+**31개, 모두 시험이 실패했다** — 병합 전 검토 반영분 23(P1~P23), 그 전의 Phase 17 동작 6(P24~P29), 좁은 재점검 반영분 2(P30·P31). 스크립트가 저장소 밖의 작업 폴더(같은 커밋)에서 파일을 바꾸고
 그 시험을 돌린 뒤 되돌린다. 첫 실행에서 **하나가 빠져나갔다** — P9(편집 화면을 페이지마다 새로 만드는 것). 이력 화면에는 그 시험이 있었고 편집 화면에는 없었다.
 "다른 페이지의 편집으로 곧바로 옮기면 새 페이지를 읽는 동안 앞 페이지의 제목 칸이 없다"를 더하고(`f0cce6e`) 다시 돌려 잡았다. 목록은 검토서 4절.
 
 ## 4. 브라우저 — E2E
 
-새 빌드(`pnpm build`, `37a3e1a`)를 호스트 `:3000`에 띄우고 `pnpm test:e2e` — **38 통과 · 실패 0 · 건너뜀 0 (1.3분).** Phase 16 끝의 36에서 둘이 늘었다 —
-화면 전면의 기계 판정(`e2e/layout.spec.ts`)과 비밀번호 초기화 요청의 알림(`e2e/auth.spec.ts`). 그 뒤의 코드 변경은 컴포넌트 시험 하나다.
+새 빌드(`pnpm build`)를 호스트 `:3000`에 띄우고 `pnpm test:e2e` — **38 통과 · 실패 0 · 건너뜀 0 (1.3분).** 병합 전 검토 반영(`37a3e1a`)의 빌드와 마지막 코드
+(`a341a2b` — 좁은 재점검 반영 + `main` 들임)의 빌드에서 두 번 돌려 둘 다 같았다. Phase 16 끝의 36에서 둘이 늘었다 — 화면 전면의 기계 판정(`e2e/layout.spec.ts`)과
+비밀번호 초기화 요청의 알림(`e2e/auth.spec.ts`).
 
 - **레이아웃**(`e2e/layout.spec.ts`) — 1280×720과 1920×1080에서 12화면(홈·스페이스·페이지 보기·편집·이력·검색·알림함·휴지통·LLM·사용자 관리·감사로그·LLM 연결):
   가로 스크롤 없음, 1280에서 본문 900px 이상, 1920에서 표 화면 1440px 이하, 편집 칸 테두리 대비 3:1 이상. 병합 전 검토가 **h1만 보고 재던 것**(불러오는 중인
@@ -88,10 +90,10 @@ web(측정만 — `clover.xml`의 문장·조건·함수): `components/ui.tsx` 9
 
 | 무엇 | 결과 |
 |---|---|
-| 이미지(`docker compose … build api`, `GIT_SHA`) | 첫 빌드 `ce36044`(화면 전면), 마지막 빌드 `f0cce6e` — 라벨 = 빌드한 때의 HEAD. **380MB**(예산 400MB, Phase 16과 같다 — 새 의존성 0). 확인용 태그 `workfluence-app:f0cce6e` |
+| 이미지(`docker compose … build api`, `GIT_SHA`) | 첫 빌드 `ce36044`(화면 전면), 병합 전 검토 반영 `f0cce6e`, 마지막 빌드 `a341a2b`(좁은 재점검 반영 + `main` 들임) — 라벨 = 빌드한 때의 HEAD. 셋 다 **380MB**(예산 400MB, Phase 16과 같다 — 새 의존성 0). 확인용 태그 `workfluence-app:a341a2b` |
 | 표 만들기(`run --rm tools node dist/db/migrate.js`) | `13개 마이그레이션 적용 상태` + `앱 계정 workfluence_app: 권한 적용` — 이번 Phase는 새 마이그레이션이 없다(감사 기록 단계는 운영 설정의 JSON 한 칸) |
-| 다시 띄우기(`up -d api`) | **12초**에 `HTTP 200` `{"status":"ok","db":"ok",…}`. 컨테이너의 이미지 라벨 `f0cce6e` |
-| nginx(`up -d --force-recreate nginx`) | 설정을 다시 읽었다(`nginx -T`에 `map "$http_x_wf_background:$status" $wf_loggable`와 `access_log … if=$wf_loggable`). 같은 주소로 배경 표시를 붙인 요청과 붙이지 않은 요청을 하나씩 보냈다(둘 다 로그인 없이 401) — **nginx 접근 로그와 앱 접근 로그에 붙이지 않은 것만 한 줄씩**, 같은 요청 번호로 남았다 |
+| 다시 띄우기(`up -d api`) | 두 빌드 모두 **12초**에 `HTTP 200` `{"status":"ok","db":"ok",…}`. 컨테이너의 이미지 라벨 `a341a2b` |
+| nginx(`up -d --force-recreate nginx`) | 설정을 다시 읽었다(`nginx -t` 통과, `map "$http_x_wf_background:$request_method:$uri:$status" $wf_loggable`). 배경 표시를 붙여 알림 수 물음·질의가 붙은 알림 수 물음·다른 경로(`/api/pages/:id`)·로그인(POST)·대문자 경로를, 붙이지 않고 알림 수 물음을 보냈다(모두 로그인 없이 401) — **빠진 것은 표시가 붙은 알림 수 물음 둘뿐이다.** 나머지는 nginx와 앱 접근 로그에 같은 요청 번호로 남았다. 첫 판(`f0cce6e`)의 설정은 표시가 붙은 다른 경로와 로그인도 두 로그에서 뺐다 — 좁은 재점검이 짚은 그대로(N1) |
 
 ## 6. 검토
 
@@ -105,7 +107,9 @@ web(측정만 — `clover.xml`의 문장·조건·함수): `components/ui.tsx` 9
   셋을 "자동 저장 셋"으로 부른 것이 틀렸다(설계서 I절 7).
 - **페이지 보기가 다른 페이지로 옮기는 사이 앞 페이지의 제목을 보인 채 삭제가 새 페이지로 갔다**(코드 리뷰).
 
-반영분만 다시 본 좁은 자체 점검과 처리 내역 전부는 [`docs/internal/P17_검토서_Review.md`](internal/P17_검토서_Review.md).
+반영분만 다시 본 좁은 자체 점검(Opus 5.5) — 원래 24건은 고쳐졌다 — 일부만 고쳐진 것이 둘(설계서의 시험 목록, 앱 안 이동의 물음 — 한계로 적었다), 해당 없음이 하나(A등급의 커밋 이력), **새 결함 6(높음 1 · 보통 1 · 낮음 4)과 문서 5**. 높음은 반영이 만든 것이다 — 배경 요청을 로그에서 빼는 판정이 경로를 보지 않아
+누구나 표시 하나로 모든 요청을 로그에서 지울 수 있었다(nginx 컨테이너로 실측했다). 보통은 대문자가 든 식별자 주소에서 페이지 보기가 영영 불러오는 중이었다. 모두 반영했다
+(A등급 Red `94429c2` → `37fbe73`). 처리 내역 전부는 [`docs/internal/P17_검토서_Review.md`](internal/P17_검토서_Review.md).
 
 ## 7. 보류 결정 처리
 
@@ -130,6 +134,7 @@ web(측정만 — `clover.xml`의 문장·조건·함수): `components/ui.tsx` 9
 - **보조기기로 직접** — 이름·`aria-*`·초점 순서는 컴포넌트 시험과 E2E의 역할 선택자로 봤다. 화면 낭독기로 끝까지 써 보지 않았다.
 - **Chromium 밖의 브라우저** — E2E는 Chromium만 돈다. 확인 대화(`<dialog>`)와 편집 화면의 여백(`:has()`·`scroll-padding`)을 Firefox·Safari에서 보지 않았다.
 - **앱 안의 링크로 떠날 때** — 실시간 편집을 끈 화면의 "저장하지 않은 편집" 물음은 창을 닫거나 새로 고칠 때만이다(설계서 J.12-15 — 라우터를 바꾸지 않았다).
+- **편집 줄이 두 줄로 접힐 때의 커서** — 편집기의 여백은 편집 줄 한 줄을 전제한다(설계서 J.12-16). 좁은 창이나 같이 보는 사람이 많을 때를 재지 않았다(좁은 재점검 N3).
 
 ## 10. 마지막 확인
 
