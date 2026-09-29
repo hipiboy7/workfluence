@@ -371,6 +371,8 @@ describe('markdownText — 마크다운 안에 넣을 글자 (P18_설계서_Mail
 
   it('줄 머리의 블록 표기(제목·인용·목록·번호)를 이스케이프한다 — 줄마다', () => {
     expect(markdownText('# 제목')).toBe('\\# 제목');
+    // CR 하나도 줄 끝이다(CommonMark) — 그 뒤의 `#`도 줄 머리다(병합 전 보안 검토 3)
+    expect(markdownText('x\r# 제목\r\n- 목록')).toBe('x\r\\# 제목\r\n\\- 목록');
     expect(markdownText('> 인용\n- 목록\n1. 번호')).toBe('\\> 인용\n\\- 목록\n1\\. 번호');
   });
 

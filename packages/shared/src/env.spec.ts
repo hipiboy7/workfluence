@@ -259,12 +259,14 @@ describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
     expect(() => mail({ WF_MAIL_AUTH_VALUE: 'k-1' })).toThrow(/WF_MAIL_AUTH_HEADER/);
     expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X API Key', WF_MAIL_AUTH_VALUE: 'k-1' })).toThrow(/WF_MAIL_AUTH_HEADER/);
     expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: 'k\r\nX-Evil: 1' })).toThrow(/WF_MAIL_AUTH_VALUE/);
+    expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: '토큰' })).toThrow(/WF_MAIL_AUTH_VALUE/);
   });
 
   it('보내는 이름은 100자까지, 줄바꿈 없이', () => {
     expect(mail({ WF_MAIL_SENDER_NAME: '사내 위키' }).WF_MAIL_SENDER_NAME).toBe('사내 위키');
     expect(() => mail({ WF_MAIL_SENDER_NAME: 'a'.repeat(101) })).toThrow(/WF_MAIL_SENDER_NAME/);
     expect(() => mail({ WF_MAIL_SENDER_NAME: '위키\n알림' })).toThrow(/WF_MAIL_SENDER_NAME/);
+    expect(() => mail({ WF_MAIL_SENDER_NAME: '위키\u0007' })).toThrow(/WF_MAIL_SENDER_NAME/);
   });
 
   it('**켰는데(모의 아님) 주소가 비면 기동 실패** — 켜 놓고 조용히 보내지 못하는 상태를 만들지 않는다', () => {

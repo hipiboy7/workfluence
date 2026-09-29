@@ -7,7 +7,7 @@ import { MAIL_FORMATS, isHttpHeaderName, mailApiUrlProblem, mailHeaderValueProbl
  */
 describe('mailApiUrlProblem — 사내 메일 API의 보내는 주소', () => {
   it('http(s) 주소는 받는다 — 경로·포트 그대로', () => {
-    for (const ok of ['https://mail.example.internal/api/v1/email/send', 'http://10.0.0.5:8080/api/v1/email/send_markdown', 'https://mail.example.internal/send/'])
+    for (const ok of ['https://mail.example.internal/api/v1/email/send', 'http://mail.example.internal:8080/api/v1/email/send_markdown', 'https://mail.example.internal/send/'])
       expect(mailApiUrlProblem(ok), ok).toBeNull();
   });
 
@@ -39,6 +39,11 @@ describe('인증 헤더 (FR-1902)', () => {
     expect(mailHeaderValueProblem('abc')).toBeNull();
     for (const bad of ['Bearer a\r\nX-Evil: 1', 'a\nb', 'a\0b']) expect(mailHeaderValueProblem(bad), JSON.stringify(bad)).toMatch(/줄바꿈|글자/);
     expect(mailHeaderValueProblem('   ')).toMatch(/비/);
+  });
+
+  it('**헤더 값은 보이는 ASCII만** — 한글 등 다른 글자면 보낼 때마다 실패하고, 그 오류 문장이 비밀 값의 글자 위치와 코드를 로그에 남긴다(병합 전 보안 검토 5)', () => {
+    expect(mailHeaderValueProblem('Bearer a~!@#$%^&*()_+-={}[]|:;"<>,.?/')).toBeNull();
+    for (const bad of ['Bearer 토큰', 'k\u00e9y', 'k\u200bey']) expect(mailHeaderValueProblem(bad), bad).toMatch(/ASCII/);
   });
 });
 

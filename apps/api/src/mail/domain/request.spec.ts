@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failureHint, hideSecret, mailConfigOf, mailRequest, statusHint } from './request';
+import { failureHint, hideSecret, isSingleRecipient, mailConfigOf, mailRequest, statusHint } from './request';
 
 /**
  * A등급 — **테스트 먼저** (3절, P18_설계서_Mail FR-1900·1902·1905). 사내 메일 API에 보내는 요청의 모양은 **사용자가 준 설명 그대로**다
@@ -31,6 +31,8 @@ describe('mailRequest', () => {
   it('**제목의 줄바꿈·제어 글자는 빈칸으로 바꾼다** — 사내 API가 제목을 메일 머리말(SMTP 헤더)로 옮겨도 머리말을 끼워 넣지 못한다(P7 C.4.1 — 표시 이름이 제목에 든다. 사내 계정의 이름은 가입 검사를 지나지 않는다)', () => {
     const r = mailRequest(cfg, { ...msg, subject: '[위키] 홍길동\r\nBcc: x@example.internal\u0000 님이 회원님을 불렀습니다' });
     expect(JSON.parse(r.body).subject).toBe('[위키] 홍길동 Bcc: x@example.internal 님이 회원님을 불렀습니다');
+    // 유니코드 줄 구분자도 줄바꿈이다(병합 전 보안 검토 6)
+    expect(JSON.parse(mailRequest(cfg, { ...msg, subject: 'a\u0085b\u2028c\u2029d' }).body).subject).toBe('a b c d');
     // 본문의 줄바꿈은 그대로다 — 본문은 여러 줄이다
     expect(JSON.parse(mailRequest(cfg, { ...msg, text: '한 줄\n두 줄' }).body).content).toBe('한 줄\n두 줄');
   });
@@ -43,10 +45,22 @@ describe('mailRequest', () => {
   });
 });
 
+describe('isSingleRecipient — 받는 사람은 주소 하나 (A.1-3)', () => {
+  it('**주소 하나만** — 쉼표로 이은 여럿·줄바꿈·형식이 아닌 것은 아니다. 사내 API의 `receivers`는 쉼표를 목록으로 읽는다(병합 전 보안 검토 2 — 사내 계정의 email은 형식 검사를 지나지 않았다)', () => {
+    expect(isSingleRecipient('user@example.internal')).toBe(true);
+    for (const bad of ['me@example.internal, other@example.internal', 'me@example.internal,other@example.internal', 'me@example.internal\r\nBcc: x@example.internal', 'not-an-address', '', ' user@example.internal'])
+      expect(isSingleRecipient(bad), JSON.stringify(bad)).toBe(false);
+  });
+});
+
 describe('hideSecret — 응답·오류 글에서 인증 값을 가린다 (FR-1902)', () => {
   it('값이 몇 번 나와도 모두 가리고, 값이 없으면 그대로', () => {
     expect(hideSecret('bad key k-1 (k-1)', 'k-1')).toBe('bad key *** (***)');
     expect(hideSecret('그대로', '')).toBe('그대로');
+  });
+
+  it('값 앞뒤의 빈칸은 떼고 가린다 — 보낼 때 떼어지므로 서버가 되읊는 값에는 없다(병합 전 보안 검토 4)', () => {
+    expect(hideSecret('bad key k-1', ' k-1 ')).toBe('bad key ***');
   });
 
   it('**`Bearer ` 뒤의 토큰만 되읊어도 가린다** — 값 전체가 아니라 토큰만 돌려주는 서버가 있다', () => {
