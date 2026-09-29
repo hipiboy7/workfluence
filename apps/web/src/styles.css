@@ -383,7 +383,8 @@ dl.meta dt { color: var(--muted); font-size: 12px; }
 .comment-editor .editor:not(.readonly) .ProseMirror { min-height: 5rem; font-size: 14px; line-height: 22px; }
 
 /* 편집 화면 — 회색 바탕 위 흰 종이 (FR-1860) */
-.app-main.editing { background: var(--canvas); padding-top: 0; }
+/* 본문(.app-main)의 안쪽 여백을 되돌려 회색 바탕이 본문 전체를 채운다 */
+.edit-canvas { margin: -20px calc(-1 * var(--pad-x)) -48px; padding: 0 var(--pad-x) 48px; background: var(--canvas); min-height: calc(100vh - var(--topbar-h)); }
 .edit-bar { position: sticky; top: var(--topbar-h); z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 48px; margin: 0 calc(-1 * var(--pad-x)) 16px; padding: 6px var(--pad-x); background: var(--surface); border-bottom: 1px solid var(--line); }
 .edit-bar .grow { flex: 1 1 auto; }
 .paper { max-width: calc(var(--w-read) + 48px); margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 20px 24px 24px; }

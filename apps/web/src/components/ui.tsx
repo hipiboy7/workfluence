@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, useEffect, type ReactElement, type ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
 
 /**
@@ -317,4 +317,37 @@ export function CodeBlock({ children, label }: { children: string; label?: strin
       </pre>
     </div>
   );
+}
+
+const READ_WIDE_KEY = 'wf:read-wide';
+const READ_WIDE_EVENT = 'wf:read-wide-changed';
+
+/**
+ * 문서 글 칸의 **넓게 보기** (J.3.4, 착수 쟁점 5) — 760px ↔ 1200px. 보기와 편집이 같은 값을 쓴다(줄바꿈이 같다). 브라우저가 기억한다
+ * (`localStorage`) — PC나 브라우저를 바꾸면 처음 상태다(J.11)
+ */
+export function useReadWide(): [boolean, () => void] {
+  const read = () => {
+    try {
+      return window.localStorage.getItem(READ_WIDE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  };
+  const [wide, setWide] = useState(read);
+  useEffect(() => {
+    const on = () => setWide(read());
+    window.addEventListener(READ_WIDE_EVENT, on);
+    return () => window.removeEventListener(READ_WIDE_EVENT, on);
+  }, []);
+  const toggle = useCallback(() => {
+    try {
+      window.localStorage.setItem(READ_WIDE_KEY, read() ? '0' : '1');
+    } catch {
+      // 기억하지 못해도 이 화면에서는 바뀐다
+    }
+    setWide((v) => !v);
+    window.dispatchEvent(new Event(READ_WIDE_EVENT));
+  }, []);
+  return [wide, toggle];
 }
