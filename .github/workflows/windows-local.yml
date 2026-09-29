@@ -113,7 +113,8 @@ jobs:
           $got = (Get-ChildItem -Recurse -File -Force $src).Count
           "files: staged $staged, downloaded $got"
           if ($got -ne $staged) { throw "the downloaded bundle has $got files but the staged one has $staged" }
-          $unused = @(Get-Content -Raw '.local\win-bundle\unused-files.json' | ConvertFrom-Json)
+          # Windows PowerShell 5.1's ConvertFrom-Json emits a JSON array as one object - pipe it once more to get the items
+          $unused = @((Get-Content -Raw '.local\win-bundle\unused-files.json' | ConvertFrom-Json) | ForEach-Object { $_ })
           $startCmd = (-join ([char[]](0xC2DC, 0xC791))) + '.cmd'
           $stopCmd = (-join ([char[]](0xBA48, 0xCD94, 0xAE30))) + '.cmd'
           $logs = Join-Path $env:RUNNER_TEMP 'bundle-test'

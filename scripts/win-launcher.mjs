@@ -328,8 +328,8 @@ function restrictData() {
   const facts = aclFacts();
   if (facts?.open)
     say(
-      '경고: 이 폴더는 이 PC의 다른 계정도 고칠 수 있다(C:\\ 바로 아래에 만든 폴더가 그렇다) — 다른 사람이 이 PC에 로그인하면 실행 파일(node\\node.exe 등)을 ' +
-        '바꿔 둘 수 있다. 혼자 쓰는 PC에서만 쓰거나, 내 사용자 폴더(C:\\Users\\<이름>) 아래로 옮긴다(이름이 영문일 때 — 읽어보기.txt)',
+      '경고: 이 폴더는 이 PC의 다른 계정도 고칠 수 있다(C:\\ 바로 아래에 만든 폴더 등) — 다른 사람이 이 PC에 로그인하면 실행 파일(node\\node.exe·pgsql\\bin 등)을 ' +
+        '바꾸거나 더해 둘 수 있다. 혼자 쓰는 PC에서만 쓰거나, 내 사용자 폴더(C:\\Users\\<이름>) 아래로 옮긴다(이름이 영문일 때 — 읽어보기.txt)',
     );
   if (facts?.narrow) return;
   if (!facts) say('data 폴더의 권한을 PowerShell로 읽지 못했다 — 다시 좁힌다');
