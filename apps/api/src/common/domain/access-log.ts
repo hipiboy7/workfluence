@@ -13,6 +13,8 @@ export type AccessLogInput = {
   userId: string | null;
   /** 끝(`finish`) 전에 받는 쪽이 끊었다 */
   aborted: boolean;
+  /** 화면이 주기로 보낸 배경 요청이다(`BACKGROUND_HEADER`) */
+  background: boolean;
 };
 
 export type AccessLogEntry = {
@@ -28,6 +30,7 @@ const HEALTH_PATH = '/api/health';
  *
  * - **질의 문자열은 어디에도 싣지 않는다** — 검색어가 들어 있다. 경로 틀을 싣고, 맞춘 라우트가 없을 때만 경로를 줄여 싣는다
  * - 헬스체크(20초마다 온다)와 `/api` 밖(SPA 정적 자산 — nginx 로그에 있다)은 남기지 않는다 (A.1-7)
+ * - 배경 요청(알림 수를 30초마다 묻는다 — 사람 수 × 하루 2,880줄)도 남기지 않는다. 5xx면 남긴다 — 고장은 보여야 한다 (P17 병합 전 코드 리뷰)
  * - 5xx만 `warn` — 401·403·404·409는 정상 흐름이다. 처리되지 않은 예외는 `http.unhandled` 줄이 따로 있다 (A.1-8)
  */
 export function accessLogEntry(x: AccessLogInput): AccessLogEntry | null {
@@ -37,6 +40,7 @@ export function accessLogEntry(x: AccessLogInput): AccessLogEntry | null {
   const lower = path.toLowerCase();
   if (lower !== '/api' && !lower.startsWith('/api/')) return null;
   if (lower === HEALTH_PATH) return null;
+  if (x.background && x.status < 500) return null;
 
   // **전체 잡기 라우트는 맞춘 라우트가 아니다** — SPA 정적 자산의 틀(`{*any}`)이 맞춘 것이 없는 API 요청에도 씌워진다(Nest 12·Express 5).
   // 그 틀을 적으면 404가 전부 `GET {*any} 404`로 보여 무엇을 불렀는지 모른다 (P11 자체 점검 2)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { NOTIFICATION_PANEL_LIMIT, NOTIFICATION_POLL_MS, type NotificationView } from '@workfluence/shared';
+import { BACKGROUND_HEADER, BACKGROUND_HEADER_VALUE, NOTIFICATION_PANEL_LIMIT, NOTIFICATION_POLL_MS, type NotificationView } from '@workfluence/shared';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { BellIcon } from './icons';
@@ -18,6 +18,8 @@ export const bellLabel = (count: number): string => (count > 0 ? `알림 — 안
  * (`NOTIFICATION_PANEL_LIMIT`건)이 펼쳐진다. 예전에는 스페이스 목록의 머리말에만 수가 있었고 다른 화면에서는 알림이 온 것을 알 수 없었다.
  *
  * - 안 읽은 수는 화면을 옮길 때와 `NOTIFICATION_POLL_MS`마다 다시 묻는다 — 서버가 밀어 주는 길은 없다(알림함과 같은 API). 실패해도 화면을 막지 않는다
+ * - **그 물음은 배경 요청이다**(`BACKGROUND_HEADER`) — 서버가 세션을 늘리지 않고 접근 로그에 남기지 않는다. 늘리면 열어 둔 탭이 자리를 비워도
+ *   유휴 만료(30분)가 오지 않는다(P17 병합 전 검토 — 검토 셋이 따로 찾았다). **탭이 가려져 있으면 묻지 않고**, 다시 보이면 곧바로 한 번 묻는다
  * - 펼친 목록은 바깥을 누르거나 Esc를 누르거나 화면을 옮기면 닫힌다
  * - 비밀번호를 바꿔야 하는 동안은 그리지 않는다 — 그 화면 밖으로 나갈 수 없다(P1 FR-209)
  */
@@ -32,7 +34,7 @@ export function NotificationBell() {
   const box = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(() => {
-    api<{ count: number }>('/api/notifications/unread-count')
+    api<{ count: number }>('/api/notifications/unread-count', { headers: { [BACKGROUND_HEADER]: BACKGROUND_HEADER_VALUE } })
       .then((r) => setCount(r.count))
       .catch(() => undefined);
   }, []);
@@ -40,11 +42,16 @@ export function NotificationBell() {
   useEffect(() => {
     if (!active) return;
     refresh();
-    const timer = window.setInterval(refresh, NOTIFICATION_POLL_MS);
+    const tick = () => {
+      if (document.visibilityState !== 'hidden') refresh();
+    };
+    const timer = window.setInterval(tick, NOTIFICATION_POLL_MS);
     window.addEventListener(NOTIFICATIONS_CHANGED, refresh);
+    document.addEventListener('visibilitychange', tick);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener(NOTIFICATIONS_CHANGED, refresh);
+      document.removeEventListener('visibilitychange', tick);
     };
   }, [active, refresh, location.key]);
 

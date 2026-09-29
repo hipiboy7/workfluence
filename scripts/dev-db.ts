@@ -32,15 +32,22 @@ function readDotenv(path: string): Record<string, string> {
 }
 
 /**
- * 그 PID의 프로세스가 있나. 신호 0은 존재만 묻는다 — 답은 셋이다: 보냈다(있다, 내 것), `ESRCH`(없다), `EPERM`(**있다, 다른 계정의 것** —
- * 보낼 권한만 없다). EPERM을 "없다"로 읽으면 다른 계정이 띄운 서버의 잠금 파일을 지운다(T-079)
+ * 그 PID에 PostgreSQL 서버가 떠 있나. 신호 0은 존재만 묻는다 — 답은 셋이다: 보냈다(있다, 내 것), `ESRCH`(없다), `EPERM`(**있다, 다른 계정의 것** —
+ * 보낼 권한만 없다). EPERM을 "없다"로 읽으면 다른 계정이 띄운 서버의 잠금 파일을 지운다(T-079). 거꾸로 재부팅 뒤 남은 잠금 파일의 번호를
+ * **다른 계정의 상관없는 프로세스**가 받았으면 EPERM만으로는 영영 치우지 못한다(병합 전 코드 리뷰) — Linux는 `/proc/<pid>/cmdline`(누구나 읽는다)으로
+ * 그 프로세스가 postgres인지 본다. 읽을 수 없는 곳(Windows)은 떠 있다고 본다 — 틀리면 지우는 쪽이 데이터를 망가뜨린다
  */
-function processExists(pid: number): boolean {
+function postgresAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== 'ESRCH';
+    if ((e as NodeJS.ErrnoException).code === 'ESRCH') return false;
+  }
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('postgres');
+  } catch {
+    return true;
   }
 }
 
@@ -49,7 +56,7 @@ function clearStaleLock(databaseDir: string): void {
   const lock = resolve(databaseDir, 'postmaster.pid');
   if (!existsSync(lock)) return;
   const pid = Number(readFileSync(lock, 'utf8').split(/\r?\n/)[0]);
-  if (Number.isInteger(pid) && pid > 0 && processExists(pid)) {
+  if (Number.isInteger(pid) && pid > 0 && postgresAlive(pid)) {
     throw new Error(`이미 PostgreSQL이 떠 있다 (PID ${pid}). 그 프로세스를 먼저 종료한다 — 다른 계정의 것이면 그 계정에서.`);
   }
   console.log('[dev-db] 남은 postmaster.pid를 정리한다 (해당 프로세스 없음)');

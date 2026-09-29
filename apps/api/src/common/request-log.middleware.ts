@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { BACKGROUND_HEADER, BACKGROUND_HEADER_VALUE } from '@workfluence/shared';
 import type { Logger } from 'pino';
 import { accessLogEntry } from './domain/access-log';
 import { requestIdFrom } from './domain/request-id';
@@ -38,6 +39,7 @@ export function requestMiddleware(logger: Logger, now: () => number = () => perf
         durationMs: now() - started,
         userId: ctx.userId ?? null,
         aborted,
+        background: req.headers[BACKGROUND_HEADER] === BACKGROUND_HEADER_VALUE,
       });
       if (entry) logger[entry.level]({ requestId, ...entry.fields }, entry.msg);
     };

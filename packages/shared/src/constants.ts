@@ -228,6 +228,14 @@ export const PAGE_TREE_LOCK_WAIT_MS = 2000;
 export const CSRF_HEADER = 'x-workfluence-request';
 export const CSRF_HEADER_VALUE = '1';
 
+/**
+ * **배경 요청** 표시 (P17 병합 전 검토) — 사람이 하지 않고 화면이 주기로 보내는 요청(알림 수를 30초마다 묻는 것)에 붙인다. 서버는 이 요청으로
+ * **세션을 늘리지 않고**(유휴 만료가 뜻을 잃지 않게 — `CLAUDE.md` 7절의 유휴 30분) 접근 로그에 남기지 않는다(5xx만). 붙여서 얻는 것은
+ * 자기 세션이 늘지 않는 것뿐이라 위조해도 해가 없다
+ */
+export const BACKGROUND_HEADER = 'x-wf-background';
+export const BACKGROUND_HEADER_VALUE = '1';
+
 /** 로컬 계정 비밀번호 정책 (사용자 결정 2026-09-15: 8자·2종. 잠금 5회/15분 유지) */
 export const PASSWORD_POLICY = {
   minLength: 8,

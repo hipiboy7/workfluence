@@ -157,7 +157,8 @@ export class AuthService {
       detail: { found: !!user, requested: true },
       ip,
     });
-    if (user) this.alertManagers(user);
+    // **비밀번호가 있는 계정만 알린다** — 사내 계정(IdP)은 관리자가 초기화할 수 없어 알림이 영영 처리되지 않는다(병합 전 검토). 응답·감사는 같다
+    if (user && user.passwordHash !== null) this.alertManagers(user);
     return { ok: true };
   }
 

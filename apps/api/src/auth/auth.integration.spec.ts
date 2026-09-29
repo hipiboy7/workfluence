@@ -378,6 +378,21 @@ describe('비밀번호 초기화 요청은 관리자의 알림함에 간다 (P17
     expect(n).toMatchObject({ kind: 'password.reset.request', actorName: '앨리스', actorUsername: 'alice', pageId: null, pageTitle: null, readAt: null });
   });
 
+  it('**사내 계정(비밀번호가 없다)의 요청은 알리지 않는다** — 관리자가 초기화할 수 없어 알림이 영영 처리되지 않는다. 응답과 감사 기록은 같다 (병합 전 검토)', async () => {
+    await addUser('root1', 'root');
+    await db.insert(users).values({ username: 'idp-user', displayName: 'idp', email: 'idp-user@example.internal', passwordHash: null, role: 'member', status: 'active', oidcSub: 'sub-idp-user' });
+    expect(await auth.recoverPassword({ username: 'idp-user', email: 'idp-user@example.internal' })).toEqual({ ok: true });
+    // 로컬 계정의 요청은 곧 알림이 된다 — 그 알림이 온 뒤에 보면 앞선 사내 계정의 요청이 알림을 만들지 않았음이 드러난다(알림은 요청 순서대로 돈다)
+    const alice = await approvedAlice();
+    await auth.recoverPassword({ username: 'alice', email: SIGNUP.email });
+    await vi.waitFor(async () => expect((await resetRows()).map((r) => r.actorId)).toContain(alice.id), { timeout: 5000 });
+    await new Promise((ok) => setTimeout(ok, 200));
+    expect((await resetRows()).map((r) => r.actorId)).toEqual([alice.id]);
+    // 감사 기록은 사내 계정의 요청도 남긴다 — 관리자가 무엇이 왔는지 본다
+    const rec = await db.select().from(auditEvents).where(eq(auditEvents.targetId, 'idp-user'));
+    expect(rec.map((r) => r.action)).toContain('auth.password.recover');
+  });
+
   it('위임까지 본다 — 요청한 관리자가 가진 위임을 못 하는 관리자에게는 가지 않고, 자기 자신에게도 가지 않는다 (FR-1801)', async () => {
     const root = await addUser('root1', 'root');
     await addUser('admin-plain', 'admin');

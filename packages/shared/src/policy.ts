@@ -76,13 +76,12 @@ const RANGES: Record<string, { min: number; max: number }> = {
 /**
  * **단계를 낮추면 빠지는 감사 행위**와, 그 행위가 아직 남는 가장 낮은 단계 (P17 I절, FR-1840). 양이 많은 것만 여기 있다 — 여기 없는 행위는
  * **필수**라 단계와 무관하게 늘 남는다(로그인·계정·권한·관리·설정·만들기·고치기·지우기·옮기기·되살리기, 관문 거절, 메일 실패 등 — `CLAUDE.md` 6절).
- * - 3에서만 남는다 — 실시간 편집의 자동 저장(한 사람이 쓰는 동안 몇 초마다)
+ * - 3에서만 남는다 — 실시간 편집의 자동 저장(한 사람이 쓰는 동안 몇 초마다). 사람이 누른 저장(`page.collab.flush`)과 제목 바꾸기
+ *   (`page.collab.title`)는 고치기라 필수다 — 둘은 누가 했는지 남기려고 보안 검토가 넣은 기록이다(P7 F3·P9 L2, P17 병합 전 보안 검토)
  * - 2부터 남는다 — 첨부 받기·HTML 내보내기·메일 발송 성공·LLM 질문(보는 사람 수만큼)
  */
 export const AUDIT_MIN_LEVEL: Readonly<Partial<Record<AuditAction, 2 | 3>>> = {
   'page.collab.save': 3,
-  'page.collab.flush': 3,
-  'page.collab.title': 3,
   'attachment.download': 2,
   'page.export': 2,
   'mail.send': 2,
