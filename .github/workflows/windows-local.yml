@@ -148,10 +148,17 @@ jobs:
             return (Start-Process @a).ExitCode
           }
           function Test-Health { try { return (Invoke-WebRequest -UseBasicParsing -Uri "$base/api/health" -TimeoutSec 5).StatusCode -eq 200 } catch { return $false } }
-          function Wait-Health($p) {
+          # health 200, then wait until the launcher has written its last "up" line (how to stop: Ctrl+C) - the launcher polls on its own clock
+          function Wait-Health($p, [string]$tag) {
             for ($i = 0; $i -lt 120; $i++) {
               Start-Sleep -Seconds 2
-              if (Test-Health) { return $true }
+              if (Test-Health) {
+                for ($j = 0; $j -lt 30; $j++) {
+                  if ((Read-Shared (Join-Path $logs "$tag.out.log")).Contains('Ctrl+C')) { break }
+                  Start-Sleep -Seconds 1
+                }
+                return $true
+              }
               if ($p.HasExited) { return $false }
             }
             return $false
@@ -195,7 +202,7 @@ jobs:
             New-Item -ItemType Directory -Force (Split-Path $dir) | Out-Null
             Copy-Item -Recurse $src $dir
             $p = Start-Trial $dir 'first'
-            $up = Wait-Health $p
+            $up = Wait-Health $p 'first'
             Protect-Secrets $dir
             Show-Logs 'first'
             Mark 'first start (init db, tables, first admin)' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
@@ -249,7 +256,7 @@ jobs:
 
             # --- 2) start again: nothing is created again and the data is still there ---
             $p = Start-Trial $dir 'second'
-            $up = Wait-Health $p
+            $up = Wait-Health $p 'second'
             Protect-Secrets $dir
             Show-Logs 'second'
             Mark 'second start (existing data)' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
@@ -264,7 +271,7 @@ jobs:
             New-Item -ItemType Directory -Force (Split-Path $moved) | Out-Null
             Move-Item -LiteralPath $dir -Destination $moved
             $p = Start-Trial $moved 'moved'
-            $up = Wait-Health $p
+            $up = Wait-Health $p 'moved'
             Protect-Secrets $moved
             Show-Logs 'moved'
             Mark 'start after moving the folder' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
@@ -307,7 +314,7 @@ jobs:
               if ($case -eq 'pgdata-deleted') { Remove-Item -LiteralPath (Join-Path $moved 'data\pgdata') -Recurse -Force }
               else { Remove-Item -LiteralPath (Join-Path $moved 'data\pgdata.ready') -Force }
               $p = Start-Trial $moved $case
-              $up = Wait-Health $p
+              $up = Wait-Health $p $case
               Show-Logs $case
               Mark "$case - starts again with a new database" $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
               if ($up) {
@@ -322,7 +329,7 @@ jobs:
             New-Item -ItemType Directory -Force (Split-Path $ko) | Out-Null
             Copy-Item -Recurse $src $ko
             $p = Start-Trial $ko 'korean'
-            $up = Wait-Health $p
+            $up = Wait-Health $p 'korean'
             Protect-Secrets $ko
             Show-Logs 'korean'
             Mark 'Korean path (reference only)' $up $(if ($up) { 'HTTP 200' } else { 'no answer - see the korean log' }) $false
