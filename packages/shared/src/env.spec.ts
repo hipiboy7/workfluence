@@ -268,6 +268,8 @@ describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
     expect(() => mail({ WF_MAIL_SENDER_NAME: 'a'.repeat(101) })).toThrow(/WF_MAIL_SENDER_NAME/);
     expect(() => mail({ WF_MAIL_SENDER_NAME: '위키\n알림' })).toThrow(/WF_MAIL_SENDER_NAME/);
     expect(() => mail({ WF_MAIL_SENDER_NAME: '위키\u0007' })).toThrow(/WF_MAIL_SENDER_NAME/);
+    // 빈칸뿐인 이름은 보내는 이름이 없는 것과 같다(자체 점검 8)
+    expect(() => mail({ WF_MAIL_SENDER_NAME: '   ' })).toThrow(/WF_MAIL_SENDER_NAME/);
   });
 
   it('**켰는데(모의 아님) 주소가 비면 기동 실패** — 켜 놓고 조용히 보내지 못하는 상태를 만들지 않는다', () => {

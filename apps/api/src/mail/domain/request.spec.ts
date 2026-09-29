@@ -61,6 +61,11 @@ describe('hideSecret — 응답·오류 글에서 인증 값을 가린다 (FR-19
     expect(hideSecret('그대로', '')).toBe('그대로');
   });
 
+  it('**JSON으로 이스케이프해 되읊어도 가린다** — `/`를 `\\/`로, `"`·`\\`를 이스케이프해 돌려주는 서버가 있다(자체 점검 3)', () => {
+    expect(hideSecret('{"msg":"bad Bearer ab\\/cd+ef=="}', 'Bearer ab/cd+ef==')).toBe('{"msg":"bad ***"}');
+    expect(hideSecret('{"msg":"bad k\\"q\\\\1"}', 'k"q\\1')).toBe('{"msg":"bad ***"}');
+  });
+
   it('값 앞뒤의 빈칸은 떼고 가린다 — 보낼 때 떼어지므로 서버가 되읊는 값에는 없다(병합 전 보안 검토 4)', () => {
     expect(hideSecret('bad key k-1', ' k-1 ')).toBe('bad key ***');
   });
@@ -73,6 +78,8 @@ describe('hideSecret — 응답·오류 글에서 인증 값을 가린다 (FR-19
 describe('시험 명령의 까닭 (FR-1905)', () => {
   it('상태 코드마다 무엇을 볼지 말한다', () => {
     expect(statusHint(400)).toMatch(/필수|받는 주소|보내는 이름/);
+    // 필수 필드 누락을 422로 답하는 서버도 있다(자체 점검 9)
+    expect(statusHint(422)).toBe(statusHint(400));
     expect(statusHint(401)).toMatch(/WF_MAIL_AUTH/);
     expect(statusHint(403)).toMatch(/WF_MAIL_AUTH/);
     expect(statusHint(404)).toMatch(/WF_MAIL_API_URL/);
