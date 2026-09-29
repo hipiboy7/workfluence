@@ -12,6 +12,7 @@
     "setup:env": "tsx scripts/setup-env.ts",
     "check:env": "tsx scripts/check-env.ts",
     "dev:db": "tsx scripts/dev-db.ts",
+    "win:bundle": "tsx scripts/win-bundle.ts",
     "dev": "pnpm --filter @workfluence/shared build && pnpm -r --parallel --stream run dev",
     "build": "pnpm -r run build",
     "start": "pnpm --filter @workfluence/api start",
