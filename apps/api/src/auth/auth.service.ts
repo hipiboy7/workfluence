@@ -19,6 +19,7 @@ import { logLine } from '../common/log-line';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { DB, type Db } from '../db/db.module';
 import { users, type UserRow } from '../db/schema';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { UsersService } from '../users/users.service';
 import { safeDisplayName } from './domain/display-name';
@@ -65,6 +66,7 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly audit: AuditService,
     private readonly spaces: SpacesService,
+    private readonly notifications: NotificationsService,
     @Inject(DB) private readonly db: Db,
     @Inject(APP_ENV) private readonly env: AppEnvToken,
     @Inject(OIDC_PROVIDER) private readonly oidc: OidcProvider | null,
@@ -140,6 +142,9 @@ export class AuthService {
    * 폐쇄망에서는 자가 재설정을 안전하게 만들 수 없으므로 **요청만 기록하고 관리자에게 보낸다.**
    *
    * 응답은 일치 여부와 무관하게 항상 같다 — 여기서 갈라지면 계정 열거가 된다.
+   *
+   * 맞는 계정이면 **그 사람을 관리할 수 있는 관리자에게 알린다** (P17 F-010 8번) — 예전에는 감사로그에만 남아 관리자가 알 길이 없었다.
+   * 알림은 **기다리지 않는다**: 응답이 알림을 만드는 동안 늦어지면 걸린 시간이 "그런 계정이 있다"를 말한다
    */
   async recoverPassword(dto: RecoverPasswordDto, ip?: string): Promise<{ ok: true }> {
     const user = await this.users.findRecoveryTarget(dto.username, dto.email);
@@ -152,7 +157,19 @@ export class AuthService {
       detail: { found: !!user, requested: true },
       ip,
     });
+    // **비밀번호가 있는 계정만 알린다** — 사내 계정(IdP)은 관리자가 초기화할 수 없어 알림이 영영 처리되지 않는다(병합 전 검토). 응답·감사는 같다
+    if (user && user.passwordHash !== null) this.alertManagers(user);
     return { ok: true };
+  }
+
+  /**
+   * 초기화 요청을 관리자에게 알린다 — 응답과 따로 돈다(`recoverPassword`). 실패는 우리 쪽 결함이라 error 한 줄이다
+   * (`auth.recover_notify_failed`) — 요청은 감사 기록(`auth.password.recover`)에 이미 남았다
+   */
+  private alertManagers(user: UserRow): void {
+    void this.notifications.notifyPasswordResetRequest({ id: user.id, role: user.role as Role, grants: user.grants }).catch((e: unknown) => {
+      this.log.error(logLine('auth.recover_notify_failed', '비밀번호 초기화 요청을 관리자에게 알리지 못했다', { userId: user.id }, e));
+    });
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto, ip?: string): Promise<void> {

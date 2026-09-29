@@ -4,11 +4,10 @@ import type { LogEvent } from '@workfluence/shared';
 import type { Server } from 'node:http';
 import { CollabGateway } from './pages/collab/collab.gateway';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import connectPgSimple from 'connect-pg-simple';
 import type { NextFunction, Request, Response } from 'express';
-import session from 'express-session';
 import type { Pool } from 'pg';
 import { AppModule } from './app.module';
+import { sessionMiddleware } from './auth/session-middleware';
 import { errorText, isQueryError } from './common/error-text';
 import { PinoNestLogger, createLogger } from './common/logger';
 import { requestMiddleware } from './common/request-log.middleware';
@@ -57,30 +56,8 @@ async function bootstrap(): Promise<void> {
 
   app.useBodyParser('json', { limit: '2mb' });
 
-  /**
-   * 서버측 세션 (FR-220~223). 저장소는 PG이고 **앱과 같은 풀을 재사용한다** (P0 13절 인계).
-   *
-   * - 쿠키 maxAge = 유휴 타임아웃. `rolling`이 요청마다 갱신한다
-   * - **절대 타임아웃은 쿠키로 못 지킨다** — rolling이 갱신해 버리므로 AuthGuard가 본다
-   * - 테이블은 마이그레이션이 만든다. createTableIfMissing을 켜면 스키마가 두 곳에서 관리된다
-   */
-  const PgStore = connectPgSimple(session);
-  app.use(
-    session({
-      name: 'wf.sid',
-      store: new PgStore({ pool: app.get<Pool>(PG_POOL), tableName: 'sessions', createTableIfMissing: false }),
-      secret: env.WF_SESSION_SECRET,
-      resave: false,
-      saveUninitialized: false,
-      rolling: true,
-      cookie: {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: env.WF_ENV === 'production',
-        maxAge: env.WF_SESSION_IDLE_MINUTES * 60_000,
-      },
-    }),
-  );
+  // 서버측 세션 — 배경 요청(알림 수)은 세션을 늘리지 않는다 (`sessionMiddleware`, P17 병합 전 검토)
+  app.use(sessionMiddleware(app.get<Pool>(PG_POOL), env));
 
   await app.listen(env.WF_PORT, '0.0.0.0');
 

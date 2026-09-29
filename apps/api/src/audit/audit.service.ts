@@ -1,9 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { maskEmail, type AuditAction, type AuditEventView, type AuditQueryDto } from '@workfluence/shared';
+import { AUDIT_MIN_LEVEL, auditRecorded, maskEmail, type AuditAction, type AuditEventView, type AuditQueryDto } from '@workfluence/shared';
 import { and, desc, eq, gte, lt } from 'drizzle-orm';
 import { currentRequest } from '../common/request-context';
 import { DB, type Db } from '../db/db.module';
 import { auditEvents, users } from '../db/schema';
+import { SettingsService } from '../settings/settings.service';
 
 /**
  * 감사로그 (P1_설계서_Auth 6절, FR-235~239).
@@ -44,13 +45,21 @@ export function sanitizeDetail(detail: Record<string, unknown> | null | undefine
 
 @Injectable()
 export class AuditService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  /**
+   * `settings`가 없으면(시험이 직접 만들 때) 단계를 보지 않고 모두 남긴다. 앱은 늘 넘긴다 — 두 모듈 모두 전역이고, 못 찾으면 기동이 실패한다
+   * (`@Optional`을 쓰지 않는 까닭 — 조용히 모두 남기는 것보다 시끄럽게 죽는 쪽이 낫다)
+   */
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly settings?: SettingsService,
+  ) {}
 
   /**
    * 기록. **본 작업과 같은 트랜잭션을 받는다** (FR-236).
    * 작업이 롤백되면 기록도 롤백돼야 한다 — "했다고 적혀 있는데 실제로는 안 된" 상태를 만들지 않는다.
    */
   async record(input: AuditInput, tx: Db = this.db): Promise<void> {
+    if (!(await this.recorded(input.action, tx))) return;
     await tx.insert(auditEvents).values({
       action: input.action,
       actorId: input.actorId ?? null,
@@ -61,6 +70,16 @@ export class AuditService {
       // 그 요청의 식별자 — 앱 로그·nginx 로그와 잇는다. 요청 밖(정리·실시간 편집의 자동 저장)이면 비운다 (P11 FR-1212)
       requestId: currentRequest()?.requestId ?? null,
     });
+  }
+
+  /**
+   * 이 행위를 지금 남기는가 (P17 FR-1840) — 판정은 `auditRecorded` 한 곳, 단계는 운영 설정(`auditLevel`). 필수 행위는 설정을 읽지도 않는다.
+   * 캐시가 있으면 그것을, 없으면 **부른 쪽의 트랜잭션으로** 읽는다 — 트랜잭션 안에서 풀의 연결을 하나 더 빌리면 몰릴 때 서로 기다린다(T-026)
+   */
+  private async recorded(action: AuditInput['action'], tx: Db): Promise<boolean> {
+    if (!this.settings || AUDIT_MIN_LEVEL[action] === undefined) return true;
+    const policy = this.settings.peek() ?? (await this.settings.get(tx));
+    return auditRecorded(action, policy.auditLevel);
   }
 
   /**

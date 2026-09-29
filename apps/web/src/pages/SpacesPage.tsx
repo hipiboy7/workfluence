@@ -3,14 +3,20 @@ import { Link } from 'react-router';
 import { can, type SpaceView } from '@workfluence/shared';
 import { api } from '../api';
 import { useAuth } from '../auth';
+import { EmptyState, Field, Loading, Notice, Page, PageHeader, StatusBadge } from '../components/ui';
 
-/** 스페이스 목록 (FR-340). 버튼 노출은 응답의 access를 쓴다 (FR-345) */
+/**
+ * 홈 — 내 스페이스 목록 (FR-340 · P17 설계서 J.6 기본 문맥). 버튼 노출은 응답의 access를 쓴다 (FR-345).
+ *
+ * 인사말·역할·메뉴 링크·로그아웃·비밀번호 변경은 한 틀의 위 막대로, 관리 링크는 왼쪽 칸으로 옮겼다(J.3.2·J.3.3) — 본문에 되풀이하면 한 화면에
+ * 같은 이름의 링크가 둘이 되어 사람도 시험도 헷갈린다(J.8-1). 제품 이름도 위 막대가 말하므로 h1은 "스페이스"다.
+ * 안 읽은 알림 수(FR-505)는 모든 화면의 알림 영역이 보인다 — 예전에는 이 머리말에만 있었다 (P17 F-010 8번, `NotificationBell`)
+ */
 export function SpacesPage() {
-  const { me, logout } = useAuth();
-  const [rows, setRows] = useState<SpaceView[]>([]);
+  const { me } = useAuth();
+  const [rows, setRows] = useState<SpaceView[] | null>(null);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [unread, setUnread] = useState(0);
 
   const load = useCallback(() => {
     Promise.all([api<SpaceView[]>('/api/spaces?scope=personal'), api<SpaceView[]>('/api/spaces?scope=team')])
@@ -18,15 +24,9 @@ export function SpacesPage() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(load, [load]);
-  // 안 읽은 알림 수를 머리말에 보여 준다 (FR-505). 실패해도 화면을 막지 않는다
-  useEffect(() => {
-    api<{ count: number }>('/api/notifications/unread-count')
-      .then((r) => setUnread(r.count))
-      .catch(() => undefined);
-  }, []);
 
   if (!me) return null;
-  // 위임까지 함께 넘긴다 — "LLM 연결"은 root, 그리고 root가 위임한 관리자 (P11 D.1)
+  // 위임까지 함께 넘긴다 — 판정은 서버의 가드와 같은 `can()` (P11 D.1)
   const principal = { id: me.id, role: me.role, grants: me.grants };
 
   const create = async (e: FormEvent) => {
@@ -41,52 +41,67 @@ export function SpacesPage() {
     }
   };
 
-  return (
-    <main className="shell">
-      <h1>workfluence</h1>
-      <p className="muted">
-        {me.displayName}님 ({me.role})
-        {can(principal, 'user.manage') && <> · <Link to="/admin/users">사용자 관리</Link></>}
-        {can(principal, 'audit.read') && <> · <Link to="/admin/audit">감사로그</Link></>}
-        {/* 모든 스페이스와 분류 (P14 FR-1513~1515) — 스페이스 관리 전체나 분류 관리를 받은 member에게도 보인다 (P15 D.5) */}
-        {(can(principal, 'space.oversee') || can(principal, 'category.manage')) && <> · <Link to="/admin/spaces">스페이스 관리</Link></>}
-        {' · '}<Link to="/search">검색</Link>
-        {' · '}<Link to="/notifications">알림{unread > 0 ? ` (${unread})` : ''}</Link>
-        {' · '}<Link to="/trash">휴지통</Link>
-        {' · '}<Link to="/llm">LLM 질문</Link>
-        {can(principal, 'settings.manage') && <> · <Link to="/admin/policy">운영 설정</Link></>}
-        {/* LLM 연결 관리 — root, 그리고 root가 위임한 관리자 (P11_설계서_Ops D.1). 판정은 서버의 가드와 같은 `can()` */}
-        {can(principal, 'llm.manage') && <> · <Link to="/admin/llm">LLM 연결</Link></>}
-        {/* 사내 계정은 비밀번호가 없다 — IdP에서 바꾼다 (P13 FR-1471) */}
-        {me.hasPassword && <>{' · '}<Link to="/change-password">비밀번호 변경</Link></>}
-        {' · '}<button type="button" className="linklike" onClick={() => void logout()}>로그아웃</button>
-      </p>
-      {error && <p className="badge fail" role="alert">{error}</p>}
+  // 분류는 붙은 공간이 하나라도 있을 때만 열을 둔다 — 아무도 쓰지 않으면 빈 열이 늘어설 뿐이다
+  const withCategory = rows?.some((s) => s.categoryName) ?? false;
 
-      <section className="card">
-        <h2>스페이스</h2>
-        <ul>
-          {rows.map((s) => (
-            <li key={s.id}>
-              <Link to={`/spaces/${s.id}`}>{s.name}</Link>{' '}
-              <span className="muted small">
-                {s.kind === 'personal' ? '개인' : '팀'} · {s.key} · Crew {s.memberCount}
-                {s.status !== 'active' && <span className="badge fail"> 중지</span>}
-              </span>
-            </li>
-          ))}
-          {rows.length === 0 && <li className="muted">아직 스페이스가 없다.</li>}
-        </ul>
-      </section>
+  return (
+    <Page>
+      <PageHeader title="스페이스" description="내 개인 스페이스와 Crew로 들어간 팀 스페이스다." />
+      {error && <Notice kind="error">{error}</Notice>}
 
       {can(principal, 'space.create') && (
-        <form className="card" onSubmit={create}>
-          <h2>팀 스페이스 만들기</h2>
-          <label htmlFor="sp-name">이름</label>
-          <input id="sp-name" value={name} onChange={(e) => setName(e.target.value)} required />
-          <button type="submit">만들기</button>
-        </form>
+        <>
+          <h2 id="sp-create-title">팀 스페이스 만들기</h2>
+          {/* 칸 하나 + 단추 한 줄 (J.5.4) — 라벨 '이름'은 시험이 찾는 이름이다 */}
+          <form className="inline-form" aria-labelledby="sp-create-title" onSubmit={create}>
+            <Field id="sp-name" label="이름" required>
+              <input id="sp-name" className="w-m" value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
+            <button type="submit" className="primary">
+              만들기
+            </button>
+          </form>
+        </>
       )}
-    </main>
+
+      <h2 id="sp-list-title">내 스페이스</h2>
+      {rows === null ? (
+        !error && <Loading />
+      ) : rows.length === 0 ? (
+        <EmptyState title="아직 스페이스가 없다." description="팀 스페이스를 만들거나, 팀 스페이스의 주인에게 Crew로 넣어 달라고 부탁한다." />
+      ) : (
+        // 진짜 표 (J.5.5) — 예전에는 한 줄에 글을 이어 붙인 목록이었다
+        <table aria-labelledby="sp-list-title">
+          <thead>
+            <tr>
+              <th scope="col">이름</th>
+              <th scope="col">종류</th>
+              <th scope="col">키</th>
+              {withCategory && <th scope="col">분류</th>}
+              <th scope="col" className="num">
+                Crew
+              </th>
+              <th scope="col">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr key={s.id}>
+                <td>
+                  <Link to={`/spaces/${s.id}`}>{s.name}</Link>
+                </td>
+                <td>
+                  <StatusBadge kind="neutral">{s.kind === 'personal' ? '개인' : '팀'}</StatusBadge>
+                </td>
+                <td className="mono">{s.key}</td>
+                {withCategory && <td>{s.categoryName ?? <span className="muted">없음</span>}</td>}
+                <td className="num">{s.memberCount}</td>
+                <td>{s.status === 'active' ? <StatusBadge kind="ok">활성</StatusBadge> : <StatusBadge kind="paused">중지</StatusBadge>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Page>
   );
 }

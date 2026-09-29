@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
+import { confirmInDialog, cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
 /**
  * Phase 15 인수 기준 (scope-definition 5절, P15_설계서_Grants K.5). "관리자가 건 중지를 권한을 받은 주인이 푼다" · "남이 쓰는 분류는 만든 사람이
@@ -55,8 +55,8 @@ test('**관리자가 건 중지는 권한을 받은 주인만 푼다** — 받�
   await admin.getByRole('searchbox').fill(spaceName);
   const row = admin.getByRole('row').filter({ has: admin.getByRole('link', { name: spaceName }) });
   await expect(row).toHaveCount(1);
-  admin.once('dialog', (d) => void d.accept());
   await row.getByRole('button', { name: '중지' }).click();
+  await confirmInDialog(admin, '멈춘다');
   await expect(row.locator('td').nth(3)).toHaveText('중지 관리자가 걸었다');
 
   // 주인은 풀지 못한다 — 관리 칸이 까닭을 말하고 다시 쓰기 단추가 없다
@@ -139,14 +139,8 @@ test('**분류는 누구나 만들고, 남이 쓰면 만든 사람은 못 지운
   await admin.goto('/admin/spaces');
   const item = admin.getByRole('region', { name: '분류' }).getByRole('listitem').filter({ has: admin.getByLabel(`분류 ${category} 이름`) });
   await expect(item).toContainText('공간 2개 (만든 사람의 것이 아닌 공간 1개)');
-  const asked = new Promise<string>((ok) =>
-    admin.once('dialog', (d) => {
-      ok(d.message());
-      void d.accept();
-    }),
-  );
   await item.getByRole('button', { name: '지우기' }).click();
-  expect(await asked).toContain('이 분류를 쓰는 공간 2개(휴지통 포함)가 "분류 없음"이 된다');
+  expect(await confirmInDialog(admin, '지운다')).toContain('이 분류를 쓰는 공간 2개(휴지통 포함)가 "분류 없음"이 된다');
   await expect(admin.getByRole('status')).toHaveText(`분류 "${category}"을(를) 지웠다 — 쓰던 공간 2개는 분류 없음이 됐다.`);
   await admin.getByRole('searchbox').fill(teamName);
   const row = admin.getByRole('row').filter({ has: admin.getByRole('link', { name: teamName }) });

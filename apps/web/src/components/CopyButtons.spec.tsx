@@ -26,7 +26,7 @@ describe('CopyButtons', () => {
     stubClipboard(writeText);
     render(<CopyButtons title="회의록" content={doc} />);
     fireEvent.click(screen.getByRole('button', { name: '텍스트 복사' }));
-    expect(await screen.findByRole('status')).toHaveProperty('textContent', ' 텍스트를 복사했다');
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', '텍스트를 복사했다');
     expect(writeText).toHaveBeenCalledWith(pageText('회의록', doc));
   });
 
@@ -40,12 +40,26 @@ describe('CopyButtons', () => {
     expect(writeText.mock.calls[0]).toEqual(['# 회의록\n\n본문 \\*별\\*']);
   });
 
-  it('**클립보드가 막히면 조용히 넘어가지 않고 말한다**', async () => {
+  it('**클립보드가 막히면 조용히 넘어가지 않고 말한다** — 오류 알림띠로(P17 J.5.7)', async () => {
     stubClipboard(() => Promise.reject(new Error('NotAllowedError')));
     render(<CopyButtons title="t" content={doc} />);
     fireEvent.click(screen.getByRole('button', { name: '텍스트 복사' }));
-    expect((await screen.findByRole('alert')).textContent).toMatch(/복사하지 못했다/);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/복사하지 못했다/);
+    expect(alert.className).toBe('notice error');
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('**다시 누르면 앞의 말을 지운다** — 막혔다가 되면 오류가 남지 않는다', async () => {
+    let allow = false;
+    stubClipboard(() => (allow ? Promise.resolve() : Promise.reject(new Error('NotAllowedError'))));
+    render(<CopyButtons title="t" content={doc} />);
+    fireEvent.click(screen.getByRole('button', { name: '마크다운 복사' }));
+    await screen.findByRole('alert');
+    allow = true;
+    fireEvent.click(screen.getByRole('button', { name: '마크다운 복사' }));
+    expect((await screen.findByRole('status')).textContent).toBe('마크다운을 복사했다');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('클립보드 API가 없는 곳(안전하지 않은 출처)에서는 옛 방식으로 한 번 더 한다', async () => {

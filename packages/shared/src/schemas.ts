@@ -16,6 +16,7 @@ import {
   USER_LIST_MAX,
   USER_LIST_PAGE,
   USER_STATUSES,
+  type NotificationKind,
 } from './constants';
 import { validateDocument, type DocNode } from './document';
 import { normalizeLlmBaseUrl, type LlmStreamStatus } from './llm';
@@ -239,6 +240,8 @@ export const policyPatchDto = z
     sessionIdleMinutes: z.number().int().optional(),
     sessionAbsoluteHours: z.number().int().optional(),
     passwordMinLength: z.number().int().optional(),
+    // 감사 기록 단계 — 시스템 관리자만 바꾼다(`PolicyController.update`, P17 FR-1841)
+    auditLevel: z.number().int().optional(),
     passwordMinCharClasses: z.number().int().optional(),
     lockoutThreshold: z.number().int().optional(),
     lockoutMinutes: z.number().int().optional(),
@@ -502,14 +505,16 @@ export type TrashPageView = { id: string; title: string; spaceId: string; spaceN
 export type TrashSpaceView = { id: string; key: string; name: string; deletedAt: string; createdByName: string };
 export type NotificationView = {
   id: string;
-  kind: 'mention';
+  kind: NotificationKind;
   pageId: string | null;
   commentId: string | null;
   /**
    * 부른 사람. **`null`이면 모른다** — 실시간 편집에서 그 멘션을 누가 만들었는지 확실하지
-   * 않을 때다. 틀린 이름을 적는 대신 비운다 (P8_설계서_Mention FR-901)
+   * 않을 때다. 틀린 이름을 적는 대신 비운다 (P8_설계서_Mention FR-901). 비밀번호 초기화 요청이면 요청한 사람이다 (P17)
    */
   actorName: string | null;
+  /** 비밀번호 초기화 요청일 때만 — 관리자가 사용자 관리에서 그 사람을 찾는다. 멘션은 `null`이다(부른 사람의 아이디를 새로 내보내지 않는다) */
+  actorUsername: string | null;
   /** 대상이 지워졌으면 null이다 (FR-506) — 알림은 남되 링크는 대상이 없음을 알린다 */
   pageTitle: string | null;
   readAt: string | null;

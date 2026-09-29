@@ -56,7 +56,11 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
 
   // 3) 댓글로 동료를 부른다
   await page.goto(pageUrl);
-  await page.locator('section[aria-label="댓글"] .editor .ProseMirror').click();
+  // 쓰는 칸은 보이는 입력란이다 — 이름으로 찾고 높이를 본다. CSS 선택자로 누르면 보이지 않는 띠도 눌려 결함을 놓쳤다(T-077)
+  const commentBox = page.getByRole('textbox', { name: '댓글 쓰기' });
+  await expect(commentBox).toBeVisible();
+  expect((await commentBox.boundingBox())!.height).toBeGreaterThanOrEqual(60);
+  await commentBox.click();
   await page.keyboard.type(`@${MATE.username} 확인 부탁`);
   const [posted] = await Promise.all([
     page.waitForResponse((r) => /\/api\/pages\/[^/]+\/comments$/.test(new URL(r.url()).pathname) && r.request().method() === 'POST'),
@@ -77,14 +81,19 @@ test('멘션 → 알림함 → 휴지통 복원 → 라벨', async ({ page }) =>
   await page.goto('/');
   await page.getByRole('button', { name: '로그아웃' }).click();
   await login(page, MATE.username, MATE.password);
-  await expect(page.getByRole('link', { name: /알림 \(1\)/ })).toBeVisible();
-  await page.getByRole('link', { name: /알림/ }).click();
+  // 알림은 **모든 화면 맨 위의 알림 영역**에 온다 (P17 F-010 8번) — 예전에는 스페이스 목록의 머리말 링크였다
+  const bell = page.getByRole('button', { name: '알림 — 안 읽은 것 1건' });
+  await expect(bell).toBeVisible();
+  await bell.click();
+  await page.getByRole('region', { name: '최근 알림' }).getByRole('link', { name: '알림함에서 모두 보기' }).click();
   // 화면은 아이디가 아니라 **이름**을 보여 준다 — 부른 사람이 누구인지는 사람이 읽는 이름이다
   await expect(page.getByText('E2E 관리자님이 불렀다')).toBeVisible();
   // 페이지가 지워졌으므로 갈 곳이 없다고 말한다 (FR-506)
   await expect(page.getByText('(지워진 글)')).toBeVisible();
   await page.getByRole('button', { name: '모두 읽음' }).click();
   await expect(page.getByText('안 읽은 것 0건')).toBeVisible();
+  // 알림 영역도 곧바로 따라온다 — 다 읽었으니 수가 없다
+  await expect(page.getByRole('button', { name: '알림', exact: true })).toBeVisible();
 
   // 6) **휴지통에서 되살린다**
   await page.goto('/trash');
@@ -138,7 +147,8 @@ test('관리자가 감사로그를 거르고 세션을 끊는다', async ({ page
   // 거른 뒤에는 그 행위만 남는다. **거른 응답이 올 때까지 다시 본다** — 누르자마자 읽으면 처음 목록(거르기 전)을 읽을 수 있다
   // (P11 종료 전 E2E에서 한 번 그렇게 실패했다 — 감사 행이 쌓여 목록 응답이 느려지면 드러난다)
   await expect(async () => {
-    const actions = await page.locator('tbody tr td:nth-child(2)').allInnerTexts();
+    // 행위 칸은 "한글 이름 + 코드"다 (P17 J.9-9) — 코드만 읽는다
+    const actions = await page.locator('tbody tr td:nth-child(2) code').allInnerTexts();
     expect(actions.length).toBeGreaterThan(0);
     expect(new Set(actions)).toEqual(new Set(['auth.login.success']));
   }).toPass();

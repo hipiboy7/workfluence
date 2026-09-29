@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { POLICY_DEFAULTS, POLICY_KEYS, applyPolicy, mergePolicy, policyConsistencyProblems, validatePolicyPatch } from './policy';
+import { AUDIT_ACTIONS } from './constants';
+import { POLICY_DEFAULTS, POLICY_KEYS, applyPolicy, auditRecorded, mergePolicy, policyConsistencyProblems, validatePolicyPatch } from './policy';
 
 /** A등급 (P4_설계서_Admin E절, FR-524). 테스트를 먼저 썼다. */
 
@@ -119,5 +120,55 @@ describe('mergePolicy — 짝을 맞추지 않고 합친다', () => {
   it('틀린 값은 기본값으로 — 읽기와 같다', () => {
     expect(mergePolicy({ llmPinnedMax: 'x' } as Record<string, unknown>).llmPinnedMax).toBe(POLICY_DEFAULTS.llmPinnedMax);
     expect(mergePolicy({})).toEqual(POLICY_DEFAULTS);
+  });
+});
+
+describe('감사 기록 단계 (P17 F-010 10번, FR-1840) — 필수는 늘, 양이 많은 것만 단계로', () => {
+  const dropped = (level: number) => AUDIT_ACTIONS.filter((a) => !auditRecorded(a, level));
+
+  it('3(전체)이 기본값이고 모든 행위를 남긴다', () => {
+    expect(POLICY_DEFAULTS.auditLevel).toBe(3);
+    expect(dropped(3)).toEqual([]);
+  });
+
+  it('2(줄임)는 실시간 편집의 **자동 저장만** 뺀다 — 사람이 누른 저장(`page.collab.flush`)과 제목 바꾸기(`page.collab.title`)는 고치기라 필수다 (병합 전 보안 검토)', () => {
+    expect(dropped(2)).toEqual(['page.collab.save']);
+  });
+
+  it('1(최소)은 거기에 첨부 받기·HTML 내보내기·메일 발송 성공·LLM 질문을 더 뺀다 — 나머지는 필수다', () => {
+    expect(new Set(dropped(1))).toEqual(
+      new Set(['page.collab.save', 'attachment.download', 'page.export', 'mail.send', 'llm.ask']),
+    );
+  });
+
+  it('**필수 기록은 가장 낮은 단계에서도 남는다** — 로그인·계정·권한·관리·설정·삭제·관문 거절·메일 실패', () => {
+    const required = [
+      'auth.login.success',
+      'auth.login.failure',
+      'auth.logout',
+      'auth.password.recover',
+      'user.password.reset',
+      'user.role.change',
+      'user.grants.change',
+      'settings.update',
+      'page.update',
+      'page.collab.flush',
+      'page.collab.title',
+      'page.delete',
+      'trash.purge',
+      'audit.purge',
+      'page.collab.reject',
+      'mail.fail',
+      'llm.provider.create',
+    ] as const;
+    for (const a of required) expect(auditRecorded(a, 1)).toBe(true);
+  });
+
+  it('단계는 1~3의 정수만 받는다 — 틀린 저장값은 읽을 때 기본값(3)이다', () => {
+    expect(validatePolicyPatch({ auditLevel: 2 })).toEqual([]);
+    expect(validatePolicyPatch({ auditLevel: 0 })).toHaveLength(1);
+    expect(validatePolicyPatch({ auditLevel: 4 })).toHaveLength(1);
+    expect(validatePolicyPatch({ auditLevel: 2.5 })).toHaveLength(1);
+    expect(mergePolicy({ auditLevel: 9 }).auditLevel).toBe(3);
   });
 });

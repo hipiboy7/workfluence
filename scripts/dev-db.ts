@@ -10,7 +10,7 @@
  */
 import EmbeddedPostgres from 'embedded-postgres';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -26,24 +26,42 @@ const WINDOWS_DLL_NOT_FOUND = 0xc0000135;
 const WINDOWS_WATCH_MS = 5_000;
 
 
-/** 남은 잠금 파일 정리. 그 PID가 살아 있으면 손대지 않고 그대로 알린다. */
 /** `.env`를 읽는다. 파싱은 shared의 `parseDotenv` 한 곳에서 한다 (CLAUDE.md 1.3절) */
 function readDotenv(path: string): Record<string, string> {
   return existsSync(path) ? parseDotenv(readFileSync(path, 'utf8')) : {};
 }
 
+/**
+ * 그 PID에 PostgreSQL 서버가 떠 있나. 신호 0은 존재만 묻는다 — 답은 셋이다: 보냈다(있다, 내 것), `ESRCH`(없다), `EPERM`(**있다, 다른 계정의 것** —
+ * 보낼 권한만 없다). EPERM을 "없다"로 읽으면 다른 계정이 띄운 서버의 잠금 파일을 지운다(T-079). 거꾸로 재부팅 뒤 남은 잠금 파일의 번호를
+ * **다른 계정의 상관없는 프로세스**가 받았으면 EPERM만으로는 영영 치우지 못한다(병합 전 코드 리뷰) — Linux는 `/proc/<pid>/cmdline`(누구나 읽는다)으로
+ * 그 프로세스가 **이 데이터 디렉토리의** postgres인지 본다(`-D`). 내 계정의 프로세스가 번호를 받았을 때도, 공유 서버의 다른 postgres가 받았을 때도 같다
+ * (좁은 재점검 N4) — 잠금 파일은 그 디렉토리의 서버만 쓴다. 읽을 수 없는 곳(Windows)은 떠 있다고 본다 — 틀리면 지우는 쪽이 데이터를 망가뜨린다
+ */
+function postgresAlive(pid: number, databaseDir: string): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ESRCH') return false;
+  }
+  let args: string[];
+  try {
+    args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+  } catch {
+    return true;
+  }
+  const dirs = new Set([databaseDir, realpathSync(databaseDir)]);
+  const at = args.indexOf('-D');
+  return /(^|\/)postgres$/.test(args[0] ?? '') && at >= 0 && dirs.has(resolve(args[at + 1] ?? ''));
+}
+
+/** 남은 잠금 파일 정리. 그 PID가 살아 있으면(다른 계정의 프로세스라도) 손대지 않고 그대로 알린다. */
 function clearStaleLock(databaseDir: string): void {
   const lock = resolve(databaseDir, 'postmaster.pid');
   if (!existsSync(lock)) return;
   const pid = Number(readFileSync(lock, 'utf8').split(/\r?\n/)[0]);
-  if (Number.isInteger(pid) && pid > 0) {
-    try {
-      process.kill(pid, 0); // 신호 0 = 존재 확인만
-      throw new Error(`이미 PostgreSQL이 떠 있다 (PID ${pid}). 그 프로세스를 먼저 종료한다.`);
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith('이미 PostgreSQL')) throw e;
-      // ESRCH: 그 PID는 없다 → 남은 잠금 파일이다
-    }
+  if (Number.isInteger(pid) && pid > 0 && postgresAlive(pid, databaseDir)) {
+    throw new Error(`이미 PostgreSQL이 떠 있다 (PID ${pid}). 그 프로세스를 먼저 종료한다 — 다른 계정의 것이면 그 계정에서.`);
   }
   console.log('[dev-db] 남은 postmaster.pid를 정리한다 (해당 프로세스 없음)');
   rmSync(lock, { force: true });
@@ -157,7 +175,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  const message = e instanceof Error ? e.message : e;
+  // embedded-postgres는 서버가 뜨지 못하면 까닭 없이(`undefined`로) 실패를 알린다 — 까닭은 바로 위의 PostgreSQL 로그 줄에 있다(T-079)
+  const message = e instanceof Error ? e.message : (e ?? '까닭을 받지 못했다 — 바로 위의 PostgreSQL 로그 줄(FATAL)을 본다');
   console.error('[dev-db] 실패:', message);
   // DLL이 없으면 initdb·pg_ctl이 말없이 이 코드로 끝난다. PostgreSQL 실행 파일은 VC++ 런타임(VCRUNTIME140·MSVCP140)을 쓰는데 묶음에 없다
   // 종료 코드를 부호 없는 수(3221225781)로 찍는지 부호 있는 수(-1073741515)로 찍는지는 부른 쪽에 달려 있어 둘 다 본다

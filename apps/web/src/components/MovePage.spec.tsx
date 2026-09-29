@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { PageSummary } from '@workfluence/shared';
+import { PAGE_TREE_MAX_DEPTH, type PageSummary } from '@workfluence/shared';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MovePage } from './MovePage';
@@ -47,6 +47,16 @@ const optionTexts = (label: string) => [...(screen.getByLabelText(label) as HTML
 const moves = () => calls.filter((c) => c.method === 'PATCH');
 
 describe('MovePage — 새 부모와 자리', () => {
+  it('**구획 폼이고 구역 이름은 제목이 붙인다** — 시험·보조기기가 "페이지 옮기기"로 찾는다. 제약은 칸 아래 도움말로 칸에 이어진다 (P17 J.5.4)', async () => {
+    render(<MovePage page={tree[0]} onMoved={vi.fn()} onCancel={vi.fn()} />);
+    const region = screen.getByRole('region', { name: '페이지 옮기기' });
+    expect(region.querySelector('h2')?.textContent).toBe('페이지 옮기기');
+    const parent = await screen.findByLabelText('어디 아래로');
+    const help = document.getElementById(parent.getAttribute('aria-describedby') ?? '');
+    expect(help?.textContent).toBe(`자기 자신과 그 아래로는 옮길 수 없다. 페이지는 ${PAGE_TREE_MAX_DEPTH}단계까지 들어간다.`);
+    expect(screen.getByRole('button', { name: '옮기기' }).className).toBe('primary');
+  });
+
   it('**자기와 그 아래는 새 부모로 고를 수 없다** — A를 옮길 때 A·A1·A2가 없다', async () => {
     render(<MovePage page={tree[0]} onMoved={vi.fn()} onCancel={vi.fn()} />);
     await screen.findByLabelText('어디 아래로');

@@ -119,6 +119,56 @@ afterEach(() => {
 
 const ask = () => calls.filter((c) => c.method === 'POST' && c.url === '/api/llm/ask');
 
+describe('화면 틀 — LLM 문맥 (P17 설계서 J.3.3·J.6)', () => {
+  it('**새 대화·내 지시문·대화 목록은 왼쪽 칸에** 그린다(틀 밖에서는 제자리) — 본문에는 h1 하나, 흩어진 "←" 링크와 새 대화 제목이 없다', async () => {
+    routes['GET /api/llm/conversations'] = () => json(200, listOf([summary('b', '최근 것', false), summary('a', '고정한 것', true)]));
+    renderAt('/llm');
+    const aside = await screen.findByRole('complementary', { name: '대화 목록' });
+    await within(aside).findByText('고정한 것');
+    // 틀 없이 그리면 `SideSlot`이 제자리에 그린다 — 틀 안에서는 왼쪽 칸으로 간다
+    const side = aside.closest('.side-inline');
+    expect(side).not.toBeNull();
+    expect(side?.contains(screen.getByRole('button', { name: '새 대화' }))).toBe(true);
+    expect(side?.contains(screen.getByRole('link', { name: '내 지시문' }))).toBe(true);
+    expect(screen.getByRole('link', { name: '내 지시문' }).getAttribute('aria-current')).toBeNull();
+    // 왼쪽 칸에는 제목을 두지 않는다 — 본문의 h1이 하나뿐이다
+    expect(side?.querySelectorAll('h1, h2, h3')).toHaveLength(0);
+    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['LLM 질문']);
+    expect(screen.queryByRole('heading', { name: '새 대화' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /←/ })).toBeNull();
+    // 고정한 것이 위다
+    const titles = within(aside)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent ?? '');
+    expect(titles[0]).toContain('고정한 것');
+    expect(titles[1]).toContain('최근 것');
+  });
+
+  it('지금 대화는 목록에서 표시한다(`aria-current`) — **받는 동안에는 목록의 제목이 링크가 아니고** 줄 끝 단추도 막힌다', async () => {
+    routes['GET /api/llm/conversations'] = () => json(200, listOf([summary('c1', '회의록 요약', false), summary('b', '최근 것', false)]));
+    routes['GET /api/llm/conversations/c1'] = () => json(200, conversation('c1'));
+    const s = stream([{ type: 'delta', text: '앞부분' }, { type: 'end', status: 'done', saved: true, conversationId: 'c1', evicted: 0, message: null }], 1);
+    routes['POST /api/llm/ask'] = () => s.res;
+    renderAt('/llm/c1');
+    const aside = await screen.findByRole('complementary', { name: '대화 목록' });
+    const current = await within(aside).findByRole('link', { name: /회의록 요약/ });
+    expect(current.getAttribute('aria-current')).toBe('page');
+    expect(current.closest('li')?.className).toBe('current');
+    expect(within(aside).getByRole('link', { name: /최근 것/ }).getAttribute('aria-current')).toBeNull();
+
+    await screen.findByText('세 줄 요약');
+    fireEvent.change(screen.getByLabelText('질문'), { target: { value: 'q' } });
+    fireEvent.click(screen.getByRole('button', { name: '보내기' }));
+    await screen.findByText('앞부분');
+    expect(within(aside).queryByRole('link')).toBeNull();
+    expect(within(aside).getByText('최근 것')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '최근 것 지우기' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: '최근 것 고정' })).toHaveProperty('disabled', true);
+    await act(async () => s.release());
+    await waitFor(() => expect(within(aside).getAllByRole('link')).toHaveLength(2));
+  });
+});
+
 describe('목록과 상한 (FR-1131~1133)', () => {
   it('고정·최근을 나누고, 상한과 남은 날을 말하고, **고정이 차면 고정 버튼을 막는다**', async () => {
     routes['GET /api/llm/conversations'] = () => json(200, listOf([summary('a', '고정한 것', true), summary('b', '최근 것', false)], 1));
@@ -131,18 +181,37 @@ describe('목록과 상한 (FR-1131~1133)', () => {
     expect(screen.getByRole('button', { name: '고정한 것 고정 풀기' })).toHaveProperty('disabled', false);
   });
 
-  it('고정·풀기·지우기는 서버를 부르고 목록을 다시 읽는다', async () => {
+  it('고정·풀기·지우기는 서버를 부르고 목록을 다시 읽는다 — **지우기는 확인 대화로 한 번 더 묻는다**(되살릴 수 없다, P17 J.5.10)', async () => {
     routes['GET /api/llm/conversations'] = () => json(200, listOf([summary('b', '최근 것', false)]));
     routes['PUT /api/llm/conversations/b/pin'] = () => json(200, { ok: true });
     routes['DELETE /api/llm/conversations/b'] = () => json(200, { ok: true });
-    // happy-dom에는 `confirm`이 없다 — 붙인다
-    Object.defineProperty(window, 'confirm', { value: vi.fn(() => true), configurable: true, writable: true });
     renderAt('/llm');
     fireEvent.click(await screen.findByRole('button', { name: '최근 것 고정' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
+
+    // 그만두면 지우지 않는다. 처음 초점은 그만두기, 확정 단추는 줄의 "{제목} 지우기"를 품지 않는다
     fireEvent.click(screen.getByRole('button', { name: '최근 것 지우기' }));
+    const dialog = await screen.findByRole('dialog', { name: '이 대화를 지울까요?' });
+    expect(dialog.textContent).toContain('"최근 것" 대화를 지운다. 되살릴 수 없다.');
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '그만두기' }));
+    expect(within(dialog).queryByRole('button', { name: /지우/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: '그만두기' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '최근 것 지우기' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '없앤다' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
+    expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual(['/api/llm/conversations/b']);
     expect(calls.filter((c) => c.url === '/api/llm/conversations').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('목록을 읽지 못하면 왼쪽 칸이 "불러오는 중"에 머물지 않고 그렇게 말한다', async () => {
+    routes['GET /api/llm/conversations'] = () => json(500, { message: '대화 목록을 읽지 못했다 (서버 오류)' });
+    renderAt('/llm');
+    expect((await screen.findByRole('alert')).textContent).toBe('대화 목록을 읽지 못했다 (서버 오류)');
+    const aside = screen.getByRole('complementary', { name: '대화 목록' });
+    expect(aside.textContent).toBe('대화 목록을 읽지 못했다.');
   });
 
   it('등록된 LLM이 없으면 그렇게 말하고 보내지 못한다', async () => {
@@ -411,7 +480,8 @@ describe('묻기 (FR-1110~1122)', () => {
     routes['GET /api/llm/conversations/c1'] = () =>
       json(200, conversation('c1', { messages: [{ id: 'm2', role: 'assistant', content: '반쯤', model: 'mock-qwen3', status: 'failed', createdAt: new Date().toISOString() }] }));
     renderAt('/llm/c1');
-    expect(await screen.findByText('끊김')).toBeTruthy();
+    // 상태 표지는 배지다 — 기호는 CSS가 붙여 글에 들어가지 않는다 (P17 J.5.8)
+    expect((await screen.findByText('끊김')).className).toBe('badge fail');
     fireEvent.click(screen.getByRole('button', { name: '답 복사' }));
     expect(await screen.findByText('답을 복사했다')).toBeTruthy();
     expect(writeText).toHaveBeenCalledWith('반쯤');

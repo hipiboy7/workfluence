@@ -1,7 +1,10 @@
 import { POLICY_DEFAULTS, SETTINGS_KEYS, type AppEnv, type Principal } from '@workfluence/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { settings, users } from '../db/schema';
+import { auditEvents, settings, users } from '../db/schema';
+import { AuditService } from '../audit/audit.service';
+import { PolicyController } from './settings.module';
+import { ForbiddenException } from '@nestjs/common';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { UsersService } from '../users/users.service';
 import { SettingsService } from './settings.service';
@@ -243,5 +246,54 @@ describe('정책값이 실제로 쓰이는지 (CLAUDE.md 5절)', () => {
     const third = await users.verifyCredentials('lockme', '틀린비밀번호');
     expect(third).toMatchObject({ ok: false, reason: 'locked' });
     expect((await users.findByUsername('lockme'))?.lockedUntil).not.toBeNull();
+  });
+});
+
+describe('감사 기록 단계 (P17 FR-1840·1841) — 필수는 늘, 양이 많은 것만 단계로', () => {
+  const actions = async () => (await db.select({ action: auditEvents.action }).from(auditEvents)).map((r) => r.action).sort();
+
+  it('단계를 낮추면 양이 많은 행위만 빠지고 필수 기록은 남는다 — 트랜잭션 안에서도(캐시가 비면 그 트랜잭션으로 읽는다)', async () => {
+    const svc = svcWith();
+    const audit = new AuditService(db, svc);
+    const me = await admin();
+
+    await applyPatch(svc, { auditLevel: 1 }, me);
+    expect(svc.peek()).toBeNull();
+    await db.transaction(async (tx) => {
+      await audit.record({ action: 'page.collab.save' }, tx);
+      await audit.record({ action: 'attachment.download' }, tx);
+      await audit.record({ action: 'page.update' }, tx);
+    });
+    await audit.record({ action: 'auth.login.success' });
+    expect(await actions()).toEqual(['auth.login.success', 'page.update']);
+
+    // 2(줄임) — 자동 저장만 빠진다
+    await applyPatch(svc, { auditLevel: 2 }, me);
+    await audit.record({ action: 'attachment.download' });
+    await audit.record({ action: 'page.collab.save' });
+    expect(await actions()).toEqual(['attachment.download', 'auth.login.success', 'page.update']);
+
+    // 3(전체, 기본) — 모두
+    await applyPatch(svc, { auditLevel: 3 }, me);
+    await audit.record({ action: 'page.collab.save' });
+    expect(await actions()).toContain('page.collab.save');
+  });
+
+  it('**시스템 관리자만 바꾼다** — 관리자는 403이고 값이 그대로다. 바꾼 것은 필수 기록(settings.update)으로 남는다', async () => {
+    const svc = svcWith();
+    const audit = new AuditService(db, svc);
+    const ctrl = new PolicyController(svc, audit, db);
+    const me = await admin();
+    const req = { ip: '127.0.0.1' } as never;
+    await expect(ctrl.update({ auditLevel: 1 }, { ...me } as never, req)).rejects.toThrow(ForbiddenException);
+    expect((await svc.get()).auditLevel).toBe(3);
+    // 다른 값은 관리자도 그대로 바꾼다
+    await ctrl.update({ trashRetentionDays: 40 }, { ...me } as never, req);
+
+    const [r] = await db.insert(users).values({ username: 'sys', displayName: 'sys', passwordHash: 'x', role: 'root', status: 'active' }).returning();
+    await ctrl.update({ auditLevel: 1 }, { id: r.id, role: 'root' } as never, req);
+    expect((await svc.get()).auditLevel).toBe(1);
+    const changes = await db.select({ detail: auditEvents.detail }).from(auditEvents).where(eq(auditEvents.action, 'settings.update'));
+    expect(changes.map((c) => c.detail)).toContainEqual({ before: { auditLevel: 3 }, after: { auditLevel: 1 } });
   });
 });

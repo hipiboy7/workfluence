@@ -5,13 +5,17 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../auth';
 import { SEARCH_DELAY_MS } from '../../timing';
-import { confirmSuspendText, confirmTakeoverText } from '../../components/SpaceManage';
+import { confirmDeleteCategoryText } from '../../components/CategoryList';
+import { confirmSuspendText, confirmTakeoverText, deleteSpaceConfirm } from '../../components/SpaceManage';
 import { AdminSpacesPage } from './AdminSpacesPage';
 
 /**
  * 컴포넌트 시험 — 관리 콘솔의 스페이스 (P14_설계서_Spaces D.3, FR-1513~1515 · P15_설계서_Grants D.5). **찾기와 상태는 서버에 보낸다**(`q`·`status`) —
  * 화면에서 거르지 않는다. 늦게 온 옛 응답은 버린다. 줄의 조치는 응답의 `access`대로. 분류의 이름 바꾸기·지우기도 응답의 `access`대로이고, 지우기는
- * 몇 개가 분류 없음이 되는지 묻는다. 스페이스 관리 전체·분류 관리를 받은 member도 연다. 서버는 가짜 `fetch`다
+ * 몇 개가 분류 없음이 되는지 묻는다. 스페이스 관리 전체·분류 관리를 받은 member도 연다. 서버는 가짜 `fetch`다.
+ *
+ * 묻는 것은 브라우저 창이 아니라 확인 대화다(P17 J.5.10) — 확정 단추는 부른 단추의 이름을 품지 않는다("중지" → "멈춘다", "지우기" → "지운다",
+ * "관리자가 건 중지로 바꾸기" → "넘겨받는다"). 결과의 알림띠는 조치한 구획에 보인다(J.5.7)
  */
 
 type Call = { method: string; url: string; body: unknown };
@@ -116,6 +120,16 @@ const table = () => screen.getByRole('table', { name: '모든 스페이스' });
 const rowButtons = (name: string) =>
   within(within(table()).getByRole('link', { name }).closest('tr')!).queryAllByRole('button').map((b) => b.textContent);
 const writes = () => calls.filter((c) => c.method !== 'GET');
+/** 확인 대화가 뜨기를 기다려 단추를 누른다 — 대화의 글을 돌려준다 */
+async function reply(button: string): Promise<string> {
+  const dialog = await screen.findByRole('dialog');
+  const text = dialog.textContent ?? '';
+  fireEvent.click(within(dialog).getByRole('button', { name: button }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  return text;
+}
+/** 분류 구획 */
+const categoryRegion = () => screen.getByRole('region', { name: '분류' });
 
 describe('AdminSpacesPage — 모든 스페이스', () => {
   it('**모든 스페이스를 상한만큼 받는다** — `scope=all`, `limit`은 공유 상수', async () => {
@@ -148,27 +162,44 @@ describe('AdminSpacesPage — 모든 스페이스', () => {
   });
 
   it('**줄의 조치는 access대로** — 활성은 중지(묻는다), 중지된 것은 다시 쓰기·지우기(묻는다)', async () => {
-    // happy-dom에는 `confirm`이 없다 — 브라우저처럼 둔다
-    const confirm = vi.fn(() => true);
-    window.confirm = confirm;
     renderPage();
     await screen.findByRole('link', { name: '운영팀' });
     // 표 안만 센다 — 아래 분류 칸에도 지우기가 있다
     expect(rowButtons('운영팀')).toEqual(['중지']);
     expect(rowButtons('개발팀')).toEqual(['다시 쓰기', '지우기']);
     fireEvent.click(within(table()).getByRole('button', { name: '중지' }));
+    // 중지를 묻는 말은 스페이스 화면의 관리 칸과 같다. 처음 초점은 그만두기, 확정은 위험 단추다
+    const dialog = await screen.findByRole('dialog');
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '그만두기' }));
+    expect(within(dialog).getByRole('button', { name: '멈춘다' }).className).toBe('danger solid');
+    expect(await reply('멈춘다')).toContain(confirmSuspendText('운영팀'));
     await waitFor(() => expect(writes()).toHaveLength(1));
+    // 다시 쓰기는 묻지 않는다 — 되돌리는 쪽이다
     fireEvent.click(within(table()).getByRole('button', { name: '다시 쓰기' }));
+    await waitFor(() => expect(writes()).toHaveLength(2));
+    expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(within(table()).getByRole('button', { name: '지우기' }));
+    expect(await reply('지운다')).toContain(deleteSpaceConfirm('개발팀').body as string);
     await waitFor(() => expect(writes()).toHaveLength(3));
     expect(writes()).toEqual([
       { method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended' } },
       { method: 'PATCH', url: '/api/spaces/s2/status', body: { status: 'active' } },
       { method: 'DELETE', url: '/api/spaces/s2', body: undefined },
     ]);
-    expect(confirm).toHaveBeenCalledTimes(2); // 중지·지우기 — 다시 쓰기는 묻지 않는다
-    // 중지를 묻는 말은 스페이스 화면의 관리 칸과 같다
-    expect(confirm).toHaveBeenNthCalledWith(1, confirmSuspendText('운영팀'));
+    // 결과는 표 위에 보인다 — 분류 구획이 아니다
+    expect((await screen.findByRole('status')).textContent).toBe('"개발팀"을(를) 지웠다 — 휴지통에 있다.');
+    expect(within(categoryRegion()).queryByRole('status')).toBeNull();
+  });
+
+  it('**그만두면 보내지 않는다** — 중지·지우기 모두', async () => {
+    renderPage();
+    await screen.findByRole('link', { name: '운영팀' });
+    fireEvent.click(within(table()).getByRole('button', { name: '중지' }));
+    await reply('그만두기');
+    fireEvent.click(within(table()).getByRole('button', { name: '지우기' }));
+    await reply('그만두기');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(writes()).toEqual([]);
   });
 
   it('**줄의 조치는 access대로** — 관리할 수 없는 줄에는 단추가 없다', async () => {
@@ -245,6 +276,8 @@ describe('AdminSpacesPage — 분류', () => {
       { method: 'POST', url: '/api/categories', body: { name: '개발' } },
     ]);
     expect((await screen.findByRole('status')).textContent).toBe('분류 "개발"을(를) 만들었다.');
+    // 결과는 조치한 구획(분류) 안에 보인다 (J.5.7)
+    expect(within(categoryRegion()).getByRole('status')).toBeTruthy();
     await screen.findByLabelText('분류 개발 이름');
   });
 
@@ -270,25 +303,25 @@ describe('AdminSpacesPage — 분류', () => {
 
   it('**지우기는 몇 개가 분류 없음이 되는지 묻는다** — 지우면 그렇게 알리고 목록을 다시 읽는다 (P15 FR-1622·1624)', async () => {
     categories = [category({ usage: { spaces: 2, otherSpaces: 1 } })];
-    const confirm = vi.fn(() => true);
-    window.confirm = confirm;
     renderPage();
     await screen.findByLabelText('분류 운영 이름');
     expect(screen.getByText('공간 2개 (만든 사람의 것이 아닌 공간 1개)')).toBeTruthy();
     fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
     // 글자 그대로 본다 — 같은 함수로 만든 말과 견주면 그 함수가 틀려도 참이다(돌연변이 W4가 빠져나갔다)
-    expect(confirm).toHaveBeenCalledWith('분류 "운영"을(를) 지운다. 이 분류를 쓰는 공간 2개(휴지통 포함)가 "분류 없음"이 된다. 되살릴 수 없다 — 어느 공간이었는지는 감사로그에 남는다.');
+    expect(await reply('지운다')).toContain('분류 "운영"을(를) 지운다. 이 분류를 쓰는 공간 2개(휴지통 포함)가 "분류 없음"이 된다. 되살릴 수 없다 — 어느 공간이었는지는 감사로그에 남는다.');
     expect((await screen.findByRole('status')).textContent).toBe('분류 "운영"을(를) 지웠다 — 쓰던 공간 2개는 분류 없음이 됐다.');
+    expect(within(categoryRegion()).getByRole('status')).toBeTruthy();
     expect(writes()).toEqual([{ method: 'DELETE', url: '/api/categories/c1', body: undefined }]);
   });
 
   it('서버가 거절하면 그 까닭을 보인다', async () => {
-    window.confirm = vi.fn(() => true);
     categoryDelete = { status: 403, body: { message: "남의 공간이 쓰는 분류는 관리자나 '분류 관리'를 받은 사람이 지운다" } };
     renderPage();
     await screen.findByLabelText('분류 운영 이름');
     fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
+    expect(await reply('지운다')).toContain(confirmDeleteCategoryText(categories[0]));
     expect((await screen.findByRole('alert')).textContent).toContain('남의 공간이 쓰는 분류는');
+    expect(within(categoryRegion()).getByRole('alert')).toBeTruthy();
   });
 
   it('**할 수 없는 분류는 누를 수 없고 까닭이 보인다** — 내가 만들었으면 남의 공간이 써서, 아니면 만든 사람이 아니어서 (FR-1621)', async () => {
@@ -314,19 +347,16 @@ describe('AdminSpacesPage — 넘겨받기·쓰임을 보이는 범위 (P15 병�
       space({ id: 's1', key: 'OPS1', name: '운영팀', status: 'suspended', suspendedByOwner: true, access: { ...NO, canChangeStatus: true, canDelete: true } }),
       space({ id: 's2', key: 'DEV1', name: '개발팀', status: 'suspended', suspendedByOwner: false, access: { ...NO, canChangeStatus: true, canDelete: true } }),
     ];
-    const confirm = vi.fn(() => true);
-    window.confirm = confirm;
     renderPage();
     await screen.findByRole('link', { name: '운영팀' });
     expect(rowButtons('운영팀')).toEqual(['다시 쓰기', '관리자가 건 중지로 바꾸기', '지우기']);
     expect(rowButtons('개발팀')).toEqual(['다시 쓰기', '지우기']);
     fireEvent.click(within(within(table()).getByRole('link', { name: '운영팀' }).closest('tr')!).getByRole('button', { name: '관리자가 건 중지로 바꾸기' }));
+    expect(await reply('넘겨받는다')).toContain(confirmTakeoverText('운영팀'));
     await waitFor(() => expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended', takeover: true } }]));
-    expect(confirm).toHaveBeenCalledWith(confirmTakeoverText('운영팀'));
   });
 
   it('**거절되면 목록을 다시 읽는다** — 그 사이 누가 바꿨으면 옛 단추가 남아 같은 거절이 되풀이된다. 분류 칸도 같다 (좁은 재검토 10·11)', async () => {
-    window.confirm = vi.fn(() => true);
     const base = globalThis.fetch;
     globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
@@ -342,10 +372,14 @@ describe('AdminSpacesPage — 넘겨받기·쓰임을 보이는 범위 (P15 병�
     const catReads = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/categories').length;
     const before = lists();
     fireEvent.click(within(table()).getByRole('button', { name: '중지' }));
+    await reply('멈춘다');
     expect((await screen.findByRole('alert')).textContent).toContain('그 사이 누가 상태를 바꿨다');
+    // 표의 거절은 표 위에 — 분류 구획이 아니다
+    expect(within(categoryRegion()).queryByRole('alert')).toBeNull();
     await waitFor(() => expect(lists()).toBeGreaterThan(before));
     const catBefore = catReads();
     fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
+    await reply('지운다');
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('남의 공간이 쓰는 분류는'));
     await waitFor(() => expect(catReads()).toBeGreaterThan(catBefore));
   });
@@ -359,14 +393,17 @@ describe('AdminSpacesPage — 넘겨받기·쓰임을 보이는 범위 (P15 병�
   });
 
   it('**휴지통 안내는 지운 스페이스를 되살릴 수 있는 사람에게만** — 분류 관리만 받은 사람의 휴지통에는 그 칸이 없다 (병합 전 문서 정합성 24)', async () => {
+    // 안내는 링크가 아닌 글이다 — 휴지통 링크는 위 막대의 주 메뉴에 있다(한 화면에 같은 이름의 링크를 둘 두지 않는다, P17 J.8-1)
+    const hint = /지운 스페이스는 휴지통에서 되살린다/;
     me = { ...me, id: 'm1', role: 'member', grants: ['category.manage'] };
     renderPage();
     await screen.findByLabelText('분류 운영 이름');
-    expect(screen.queryByRole('link', { name: '휴지통' })).toBeNull();
+    expect(screen.queryByText(hint)).toBeNull();
     cleanup();
     me = { ...me, grants: ['space.oversee'] };
     renderPage();
-    expect(await screen.findByRole('link', { name: '휴지통' })).toBeTruthy();
+    expect(await screen.findByText(hint)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '휴지통' })).toBeNull();
   });
 });
 

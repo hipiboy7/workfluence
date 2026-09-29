@@ -129,7 +129,7 @@ test('지시문을 고르고 물으면 답이 흘러나오고, 고정하고 이�
   await page.getByRole('button', { name: '저장' }).click();
   await expect(page.getByRole('region', { name: '요약가' })).toBeVisible();
 
-  await page.getByRole('link', { name: '← LLM 질문' }).click();
+  await page.getByRole('link', { name: 'LLM 질문', exact: true }).click();
   await page.getByLabel('지시문').selectOption({ label: '요약가' });
   await chooseProvider(page);
   await page.getByLabel('질문', { exact: true }).fill('첫 질문입니다');
@@ -216,7 +216,7 @@ test('**페이지를 떠나면 받던 답을 멈춘다** — 받은 데까지 �
   await expect.poll(() => chats().at(-1)?.closedEarly).toBe(true);
 
   // 자리가 풀렸다 — "이미 답을 받고 있다"(409)가 아니다
-  await page.getByRole('link', { name: '← LLM 질문' }).click();
+  await page.getByRole('link', { name: 'LLM 질문', exact: true }).click();
   await chooseProvider(page);
   await page.getByLabel('질문', { exact: true }).fill('돌아와서 묻는다');
   await page.getByRole('button', { name: '보내기' }).click();

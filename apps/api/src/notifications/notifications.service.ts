@@ -1,6 +1,18 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { can, spaceAccess, type DocNode, type NotificationView, type Principal, type Role, type SpaceLike, type SpaceMemberRole } from '@workfluence/shared';
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import {
+  can,
+  canManageUser,
+  isAdminRole,
+  spaceAccess,
+  type DocNode,
+  type NotificationKind,
+  type NotificationView,
+  type Principal,
+  type Role,
+  type SpaceLike,
+  type SpaceMemberRole,
+} from '@workfluence/shared';
+import { and, count, desc, eq, inArray, isNull, ne, type SQL } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { comments, notifications, pages, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
 import { callerFor, extractMentions } from './domain/mention';
@@ -13,12 +25,16 @@ export const NOTIFY = Symbol('NOTIFY');
 
 export type NotificationDraft = {
   userId: string;
-  kind: 'mention';
-  pageId: string;
+  kind: NotificationKind;
+  /** 어디서 불렸나. 비밀번호 초기화 요청은 페이지가 없다 (P17) */
+  pageId: string | null;
   commentId: string | null;
-  /** 부른 사람. `null`이면 모른다 (P8 FR-901) */
+  /** 부른 사람. `null`이면 모른다 (P8 FR-901). 비밀번호 초기화 요청이면 요청한 사람이다 */
   actorId: string | null;
 };
+
+/** 비밀번호 초기화 요청 (P17 F-010 8번) */
+const RESET_REQUEST: NotificationKind = 'password.reset.request';
 
 export interface NotificationChannel {
   send(drafts: NotificationDraft[], tx: Db): Promise<void>;
@@ -148,6 +164,65 @@ export class NotificationsService {
   }
 
   /**
+   * 비밀번호 초기화 요청을 **그 사람을 관리할 수 있는 관리자·시스템 관리자에게** 알린다 (P17 F-010 8번, FR-1801). 받는 사람은 사용자 관리에서
+   * 초기화 단추를 누를 수 있는 사람이다 — 판정은 `canManageUser` 한 곳(위임까지 본다, P11). 자기 자신과 활성이 아닌 계정에는 보내지 않는다.
+   *
+   * **같은 사람의 요청을 아직 읽지 않았으면 또 만들지 않는다** (FR-1802). 로그인하지 않은 경로라 아이디와 email을 아는 누구나 되풀이할 수 있다 —
+   * IP별 제한이 있어도 관리자의 알림함이 쌓인다. 만든 수를 돌려준다
+   */
+  async notifyPasswordResetRequest(requester: { id: string; role: Role; grants: readonly string[] }, tx: Db = this.db): Promise<number> {
+    const managers = await tx
+      .select({ id: users.id, role: users.role, grants: users.grants })
+      .from(users)
+      .where(and(inArray(users.role, ['admin', 'root']), eq(users.status, 'active')));
+    const eligible = managers.filter(
+      (m) => m.id !== requester.id && canManageUser({ id: m.id, role: m.role as Role, grants: m.grants }, { role: requester.role, grants: requester.grants }),
+    );
+    if (eligible.length === 0) return 0;
+    const pending = await tx
+      .select({ userId: notifications.userId })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.kind, RESET_REQUEST),
+          eq(notifications.actorId, requester.id),
+          isNull(notifications.readAt),
+          inArray(
+            notifications.userId,
+            eligible.map((m) => m.id),
+          ),
+        ),
+      );
+    const waiting = new Set(pending.map((p) => p.userId));
+    const drafts: NotificationDraft[] = eligible
+      .filter((m) => !waiting.has(m.id))
+      .map((m) => ({ userId: m.id, kind: RESET_REQUEST, pageId: null, commentId: null, actorId: requester.id }));
+    await this.channel.send(drafts, tx);
+    return drafts.length;
+  }
+
+  /**
+   * 그 사람의 비밀번호를 누가 초기화하면 **남은 초기화 요청 알림을 모두 읽음으로** 한다 (P17 FR-1803) — 받은 관리자 모두의 것이다. 둘이 같은 요청을
+   * 받고 둘 다 초기화하면 먼저 알려 준 임시 비밀번호가 쓸모없어진다. 초기화와 같은 트랜잭션에서 부른다. 바꾼 수를 돌려준다
+   */
+  async resolvePasswordResetRequests(requesterId: string, tx: Db = this.db): Promise<number> {
+    const done = await tx
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(and(eq(notifications.kind, RESET_REQUEST), eq(notifications.actorId, requesterId), isNull(notifications.readAt)))
+      .returning({ id: notifications.id });
+    return done.length;
+  }
+
+  /**
+   * 지금 볼 수 있는 종류만 (P17 FR-1804). 비밀번호 초기화 요청은 **지금 관리자·시스템 관리자일 때만** 보이고 세어진다 — 관리자에서 내려가면
+   * 누가 초기화를 요청했는지는 더 알 일이 아니다. 목록과 안 읽은 수가 같은 조건을 쓴다
+   */
+  private visibleKinds(principal: Principal): SQL | undefined {
+    return isAdminRole(principal.role) ? undefined : ne(notifications.kind, RESET_REQUEST);
+  }
+
+  /**
    * 자기 것만 본다 (FR-508). 남의 알림을 조회할 경로 자체를 두지 않는다.
    *
    * **제목은 지금 볼 수 있을 때만 준다.** 만들 때 권한을 봤어도 그 뒤 Crew에서 빠질 수
@@ -165,6 +240,7 @@ export class NotificationsService {
         readAt: notifications.readAt,
         createdAt: notifications.createdAt,
         actorName: users.displayName,
+        actorUsername: users.username,
         pageTitle: pages.title,
         pageDeletedAt: pages.deletedAt,
         // 대상이 살아 있는지는 **페이지만으로 판단할 수 없다** (자체 점검 9).
@@ -184,16 +260,18 @@ export class NotificationsService {
       .leftJoin(spaces, eq(spaces.id, pages.spaceId))
       .leftJoin(spaceMembers, and(eq(spaceMembers.spaceId, spaces.id), eq(spaceMembers.userId, principal.id)))
       .leftJoin(comments, eq(comments.id, notifications.commentId))
-      .where(eq(notifications.userId, principal.id))
+      .where(and(eq(notifications.userId, principal.id), this.visibleKinds(principal)))
       .orderBy(desc(notifications.createdAt))
       .limit(limit);
 
     return rows.map((r) => ({
       id: r.id,
-      kind: r.kind as 'mention',
+      kind: r.kind as NotificationKind,
       pageId: r.pageId,
       commentId: r.commentId,
       actorName: r.actorName,
+      // 관리자가 사용자 관리에서 그 사람을 찾는 데만 쓴다 — 멘션에는 싣지 않는다 (P17)
+      actorUsername: r.kind === RESET_REQUEST ? r.actorUsername : null,
       // 대상이 지워졌거나 **지금 볼 수 없으면** 제목 대신 그 사실을 준다 (FR-506)
       pageTitle: this.visibleTitle(r, principal, isAdmin),
       readAt: r.readAt?.toISOString() ?? null,
@@ -240,7 +318,7 @@ export class NotificationsService {
     const [{ n }] = await tx
       .select({ n: count() })
       .from(notifications)
-      .where(and(eq(notifications.userId, principal.id), isNull(notifications.readAt)));
+      .where(and(eq(notifications.userId, principal.id), isNull(notifications.readAt), this.visibleKinds(principal)));
     return n;
   }
 
@@ -261,7 +339,7 @@ export class NotificationsService {
     const r = await tx
       .update(notifications)
       .set({ readAt: new Date() })
-      .where(and(eq(notifications.userId, principal.id), isNull(notifications.readAt)))
+      .where(and(eq(notifications.userId, principal.id), isNull(notifications.readAt), this.visibleKinds(principal)))
       .returning({ id: notifications.id });
     return r.length;
   }

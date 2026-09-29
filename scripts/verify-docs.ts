@@ -24,7 +24,7 @@
  *
  * 종료 코드: 0 이상 없음 / 1 위반 있음
  */
-import { LOG_EVENTS } from '@workfluence/shared';
+import { BACKGROUND_POLL_PATH, LOG_EVENTS } from '@workfluence/shared';
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
@@ -271,6 +271,37 @@ function checkUploadLimits(findings: Finding[]): void {
 }
 
 /**
+ * **nginx가 접근 로그에서 빼는 배경 요청의 경로가 공유 상수와 같은지 본다** (P17 설계서 A.1-8). 앱(`accessLogEntry`)은 `BACKGROUND_POLL_PATH`를 쓰고
+ * nginx는 설정 파일에 글로 적는다 — 한쪽만 바뀌면 알림 수 물음이 한쪽 로그에만 30초마다 쌓이거나, 넓어지면 표시 하나로 다른 요청이 로그에서 빠진다
+ */
+function checkBackgroundPoll(findings: Finding[]): void {
+  const conf = resolve(ROOT, 'deploy/nginx.conf');
+  if (!existsSync(conf)) return;
+  const lines = readFileSync(conf, 'utf8').split(/\r?\n/);
+  const at = lines.findIndex((l) => /^\s*map\s+"\$http_x_wf_background:\$request_method:\$uri:\$status"\s+\$wf_loggable/.test(l));
+  const entry = at < 0 ? undefined : lines[at + 1];
+  if (entry === undefined || !entry.includes(`"~^1:GET:${BACKGROUND_POLL_PATH}:`)) {
+    findings.push({ file: 'deploy/nginx.conf', line: at + 2, kind: '배경 요청 경로 불일치', detail: `$wf_loggable의 첫 줄이 GET ${BACKGROUND_POLL_PATH}(BACKGROUND_POLL_PATH)를 빼지 않는다` });
+  }
+}
+
+/**
+ * **대소문자만 다른 파일·모듈 이름을 막는다** (T-093). Linux는 가리지만 Windows(체험의 가 길, 묶음 러너)는 가리지 않는다 — 확장자 없이 부르는
+ * `./Labels`가 같은 폴더의 `labels.ts`로 읽혀 Windows에서만 빌드가 깨졌다. 코드 파일은 확장자를 뺀 이름으로(`.ts`·`.tsx`·`.js`·`.mjs` 등이 서로
+ * 가려진다), 그 밖의 파일은 전체 이름으로 견준다
+ */
+function checkCaseCollisions(findings: Finding[]): void {
+  const out = execSync('git -c core.quotepath=false ls-files', { cwd: ROOT, encoding: 'utf8' });
+  const seen = new Map<string, string>();
+  for (const rel of out.split(/\r?\n/).filter(Boolean)) {
+    const stem = rel.replace(/\.(d\.ts|[cm]?[jt]sx?)$/i, '');
+    const other = seen.get(stem.toLowerCase());
+    if (other === undefined) seen.set(stem.toLowerCase(), stem);
+    else if (other !== stem) findings.push({ file: rel, line: 0, kind: '대소문자만 다른 이름', detail: `${other} — Windows에서는 같은 이름이다` });
+  }
+}
+
+/**
  * 7. 로그 event 코드 (P11_설계서_Ops D.4, FR-1218). 코드 목록(`LOG_EVENTS`)이 정본이고 운영자가 읽는 표는 장애대응 가이드 한 곳이다 —
  * 코드를 더하고 가이드를 잊으면 운영자가 그 줄을 만났을 때 찾을 곳이 없다. 백틱으로 적힌 코드를 찾는다
  */
@@ -305,6 +336,8 @@ function main(): void {
   if (argPath < 0) {
     checkShellScripts(findings);
     checkUploadLimits(findings);
+    checkBackgroundPoll(findings);
+    checkCaseCollisions(findings);
     checkLogEvents(findings);
   }
 

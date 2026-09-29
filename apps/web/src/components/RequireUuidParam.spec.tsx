@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RequireUuidParam } from './RequireUuidParam';
 
@@ -31,10 +31,44 @@ describe('RequireUuidParam', () => {
     expect(screen.getByText('페이지 화면')).toBeTruthy();
   });
 
+  it('**대문자가 든 식별자는 소문자 주소로 바꿔 연다** — 서버가 돌려주는 id(소문자)와 견주는 화면이 멈추지 않게. 질의·조각은 그대로 (좁은 재점검 N2)', async () => {
+    function Where() {
+      const l = useLocation();
+      return <output>{`${l.pathname}${l.search}${l.hash}`}</output>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/pages/3F2A7B1C-9D4E-4F60-8A1B-2C3D4E5F6A7B/edit?x=1#c']}>
+        <Where />
+        <Routes>
+          <Route
+            path="/pages/:id/edit"
+            element={
+              <RequireUuidParam>
+                <p>편집 화면</p>
+              </RequireUuidParam>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText('편집 화면');
+    expect(screen.getByRole('status').textContent).toBe('/pages/3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b/edit?x=1#c');
+  });
+
   it('**`%2F`로 하위 경로를 붙인 id는 그리지 않는다** — 화면이 그 id로 API를 부르지 않는다', () => {
     renderAt('/pages/3f2a7b1c-9d4e-4f60-8a1b-2c3d4e5f6a7b%2Flabels%2Fx');
     expect(screen.queryByText('페이지 화면')).toBeNull();
     expect(screen.getByRole('alert').textContent).toMatch(/찾을 수 없다/);
+  });
+
+  it('**잘못된 주소 화면에도 h1이 하나 있다** — 제목으로 화면을 찾는 보조기기에 잡힌다. 탭 제목도 같다 (FR-1854, 병합 전 검토 10)', async () => {
+    renderAt('/pages/not-an-id');
+    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['찾을 수 없다']);
+    // 알림띠는 머리 아래다
+    const heading = screen.getByRole('heading', { level: 1 });
+    expect(heading.compareDocumentPosition(screen.getByRole('alert')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('link', { name: '← 홈' }).getAttribute('href')).toBe('/');
+    await waitFor(() => expect(document.title).toBe('찾을 수 없다 - 스페이스 - workfluence'));
   });
 
   it('**`:id`가 없는 경로는 그대로 그리고, 같은 화면의 두 경로 사이를 옮겨도 화면을 새로 만들지 않는다** — 알림·상태가 남는다', async () => {

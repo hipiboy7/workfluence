@@ -46,6 +46,11 @@ export class SettingsService {
     return this.env.WF_UPLOAD_MAX_MB;
   }
 
+  /** 캐시에 있으면 그 값, 없으면 `null` — DB에 가지 않는다. 감사 기록이 트랜잭션 안에서 단계를 볼 때 쓴다(`AuditService`, P17) */
+  peek(): Policy | null {
+    return this.cache;
+  }
+
   async get(tx: Db = this.db): Promise<Policy> {
     // **트랜잭션 안에서는 캐시를 보지 않는다** — 잠금 뒤에 읽는 값(`update`의 `current`)이 캐시의 옛 값이면 "잠금 뒤에 읽는다"가
     // 거짓이 된다 (검토 반영 — 짝 규칙이 옛 값을 보고 지나갔다). `update`만의 일이 아니다: 트랜잭션을 넘기는 호출자 모두(비밀번호 판정·

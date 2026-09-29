@@ -7,7 +7,8 @@ import { SpaceManage, confirmSuspendText, confirmTakeoverText } from './SpaceMan
 
 /**
  * 컴포넌트 시험 — 스페이스 화면의 관리 칸 (P14_설계서_Spaces D.3, FR-1510·1511 · P15_설계서_Grants D.5). 보이는 조건은 응답의 `access`다 — 화면은
- * 규칙을 다시 만들지 않는다. 중지와 지우기는 한 번 더 묻는다. 새 분류는 고른 상태가 되고 저장해야 붙는다. 서버는 가짜 `fetch`다
+ * 규칙을 다시 만들지 않는다. 중지와 지우기는 한 번 더 묻는다 — 확인 대화다(P17 J.5.10). 새 분류는 고른 상태가 되고 저장해야 붙는다. 결과는 조치한
+ * 구획 안의 알림띠다(J.5.7). 서버는 가짜 `fetch`다
  */
 
 type Call = { method: string; url: string; body: unknown };
@@ -75,6 +76,16 @@ afterEach(() => {
 });
 
 const writes = () => calls.filter((c) => c.method !== 'GET');
+/** 확인 대화가 뜨기를 기다려 단추를 누른다 — 대화의 글을 돌려준다 */
+async function reply(button: string): Promise<string> {
+  const dialog = await screen.findByRole('dialog');
+  const text = dialog.textContent ?? '';
+  fireEvent.click(within(dialog).getByRole('button', { name: button }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  return text;
+}
+/** 그 제목의 구획 — 결과가 어느 구획에 보이는지 본다 */
+const block = (heading: string) => screen.getByRole('heading', { name: heading }).parentElement!;
 
 describe('SpaceManage — 보이는 조건은 access', () => {
   it('관리할 수도 지울 수도 없으면 칸이 없다 — 분류도 읽지 않는다', async () => {
@@ -119,21 +130,28 @@ describe('SpaceManage — 보이는 조건은 access', () => {
     expect(writes()[0].body).toEqual({ name: '운영팀', description: '운영 문서', categoryId: null });
   });
 
-  it('**중지는 한 번 더 묻는다** — 아니라고 하면 보내지 않는다', async () => {
-    // happy-dom에는 `confirm`이 없다 — 브라우저처럼 둔다
-    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
-    window.confirm = confirm;
+  it('**중지는 한 번 더 묻는다** — 그만두면 보내지 않는다. 처음 초점은 그만두기다 (J.5.10)', async () => {
     const onChanged = vi.fn();
     render(<SpaceManage meId="u1" space={space()} onChanged={onChanged} onDeleted={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '중지' }));
+    const suspend = screen.getByRole('button', { name: '중지' });
+    // 위험한 조치는 위험 단추다 (J.5.2)
+    expect(suspend.className).toBe('danger');
+    fireEvent.click(suspend);
+    const dialog = await screen.findByRole('dialog');
+    // 열어 둔 편집 창이 곧바로가 아니라 몇 분 안에 끊긴다고 말한다(주기 재판정)
+    expect(dialog.textContent).toContain(confirmSuspendText('운영팀'));
+    expect(confirmSuspendText('운영팀')).toContain('열어 둔 편집 창은 몇 분 안에 끊긴다');
+    // 잘못 누른 Enter가 중지가 되지 않게 — 처음 초점은 그만두기, 확정은 위험 단추
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '그만두기' }));
+    expect(within(dialog).getByRole('button', { name: '멈춘다' }).className).toBe('danger solid');
+    await reply('그만두기');
     expect(writes()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: '중지' }));
+    await reply('멈춘다');
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
-    expect(confirm).toHaveBeenCalledTimes(2);
-    // 열어 둔 편집 창이 곧바로가 아니라 몇 분 안에 끊긴다고 말한다(주기 재판정)
-    expect(confirm).toHaveBeenCalledWith(confirmSuspendText('운영팀'));
-    expect(confirmSuspendText('운영팀')).toContain('열어 둔 편집 창은 몇 분 안에 끊긴다');
     expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended' } }]);
+    // 결과는 위험 구역 안에 보인다 — 조치한 구획 바로 위 (J.5.7)
+    expect(within(block('위험 구역')).getByRole('status').textContent).toBe('중지했다 — 읽기만 된다.');
   });
 
   it('**중지된 스페이스** — 이름·설명·분류는 막히고 다시 쓰기는 묻지 않고 보낸다', async () => {
@@ -155,7 +173,6 @@ describe('SpaceManage — 보이는 조건은 access', () => {
   });
 
   it('**지우기는 `canDelete`일 때만, 한 번 더 묻고** 지우면 목록으로 간다', async () => {
-    window.confirm = vi.fn(() => true);
     const onDeleted = vi.fn();
     const { unmount } = render(<SpaceManage meId="u1" space={space()} onChanged={vi.fn()} onDeleted={onDeleted} />);
     expect(screen.queryByRole('button', { name: '지우기' })).toBeNull();
@@ -163,6 +180,9 @@ describe('SpaceManage — 보이는 조건은 access', () => {
     unmount();
     render(<SpaceManage meId="u1" space={space({ access: { ...NO, canEditInfo: true, canChangeStatus: true, canDelete: true, isOwner: true } })} onChanged={vi.fn()} onDeleted={onDeleted} />);
     fireEvent.click(screen.getByRole('button', { name: '지우기' }));
+    // 묻는 동안은 보내지 않는다. 되살리는 길을 말한다
+    expect(writes()).toEqual([]);
+    expect(await reply('지운다')).toContain('되살리기는 관리자(와 스페이스 관리 전체를 받은 사람)가 휴지통에서 한다');
     await waitFor(() => expect(onDeleted).toHaveBeenCalled());
     expect(writes()).toEqual([{ method: 'DELETE', url: '/api/spaces/s1', body: undefined }]);
   });
@@ -173,6 +193,8 @@ describe('SpaceManage — 보이는 조건은 access', () => {
     render(<SpaceManage meId="u1" space={space()} onChanged={onChanged} onDeleted={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
     expect((await screen.findByRole('alert')).textContent).toContain('스페이스 정보를 바꿀 권한이 없다');
+    // 저장한 구획 안에 보인다 (J.5.7)
+    expect(within(block('스페이스 정보')).getByRole('alert')).toBeTruthy();
     // 성공이라 하지 않는다. 지금 상태는 다시 읽는다 — 그 사이 권한이 바뀌었을 수 있다 (P15 병합 전 코드 리뷰 12)
     expect(screen.queryByRole('status')).toBeNull();
     expect(onChanged).toHaveBeenCalled();
@@ -256,18 +278,18 @@ describe('SpaceManage — 새 분류·분류 관리 (P15 C.3, FR-1620~1624)', ()
       category({ id: 'c2', name: '내 분류', createdBy: 'u1', access: { canRename: true, canDelete: true }, usage: { spaces: 2, otherSpaces: 0 } }),
       category({ id: 'c3', name: '남이 쓰는 내 분류', createdBy: 'u1', usage: { spaces: 2, otherSpaces: 1 } }),
     ];
-    const confirm = vi.fn(() => true);
-    window.confirm = confirm;
     const onChanged = vi.fn();
     render(<SpaceManage meId="u1" space={space()} onChanged={onChanged} onDeleted={vi.fn()} />);
     await screen.findByLabelText('분류 내 분류 이름');
     expect(screen.queryByLabelText('분류 운영 이름')).toBeNull();
     expect(screen.queryByLabelText('분류 남이 쓰는 내 분류 이름')).toBeNull();
     fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
+    expect(await reply('지운다')).toContain(confirmDeleteCategoryText(categories[1]));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
-    expect(confirm).toHaveBeenCalledWith(confirmDeleteCategoryText(categories[1]));
     expect(confirmDeleteCategoryText(categories[1])).toContain('이 분류를 쓰는 공간 2개(휴지통 포함)가 "분류 없음"이 된다');
     expect(writes()).toEqual([{ method: 'DELETE', url: '/api/categories/c2', body: undefined }]);
+    // 결과는 분류 관리 구획 안에 보인다 (J.5.7)
+    expect(within(block('분류 관리')).getByRole('status').textContent).toBe('분류 "내 분류"을(를) 지웠다 — 쓰던 공간 2개는 분류 없음이 됐다.');
   });
 
   it('바꿀 수 있는 분류가 없으면 그렇게 말한다 — 분류를 읽은 **뒤에** 본다(읽기 전에도 빈 글이라 늘 참이었다 — 병합 전 코드 리뷰 7)', async () => {
@@ -280,7 +302,6 @@ describe('SpaceManage — 새 분류·분류 관리 (P15 C.3, FR-1620~1624)', ()
 
   it('**고른 채 저장하지 않은 분류가 지워지면 고르지 않은 것으로** — 그대로 저장하면 "없는 분류다"였다. 치던 이름은 분류가 바뀌어도 남는다 (병합 전 코드 리뷰 8)', async () => {
     categories = [category({}), category({ id: 'c2', name: '곧 지움', createdBy: 'u1', access: { canRename: true, canDelete: true } })];
-    window.confirm = vi.fn(() => true);
     const { rerender } = render(<SpaceManage meId="u1" space={space({ categoryId: 'c1', categoryName: '운영' })} onChanged={vi.fn()} onDeleted={vi.fn()} />);
     await screen.findByRole('option', { name: '곧 지움' });
     fireEvent.change(screen.getByLabelText('분류'), { target: { value: 'c2' } });
@@ -288,6 +309,7 @@ describe('SpaceManage — 새 분류·분류 관리 (P15 C.3, FR-1620~1624)', ()
     // 분류 관리에서 그 분류를 지운다 — 다시 읽으면 목록에서 빠진다
     categories = [category({})];
     fireEvent.click(within(screen.getByRole('list', { name: '분류 목록' })).getByRole('button', { name: '지우기' }));
+    await reply('지운다');
     await waitFor(() => expect((screen.getByLabelText('분류') as HTMLSelectElement).value).toBe(''));
     // 서버의 분류만 바뀌었다(다른 사람이 이 공간의 분류를 지웠다) — 이름 칸은 그대로다
     rerender(<SpaceManage meId="u1" space={space({ categoryId: null, categoryName: null })} onChanged={vi.fn()} onDeleted={vi.fn()} />);
@@ -297,16 +319,14 @@ describe('SpaceManage — 새 분류·분류 관리 (P15 C.3, FR-1620~1624)', ()
 
 describe('SpaceManage — 넘겨받기·거절 뒤 (P15 병합 전 검토)', () => {
   it('**관리자는 주인이 건 중지를 넘겨받는다** — 묻고, 같은 상태를 보낸다. 주인에게는 단추가 없다', async () => {
-    const confirm = vi.fn(() => true);
-    window.confirm = confirm;
     const onChanged = vi.fn();
     const byOwner = { status: 'suspended' as const, suspendedByOwner: true };
     const { unmount } = render(
       <SpaceManage meId="a1" space={space({ ...byOwner, access: { ...NO, canEditInfo: true, canChangeStatus: true, canDelete: true } })} onChanged={onChanged} onDeleted={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole('button', { name: '관리자가 건 중지로 바꾸기' }));
+    expect(await reply('넘겨받는다')).toContain(confirmTakeoverText('운영팀'));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
-    expect(confirm).toHaveBeenCalledWith(confirmTakeoverText('운영팀'));
     // 화면이 본 상태(주인이 건 중지)를 싣는다 — 그 사이 주인이 풀었으면 서버가 409다
     expect(writes()).toEqual([{ method: 'PATCH', url: '/api/spaces/s1/status', body: { status: 'suspended', takeover: true } }]);
     unmount();
@@ -325,11 +345,11 @@ describe('SpaceManage — 넘겨받기·거절 뒤 (P15 병합 전 검토)', () 
   });
 
   it('**거절되면 지금 상태를 다시 읽는다** — 그 사이 누가 바꿨으면 옛 단추가 남아 다시 눌러도 같은 거절이다 (병합 전 코드 리뷰 12)', async () => {
-    window.confirm = vi.fn(() => true);
     answer = { status: 409, body: { message: '그 사이 누가 상태를 바꿨다 — 다시 본다' } };
     const onChanged = vi.fn();
     render(<SpaceManage meId="u1" space={space()} onChanged={onChanged} onDeleted={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '중지' }));
+    await reply('멈춘다');
     expect((await screen.findByRole('alert')).textContent).toContain('그 사이 누가 상태를 바꿨다');
     expect(onChanged).toHaveBeenCalled();
   });

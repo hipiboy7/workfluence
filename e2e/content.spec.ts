@@ -76,13 +76,13 @@ test('검색 → 첨부 → 댓글', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('허용하지 않는 확장자');
 
   // 4) 댓글과 대댓글
-  await page.locator('section[aria-label="댓글"] .editor .ProseMirror').click();
+  await page.getByRole('textbox', { name: '댓글 쓰기' }).click();
   await page.keyboard.type('확인했다');
   await page.getByRole('button', { name: '등록' }).click();
   await expect(page.locator('section[aria-label="댓글"]').getByText('확인했다')).toBeVisible();
 
   await page.getByRole('button', { name: '답하기' }).click();
-  await page.locator('section[aria-label="댓글"] .editor .ProseMirror').last().click();
+  await page.getByRole('textbox', { name: '답 쓰기' }).click();
   await page.keyboard.type('고맙다');
   await page.getByRole('button', { name: '등록' }).click();
   await expect(page.locator('section[aria-label="댓글"]').getByText('고맙다')).toBeVisible();
