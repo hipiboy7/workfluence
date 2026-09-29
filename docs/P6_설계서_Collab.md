@@ -18,6 +18,10 @@ Phase 6은 `CLAUDE.md` 1절 표에서 "2단계 (실시간 편집·외부 알림�
 
 ## A.1 확인 필요 — 사내 메일 API의 요청 형식
 
+> **Phase 18이 바꿨다 (2026-09-29).** 사용자가 사내 메일 API의 실제 모양을 주었다 — 아래의 가정은 옛 것이다. 지금의 요청(`subject`·`content`·`receivers`·
+> `sender_name`)과 설정(`WF_MAIL_FORMAT`·`WF_MAIL_SENDER_NAME`·`WF_MAIL_AUTH_HEADER`·`WF_MAIL_AUTH_VALUE` — `WF_MAIL_FROM`·`WF_MAIL_API_TOKEN`은 없어졌다)은
+> [`docs/P18_설계서_Mail.md`](P18_설계서_Mail.md) C·E절이다. 아래와 이 문서 H절의 설정 표는 Phase 6 때의 기록으로 둔다.
+
 사용자가 "메일 전송 API가 있다"고 했고 **그 API의 요청 형식은 아직 모른다.**
 그래서 IdP와 **같은 방식**으로 둔다 (2절 DIP): 주입 토큰 뒤에 인터페이스를 두고,
 개발은 모의 구현으로 하고, 실제 어댑터는 **한 파일**이다.

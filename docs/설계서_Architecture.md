@@ -31,7 +31,7 @@
     │ SQL                               │ OIDC · 메일 발송 · LLM 질문 (HTTP)
     ▼                                   ▼
 [postgres]  문서·사용자·감사로그       [사내 IdP]  외부. Discovery·JWKS
-                                       [사내 메일 API]  외부. 멘션 알림 (보류 18)
+                                       [사내 메일 API]  외부. 멘션 알림 — 요청 모양은 사용자가 준 설명대로(P18), 실연동은 현장에서 (보류 18)
                                        [사내 LLM (vLLM)]  외부. OpenAI 호환. 관리자가 등록한 주소 (보류 29)
     │
     ▼
@@ -304,6 +304,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 15 | 맡기는 권한(보류 32·33) — 위임 규칙표(`DELEGATION`: LLM 연결 관리는 root가 관리자에게, 분류 관리·관리자가 건 중지 풀기·스페이스 관리 전체는 관리자·root가 member에게)와 `canGrant`, 받는 역할의 CHECK와 `spaces.suspended_by_owner`(`0012_grants`), `spaceAccess`의 `canEditInfo`·지금 상태에서 바꿀 수 있는가(`canChangeStatus`), 읽지 못해도 중지·지우기(`manageContext`), `categoryAccess`와 분류의 쓰임·지우면 분류 없음, 공용 `CategoryList` |
 | 16 | 관리자가 건 중지 동안 Crew를 얼린다(보류 35) — `spaceAccess.canManageMembers`에 중지를 건 사람을 넣고(주인은 관리자가 건 중지면 거짓) `crewFrozen`(막힌 주인 — 서버의 까닭과 화면의 안내가 이것 하나를 본다)을 더한다. Crew 쓰기는 판정하고 공간 행을 잠그고 다시 판정한다(`FOR NO KEY UPDATE` — 판정한 상태에서만 쓴다, 권한 없는 사람은 줄에 서지 않는다). 데이터·마이그레이션 없음 |
 | 17 | PC 화면과 한 체계의 UI(F-010) — 한 틀(`AppLayout`: 위 막대·왼쪽 칸·본문, 화면이 `SideSlot`으로 왼쪽 칸을 채운다 — 스페이스 안은 페이지 트리, LLM은 대화 목록)과 카드 틀(`AuthLayout`)을 중첩 경로가 씌운다, 토큰·요소 기본값·부품은 `styles.css` 한 파일(화면별 CSS 없음), 공통 부품(`ui.tsx` — 머리·알림띠·Field·구획 폼·거르기 줄·빈 상태·배지)과 확인 대화(`<dialog>`), 역할·운영 설정·감사 행위의 한글 이름. 비밀번호 초기화 요청을 관리자의 알림으로(`password.reset.request` — 받는 사람은 `canManageUser`), 모든 화면의 알림 영역, 감사 기록 단계(운영 설정 `auditLevel`, `AUDIT_MIN_LEVEL` — 필수 기록은 늘). 새 의존성·마이그레이션 없음 |
+| 18 | 사내 메일 API 설정(F-012) — 요청 모양을 사용자가 준 사내 API 설명(`subject`·`content`·`receivers`·`sender_name`)으로 한 곳(`apps/api/src/mail/domain/request.ts`)에 두고, 주소·형식(평문·마크다운)·보내는 이름·인증 헤더를 `WF_MAIL_*` 설정으로(기동 검사는 공유 `mail.ts`·`env.ts`). 메일 글은 `domain/compose.ts`(평문·마크다운 — 마크다운은 공유 `markdownText`로 이스케이프), 제목은 보내는 경계에서 한 줄로. 시험 명령 `apps/api/src/cli/mail-test.ts`(compose `tools`) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

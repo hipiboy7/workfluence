@@ -39,7 +39,7 @@ Phase 6은 멘션을 메일로도 보내게 만들었지만, 사내 메일 API�
 | # | 요구사항 | 확인 |
 |---|---|---|
 | FR-1900 | **요청 모양** — `POST {WF_MAIL_API_URL}`, `content-type: application/json; charset=utf-8`, 본문 `{"subject", "content", "receivers", "sender_name"}`. `receivers`는 주소 하나(A.1-3), `sender_name`은 `WF_MAIL_SENDER_NAME` | A등급 `apps/api/src/mail/domain/request.spec.ts` · 통합 `apps/api/src/mail/mail.spec.ts`(가짜 메일 서버가 받은 것) |
-| FR-1901 | **형식** — `WF_MAIL_FORMAT`이 `text`면 평문, `markdown`이면 마크다운 본문. 마크다운에서는 문서 제목·부른 사람의 이름에 든 마크다운 글자를 이스케이프하고, 링크는 `[문서 열기](주소)`다. 제목(`subject`)은 둘 다 평문 | A등급 `apps/api/src/mail/domain/compose.spec.ts` |
+| FR-1901 | **형식** — `WF_MAIL_FORMAT`이 `text`면 평문, `markdown`이면 마크다운 본문. 마크다운에서는 문서 제목·부른 사람의 이름에 든 마크다운 글자를 이스케이프하고, 바로 가기는 "문서 열기"라는 글의 링크다. 제목(`subject`)은 둘 다 평문 | A등급 `apps/api/src/mail/domain/compose.spec.ts` |
 | FR-1902 | **인증** — `WF_MAIL_AUTH_HEADER`와 `WF_MAIL_AUTH_VALUE`가 둘 다 있으면 그 헤더를 싣는다(예: `Authorization: Bearer …`, `X-API-Key: …`). 하나만 있으면 기동 실패. 값은 로그·창·감사에 나가지 않고, 응답이 그 값을 되읊으면 가린다 | A등급(`packages/shared/src/env.spec.ts`·`request.spec.ts`) · 통합 |
 | FR-1903 | **성공 판정** — HTTP 2xx만 성공. 넘겨주기를 따르지 않는다. 10초 시간 제한. 실패는 앱 로그에 상태만(`mail.rejected`)·연결 실패(`mail.failed`) — 응답 본문은 싣지 않는다(P6 그대로). 실패해도 앱 동작을 막지 않는다(FR-753 그대로) | 통합(가짜 서버의 200·400·500·302·응답 없음) |
 | FR-1904 | **기동할 때 설정을 본다** — 주소는 `http(s)`이고 사용자 정보·질의·조각이 없다. 헤더 이름은 HTTP 토큰 글자, 값에 줄바꿈이 없다. 켰는데(모의 아님) 주소가 비면 기동 실패. **운영(`production`)에서 켰는데 모의면 기동 실패** — 메일이 나간다고 믿는데 로그로만 남는 것은 조용히 잘못되는 유형이다(OIDC 모의와 같은 판단) | A등급 `packages/shared/src/mail.spec.ts`·`packages/shared/src/env.spec.ts` |
