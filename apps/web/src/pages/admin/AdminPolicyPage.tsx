@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ALLOWED_UPLOAD_EXTENSIONS, policyConsistencyProblems, validatePolicyPatch, type Policy } from '@workfluence/shared';
 import { api } from '../../api';
-import { withCode } from '../../components/labels';
+import { withCode } from '../../components/displayNames';
 import { POLICY_GROUPS, POLICY_NAMES, policyKeysOf, type PolicyGroup, type PolicyNumberKey } from '../../components/policyNames';
 import { FormActions, FormRow, FormRows, FormSection, Loading, Notice, Page, PageHeader } from '../../components/ui';
 

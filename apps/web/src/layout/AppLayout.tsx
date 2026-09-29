@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../auth';
 import { MenuIcon } from '../components/icons';
-import { ROLE_NAMES } from '../components/labels';
+import { ROLE_NAMES } from '../components/displayNames';
 import { NotificationBell } from '../components/NotificationBell';
 
 /**

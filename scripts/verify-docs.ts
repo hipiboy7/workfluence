@@ -286,6 +286,22 @@ function checkBackgroundPoll(findings: Finding[]): void {
 }
 
 /**
+ * **대소문자만 다른 파일·모듈 이름을 막는다** (T-093). Linux는 가리지만 Windows(체험의 가 길, 묶음 러너)는 가리지 않는다 — 확장자 없이 부르는
+ * `./Labels`가 같은 폴더의 `labels.ts`로 읽혀 Windows에서만 빌드가 깨졌다. 코드 파일은 확장자를 뺀 이름으로(`.ts`·`.tsx`·`.js`·`.mjs` 등이 서로
+ * 가려진다), 그 밖의 파일은 전체 이름으로 견준다
+ */
+function checkCaseCollisions(findings: Finding[]): void {
+  const out = execSync('git -c core.quotepath=false ls-files', { cwd: ROOT, encoding: 'utf8' });
+  const seen = new Map<string, string>();
+  for (const rel of out.split(/\r?\n/).filter(Boolean)) {
+    const stem = rel.replace(/\.(d\.ts|[cm]?[jt]sx?)$/i, '');
+    const other = seen.get(stem.toLowerCase());
+    if (other === undefined) seen.set(stem.toLowerCase(), stem);
+    else if (other !== stem) findings.push({ file: rel, line: 0, kind: '대소문자만 다른 이름', detail: `${other} — Windows에서는 같은 이름이다` });
+  }
+}
+
+/**
  * 7. 로그 event 코드 (P11_설계서_Ops D.4, FR-1218). 코드 목록(`LOG_EVENTS`)이 정본이고 운영자가 읽는 표는 장애대응 가이드 한 곳이다 —
  * 코드를 더하고 가이드를 잊으면 운영자가 그 줄을 만났을 때 찾을 곳이 없다. 백틱으로 적힌 코드를 찾는다
  */
@@ -321,6 +337,7 @@ function main(): void {
     checkShellScripts(findings);
     checkUploadLimits(findings);
     checkBackgroundPoll(findings);
+    checkCaseCollisions(findings);
     checkLogEvents(findings);
   }
 

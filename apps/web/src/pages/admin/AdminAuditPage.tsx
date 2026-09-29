@@ -7,7 +7,7 @@ import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { AuditLevelCard } from '../../components/AuditLevelCard';
 import { AUDIT_ACTION_NAMES, auditActionName, auditTargetLabel, auditTargetName } from '../../components/auditNames';
-import { withCode } from '../../components/labels';
+import { withCode } from '../../components/displayNames';
 import { CodeBlock, EmptyState, Field, FilterBar, Loading, Notice, Page, PageHeader } from '../../components/ui';
 
 /** 상세 요약의 길이 — 넘으면 펼쳐 본다 */

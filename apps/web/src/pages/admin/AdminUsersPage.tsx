@@ -21,7 +21,7 @@ import {
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { useConfirm } from '../../components/ConfirmDialog';
-import { ROLE_NAMES, withCode } from '../../components/labels';
+import { ROLE_NAMES, withCode } from '../../components/displayNames';
 import { CodeBlock, Field, FilterBar, Loading, Notice, Page, PageHeader, StatusBadge } from '../../components/ui';
 import { SEARCH_DELAY_MS } from '../../timing';
 

@@ -100,7 +100,7 @@ Phase 17은 사용자가 Windows 묶음(F-009)을 써 보고 적은 개선 열 �
 | `apps/api/src/common/domain/access-log.ts`(배경 표시가 붙은 알림 수 물음은 접근 로그에 남기지 않는다 — `BACKGROUND_POLL_PATH`의 GET만, A.1-8) · `deploy/nginx.conf`(`$wf_loggable` — 같은 규칙, `pnpm verify:docs`가 경로를 대조한다) | A · 설정 | A등급 `apps/api/src/common/domain/access-log.spec.ts` · 컨테이너 |
 | `apps/web/src/styles.css` — 토큰·요소 기본값(명시도 0 — `:where`)·부품 클래스 (J.4·J.5) | B(web) — 모양 | E2E `e2e/layout.spec.ts`(폭·대비) · 1280·1440·1920 화면 확인 |
 | `apps/web/src/layout/AppLayout.tsx`(한 틀·`SideSlot`·`adminLinks`) · `AuthLayout.tsx` · `SpaceSideNav.tsx`(스페이스 문맥·`PageTree`·`announceTreeChanged`) | B(web) | 컴포넌트 `apps/web/src/layout/AppLayout.spec.tsx`·`apps/web/src/layout/SpaceSideNav.spec.tsx`·`apps/web/src/pages/SpacePage.spec.tsx` · E2E `e2e/tree.spec.ts` |
-| `apps/web/src/components/ui.tsx`(머리·알림띠·Field·구획 폼·거르기 줄·빈 상태·배지·`useReadWide`) · `ConfirmDialog.tsx` · `icons.tsx` · `labels.ts` | B(web) | 컴포넌트(쓰는 화면들의 시험) · `apps/web/src/components/ConfirmDialog.spec.tsx` |
+| `apps/web/src/components/ui.tsx`(머리·알림띠·Field·구획 폼·거르기 줄·빈 상태·배지·`useReadWide`) · `ConfirmDialog.tsx` · `icons.tsx` · `displayNames.ts`(역할의 한글 이름·`withCode` — 처음 이름 `labels.ts`는 Windows에서 `Labels.tsx`와 겹쳤다, T-093) | B(web) | 컴포넌트(쓰는 화면들의 시험) · `apps/web/src/components/ConfirmDialog.spec.tsx` |
 | `apps/web/src/components/auditNames.ts`(감사 행위의 한글 이름 — `AUDIT_ACTIONS` 전부, 빠지면 타입이 막는다) · `policyNames.ts`(운영 설정의 한글 이름·단위·묶음) · `LlmSideNav.tsx` | B(web) | `apps/web/src/components/auditNames.spec.ts` · 컴포넌트 |
 | 화면 21개(`apps/web/src/pages/**`)와 부품(`Comments`·`Attachments`·`Labels`·`SpaceManage`·`CategoryList`·`MovePage`·`TemplateFromPage`·`Editor`·`CollabEditor`·`PasswordInput`) | B(web) | 컴포넌트 · E2E 38 |
 
