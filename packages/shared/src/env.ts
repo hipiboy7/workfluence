@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ROLES, type Role } from './constants';
-import { MAIL_FORMATS, MAIL_LIMITS, isHttpHeaderName, mailApiUrlProblem, mailHeaderValueProblem } from './mail';
+import { MAIL_FORMATS, MAIL_LIMITS, mailApiUrlProblem, mailAuthHeaderProblem, mailHeaderValueProblem } from './mail';
 
 /**
  * 환경변수 스키마 (P0_설계서_Foundation 1절, FR-010~FR-017).
@@ -156,7 +156,10 @@ export const envSchema = z
     WF_MAIL_AUTH_HEADER: z
       .string()
       .default('')
-      .refine((v) => v === '' || isHttpHeaderName(v), 'HTTP 헤더 이름(영문·숫자·-_. 등, 빈칸·콜론 없이)이어야 한다'),
+      .superRefine((v, ctx) => {
+        const problem = v === '' ? null : mailAuthHeaderProblem(v);
+        if (problem) ctx.addIssue({ code: 'custom', message: problem });
+      }),
     /** 그 헤더의 값 전체 — 예 `Bearer <토큰>`. **비밀 값** — 로그·창·감사에 나가지 않는다 */
     WF_MAIL_AUTH_VALUE: z
       .string()

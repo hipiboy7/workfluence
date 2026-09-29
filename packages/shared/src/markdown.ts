@@ -75,11 +75,18 @@ function wrapEmphasis(s: string, marker: string): string {
 }
 
 /** 링크는 허용 주소만 (FR-1142). 통과하지 못하면 **글자만** 남긴다. 주소의 빈칸·괄호는 링크를 끊지 않게 바꾼다 */
+/**
+ * 마크다운 링크의 주소 — 괄호·빈칸은 퍼센트로(링크가 중간에서 끊기지 않게, `encodeURIComponent`는 괄호를 두고 간다). 문서 복사의 링크와 메일의 바로 가기
+ * (P18)가 이 한 곳을 쓴다
+ */
+export function markdownLinkTarget(url: string): string {
+  return url.replace(/[\s()]/g, (c) => (c === '(' ? '%28' : c === ')' ? '%29' : encodeURIComponent(c)));
+}
+
 function wrapLink(label: string, mark: DocMark): string {
   const raw = typeof mark.attrs?.href === 'string' ? mark.attrs.href.trim() : '';
   if (!raw || !ALLOWED_LINK_HREF.test(raw)) return label;
-  const href = raw.replace(/[\s()]/g, (c) => (c === '(' ? '%28' : c === ')' ? '%29' : encodeURIComponent(c)));
-  return `[${label}](${href})`;
+  return `[${label}](${markdownLinkTarget(raw)})`;
 }
 
 function renderText(node: DocNode): string {

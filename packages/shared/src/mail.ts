@@ -40,6 +40,16 @@ export function isHttpHeaderName(name: string): boolean {
   return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name);
 }
 
+/** 인증 헤더로 쓸 수 없는 이름 — 요청의 모양·연결을 바꾸는 머리말이다(소문자로 견준다, P18 코드 리뷰 12) */
+const RESERVED_HEADERS = new Set(['host', 'content-type', 'content-length', 'transfer-encoding', 'connection', 'expect', 'upgrade', 'te', 'trailer', 'keep-alive', 'proxy-authorization', 'proxy-connection']);
+
+/** 인증 헤더 이름이 틀렸으면 까닭 — HTTP 토큰 글자여야 하고, 요청의 모양을 바꾸는 머리말은 쓸 수 없다 */
+export function mailAuthHeaderProblem(name: string): string | null {
+  if (!isHttpHeaderName(name)) return 'HTTP 헤더 이름(영문·숫자·-_. 등, 빈칸·콜론 없이)이어야 한다';
+  if (RESERVED_HEADERS.has(name.toLowerCase())) return `${name}는 인증 헤더로 쓸 수 없다 — 요청의 모양을 바꾸는 머리말이다. 메일 API 담당에게 받은 인증 헤더 이름을 적는다`;
+  return null;
+}
+
 /**
  * 헤더 값이 틀렸으면 까닭 — **줄바꿈은 다른 헤더를 끼워 넣는 길이다**. 비어 있으면 안 된다. **보이는 ASCII(와 빈칸·탭)만** — 다른 글자(한글 등)면 보낼 때마다
  * 실패하고, 그 오류 문장이 비밀 값의 몇째 글자가 무엇인지를 로그에 남긴다(P18 병합 전 보안 검토 5)

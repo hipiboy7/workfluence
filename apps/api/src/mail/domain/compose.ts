@@ -1,4 +1,4 @@
-import { markdownText } from '@workfluence/shared';
+import { markdownLinkTarget, markdownText } from '@workfluence/shared';
 import { oneLine } from './request';
 
 /**
@@ -16,10 +16,6 @@ export type MailContent = { subject: string; text: string; markdown: string };
  * 된다, P18 병합 전 보안 검토 1), 나머지 서식 기호는 문서 복사와 같은 규칙(`markdownText`)으로 이스케이프한다. 한 줄로 만든 뒤에 한다
  */
 const mdText = (s: string): string => markdownText(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-
-/** 마크다운 링크의 주소 — 괄호·빈칸은 퍼센트로(링크가 중간에서 끊기지 않게) */
-const linkTarget = (url: string): string =>
-  url.replace(/[()\s]/g, (c) => (c === '(' ? '%28' : c === ')' ? '%29' : encodeURIComponent(c))); // encodeURIComponent는 괄호를 두고 간다
 
 export function mentionMail(input: { callerName: string | null; where: '댓글' | '문서'; pageTitle: string; pageUrl: string | null }): MailContent {
   // **이름·제목은 한 줄이다** — 줄바꿈(CR 하나·유니코드 줄 구분자)이 새 줄을 만들면 마크다운에서 줄 머리 표기가 되고, 제목은 메일 머리말로 간다
@@ -41,7 +37,7 @@ export function mentionMail(input: { callerName: string | null; where: '댓글' 
     name ? `**${mdText(name)}** 님이 ${where}에서 회원님을 불렀습니다.` : `${where}에서 회원님이 불렸습니다.`,
     '',
     `문서: **${mdText(pageTitle)}**`,
-    ...(pageUrl ? ['', `[문서 열기](${linkTarget(pageUrl)})`] : []),
+    ...(pageUrl ? ['', `[문서 열기](${markdownLinkTarget(pageUrl)})`] : []),
     '',
     closing,
   ].join('\n');

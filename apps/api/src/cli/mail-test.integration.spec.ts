@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { SETTINGS_KEYS, type AppEnv } from '@workfluence/shared';
 import { sql } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { databaseUrl, loadEnv } from '../config/config.module';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { mailTest } from './mail-test';
@@ -15,7 +15,7 @@ type Got = { url?: string; headers: IncomingHttpHeaders; body: string };
 let server: Server;
 let base = '';
 let got: Got[] = [];
-let answer: { status: number; body?: string } = { status: 200 };
+let answer: { status: number; body?: string; headers?: Record<string, string> } = { status: 200 };
 let db: TestDb;
 let lines: { log: string[]; error: string[] };
 const out = { log: (l: string) => lines.log.push(l), error: (l: string) => lines.error.push(l) };
@@ -28,7 +28,7 @@ beforeAll(async () => {
     req.on('data', (c: string) => (body += c));
     req.on('end', () => {
       got.push({ url: req.url, headers: req.headers, body });
-      res.writeHead(answer.status, { 'content-type': 'application/json' });
+      res.writeHead(answer.status, { 'content-type': 'application/json', ...answer.headers });
       res.end(answer.body ?? '{"message":"Email sent successfully"}');
     });
   });
@@ -45,7 +45,6 @@ beforeEach(async () => {
   answer = { status: 200 };
   lines = { log: [], error: [] };
 });
-afterEach(() => undefined);
 
 const envFor = (over: Partial<AppEnv> = {}): AppEnv =>
   ({
@@ -67,6 +66,14 @@ const run = (args: string[], over: Partial<AppEnv> = {}, url?: string) => {
 const audits = async () =>
   (await db.execute<{ action: string; detail: unknown }>(sql`SELECT action, detail FROM audit_events ORDER BY created_at`)).rows.map((r) => [r.action, r.detail]);
 const all = () => [...lines.log, ...lines.error].join('\n');
+/** 열었다 닫은 포트 — 연결이 거절된다(ECONNREFUSED). 포트 1 같은 것은 fetch가 막아 연결을 시도하지도 않는다 */
+const closedPort = async (): Promise<number> => {
+  const s = createServer();
+  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+  const port = (s.address() as AddressInfo).port;
+  await new Promise<void>((r) => s.close(() => r()));
+  return port;
+};
 
 describe('mail:test — 시험 메일 한 통 (FR-1905)', () => {
   it('받는 주소가 없거나 틀리면 1 — 보내지 않고 쓰는 법을 말한다', async () => {
@@ -126,10 +133,20 @@ describe('mail:test — 시험 메일 한 통 (FR-1905)', () => {
     expect(all()).not.toMatch(/주의/);
   });
 
-  it('닿지 않으면 1과 오류 코드 — 감사에 mail.fail', async () => {
-    expect(await run(['a@example.internal'], { WF_MAIL_API_URL: 'http://127.0.0.1:1/api/v1/email/send' })).toBe(1);
-    expect(all()).toMatch(/보내지 못했다 — 메일 API에 닿지 않는다/);
+  it('**닿지 않으면 1과 오류 코드**(열었다 닫은 포트 — ECONNREFUSED) — 감사에 mail.fail. fetch가 막는 포트면 그렇게 말한다(코드 리뷰 5)', async () => {
+    expect(await run(['a@example.internal'], { WF_MAIL_API_URL: `http://127.0.0.1:${await closedPort()}/api/v1/email/send` })).toBe(1);
+    expect(all()).toMatch(/보내지 못했다 — 메일 API에 닿지 않는다 \(ECONNREFUSED\)/);
     expect((await audits()).map((a) => a[0])).toEqual(['mail.fail']);
+    lines = { log: [], error: [] };
+    expect(await run(['a@example.internal'], { WF_MAIL_API_URL: 'http://127.0.0.1:25/api/v1/email/send' })).toBe(1);
+    expect(all()).toMatch(/그 포트로는 보낼 수 없다/);
+  });
+
+  it('**넘겨주기(302)를 따르지 않는다** — 1과 까닭, 서버는 한 번만 받는다', async () => {
+    answer = { status: 302, headers: { location: `${base}/elsewhere` } };
+    expect(await run(['a@example.internal'])).toBe(1);
+    expect(all()).toMatch(/다른 주소로 넘겼다/);
+    expect(got.map((g) => g.url)).toEqual(['/api/v1/email/send']);
   });
 
   it('**감사 기록 단계 1이면 성공한 시험은 남기지 않는다**(mail.send는 단계 2부터) — 실패는 늘 남는다', async () => {

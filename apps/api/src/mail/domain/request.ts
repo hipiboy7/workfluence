@@ -31,12 +31,12 @@ export function mailConfigOf(env: Pick<AppEnv, 'WF_MAIL_API_URL' | 'WF_MAIL_FORM
 }
 
 /**
- * 줄바꿈·제어 글자(와 그 옆의 빈칸)를 빈칸 하나로 — 유니코드 줄 구분자(U+0085·U+2028·U+2029)도 (P18 병합 전 보안 검토 6). 메일 글(`compose.ts`)의
- * 이름·제목도 이것으로 한 줄이 된다
+ * 줄바꿈·제어 글자(와 그 옆의 빈칸)를 빈칸 하나로 — C1 제어 글자(U+0080~U+009F — U+0085 줄 끝, 터미널이 명령으로 읽는 CSI 등)와 유니코드 줄
+ * 구분자(U+2028·U+2029)도 (P18 병합 전 보안 검토 6·코드 리뷰 10). 메일 글(`compose.ts`)의 이름·제목과 시험 명령이 창에 찍는 남의 글도 이것을 지난다
  */
 export function oneLine(s: string): string {
   // eslint-disable-next-line no-control-regex -- 제어 글자를 지우는 것이 이 함수다
-  return s.replace(/ *[\u0000-\u001F\u007F\u0085\u2028\u2029]+ */g, ' ');
+  return s.replace(/ *[\u0000-\u001F\u007F-\u009F\u2028\u2029]+ */g, ' ');
 }
 
 /**
@@ -86,12 +86,19 @@ export function statusHint(status: number): string {
 export function failureHint(e: unknown): string {
   if (e instanceof DOMException && e.name === 'TimeoutError') return `${MAIL_TIMEOUT_MS / 1000}초 안에 답이 없다 — 주소·포트가 맞는지, 방화벽이 막는지 본다`;
   const cause = e instanceof Error ? (e.cause as { code?: unknown; message?: unknown } | undefined) : undefined;
+  // 원인이 없는 TypeError는 요청을 만들지 못한 것이다(헤더 값에 보낼 수 없는 글자 등) — **문장을 싣지 않는다**: 비밀 값의 몇째 글자가 무엇인지가 들어 있다(코드 리뷰 2)
+  if (e instanceof TypeError && cause === undefined) return '요청을 만들지 못했다 — WF_MAIL_AUTH_VALUE·WF_MAIL_SENDER_NAME에 보낼 수 없는 글자가 없는지 본다';
   const code = typeof cause?.code === 'string' ? cause.code : '';
   const message = typeof cause?.message === 'string' ? cause.message : '';
-  if (/redirect/i.test(message)) return '메일 API가 다른 주소로 넘겼다 — 넘겨주기는 따르지 않는다(인증 값이 다른 곳으로 가지 않게). 넘겨 준 곳의 주소를 WF_MAIL_API_URL에 적는다';
+  // 코드가 있으면 코드로 먼저 가린다 — 문장에는 호스트 이름이 들어 있어 문장만 보면 오진한다(호스트 이름에 "redirect"가 든 경우 — 자체 점검 5)
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `호스트 이름을 찾지 못했다 (${code}) — 주소의 호스트를 본다`;
+  if (code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID') return `메일 API의 인증서가 만료됐거나 아직 유효하지 않다 (${code}) — 메일 API 담당에게 알린다`;
+  if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') return `인증서의 호스트 이름이 주소와 다르다 (${code}) — 주소의 호스트를 인증서에 적힌 이름으로 적는다`;
   if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER/.test(code))
     return `인증서를 믿지 못했다 (${code}) — 사내 인증 기관이면 compose 옆 ca/ca.pem에 두고 다시 친다(반입 가이드 10절 ②)`;
   if (code) return `메일 API에 닿지 않는다 (${code}) — 주소·포트와 망을 본다`;
+  if (/redirect/i.test(message)) return '메일 API가 다른 주소로 넘겼다 — 넘겨주기는 따르지 않는다(인증 값이 다른 곳으로 가지 않게). 넘겨 준 곳의 주소를 WF_MAIL_API_URL에 적는다';
+  // fetch는 메일·원격 제어 등에 쓰는 포트(25·465·587·993·995 등)로는 아예 보내지 않는다 — 연결을 시도하지도 않는다(코드 리뷰 5)
+  if (/bad port/i.test(message)) return '그 포트로는 보낼 수 없다(fetch가 막는 포트 — 25·465·587 등 메일 서버 자체의 포트) — 메일 API(HTTP)의 포트를 적었는지 본다';
   return '메일 API에 닿지 않는다 — 주소·포트와 망을 본다';
 }
