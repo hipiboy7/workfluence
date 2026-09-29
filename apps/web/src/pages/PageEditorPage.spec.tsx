@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { MeView } from '@workfluence/shared';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { AuthProvider } from '../auth';
@@ -252,6 +252,47 @@ describe('PageEditorPage — 편집 화면의 모양 (P17 J.6 · FR-1860)', () =
       (box as HTMLElement & { editor: { commands: { insertContent: (t: string) => void } } }).editor.commands.insertContent('새 글');
     });
     expect(leaving()).toBe(true);
+  });
+
+  it('**다른 페이지의 편집으로 곧바로 옮기면 앞 페이지의 제목·고친 표시를 들고 가지 않는다** — 새 페이지를 읽는 동안은 불러오는 중이다 (병합 전 검토 14)', async () => {
+    collabEnabled = false;
+    let answerP2: (r: Response) => void = () => undefined;
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      if (String(input) === '/api/pages/p2') return new Promise<Response>((r) => (answerP2 = r));
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    function Go() {
+      const nav = useNavigate();
+      return (
+        <button type="button" onClick={() => void nav('/pages/p2/edit')}>
+          다른 편집으로
+        </button>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/pages/p1/edit']}>
+        <AuthProvider>
+          <Go />
+          <Routes>
+            <Route path="/pages/:id/edit" element={<PageEditorPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole('textbox', { name: '본문' });
+    fireEvent.change(titleBox(), { target: { value: '고친 제목' } });
+    expect(leaving()).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '다른 편집으로' }));
+    // 둘째 페이지의 응답이 오기 전 — 앞 페이지의 제목 칸이 남아 있으면 그것을 고쳐 둘째 페이지로 저장하게 된다
+    await waitFor(() => expect(screen.queryByLabelText('제목')).toBeNull());
+    expect(leaving()).toBe(false);
+    await act(async () => {
+      answerP2(json(200, { ...pageSummary, id: 'p2', title: '둘째 문서', currentVersionNo: 1, content: doc }));
+    });
+    await waitFor(() => expect(titleBox().value).toBe('둘째 문서'));
+    expect(screen.getByText('편집을 시작한 버전: v1')).toBeTruthy();
+    expect(leaving()).toBe(false);
   });
 
   it('실시간 편집 화면은 묻지 않는다 — 서버가 쓰는 대로 저장한다', async () => {
