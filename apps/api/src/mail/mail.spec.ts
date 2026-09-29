@@ -165,8 +165,11 @@ describe('postMail — 앱과 시험 명령이 함께 쓰는 보내는 길 (FR-1
   });
 
   it('**받았으면(2xx) 본문을 읽지 않는다** — 200을 주고 본문을 끝내지 않아도 성공이다(좁은 재점검 2 — 시험 명령만 "보내지 못했다"로 오진했다)', async () => {
-    const r = await postMail({ url: `${base}/ok-endless`, headers: {}, body: '{}' }, { readBody: true, timeoutMs: 1000 });
+    const started = Date.now();
+    const r = await postMail({ url: `${base}/ok-endless`, headers: {}, body: '{}' }, { readBody: true, timeoutMs: 5000 });
     expect(r).toEqual({ ok: true, status: 200, body: '' });
+    // 곧바로 끝난다 — 본문을 읽으려 했다면 시간 제한(5초)까지 매달렸다
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 
   it('**끝나지 않는 본문도 앞부분에서 멈춘다** — 끝까지 읽으려 하면 시간 제한까지 매달린다', async () => {
