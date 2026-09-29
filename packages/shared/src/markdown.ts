@@ -30,15 +30,20 @@ export function markdownText(text: string): string {
   return escapeLineStarts(escapeInline(text));
 }
 
+/** 줄 끝 — CR 하나도 줄 끝이다(CommonMark). 나눈 조각에 줄 끝을 남겨 그대로 다시 잇는다 (P18 병합 전 보안 검토 3) */
+const LINE_END = /(\r\n?|\n)/;
+
 function escapeLineStarts(s: string): string {
   return s
-    .split('\n')
-    .map((line) =>
-      line.replace(LINE_START, (_m, space: string, symbol: string | undefined, digits: string | undefined, punct: string | undefined) =>
-        symbol !== undefined ? `${space}\\${symbol}` : `${space}${digits}\\${punct}`,
-      ),
+    .split(LINE_END)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(LINE_START, (_m, space: string, symbol: string | undefined, digits: string | undefined, punct: string | undefined) =>
+            symbol !== undefined ? `${space}\\${symbol}` : `${space}${digits}\\${punct}`,
+          ),
     )
-    .join('\n');
+    .join('');
 }
 
 const allowed = (node: DocNode): boolean => Object.hasOwn(ALLOWED_NODES, node.type);

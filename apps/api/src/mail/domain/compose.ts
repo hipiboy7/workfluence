@@ -1,4 +1,5 @@
 import { markdownText } from '@workfluence/shared';
+import { oneLine } from './request';
 
 /**
  * 메일 한 통의 제목·평문·마크다운 (A등급, P18_설계서_Mail FR-1901). 보내는 쪽(`HttpMailSender`)이 설정(`WF_MAIL_FORMAT`)을 보고 둘 가운데 하나를 싣는다 —
@@ -10,12 +11,22 @@ import { markdownText } from '@workfluence/shared';
  */
 export type MailContent = { subject: string; text: string; markdown: string };
 
+/**
+ * 마크다운 안에 넣을 이름·제목 — `<`·`>`·`&`는 **엔터티로** 바꾸고(`\\<`를 이스케이프로 읽지 않는 렌더러가 있다 — 제목의 `<a href=…>`가 숨은 링크가
+ * 된다, P18 병합 전 보안 검토 1), 나머지 서식 기호는 문서 복사와 같은 규칙(`markdownText`)으로 이스케이프한다. 한 줄로 만든 뒤에 한다
+ */
+const mdText = (s: string): string => markdownText(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+
 /** 마크다운 링크의 주소 — 괄호·빈칸은 퍼센트로(링크가 중간에서 끊기지 않게) */
 const linkTarget = (url: string): string =>
   url.replace(/[()\s]/g, (c) => (c === '(' ? '%28' : c === ')' ? '%29' : encodeURIComponent(c))); // encodeURIComponent는 괄호를 두고 간다
 
 export function mentionMail(input: { callerName: string | null; where: '댓글' | '문서'; pageTitle: string; pageUrl: string | null }): MailContent {
-  const { callerName: name, where, pageTitle, pageUrl } = input;
+  // **이름·제목은 한 줄이다** — 줄바꿈(CR 하나·유니코드 줄 구분자)이 새 줄을 만들면 마크다운에서 줄 머리 표기가 되고, 제목은 메일 머리말로 간다
+  // (P18 병합 전 보안 검토 3, P7 C.4.1)
+  const name = input.callerName === null ? null : oneLine(input.callerName);
+  const pageTitle = oneLine(input.pageTitle);
+  const { where, pageUrl } = input;
   const closing = '내용은 위키에서 확인해 주세요.';
   const text = [
     name ? `${name} 님이 ${where}에서 회원님을 불렀습니다.` : `${where}에서 회원님이 불렸습니다.`,
@@ -27,9 +38,9 @@ export function mentionMail(input: { callerName: string | null; where: '댓글' 
     closing,
   ].join('\n');
   const markdown = [
-    name ? `**${markdownText(name)}** 님이 ${where}에서 회원님을 불렀습니다.` : `${where}에서 회원님이 불렸습니다.`,
+    name ? `**${mdText(name)}** 님이 ${where}에서 회원님을 불렀습니다.` : `${where}에서 회원님이 불렸습니다.`,
     '',
-    `문서: **${markdownText(pageTitle)}**`,
+    `문서: **${mdText(pageTitle)}**`,
     ...(pageUrl ? ['', `[문서 열기](${linkTarget(pageUrl)})`] : []),
     '',
     closing,

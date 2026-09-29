@@ -1,4 +1,4 @@
-import type { AppEnv, MailFormat } from '@workfluence/shared';
+import { emailSchema, type AppEnv, type MailFormat } from '@workfluence/shared';
 
 /**
  * 사내 메일 API에 보내는 요청 (A등급, P18_설계서_Mail C절·FR-1900·1902). 모양은 **사용자가 준 설명 그대로**다(`docs/prompts/phase17/scope.md`):
@@ -30,9 +30,23 @@ export function mailConfigOf(env: Pick<AppEnv, 'WF_MAIL_API_URL' | 'WF_MAIL_FORM
   };
 }
 
-/** 줄바꿈·제어 글자(와 그 옆의 빈칸)를 빈칸 하나로 */
-// eslint-disable-next-line no-control-regex -- 제어 글자를 지우는 것이 이 함수다
-const oneLine = (s: string): string => s.replace(/ *[\u0000-\u001F\u007F]+ */g, ' ');
+/**
+ * 줄바꿈·제어 글자(와 그 옆의 빈칸)를 빈칸 하나로 — 유니코드 줄 구분자(U+0085·U+2028·U+2029)도 (P18 병합 전 보안 검토 6). 메일 글(`compose.ts`)의
+ * 이름·제목도 이것으로 한 줄이 된다
+ */
+export function oneLine(s: string): string {
+  // eslint-disable-next-line no-control-regex -- 제어 글자를 지우는 것이 이 함수다
+  return s.replace(/ *[\u0000-\u001F\u007F\u0085\u2028\u2029]+ */g, ' ');
+}
+
+/**
+ * 받는 사람이 **주소 하나**인가 (A.1-3) — 사내 API의 `receivers`는 쉼표로 이은 여럿을 받는다. 사내 계정의 email은 로그인 때 받아 적는데, 그 값이
+ * 쉼표 목록이면 한 사람에게 가야 할 멘션 메일이 여럿에게 간다(P18 병합 전 보안 검토 2). 앞뒤 빈칸도 받지 않는다 — 고쳐 보내지 않고 그 한 통을 실패로 친다
+ */
+export function isSingleRecipient(to: string): boolean {
+  const parsed = emailSchema.safeParse(to);
+  return parsed.success && parsed.data === to.toLowerCase() && to === to.trim();
+}
 
 export function mailRequest(cfg: MailConfig, mail: OutgoingMail): { url: string; headers: Record<string, string>; body: string } {
   const headers: Record<string, string> = { 'content-type': 'application/json; charset=utf-8' };
@@ -51,7 +65,9 @@ export function mailRequest(cfg: MailConfig, mail: OutgoingMail): { url: string;
 /**
  * 남의 글(응답 본문·오류 문장)에서 인증 값을 가린다 — 값 전체와, `Bearer ` 같은 앞말을 뗀 토큰만 (FR-1902). 토큰만 되읊는 서버가 있다
  */
-export function hideSecret(text: string, secret: string): string {
+export function hideSecret(text: string, raw: string): string {
+  // 보낼 때 앞뒤 빈칸이 떼어진다 — 서버가 되읊는 값에는 없다(병합 전 보안 검토 4)
+  const secret = raw.trim();
   if (!secret) return text;
   const parts = [secret, secret.replace(/^\S+\s+/, '')].filter((p, i, all) => p.length > 0 && all.indexOf(p) === i).sort((a, b) => b.length - a.length);
   return parts.reduce((out, p) => out.split(p).join('***'), text);

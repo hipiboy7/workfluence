@@ -47,7 +47,9 @@ describe('mentionMail', () => {
 
   it('**이름·제목은 메일에서 한 줄이다** — 줄바꿈(CR 하나·U+2028 등)이 새 줄을 만들어 줄 머리 이스케이프를 비켜 가지 않게(병합 전 보안 검토 3)', () => {
     const m = mentionMail({ callerName: '홍\u2028길동', where: '문서', pageTitle: 'x\r# 큰 글씨\n> 인용', pageUrl: null });
-    expect(m.markdown).toContain('문서: **x \\# 큰 글씨 &gt; 인용**');
+    // 한 줄이 되면 `#`·`>`는 줄 머리가 아니다 — 새 줄이 없다
+    expect(m.markdown).toContain('문서: **x # 큰 글씨 &gt; 인용**');
+    expect(m.markdown).not.toMatch(/\r|\u2028/);
     expect(m.markdown.split('\n')[0]).toBe('**홍 길동** 님이 문서에서 회원님을 불렀습니다.');
     expect(m.text).toContain('문서: x # 큰 글씨 > 인용');
     expect(m.subject).toBe('[위키] 홍 길동 님이 회원님을 불렀습니다');

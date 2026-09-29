@@ -40,11 +40,15 @@ export function isHttpHeaderName(name: string): boolean {
   return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name);
 }
 
-/** 헤더 값이 틀렸으면 까닭 — **줄바꿈은 다른 헤더를 끼워 넣는 길이다**. 비어 있으면 안 된다 */
+/**
+ * 헤더 값이 틀렸으면 까닭 — **줄바꿈은 다른 헤더를 끼워 넣는 길이다**. 비어 있으면 안 된다. **보이는 ASCII(와 빈칸·탭)만** — 다른 글자(한글 등)면 보낼 때마다
+ * 실패하고, 그 오류 문장이 비밀 값의 몇째 글자가 무엇인지를 로그에 남긴다(P18 병합 전 보안 검토 5)
+ */
 export function mailHeaderValueProblem(value: string): string | null {
   if (/[\r\n]/.test(value)) return '헤더 값에 줄바꿈을 넣지 않는다';
   // eslint-disable-next-line no-control-regex -- 제어 글자를 찾는 것이 이 판정이다
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(value)) return '헤더 값에 제어 글자를 넣지 않는다';
+  if (!/^[\t\u0020-\u007E]*$/.test(value)) return '헤더 값은 영문·숫자·기호(보이는 ASCII)만 쓴다 — 메일 API 담당에게 받은 값을 그대로 적는다';
   if (!value.trim()) return '헤더 값이 비었다';
   return null;
 }
