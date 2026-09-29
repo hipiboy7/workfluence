@@ -409,15 +409,19 @@ async function main(): Promise<void> {
   if (longest > LONGEST_PATH_LIMIT) throw new Error(`묶음 안의 경로가 너무 길다(${longest}자 > ${LONGEST_PATH_LIMIT}): ${top[0]}`);
   const folderMax = MAX_PATH - 1 - longest;
   writeFileSync(join(out, 'app', 'bundle.json'), JSON.stringify({ longestPath: longest }));
-  // 8) 여는 명령과 읽어보기. 실패하면 창이 닫히지 않게 멈춘다(자동 확인은 TRIAL_NO_PAUSE=1)
-  writeFileSync(
-    join(out, '시작.cmd'),
-    cmdFile(['@echo off', 'setlocal', '"%~dp0node\\node.exe" "%~dp0app\\launcher.mjs" start %*', 'if errorlevel 1 if not "%TRIAL_NO_PAUSE%"=="1" pause']),
-  );
-  writeFileSync(
-    join(out, '멈추기.cmd'),
-    cmdFile(['@echo off', 'setlocal', '"%~dp0node\\node.exe" "%~dp0app\\launcher.mjs" stop %*', 'if not "%TRIAL_NO_PAUSE%"=="1" pause']),
-  );
+  // 8) 여는 명령과 읽어보기. 실패하면 창이 닫히지 않게 멈춘다(자동 확인은 TRIAL_NO_PAUSE=1). 여는 스크립트의 종료 코드를 그대로 돌려준다 —
+  //    마지막 줄이 조건이 거짓인 `if`면 명령 창은 0을 돌려준다(2026-09-29 러너 — 자리가 차서 1로 끝났는데 시작.cmd는 0이었다)
+  const launch = (command: string, pauseAlways: boolean): string =>
+    cmdFile([
+      '@echo off',
+      'setlocal',
+      `"%~dp0node\\node.exe" "%~dp0app\\launcher.mjs" ${command} %*`,
+      'set "RC=%ERRORLEVEL%"',
+      `${pauseAlways ? '' : 'if not "%RC%"=="0" '}if not "%TRIAL_NO_PAUSE%"=="1" pause`,
+      'exit /b %RC%',
+    ]);
+  writeFileSync(join(out, '시작.cmd'), launch('start', false));
+  writeFileSync(join(out, '멈추기.cmd'), launch('stop', true));
   writeFileSync(join(out, '읽어보기.txt'), textFile(readme(folderMax)));
   console.log(`[win-bundle] ${out} — 연결 ${links.length}개, VC++ 런타임 ${copied.join(', ')}`);
   console.log(`[win-bundle] 가장 긴 경로 ${longest}자 — 풀 자리의 경로는 ${folderMax}자까지`);
