@@ -388,11 +388,14 @@ function stopDatabase() {
   return r.status === 0 && !dbRunning() ? 'stopped' : 'failed';
 }
 
-/** 데이터베이스가 다 만들어졌는가 — 표시가 없으면 앞선 판의 흔적(첫 관리자 표시·기동 로그)으로 본다 */
+/**
+ * 데이터베이스가 다 만들어졌는가 — 데이터 폴더가 있고 initdb가 끝났다는 표시가 있어야 한다(`data\pgdata`만 지우면 표시가 남는다 — 그때는 새로 만든다).
+ * 표시가 없으면 앞선 판의 흔적(첫 관리자를 만들었다는 표시)으로 본다 — 첫 관리자까지 갔으면 데이터베이스는 다 만들어졌다
+ */
 function pgReady() {
-  if (existsSync(PG_READY)) return true;
   if (!existsSync(join(PGDATA, 'PG_VERSION'))) return false;
-  if (existsSync(LEGACY_SEEDED) || existsSync(join(DATA, 'postgres.log'))) {
+  if (existsSync(PG_READY)) return true;
+  if (existsSync(LEGACY_SEEDED)) {
     writeOrFail(PG_READY, new Date().toISOString());
     return true;
   }
@@ -461,7 +464,10 @@ async function start(openBrowser) {
   const dbUp = dbRunning();
   if (!dbUp) await requireFreePort(dbPort, '127.0.0.1', 'WF_PG_EMBEDDED_PORT', '데이터베이스');
 
+  // 떠 있는 데이터베이스는 다 만들어진 것이다(initdb는 서버를 띄운 채 끝나지 않는다)
+  if (dbUp && !existsSync(PG_READY)) writeOrFail(PG_READY, new Date().toISOString());
   if (!pgReady()) {
+    rmSync(PG_READY, { force: true });
     if (existsSync(PGDATA)) {
       say('처음 실행이 중간에 끊겨 반쯤 만든 데이터베이스를 지우고 다시 만든다');
       rmSync(PGDATA, { recursive: true, force: true });
