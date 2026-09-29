@@ -2,6 +2,7 @@ name: Windows 묶음 (F-009)
 
 # 백로그 F-009 — Docker 없이 Windows에서 zip을 받아 풀고 시작.cmd로 바로 띄워 보는 묶음을 만들고, **올린 것을 다시 받아 저장소가 없는 빈 폴더에 풀어**
 # 실제로 띄워 본다. 결과물(artifact) `workfluence-windows-trial`이 그 묶음이다 — Actions 화면에서 받는다(GitHub 로그인 필요). 기존 체험 워크플로(windows.yml)와 따로 돈다.
+# 같은 실행의 결과물 `workfluence-windows-trial-lgpl-sources`는 묶음에 든 LGPL 라이브러리(GNU libiconv·libintl)의 소스다(사용자 결정 2026-09-29 (가′)).
 #
 # 알아 둘 것 (windows.yml과 같다)
 #   - 한 단계가 끝나면 그 단계가 띄운 프로세스가 사라진다 — 띄우고 확인하는 일은 한 단계 안에서(docs/internal/검토서_트러블슈팅.md T-062)
@@ -81,6 +82,37 @@ jobs:
           name: workfluence-windows-trial
           path: .local/win-bundle/workfluence
           include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+
+      # LGPL 구성 요소(GNU libiconv·libintl)의 소스 — 판을 맞춘 upstream tarball을 받아 SHA-256을 맞추고, 묶음과 같은 실행의 별도 결과물로 올린다(사용자 결정
+      # 2026-09-29 (가′) — 체험 가이드 10.3절). 받을 목록은 묶기가 적는다(.local/win-bundle/lgpl-sources.json — 판·주소·SHA-256은 scripts/win-bundle.ts 한 곳)
+      - name: LGPL 소스 받기
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $dir = '.local\win-bundle\lgpl-sources'
+          # Windows PowerShell 5.1's ConvertFrom-Json emits a JSON array as one object - pipe it once more to get the items
+          $list = @((Get-Content -Raw '.local\win-bundle\lgpl-sources.json' | ConvertFrom-Json) | ForEach-Object { $_ })
+          if ($list.Count -eq 0) { throw 'the bundler listed no LGPL source archive' }
+          foreach ($s in $list) {
+            $dest = Join-Path $dir $s.file
+            $ok = $false
+            for ($i = 1; $i -le 3 -and -not $ok; $i++) {
+              try { Invoke-WebRequest -UseBasicParsing -Uri $s.url -OutFile $dest; $ok = $true } catch { "try ${i}: $($_.Exception.Message)"; Start-Sleep -Seconds (15 * $i) }
+            }
+            if (-not $ok) { throw "could not download $($s.url)" }
+            $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash.ToLower()
+            if ($got -ne $s.sha256) { throw "SHA-256 of $($s.file) is $got - expected $($s.sha256)" }
+            "{0}: {1:N1} MB, SHA-256 ok" -f $s.file, ((Get-Item -LiteralPath $dest).Length / 1MB)
+          }
+          Get-ChildItem $dir | Format-Table Name, Length -AutoSize | Out-String
+
+      - name: LGPL 소스 올리기
+        uses: actions/upload-artifact@v4
+        with:
+          name: workfluence-windows-trial-lgpl-sources
+          path: .local/win-bundle/lgpl-sources
+          compression-level: 0
           retention-days: 30
           if-no-files-found: error
 
@@ -261,6 +293,7 @@ jobs:
             $notices = [IO.File]::ReadAllText((Join-Path $src 'pgsql\THIRD_PARTY_NOTICES.txt'))
             $named = @('wxWidgets', 'wxWindows', 'Artistic', 'libcurl', 'libxslt', 'pldebugger', 'system_stats', 'pgxml', 'testplug', 'libecpg') | Where-Object { $notices.Contains($_) }
             Mark 'notices: no dropped component named' ($named.Count -eq 0) ($named -join ', ')
+            Mark 'notices: point to the LGPL source artifact of this run' ($notices.Contains('workfluence-windows-trial-lgpl-sources')) ''
 
             # --- 1) fresh folder with a space in the path ---
             $dir = Join-Path $env:RUNNER_TEMP $env:TRIAL_FIRST
@@ -564,7 +597,7 @@ jobs:
             ${{ runner.temp }}/moved here/wf2/data/postgres.log
             ${{ runner.temp }}/new bundle/wf3/data/postgres.log
 
-  # 받을 수 있는 묶음은 시험을 통과한 것뿐이다 — 실패·취소된 실행의 묶음은 지운다. **쓰기 권한(actions: write)은 이 작업만 쥔다** — 저장소 코드를 받지도 돌리지도
+  # 받을 수 있는 묶음은 시험을 통과한 것뿐이다 — 실패·취소된 실행의 묶음은 지운다(그 묶음의 LGPL 소스 결과물도 함께). **쓰기 권한(actions: write)은 이 작업만 쥔다** — 저장소 코드를 받지도 돌리지도
   # 않는다. 이 실행의 결과물 가운데 이름이 맞는 것을 찾아 지운다(시험 작업이 도중에 끊겨도 찾는다)
   discard:
     needs: bundle
@@ -580,6 +613,6 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          ids=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "workfluence-windows-trial") | .id')
+          ids=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "workfluence-windows-trial" or .name == "workfluence-windows-trial-lgpl-sources") | .id')
           if [ -z "$ids" ]; then echo 'no bundle artifact in this run'; exit 0; fi
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/artifacts/$id"; echo "deleted the untested bundle artifact $id"; done

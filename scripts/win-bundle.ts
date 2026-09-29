@@ -23,6 +23,10 @@
  * 도구(pgAdmin·StackBuilder·ecpg 등)의 라이브러리와 EDB의 확장이 함께 있다 — 아래 `PG_DROPPED`가 그것을 빼고, 남은 파일의 가져오기 목록(PE import)을
  * 읽어 뺀 파일을 가져오는 것이 없는지 본다(`checkImports`). 뺀 목록은 묶음 밖의 `.local/win-bundle/dropped-files.json`에 적는다 — 워크플로가 받은 묶음에
  * 그 파일이 없는지 본다
+ *
+ * **LGPL 구성 요소(GNU libiconv·libintl)의 소스는 같은 실행의 별도 결과물이다**(사용자 결정 2026-09-29 (가′) — 체험 가이드 10.3절). 묶음 밖의
+ * `.local/win-bundle/lgpl-sources.json`에 받을 tarball(주소·SHA-256)을 적고 `.local/win-bundle/lgpl-sources/`에 읽어보기를 둔다 — 워크플로가 tarball을
+ * 받아 SHA-256을 맞추고 그 폴더를 결과물 `LGPL_SOURCES_ARTIFACT`로 올린다. 판·주소·SHA-256은 아래 `PG_COMPONENTS` 한 곳이다
  */
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -57,14 +61,31 @@ type Component = {
   /** `scripts/win-notices/`의 원문 */
   texts: string[];
   source: string;
+  /** LGPL 구성 요소 — 판을 맞춘 upstream 소스 tarball. 워크플로가 받아 SHA-256을 맞추고 묶음과 같은 실행의 결과물로 올린다 */
+  sourceArchive?: SourceArchive;
   note?: string;
 };
+
+type SourceArchive = { url: string; sha256: string };
+
+/** LGPL 소스를 올리는 결과물의 이름 — 워크플로(`.github/workflows/windows-local.yml`)의 올리기·지우기와 같다. 러너가 고지에 이 이름이 있는지 본다 */
+const LGPL_SOURCES_ARTIFACT = 'workfluence-windows-trial-lgpl-sources';
+
+const ICONV_SOURCE: SourceArchive = {
+  url: 'https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.15.tar.gz',
+  sha256: 'ccf536620a45458d26ba83887a983b96827001e92a13847b45e4925cc8913178',
+};
+const GETTEXT_SOURCE: SourceArchive = {
+  url: 'https://ftp.gnu.org/pub/gnu/gettext/gettext-0.19.8.tar.gz',
+  sha256: '3da4f6bd79685648ecf46dab51d66fcdddc156f41ed07e580a696a38ac61d48f',
+};
+const sourceText = (a: SourceArchive): string => `${a.url} (SHA-256 ${a.sha256})`;
 
 /**
  * `pgsql/`에 든 것 — `@embedded-postgres/windows-x64@17.10.0-beta.17`을 열어 가져오기 목록(PE import)과 판 정보로 확인했다(2026-09-29).
  * PostgreSQL 실행 파일(postgres·initdb·pg_ctl)은 libintl-9.dll을 **직접 가져온다** — 그 DLL(과 그것이 가져오는 libiconv-2·libwinpthread-1)이
  * 없으면 Windows가 실행 파일을 띄우지 않는다. 라이선스의 판정은 체험 가이드 10.3절 — PostgreSQL License·Zlib·ICU License는 허용적 라이선스로 본다
- * (사용자 결정 2026-09-29), LGPL 둘(libiconv·libintl)은 사용자 승인을 기다린다
+ * (사용자 결정 2026-09-29), LGPL 둘(libiconv·libintl)은 승인했고 소스를 같은 실행의 별도 결과물로 내준다(사용자 결정 2026-09-29 (가′))
  */
 const PG_COMPONENTS: Component[] = [
   {
@@ -131,7 +152,8 @@ const PG_COMPONENTS: Component[] = [
     license: 'LGPL-2.0-or-later',
     files: /^libiconv-2\.dll$|^iconv\.lib$/i,
     texts: ['lgpl-2.0.txt'],
-    source: 'https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.15.tar.gz (SHA-256 ccf536620a45458d26ba83887a983b96827001e92a13847b45e4925cc8913178)',
+    source: sourceText(ICONV_SOURCE),
+    sourceArchive: ICONV_SOURCE,
   },
   {
     name: 'GNU gettext — libintl',
@@ -140,7 +162,8 @@ const PG_COMPONENTS: Component[] = [
     license: 'LGPL-2.1-or-later',
     files: /^libintl-9\.dll$/i,
     texts: ['lgpl-2.1.txt'],
-    source: 'https://ftp.gnu.org/pub/gnu/gettext/gettext-0.19.8.tar.gz (SHA-256 3da4f6bd79685648ecf46dab51d66fcdddc156f41ed07e580a696a38ac61d48f) — 라이브러리는 gettext-runtime/intl',
+    source: `${sourceText(GETTEXT_SOURCE)} — 라이브러리는 gettext-runtime/intl`,
+    sourceArchive: GETTEXT_SOURCE,
   },
 ];
 
@@ -334,7 +357,8 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
     '',
     'GNU libiconv(pgsql\\bin\\libiconv-2.dll)와 GNU gettext의 libintl(pgsql\\bin\\libintl-9.dll)은 LGPL이다. PostgreSQL 실행 파일은',
     '이 DLL을 동적으로 연결해 쓴다 — 같은 이름의 호환되는 빌드로 바꿔 넣어 쓸 수 있다. 수정해 쓰는 것과 그것을 위한 역공학을 막지 않는다.',
-    '소스는 위 "소스"의 주소(판을 맞춘 upstream 소스와 SHA-256)에서 받는다.',
+    `소스: 이 묶음을 받은 곳(GitHub Actions의 같은 실행)의 결과물 ${LGPL_SOURCES_ARTIFACT}에 판을 맞춘 upstream 소스 tarball이`,
+    '함께 올라가 있다 — 묶음과 같은 기간 보관된다. 위 "소스"의 주소에서도 받을 수 있고, SHA-256으로 같은 파일인지 확인한다.',
   );
   const seen = new Set<string>();
   const section = (title: string, body: string): void => {
@@ -348,6 +372,30 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
       }
   section('원문: embedded-postgres LICENSE', wrapperLicense);
   writeFileSync(join(pgDir, 'THIRD_PARTY_NOTICES.txt'), textFile(lines.join('\n') + '\n'));
+}
+
+/**
+ * LGPL 구성 요소의 소스 (사용자 결정 2026-09-29 (가′)) — `lgpl-sources.json`(워크플로가 받을 주소·SHA-256·파일 이름)과 `lgpl-sources/README.txt`.
+ * tarball은 여기서 받지 않는다 — 묶음(zip)에 넣지 않고 같은 실행의 별도 결과물로 올린다
+ */
+function writeLgplSources(base: string): void {
+  const list = PG_COMPONENTS.filter((c) => c.sourceArchive).map((c) => {
+    const a = c.sourceArchive!;
+    return { name: c.name, version: c.version, license: c.license, url: a.url, sha256: a.sha256, file: basename(new URL(a.url).pathname) };
+  });
+  const dir = join(base, 'lgpl-sources');
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(base, 'lgpl-sources.json'), JSON.stringify(list, null, 1));
+  const lines = [
+    'workfluence 체험 묶음 — LGPL 구성 요소의 소스',
+    '',
+    `같은 실행의 묶음(workfluence-windows-trial)의 pgsql\\bin 에 든 아래 라이브러리의 소스다. 판을 맞춘 upstream 소스 tarball을 받아`,
+    'SHA-256을 맞춘 것이다. 라이선스 원문과 구성 요소 목록은 묶음의 pgsql\\THIRD_PARTY_NOTICES.txt 에 있다.',
+    '',
+    ...list.flatMap((s) => [`${s.name} ${s.version} — ${s.license}`, `  파일: ${s.file}`, `  받은 곳: ${s.url}`, `  SHA-256: ${s.sha256}`, '']),
+  ];
+  writeFileSync(join(dir, 'README.txt'), textFile(lines.join('\n')));
 }
 
 /**
@@ -494,6 +542,8 @@ async function main(): Promise<void> {
   console.log(`[win-bundle] 어떤 실행 파일도 쓰지 않는 파일 ${dropped.length}개를 뺐다 — 남은 파일은 그것을 가져오지 않는다:\n${dropped.map((f) => `  ${f}`).join('\n')}`);
   // 6-2) 고지 — 모든 파일의 구성 요소·판을 확인하고 COPYRIGHT·THIRD_PARTY_NOTICES.txt를 쓴다
   writePgNotices(join(out, 'pgsql'), readFileSync(join(pkgDir, wrapperLicense), 'utf8'), copied);
+  // 6-3) LGPL 소스 — 받을 tarball의 목록과 읽어보기를 묶음 밖에 둔다. 받아서 SHA-256을 맞추고 올리는 것은 워크플로다
+  writeLgplSources(dirname(out));
   // 7) 경로 길이 — 탐색기는 260자를 넘는 경로를 풀지 못한다
   const top = longestPaths(out, 5);
   const longest = top[0]?.length ?? 0;
