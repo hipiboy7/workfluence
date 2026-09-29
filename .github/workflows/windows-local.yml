@@ -7,9 +7,12 @@ name: Windows 묶음 (F-009)
 #   - 한 단계가 끝나면 그 단계가 띄운 프로세스가 사라진다 — 띄우고 확인하는 일은 한 단계 안에서(docs/internal/검토서_트러블슈팅.md T-062)
 #   - run 블록 안에는 ASCII만 쓴다 — Windows PowerShell 5.1이 BOM 없는 UTF-8 스크립트를 시스템 코드 페이지로 읽는다. 한글 파일 이름은 문자 코드로 만든다
 #   - 비밀 값(첫 비밀번호)은 로그에서 가린다
+#
+# 언제 도나 — main에 들어온 커밋마다(2026-09-29 사용자 결정으로 main에 들어왔다), 그리고 수동 실행(Actions 화면의 Run workflow — 브랜치를 고른다).
+# 수동 실행은 이 파일이 기본 브랜치(main)에 있어야 보인다 — Phase 브랜치의 화면을 Windows에서 미리 볼 때 그 브랜치를 고른다
 on:
   push:
-    branches: [exp/windows-local]
+    branches: [main]
     paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:
 
