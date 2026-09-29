@@ -59,3 +59,33 @@
 - 3의 "둘 다"는 Claude가 물은 두 폴더다 — 옛 작업 트리(사용자 홈, 145MB)와 계정 인수인계 폴더(`.local/` 아래, 159MB). 지웠다(저장소 밖).
 - 2는 `docs/기능백로그.md` F-012로 적었다.
 
+## 2026-09-29 — Claude가 물은 셋에 고른 안
+
+- F-009를 main에 넣을까: **"지금 병합 (Recommended)"**
+- 사내 메일 API의 요청 형식: 사용자가 적어 준 것 그대로 —
+
+> 이메일 발송(Email API)
+> POST /api/v1/email/send
+> 예시:
+> Request body
+> {
+>     "content":"공지"
+>     "receivers":"users1@example.com, users2@example.com",
+>     "sender_name":"이메일 시스템",
+>     "subject":""알림"
+> }
+> Responses
+> Code 200
+> {
+>     "message":"Eamil sent successfully"
+> }
+>
+> Code 400: 필수 파라미터 누락
+> Code 500: 메일 발송 오류
+>
+> 2. Markdown 이메일 발송
+> POST /api/v1/email/send_markdown
+> 예시: 이메일 발송 예시위와 동일
+
+- 메일 설정 준비(F-012)는 언제: **"Phase 17 뒤 Phase 18 (Recommended)"**
+
