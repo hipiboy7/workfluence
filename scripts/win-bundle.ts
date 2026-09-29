@@ -12,7 +12,8 @@
  * - `app/links.json` — api의 node_modules는 pnpm이 폴더 연결로 짠다(Windows는 junction). zip은 연결을 담지 못하고, 연결을 따라 복사하면 pnpm의
  *   배치가 깨진다(패키지가 자기 의존성을 옆자리에서 찾는다). 그래서 연결을 목록으로 적고 지운다 — 여는 스크립트가 시작할 때 다시 만든다
  *   (junction은 관리자 권한 없이 만든다). pnpm의 평평한 배치(`node-linker=hoisted`)로 배포하면 node_modules가 비었다(pnpm 12.4.1, 2026-09-28)
- * - `app/bundle.json` — 묶음 안에서 가장 긴 상대 경로. 여는 스크립트가 풀린 자리의 경로 길이를 견준다
+ * - `app/bundle.json` — 묶음 안에서 가장 긴 상대 경로. 여는 스크립트가 풀린 자리의 경로 길이를 견준다. 패키지가 잘못 싣고 나온 시험 도구의
+ *   캐시(`node_modules/.vite`)는 뺀다 — 실행에 쓰이지 않고 가장 긴 경로였다(`pruneToolCaches`)
  * - `pgsql/` — `@embedded-postgres/windows-x64`의 PostgreSQL 17과 그것이 쓰는 라이브러리, VC++ 런타임 DLL(사용자 승인 2026-09-28 — Microsoft의 재배포
  *   허용 파일, `CLAUDE.md` 7절의 상용 구성 요소. 앱 폴더에 두면 Windows가 System32보다 먼저 찾는다), 그리고 `COPYRIGHT`(PostgreSQL)·
  *   `THIRD_PARTY_NOTICES.txt`(구성 요소마다 판·라이선스·소스 위치와 원문 — 원문은 `scripts/win-notices/`). 아래 `PG_COMPONENTS`에 없는 파일이
@@ -21,7 +22,7 @@
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve(__dirname, '..');
@@ -307,22 +308,39 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
   writeFileSync(join(pgDir, 'THIRD_PARTY_NOTICES.txt'), textFile(lines.join('\n') + '\n'));
 }
 
-/** 묶음 안의 가장 긴 상대 경로(파일) */
-function longestPath(dir: string): { length: number; path: string } {
-  let best = { length: 0, path: '' };
+/** 묶음 안의 상대 경로(파일)를 긴 것부터 `n`개 */
+function longestPaths(dir: string, n: number): string[] {
+  const all: string[] = [];
+  const walk = (d: string): void => {
+    for (const name of readdirSync(d)) {
+      const p = join(d, name);
+      if (lstatSync(p).isDirectory()) walk(p);
+      else all.push(relative(dir, p));
+    }
+  };
+  walk(dir);
+  return all.sort((a, b) => b.length - a.length).slice(0, n);
+}
+
+/**
+ * 패키지가 잘못 싣고 나온 시험 도구의 캐시(`…/node_modules/.vite`)를 뺀다 — 실행에 쓰이지 않고 묶음에서 가장 긴 경로였다
+ * (`@nestjs/serve-static@12.0.0`의 `tests/node_modules/.vite/vitest/<해시>/results.json`, 207자 — 2026-09-29 러너). 뺀 폴더 수를 돌려준다
+ */
+function pruneToolCaches(dir: string): number {
+  let n = 0;
   const walk = (d: string): void => {
     for (const name of readdirSync(d)) {
       const p = join(d, name);
       const st = lstatSync(p);
-      if (st.isDirectory()) walk(p);
-      else {
-        const rel = relative(dir, p);
-        if (rel.length > best.length) best = { length: rel.length, path: rel };
-      }
+      if (!st.isDirectory()) continue;
+      if (name === '.vite' && basename(d) === 'node_modules') {
+        rmSync(p, { recursive: true, force: true });
+        n++;
+      } else walk(p);
     }
   };
   walk(dir);
-  return best;
+  return n;
 }
 
 async function main(): Promise<void> {
@@ -346,6 +364,7 @@ async function main(): Promise<void> {
       } else if (st.isDirectory()) walk(p);
     }
   };
+  const pruned = pruneToolCaches(join(apiDir, 'node_modules'));
   walk(join(apiDir, 'node_modules'));
   for (const l of links) {
     const p = join(apiDir, l.path);
@@ -384,10 +403,12 @@ async function main(): Promise<void> {
   // 6-1) 고지 — 모든 파일의 구성 요소·판을 확인하고 COPYRIGHT·THIRD_PARTY_NOTICES.txt를 쓴다
   writePgNotices(join(out, 'pgsql'), readFileSync(join(pkgDir, wrapperLicense), 'utf8'), copied);
   // 7) 경로 길이 — 탐색기는 260자를 넘는 경로를 풀지 못한다
-  const longest = longestPath(out);
-  if (longest.length > LONGEST_PATH_LIMIT) throw new Error(`묶음 안의 경로가 너무 길다(${longest.length}자 > ${LONGEST_PATH_LIMIT}): ${longest.path}`);
-  const folderMax = MAX_PATH - 1 - longest.length;
-  writeFileSync(join(out, 'app', 'bundle.json'), JSON.stringify({ longestPath: longest.length }));
+  const top = longestPaths(out, 5);
+  const longest = top[0]?.length ?? 0;
+  console.log(`[win-bundle] 긴 경로(뺀 시험 캐시 ${pruned}개):\n${top.map((p) => `  ${p.length} ${p}`).join('\n')}`);
+  if (longest > LONGEST_PATH_LIMIT) throw new Error(`묶음 안의 경로가 너무 길다(${longest}자 > ${LONGEST_PATH_LIMIT}): ${top[0]}`);
+  const folderMax = MAX_PATH - 1 - longest;
+  writeFileSync(join(out, 'app', 'bundle.json'), JSON.stringify({ longestPath: longest }));
   // 8) 여는 명령과 읽어보기. 실패하면 창이 닫히지 않게 멈춘다(자동 확인은 TRIAL_NO_PAUSE=1)
   writeFileSync(
     join(out, '시작.cmd'),
@@ -399,7 +420,7 @@ async function main(): Promise<void> {
   );
   writeFileSync(join(out, '읽어보기.txt'), textFile(readme(folderMax)));
   console.log(`[win-bundle] ${out} — 연결 ${links.length}개, VC++ 런타임 ${copied.join(', ')}`);
-  console.log(`[win-bundle] 가장 긴 경로 ${longest.length}자(${longest.path}) — 풀 자리의 경로는 ${folderMax}자까지`);
+  console.log(`[win-bundle] 가장 긴 경로 ${longest}자 — 풀 자리의 경로는 ${folderMax}자까지`);
 }
 
 main().catch((e: unknown) => {

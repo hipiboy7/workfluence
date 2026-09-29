@@ -198,6 +198,9 @@ jobs:
             Protect-Secrets $dir
             Show-Logs 'first'
             Mark 'first start (init db, tables, first admin)' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            $acl = Get-Acl -LiteralPath (Join-Path $dir 'data')
+            $who = @($acl.Access | ForEach-Object { $_.IdentityReference.Value })
+            Mark 'data folder: inheritance cut, no Users group (icacls)' ($acl.AreAccessRulesProtected -and -not ($who | Where-Object { $_ -match 'Users$' })) ($who -join ', ')
             $newPw = 'Wf-New-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
             Write-Output "::add-mask::$newPw"
             $script:secrets.Add($newPw)
