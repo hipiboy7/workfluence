@@ -28,6 +28,13 @@ describe('mailRequest', () => {
     expect(JSON.parse(r.body).content).toBe('**마크다운** 본문');
   });
 
+  it('**제목의 줄바꿈·제어 글자는 빈칸으로 바꾼다** — 사내 API가 제목을 메일 머리말(SMTP 헤더)로 옮겨도 머리말을 끼워 넣지 못한다(P7 C.4.1 — 표시 이름이 제목에 든다. 사내 계정의 이름은 가입 검사를 지나지 않는다)', () => {
+    const r = mailRequest(cfg, { ...msg, subject: '[위키] 홍길동\r\nBcc: x@example.internal\u0000 님이 회원님을 불렀습니다' });
+    expect(JSON.parse(r.body).subject).toBe('[위키] 홍길동 Bcc: x@example.internal 님이 회원님을 불렀습니다');
+    // 본문의 줄바꿈은 그대로다 — 본문은 여러 줄이다
+    expect(JSON.parse(mailRequest(cfg, { ...msg, text: '한 줄\n두 줄' }).body).content).toBe('한 줄\n두 줄');
+  });
+
   it('**인증 헤더는 둘 다 있을 때만** 싣는다 — 이름은 설정 그대로', () => {
     const withKey = mailRequest({ ...cfg, authHeader: 'X-API-Key', authValue: 'k-1' }, msg);
     expect(withKey.headers).toEqual({ 'content-type': 'application/json; charset=utf-8', 'X-API-Key': 'k-1' });
