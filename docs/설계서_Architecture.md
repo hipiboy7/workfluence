@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 17까지 구현 완료** (2026-09-29). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 18까지 구현 완료** (2026-09-29). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -58,7 +58,7 @@ workfluence/
 │   │   │   ├── config/           [P0] .env 로딩·검증 (WF_* strict)
 │   │   │   ├── db/               [P0] Drizzle 연결·스키마·마이그레이션·시드 / [P10] order.ts (이름 정렬 — `COLLATE "C"`, T-046) /
 │   │   │   │                     [P13] app-role.ts (앱 DB 계정과 권한 — 마이그레이션이 준다)
-│   │   │   ├── cli/              [P13] 월간 작업의 본문(휴지통·감사로그 정리·재색인) — 앱 이미지 안에서 `tools`로 돈다
+│   │   │   ├── cli/              [P13] 월간 작업의 본문(휴지통·감사로그 정리·재색인) — 앱 이미지 안에서 `tools`로 돈다. [P18] mail-test(사내 메일 시험 한 통)
 │   │   │   ├── common/           [P0] ZodPipe · 로거 · rate limit 가드 / [P7] revocation.bus.ts /
 │   │   │   │                     [P10] error-text.ts (로그에 적는 오류 한 줄 — drizzle 문장의 매개변수를 싣지 않는다) /
 │   │   │   │                     [P11] request-context.ts · request-log.middleware.ts · log-line.ts · domain/{request-id,access-log}.ts
@@ -81,7 +81,7 @@ workfluence/
 │   │   │   ├── trash/            [P4] 휴지통·되살리기
 │   │   │   ├── labels/           [P4] 라벨
 │   │   │   ├── templates/        [P6] 페이지 템플릿
-│   │   │   ├── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http)
+│   │   │   ├── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http). [P18] domain/{request,compose}(요청 모양·메일 글) · post(보내는 길 — 앱과 시험 명령이 함께)
 │   │   │   └── llm/              [P10] 사내 LLM 질문 — domain/{secret,openai,think,conversation}.ts ·
 │   │   │                         LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
@@ -95,16 +95,16 @@ workfluence/
 │                                 (한 틀 = 위 막대·왼쪽 칸(SideSlot)·본문, 카드 틀, 스페이스 문맥의 왼쪽 칸과 페이지 트리) ·
 │                                 components/{ui,ConfirmDialog,icons,labels,LlmSideNav,NotificationBell,auditNames,policyNames}.ts(x)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
-│   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown}.ts
+│   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown,mail}.ts
 ├── e2e/                          Playwright
 ├── scripts/                      check-env · setup-env · dev-db · verify-docs · e2e · check-licenses
 │                                 reindex · trash-purge · audit-purge · backup-create · backup-restore
-│                                 release-bundle · release-verify · load-test   (전부 tsx, OS 무관)
+│                                 release-bundle · release-verify · load-test · mail-test   (전부 tsx, OS 무관)
 ├── deploy/                       Dockerfile · compose · nginx.conf
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P15]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P18]`은 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -132,7 +132,8 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `diff.ts` | 두 문서 JSON의 블록·단어 비교 (LCS) | 화면이 그리고 서버가 같은 결과를 내야 한다 |
 | `html.ts` | 문서 JSON → HTML 렌더링·이스케이프·인쇄 CSS | 허용 노드 목록이 `document.ts`와 한 곳에서 나와야 한다 |
 | `llm.ts` | LLM 질문의 흐름 줄(NDJSON) 모양·줄 나누기·줄 읽기, LLM 주소 판정 | 서버가 쓰고 화면이 읽는다. 주소 판정은 관리 화면과 서버가 같아야 한다 |
-| `markdown.ts` | 문서 JSON → 마크다운·텍스트(페이지 복사) | 허용 목록이 `document.ts`와 한 곳에서 나와야 한다. 평문 추출은 검색 인덱스와 같은 함수다 |
+| `markdown.ts` | 문서 JSON → 마크다운·텍스트(페이지 복사), 마크다운 안에 넣을 글자(`markdownText`)·링크 주소(`markdownLinkTarget`) | 허용 목록이 `document.ts`와 한 곳에서 나와야 한다. 평문 추출은 검색 인덱스와 같은 함수다. 메일(P18)도 같은 이스케이프 규칙을 쓴다 |
+| `mail.ts` | 사내 메일 API 설정의 판정 — 보내는 주소·인증 헤더 이름과 값, 본문 형식 (P18) | 기동 검사(`env.ts`)가 쓴다. 비밀은 인증 헤더로만 받는다 |
 
 전부 **A등급**(테스트 먼저, ≥90%)이다. 입출력이 결정적이고 외부 의존이 없다.
 
@@ -219,7 +220,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 파일 스토리지 | 로컬 디스크(볼륨) | `StorageProvider` | MinIO·S3 호환·NAS |
 | 검색 | PostgreSQL ILIKE + pg_trgm | `SearchProvider` | pg_bigm·외부 엔진 |
 | 실시간 상태 | Yjs (`page_realtime`). **JSON이 정본이고 이것은 파생** | 게이트웨이가 상태를 읽고 쓰는 지점 | 다른 CRDT, 또는 실시간 편집을 끄는 것(`WF_COLLAB_ENABLED=false`) |
-| 알림 발송 | 앱 안 알림함 + 사내 메일 API | `MAIL_SENDER` 토큰 (`mock`/`http`) | 사내 메신저, 다른 메일 게이트웨이 |
+| 알림 발송 | 앱 안 알림함 + 사내 메일 API | `MAIL_SENDER` 토큰 (`mock`/`http`) — 요청 모양은 `apps/api/src/mail/domain/request.ts` 한 곳(P18) | 사내 메신저, 다른 메일 게이트웨이 |
 | LLM 질문 | 사내 LLM의 OpenAI 호환 API (vLLM) | `LLM_CLIENT` 토큰 (`openai.client.ts`) | 다른 형식의 사내 LLM 게이트웨이. 형식 읽기는 `domain/openai.ts` |
 
 테스트에서는 이 인터페이스의 대역(fake)을 쓴다. 단 **PostgreSQL은 대역을 쓰지 않는다** — SQL·제약·트랜잭션이 곧 로직이라 대역으로 검증하면 실패를 놓친다.
@@ -245,6 +246,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `backup:create` / `backup:restore` | 백업(DB 덤프 + 첨부) 만들기 / 되살리기. 복원은 **빈 볼륨에만** |
 | `release:bundle` / `release:verify` | 반입 묶음 만들기 / 필수 파일·체크섬·매니페스트 검사 |
 | `load:test` | 동시 N세션 읽기 시나리오. p50·p95·max와 오류 수 |
+| `mail:test <받는 주소>` | 사내 메일 API로 시험 메일 한 통 — 설정을 말하고 결과와 까닭을 말한다(운영은 `tools`의 `node dist/cli/mail-test.js`, P18) |
 | `lint` / `typecheck` / `test` / `test:cov` / `test:e2e` / `verify:docs` | 검사 |
 | `check` | lint + typecheck + test + verify:docs (CI와 동일) |
 
@@ -340,6 +342,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 검색 엔진 교체 | 6절 축 | M | 같음. 색인은 파생 데이터라 재생성 가능하다 |
 | 외부 시스템 알림 (메일·메신저) | ③ + 설정 | M | 폐쇄망에서 닿는 곳인지 먼저 확인 |
 | 사내 LLM의 형식이 다르다 (다른 게이트웨이) | 6절 축 | M | `LLM_CLIENT` 뒤의 어댑터(`apps/api/src/llm/openai.client.ts`)와 형식 읽기(`domain/openai.ts`)만 바꾼다 |
+| 사내 메일 API의 형식이 다르다 (현장의 API가 다른 필드·성공 판정) | 6절 축 | S | 요청 모양(`apps/api/src/mail/domain/request.ts`)과 그 시험만 바꾼다. 주소·형식·보내는 이름·인증 헤더는 이미 설정이다(P18) |
 | 사람에게 **다른 행위도** 맡긴다 | 권한 판정 | L | `DELEGABLE_ACTIONS`와 규칙표 `DELEGATION`(`packages/shared/src/permissions.ts` — 받는 역할과 주는 사람)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`·`users_grants_holder_chk`를 고친다 — 잊으면 `apps/api/src/db/constraints.integration.spec.ts`가 둘이 다르다고 막는다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다. 받은 사람은 행위자가 할 수 없는 위임을 가진 셈이 되므로 관리의 우열(`canManageUser`)이 저절로 따라간다 |
 | 새 로그 줄을 더한다 | 로그 | S | `LOG_EVENTS`(`packages/shared/src/constants.ts`)에 코드를 더하고 `logLine()`으로 남긴다. 장애대응 가이드 7.28절 표에 한 줄 — 빠뜨리면 `verify:docs`가 막는다 |
 
