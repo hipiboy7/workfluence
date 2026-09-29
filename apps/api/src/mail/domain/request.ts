@@ -30,11 +30,17 @@ export function mailConfigOf(env: Pick<AppEnv, 'WF_MAIL_API_URL' | 'WF_MAIL_FORM
   };
 }
 
+/** 줄바꿈·제어 글자(와 그 옆의 빈칸)를 빈칸 하나로 */
+// eslint-disable-next-line no-control-regex -- 제어 글자를 지우는 것이 이 함수다
+const oneLine = (s: string): string => s.replace(/ *[\u0000-\u001F\u007F]+ */g, ' ');
+
 export function mailRequest(cfg: MailConfig, mail: OutgoingMail): { url: string; headers: Record<string, string>; body: string } {
   const headers: Record<string, string> = { 'content-type': 'application/json; charset=utf-8' };
   if (cfg.authHeader && cfg.authValue) headers[cfg.authHeader] = cfg.authValue;
   const body = JSON.stringify({
-    subject: mail.subject,
+    // **제목은 한 줄이다** — 사내 API가 제목을 메일 머리말(SMTP 헤더)로 옮기면 줄바꿈이 머리말을 끼워 넣는다(P7 C.4.1). 제목에는 부른 사람의
+    // 표시 이름이 들고, 사내 계정의 이름은 가입 검사(`displayNameSchema`)를 지나지 않는다 — 보내는 경계 한 곳에서 막는다
+    subject: oneLine(mail.subject),
     content: cfg.format === 'markdown' ? mail.markdown : mail.text,
     receivers: mail.to,
     sender_name: cfg.senderName,
