@@ -30,6 +30,7 @@
     "search:reindex": "pnpm build:shared && tsx scripts/reindex.ts",
     "trash:purge": "pnpm build:shared && tsx scripts/trash-purge.ts",
     "audit:purge": "pnpm build:shared && tsx scripts/audit-purge.ts",
+    "mail:test": "pnpm build:shared && tsx scripts/mail-test.ts",
     "backup:create": "pnpm build:shared && tsx scripts/backup-create.ts",
     "backup:restore": "pnpm build:shared && tsx scripts/backup-restore.ts",
     "release:bundle": "pnpm build:shared && tsx scripts/release-bundle.ts",

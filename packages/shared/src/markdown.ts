@@ -22,6 +22,14 @@ function escapeInline(text: string): string {
 /** 줄 머리에서 블록이 되는 표기 — 제목·인용·목록·가로줄·setext 밑줄. 빈칸 셋까지는 들여 써도 같다 (CommonMark) */
 const LINE_START = /^( {0,3})(?:([#>+=-])|(\d+)([.)]))/;
 
+/**
+ * 마크다운 안에 넣을 글자 (P18_설계서_Mail FR-1901) — 서식·링크·HTML이 되는 기호와 줄 머리의 블록 표기를 이스케이프한다. 메일 본문이 문서 제목·사람
+ * 이름을 싣는다. 문서를 마크다운으로 복사할 때(`pageMarkdown`)와 **같은 규칙**이다 — 규칙이 두 벌이면 한쪽만 고쳐진다(1.3절)
+ */
+export function markdownText(text: string): string {
+  return escapeLineStarts(escapeInline(text));
+}
+
 function escapeLineStarts(s: string): string {
   return s
     .split('\n')

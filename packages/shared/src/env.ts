@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ROLES, type Role } from './constants';
+import { MAIL_FORMATS, MAIL_LIMITS, isHttpHeaderName, mailApiUrlProblem, mailHeaderValueProblem } from './mail';
 
 /**
  * 환경변수 스키마 (P0_설계서_Foundation 1절, FR-010~FR-017).
@@ -129,11 +130,40 @@ export const envSchema = z
      * 기동은 되고 발송만 조용히 실패한다 (FR-757).
      */
     WF_MAIL_ENABLED: bool(false),
-    /** 모의 발송 — 보낸 내용을 로그로 남기고 실제로 보내지 않는다 (FR-752) */
+    /** 모의 발송 — 보낸 내용을 로그로 남기고 실제로 보내지 않는다 (FR-752). **운영에서 켰으면 false여야 뜬다** (P18 FR-1904 — 아래 `parseEnv`) */
     WF_MAIL_MOCK: bool(true),
-    WF_MAIL_API_URL: z.string().default(''),
-    WF_MAIL_API_TOKEN: z.string().default(''),
-    WF_MAIL_FROM: z.string().default(''),
+    /**
+     * 사내 메일 API의 **보내는 주소 전체** (P18_설계서_Mail E절) — 고른 형식의 주소(`…/send` · `…/send_markdown`). http(s)만, 사용자 정보·질의·조각
+     * 없이 — 비밀은 인증 헤더로만 받는다(`mailApiUrlProblem`)
+     */
+    WF_MAIL_API_URL: z
+      .string()
+      .default('')
+      .superRefine((v, ctx) => {
+        const problem = v === '' ? null : mailApiUrlProblem(v);
+        if (problem) ctx.addIssue({ code: 'custom', message: problem });
+      }),
+    /** 본문 형식 — `text`(평문, `/send`) · `markdown`(`/send_markdown`) (쟁점 3) */
+    WF_MAIL_FORMAT: z.enum(MAIL_FORMATS).default('text'),
+    /** 받는 사람에게 보이는 보내는 이름 — 사내 API의 `sender_name` (A.1-5) */
+    WF_MAIL_SENDER_NAME: z
+      .string()
+      .max(MAIL_LIMITS.senderNameMaxChars, `${MAIL_LIMITS.senderNameMaxChars}자까지`)
+      .regex(/^[^\r\n]+$/, '줄바꿈을 넣지 않는다')
+      .default('위키'),
+    /** 인증 헤더 이름 — 예 `Authorization`, `X-API-Key`. 비면 인증 없음. 값(`WF_MAIL_AUTH_VALUE`)과 함께 있어야 한다 (FR-1902) */
+    WF_MAIL_AUTH_HEADER: z
+      .string()
+      .default('')
+      .refine((v) => v === '' || isHttpHeaderName(v), 'HTTP 헤더 이름(영문·숫자·-_. 등, 빈칸·콜론 없이)이어야 한다'),
+    /** 그 헤더의 값 전체 — 예 `Bearer <토큰>`. **비밀 값** — 로그·창·감사에 나가지 않는다 */
+    WF_MAIL_AUTH_VALUE: z
+      .string()
+      .default('')
+      .superRefine((v, ctx) => {
+        const problem = v === '' ? null : mailHeaderValueProblem(v);
+        if (problem) ctx.addIssue({ code: 'custom', message: problem });
+      }),
     /**
      * 사람이 눌러서 들어올 주소. **메일에 링크를 넣으려면 서버가 자기 주소를 알아야 한다** —
      * 요청 헤더로 조립하지 않는다 (9.1절 `redirect_uri`와 같은 판단: 헤더는 위조된다)
@@ -202,6 +232,15 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
   // 앱 계정은 이름과 비밀번호가 함께 있어야 만든다. 하나만 있으면 "계정을 나눴다"고 믿는데 실제로는 안 나뉜 상태가 된다
   if (env.WF_DB_APP_ROLE && !env.WF_DB_APP_PASSWORD) problems.push('WF_DB_APP_PASSWORD: WF_DB_APP_ROLE이 있으면 값이 있어야 한다');
   if (env.WF_DB_APP_PASSWORD && !env.WF_DB_APP_ROLE) problems.push('WF_DB_APP_ROLE: WF_DB_APP_PASSWORD가 있으면 값이 있어야 한다');
+  // 사내 메일 (P18_설계서_Mail FR-1902·1904). 인증 헤더는 이름과 값이 함께 — 하나만 있으면 "인증을 넣었다"고 믿는데 실제로는 안 나간다
+  if (env.WF_MAIL_AUTH_HEADER && !env.WF_MAIL_AUTH_VALUE) problems.push('WF_MAIL_AUTH_VALUE: WF_MAIL_AUTH_HEADER가 있으면 값이 있어야 한다');
+  if (env.WF_MAIL_AUTH_VALUE && !env.WF_MAIL_AUTH_HEADER) problems.push('WF_MAIL_AUTH_HEADER: WF_MAIL_AUTH_VALUE가 있으면 헤더 이름이 있어야 한다');
+  // 켜 놓고 주소가 없으면 멘션 메일이 조용히 나가지 않는다 — 기동에서 잡는다
+  if (env.WF_MAIL_ENABLED && !env.WF_MAIL_MOCK && !env.WF_MAIL_API_URL) problems.push('WF_MAIL_API_URL: WF_MAIL_ENABLED=true이고 모의가 아니면 값이 있어야 한다');
+  // 운영에서 켰는데 모의면 메일이 나간다고 믿는데 로그로만 남는다 — 조용히 잘못되는 유형이다(OIDC 모의와 같은 판단)
+  if (env.WF_ENV === 'production' && env.WF_MAIL_ENABLED && env.WF_MAIL_MOCK) {
+    problems.push('WF_MAIL_MOCK: 운영(production)에서 메일을 켰으면 false여야 한다 — 모의는 보내지 않고 로그로만 남긴다');
+  }
   if (problems.length) throw new EnvValidationError(problems);
   return env;
 }

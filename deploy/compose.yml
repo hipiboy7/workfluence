@@ -94,9 +94,12 @@ services:
       WF_COLLAB_RECHECK_MS: ${WF_COLLAB_RECHECK_MS:-300000}
       WF_MAIL_ENABLED: ${WF_MAIL_ENABLED:-false}
       WF_MAIL_MOCK: ${WF_MAIL_MOCK:-true}
+      # 사내 메일 API (P18_설계서_Mail E절) — 현장 절차는 반입 가이드 "사내 메일 연결하기". 인증 값은 deploy/.env에만
       WF_MAIL_API_URL: ${WF_MAIL_API_URL:-}
-      WF_MAIL_API_TOKEN: ${WF_MAIL_API_TOKEN:-}
-      WF_MAIL_FROM: ${WF_MAIL_FROM:-}
+      WF_MAIL_FORMAT: ${WF_MAIL_FORMAT:-text}
+      WF_MAIL_SENDER_NAME: ${WF_MAIL_SENDER_NAME:-}
+      WF_MAIL_AUTH_HEADER: ${WF_MAIL_AUTH_HEADER:-}
+      WF_MAIL_AUTH_VALUE: ${WF_MAIL_AUTH_VALUE:-}
       WF_PUBLIC_URL: ${WF_PUBLIC_URL:-}
       # Phase 10 — 사내 LLM (P10_설계서_Llm I절). 마스터 키는 **deploy/.env에만** 둔다 (비면 키 없는 LLM만 등록된다)
       WF_LLM_MASTER_KEY: ${WF_LLM_MASTER_KEY:-}
@@ -134,8 +137,18 @@ services:
       WF_STORAGE_PATH: /data/attachments
       WF_TRASH_RETENTION_DAYS: ${WF_TRASH_RETENTION_DAYS:-30}
       WF_AUDIT_RETENTION_DAYS: ${WF_AUDIT_RETENTION_DAYS:-365}
+      # 메일 시험 명령(`node dist/cli/mail-test.js <받는 주소>`, P18 FR-1905)이 api와 같은 설정으로 보낸다
+      WF_MAIL_ENABLED: ${WF_MAIL_ENABLED:-false}
+      WF_MAIL_MOCK: ${WF_MAIL_MOCK:-true}
+      WF_MAIL_API_URL: ${WF_MAIL_API_URL:-}
+      WF_MAIL_FORMAT: ${WF_MAIL_FORMAT:-text}
+      WF_MAIL_SENDER_NAME: ${WF_MAIL_SENDER_NAME:-}
+      WF_MAIL_AUTH_HEADER: ${WF_MAIL_AUTH_HEADER:-}
+      WF_MAIL_AUTH_VALUE: ${WF_MAIL_AUTH_VALUE:-}
     volumes:
       - attachments:/data/attachments
+      # 사내 CA — 메일 시험 명령이 https 사내 API에 닿게(api와 같은 자리, 시작 스크립트가 믿게 한다)
+      - ./ca:/etc/workfluence/ca:ro
     depends_on:
       postgres:
         condition: service_healthy
