@@ -116,7 +116,16 @@ const PG_COMPONENTS: Component[] = [
     texts: ['icu-LICENSE.txt'],
     source: 'https://github.com/unicode-org/icu/releases/tag/release-67-1',
   },
-  { name: 'zlib', version: '1.3.2', versionOf: 'zlib1.dll', license: 'Zlib', files: /^zlib1\.dll$/i, texts: ['zlib-LICENSE.txt'], source: 'https://github.com/madler/zlib/releases/tag/v1.3.2' },
+  {
+    name: 'zlib',
+    version: '1.3.2',
+    versionOf: 'zlib1.dll',
+    license: 'Zlib',
+    files: /^zlib1\.dll$/i,
+    texts: ['zlib-LICENSE.txt'],
+    source: 'https://github.com/madler/zlib/releases/tag/v1.3.2',
+    note: 'pgsql\\lib\\pgcrypto.dll에도 정적으로 들어 있다',
+  },
   {
     name: 'libxml2',
     version: '2.15.3',
@@ -182,7 +191,22 @@ const PG_DROPPED: { what: string; bin?: RegExp; lib?: RegExp; share?: RegExp }[]
   { what: 'PostgreSQL xml2 확장 — libxslt 없이는 불러올 수 없다', lib: /^pgxml\.dll$/i, share: /^xml2(--.*\.sql|\.control)$/i },
   { what: 'PL/pgSQL debugger (pldebugger)', lib: /^plugin_debugger\.dll$/i, share: /^pldbgapi(--.*\.sql|\.control)$/i },
   { what: 'system_stats (EnterpriseDB)', lib: /^system_stats\.dll$/i, share: /^system_stats(--.*\.sql|\.control)$/i },
+  // 정적으로 든 제3자 코드의 고지가 없다(3차 재검토 — 앱이 쓰는 확장은 pg_trgm뿐이다). 남은 확장 모듈의 표시는 `foreignMarks`가 본다
+  { what: 'PostgreSQL uuid-ossp 확장 — OSSP uuid 1.6.2가 정적으로 들어 있다', lib: /^uuid-ossp\.dll$/i, share: /^uuid-ossp(--.*\.sql|\.control)$/i },
 ];
+
+/** 확장 모듈에 정적으로 들어 있어도 되는 제3자 표시 — zlib(고지에 있다, pgcrypto) */
+const KNOWN_MARKS = /Jean-loup Gailly|Mark Adler/;
+
+/**
+ * `pgsql/lib`의 확장 모듈(PostgreSQL로 치는 것)에 **정적으로 든 제3자 코드**의 표시 — 저작권 문장과 "This is X, Version"(OSSP uuid가 그렇게 찾혔다 —
+ * 3차 재검토). 표시가 없는 제3자 코드는 찾지 못한다(어림이다). 고지에 있는 것(`KNOWN_MARKS`)은 뺀다
+ */
+function foreignMarks(file: string): string[] {
+  const t = readFileSync(file).toString('latin1');
+  const found = t.match(/Copyright[ -~]{0,80}|This is [A-Z][A-Za-z ]+, Version[ -~]{0,40}/g) ?? [];
+  return [...new Set(found.map((m) => m.trim()))].filter((m) => !KNOWN_MARKS.test(m));
+}
 
 /**
  * PE 파일(.exe·.dll)이 가져오는 DLL의 이름(소문자) — 가져오기 표와 지연 가져오기 표. PE가 아니면 null. 표를 읽지 못하면 멈춘다(판정하지 않고 넘어가지 않는다)
@@ -310,7 +334,11 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
   for (const f of readdirSync(lib)) {
     const c = PG_COMPONENTS.find((x) => x.files.test(f));
     if (c) add(c, `pgsql\\lib\\${f}`);
-    else if (/\.dll$/i.test(f)) add(postgres, `pgsql\\lib\\${f}`);
+    else if (/\.dll$/i.test(f)) {
+      const marks = foreignMarks(join(lib, f));
+      if (marks.length) unknown.push(`pgsql\\lib\\${f}(정적으로 든 제3자 코드일 수 있다: ${marks.join(' / ')})`);
+      else add(postgres, `pgsql\\lib\\${f}`);
+    }
     else unknown.push(`pgsql\\lib\\${f}`);
   }
   if (unknown.length) throw new Error(`고지에 없는 파일이 묶음에 들어간다 — scripts/win-bundle.ts의 PG_COMPONENTS에 더하고 원문을 scripts/win-notices/에 둔다: ${unknown.join(', ')}`);
@@ -321,6 +349,9 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
     if (!c.versionOf) continue;
     const v = versions.get(c.versionOf.toLowerCase()) ?? '';
     if (!v.startsWith(c.version)) wrong.push(`${c.name}: ${c.versionOf}의 판이 ${v || '(없음)'} — 고지는 ${c.version}`);
+    // 소스를 내주는 것은 판이 같아야 하고 tarball도 그 판이다 — 0.19.8은 0.19.8.1도 받는다(3차 재검토)
+    if (c.sourceArchive && (v !== c.version || !c.sourceArchive.url.includes(`-${c.version}.tar`)))
+      wrong.push(`${c.name}: 소스 tarball(${c.sourceArchive.url})과 DLL의 판(${v || '(없음)'})이 ${c.version}으로 같지 않다`);
   }
   if (wrong.length) throw new Error(`고지와 묶음이 어긋난다 — 판·소스 위치·원문을 그 판으로 고친다: ${wrong.join('; ')}`);
 

@@ -780,7 +780,8 @@ async function start(openBrowser) {
  * 멈추기 — 이 묶음의 여는 스크립트·앱으로 확인된 것만 끝낸다. PID 파일의 번호가 남의 것이면 파일만 지운다.
  * **확인하지 못한 것은 건드리지 않고 그렇다고 말한다**(1로 끝난다) — 데이터베이스만 멈추면 앱이 데이터베이스 없이 자리를 쥔 채 남는다. 그래서 데이터베이스는
  * 이 묶음의 Node를 **모두 확인하고 모두 끝냈을 때만** 멈춘다: 권한이 다른 창의 Node(경로·명령줄이 보이지 않는다)가 하나라도 있거나, 끝내지 못한 것이 아직
- * 떠 있거나, PowerShell을 쓸 수 없어 PID 파일의 번호가 아직 떠 있는 Node면 그대로 둔다. 앱 자리(`WF_PORT`)에 위키가 아직 답하는지는 어느 갈래에서든 본다
+ * 떠 있거나, PowerShell을 쓸 수 없어 PID 파일의 번호가 아직 떠 있는 Node거나 앱 자리가 답하면 그대로 둔다(PID 파일이 없거나 낡아도 여는 스크립트만 끝나 앱이
+ * 남았을 수 있다 — 3차 재검토). 앱 자리(`WF_PORT`)에 위키가 아직 답하는지는 어느 갈래에서든 본다
  */
 async function stop() {
   let failed = false;
@@ -791,6 +792,7 @@ async function stop() {
   const pid = lockPid();
   const procs = bundleProcesses();
   const sameRights = '그 창에서 Ctrl+C로 멈추거나, 이 멈추기.cmd를 같은 권한으로(마우스 오른쪽 → 관리자 권한으로 실행) 누른다';
+  const url = `http://127.0.0.1:${appPortOfSettings()}`;
   if (procs === null) {
     failed = true;
     doubt = true;
@@ -798,7 +800,13 @@ async function stop() {
     if (pid !== null && isNodePid(pid)) {
       keep = true;
       say(`data\\launcher.pid의 번호(${pid})가 아직 떠 있는 Node다 — 이 묶음의 실행일 수 있어 데이터베이스도 그대로 둔다`);
-    } else rmSync(PIDFILE, { force: true });
+    } else {
+      rmSync(PIDFILE, { force: true });
+      if (await healthy(url, null)) {
+        keep = true;
+        say(`${url}에서 위키가 답한다 — 이 묶음의 앱일 수 있어 데이터베이스도 그대로 둔다`);
+      }
+    }
   } else {
     const lock = pid === null ? undefined : procs.find((p) => p.pid === pid);
     const hidden = procs.filter(unverified);
@@ -848,7 +856,6 @@ async function stop() {
     if (db === 'stopped') did = true;
   }
   // 앱 자리 — 끝낸 프로세스가 자리를 놓기까지 잠깐 기다린다
-  const url = `http://127.0.0.1:${appPortOfSettings()}`;
   let answering = await healthy(url, null);
   for (let i = 0; answering && did && i < 10; i++) {
     await sleep(500);
