@@ -26,24 +26,31 @@ const WINDOWS_DLL_NOT_FOUND = 0xc0000135;
 const WINDOWS_WATCH_MS = 5_000;
 
 
-/** 남은 잠금 파일 정리. 그 PID가 살아 있으면 손대지 않고 그대로 알린다. */
 /** `.env`를 읽는다. 파싱은 shared의 `parseDotenv` 한 곳에서 한다 (CLAUDE.md 1.3절) */
 function readDotenv(path: string): Record<string, string> {
   return existsSync(path) ? parseDotenv(readFileSync(path, 'utf8')) : {};
 }
 
+/**
+ * 그 PID의 프로세스가 있나. 신호 0은 존재만 묻는다 — 답은 셋이다: 보냈다(있다, 내 것), `ESRCH`(없다), `EPERM`(**있다, 다른 계정의 것** —
+ * 보낼 권한만 없다). EPERM을 "없다"로 읽으면 다른 계정이 띄운 서버의 잠금 파일을 지운다(T-079)
+ */
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+/** 남은 잠금 파일 정리. 그 PID가 살아 있으면(다른 계정의 프로세스라도) 손대지 않고 그대로 알린다. */
 function clearStaleLock(databaseDir: string): void {
   const lock = resolve(databaseDir, 'postmaster.pid');
   if (!existsSync(lock)) return;
   const pid = Number(readFileSync(lock, 'utf8').split(/\r?\n/)[0]);
-  if (Number.isInteger(pid) && pid > 0) {
-    try {
-      process.kill(pid, 0); // 신호 0 = 존재 확인만
-      throw new Error(`이미 PostgreSQL이 떠 있다 (PID ${pid}). 그 프로세스를 먼저 종료한다.`);
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith('이미 PostgreSQL')) throw e;
-      // ESRCH: 그 PID는 없다 → 남은 잠금 파일이다
-    }
+  if (Number.isInteger(pid) && pid > 0 && processExists(pid)) {
+    throw new Error(`이미 PostgreSQL이 떠 있다 (PID ${pid}). 그 프로세스를 먼저 종료한다 — 다른 계정의 것이면 그 계정에서.`);
   }
   console.log('[dev-db] 남은 postmaster.pid를 정리한다 (해당 프로세스 없음)');
   rmSync(lock, { force: true });
@@ -157,7 +164,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  const message = e instanceof Error ? e.message : e;
+  // embedded-postgres는 서버가 뜨지 못하면 까닭 없이(`undefined`로) 실패를 알린다 — 까닭은 바로 위의 PostgreSQL 로그 줄에 있다(T-079)
+  const message = e instanceof Error ? e.message : (e ?? '까닭을 받지 못했다 — 바로 위의 PostgreSQL 로그 줄(FATAL)을 본다');
   console.error('[dev-db] 실패:', message);
   // DLL이 없으면 initdb·pg_ctl이 말없이 이 코드로 끝난다. PostgreSQL 실행 파일은 VC++ 런타임(VCRUNTIME140·MSVCP140)을 쓰는데 묶음에 없다
   // 종료 코드를 부호 없는 수(3221225781)로 찍는지 부호 있는 수(-1073741515)로 찍는지는 부른 쪽에 달려 있어 둘 다 본다
