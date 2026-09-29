@@ -108,6 +108,8 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
    ③ 에이전트 결과 검토·반영
    ④ 브랜치에 커밋 → push
    ⑤ PR 병합 (--no-ff). 브랜치는 삭제하지 않는다 (12.1절)
+   ⑥ 병합 뒤: main 푸시로 도는 Windows 묶음(windows-local.yml) 실행이 초록인지 본다
+      — pull request에는 돌지 않는다(러너 비용). 빨가면 그 Phase의 설정 키 변경부터 본다(5절 ④)
    ```
 
 9. **`main` 병합** — 12절.
@@ -295,7 +297,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 운영 중 관리자가 조절하는 정책값인가 | 기본값은 `constants`. 조절은 Phase 1은 `.env`, **Phase 4부터 DB `settings` + 관리 화면** | 비밀번호 규칙, 세션 타임아웃, 업로드 크기·확장자, 감사로그 보존 기간 |
 
 - **모든 앱 환경변수는 `WF_` 접두사.** `packages/shared`의 zod 스키마가 `WF_*`만 골라 파싱하고, 스키마에 없는 `WF_` 키가 있으면 **기동 실패**. 잘못된 타입도 기동 실패.
-- `.env.example`의 키 집합 == 스키마 키 집합을 **테스트로 강제**한다. 키를 추가·삭제·개명하면 같은 커밋에서 ① `.env.example` ② 해당 설계서의 설정 항목 표 ③ `deploy/compose.yml`을 함께 갱신한다.
+- `.env.example`의 키 집합 == 스키마 키 집합을 **테스트로 강제**한다. 키를 추가·삭제·개명하면 같은 커밋에서 ① `.env.example` ② 해당 설계서의 설정 항목 표 ③ `deploy/compose.yml` ④ `scripts/win-launcher.mjs`(Windows 체험 묶음이 설정 파일을 만들며 키 이름을 쓴다 — F-009)를 함께 갱신한다.
 - **설정 키를 만들었으면 코드가 그 값을 실제로 쓰는지 확인한다.** 로그는 "읽었다"를 보여주지 "썼다"를 보여주지 않는다. 테스트는 값이 소비 지점에 전달되는지를 본다.
 - `.env`는 커밋 금지. `.env.example`은 **placeholder만** (12.3절).
 - 매직 넘버·URL·경로·시크릿을 코드에 리터럴로 쓰지 않는다. 예외: 수학 상수, HTTP 상태코드, 테스트 fixture 값.
@@ -335,7 +337,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 로그 | 비밀번호·토큰·세션 ID·문서 본문·**LLM 질문과 답·지시문**을 로그에 남기지 않는다. 사용자는 불투명 ID로. **오류는 `errorText`로 적는다**(`apps/api/src/common/error-text.ts`) — DB 오류는 PostgreSQL의 코드·문장만 싣고, 문장이 값을 싣는 데이터 예외(SQLSTATE 22)는 따옴표 안을 가린다(실제 PostgreSQL로 시험). drizzle의 오류 문장에는 질의 매개변수가 들어 있고, 공통 로거가 Nest 기본 처리기로 온 것까지 같은 길로 거른다(Phase 10). LLM 서버의 거절 문장은 남의 응답이라 싣지 않고 종류와 HTTP 상태만. **로그 한 줄에는 `event` 코드**(`LOG_EVENTS`, 장애대응 가이드가 그것으로 찾는다 — `verify:docs`가 대조)와 **식별자 필드**를 싣고 문장에 id를 섞지 않는다. 요청 안의 줄에는 요청 번호(`requestId`)가 실린다 — nginx 로그·감사 행과 같은 값이다. **실패는 구조화해 남긴다** — 바깥·입력 탓(LLM 서버·메일 API·사내 IdP)은 `warn`, 우리 쪽 결함은 `error`. 접근 로그·nginx 로그에 질의 문자열(검색어)을 싣지 않는다. 로그는 compose가 순환한다(Phase 11) |
 | 사내 LLM | 등록·삭제는 root와, root가 위임한 관리자. API 키는 `WF_LLM_MASTER_KEY`로 암호화(AES-256-GCM, **행 id와 주소**를 AAD로 — 주소만 바꿔도 풀리지 않는다)해 두고 **응답·로그·감사로그에 다시 내보내지 않는다.** LLM 서버의 문장이 키를 되읊으면 가린다. 브라우저는 LLM에 가지 않고 서버만 부른다. 주소는 `http(s)`만, 사용자 정보·질의를 받지 않고 넘겨주기(redirect)를 따르지 않는다. http 주소면 등록 화면이 무엇이 평문으로 가는지 알린다. **세션을 끊으면 받던 답도 멈춘다**(실시간 편집과 같은 버스). 답은 평문으로 그린다(HTML로 그리지 않는다) |
 | TLS | 검증을 끄지 않는다. 사내 CA는 `NODE_EXTRA_CA_CERTS`로 신뢰. nginx가 종단 |
-| 의존성 | lockfile 고정(`--frozen-lockfile`). 허용 라이선스 MIT·Apache-2.0·BSD·ISC·0BSD. GPL·AGPL·SSPL·상용은 승인 없이 금지. TipTap은 npm 공개 MIT 확장만. `pnpm audit`·라이선스 검사·gitleaks를 CI 관문으로. 반입 번들에 SBOM과 라이선스 목록 포함 |
+| 의존성 | lockfile 고정(`--frozen-lockfile`). 허용 라이선스 MIT·Apache-2.0·BSD·ISC·0BSD. GPL·AGPL·SSPL·상용은 승인 없이 금지. TipTap은 npm 공개 MIT 확장만. `pnpm audit`·라이선스 검사·gitleaks를 CI 관문으로. 반입 번들에 SBOM과 라이선스 목록 포함. **Windows 체험 묶음(F-009 — 반입과 무관)** 은 사용자가 승인한 것을 더 싣는다 — Microsoft VC++ 재배포 가능 런타임(2026-09-28), GNU libiconv·libintl(LGPL — 소스는 같은 실행의 별도 결과물, 2026-09-29). PostgreSQL License·Zlib·ICU License는 허용적 라이선스로 본다(2026-09-29). 판정은 [`docs/운영가이드_윈도우체험.md`](docs/운영가이드_윈도우체험.md) 10.3절 |
 | 컨테이너 | non-root, 불필요 패키지 없음, 헬스체크, `restart: unless-stopped`(늘 떠 있는 서비스 — 부를 때만 도는 `tools`는 빼고). 시크릿은 이미지에 넣지 않고 `.env`·파일 마운트로 — 빌드 문맥에도 넣지 않는다(`.dockerignore`) |
 
 ## 8. 실행 환경·Docker·반입
@@ -420,7 +422,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | `docs/P{N}_검증기록_<Topic>.md` | 실측·실호출·확인 못 한 것 | Phase 종료 |
 | [`docs/운영가이드_반입.md`](docs/운영가이드_반입.md) | 폐쇄망 반입 당일의 순서와 사후 검증, 새 버전 들여오기 | 반입 구성이 바뀔 때 |
 | [`docs/운영가이드_운영이관.md`](docs/운영가이드_운영이관.md) | 날마다·주마다·달마다 하는 일, 하지 말 것, 연락 경로 | 운영 절차가 바뀔 때 |
-| [`docs/운영가이드_윈도우체험.md`](docs/운영가이드_윈도우체험.md) | 인터넷이 되는 Windows에서 띄워 써 보는 길 — 폐쇄망 반입과 무관한 체험이다(F-006). GitHub의 Windows 러너가 같은 길을 돌린다(`.github/workflows/windows.yml`) | 체험 길(설치·실행 명령)이 바뀔 때 |
+| [`docs/운영가이드_윈도우체험.md`](docs/운영가이드_윈도우체험.md) | 인터넷이 되는 Windows에서 띄워 써 보는 길 — 폐쇄망 반입과 무관한 체험이다(F-006). 같은 길을 GitHub의 Windows 러너로 돌리는 워크플로가 있다(`.github/workflows/windows.yml` — 멈춘 탐색 브랜치 `exp/windows`에 올릴 때와 손으로 돌릴 때만 돈다). 받아서 푸는 묶음(F-009)은 코드가 바뀐 `main` 커밋마다 러너가 만들고 띄워 본다(`.github/workflows/windows-local.yml`) | 체험 길(설치·실행 명령)이나 묶음의 구성이 바뀔 때 |
 
 ### 10.2 `docs/internal/` — 작업 기록 (운영 담당자는 안 읽어도 된다)
 
