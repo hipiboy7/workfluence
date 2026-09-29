@@ -1,3 +1,4 @@
+import { BACKGROUND_POLL_PATH } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
 import { accessLogEntry, type AccessLogInput } from './access-log';
 
@@ -67,6 +68,22 @@ describe('accessLogEntry', () => {
     expect(accessLogEntry({ ...poll, status: 503 })?.level).toBe('warn');
     // 표시가 없으면 같은 경로도 남긴다 — 사람이 알림을 열 때
     expect(accessLogEntry({ ...poll, background: false })?.fields.route).toBe('/api/notifications/unread-count');
+    expect(accessLogEntry({ ...poll, url: '/api/notifications/unread-count?x=1' })).toBeNull();
+  });
+
+  it('**배경 표시로 빼는 것은 알림 수 물음(`BACKGROUND_POLL_PATH`의 GET) 하나뿐이다** — 표시는 누구나 붙인다. 다른 경로에 붙여도 남는다(좁은 재점검 — 처음 판은 경로를 보지 않아 표시 하나로 모든 요청이 로그에서 사라졌다)', () => {
+    expect(BACKGROUND_POLL_PATH).toBe('/api/notifications/unread-count');
+    const cases: Partial<AccessLogInput>[] = [
+      {},
+      { method: 'POST', url: '/api/auth/login', route: '/api/auth/login', status: 401, userId: null },
+      { url: '/api/pages/p1', status: 404 },
+      { url: '/api/attachments/a1', route: '/api/attachments/:id', status: 429 },
+      // 같은 경로라도 GET이 아니거나, 대소문자·끝 빗금이 다르면 알림 영역이 보낸 것이 아니다
+      { method: 'POST', url: BACKGROUND_POLL_PATH, route: BACKGROUND_POLL_PATH },
+      { url: '/API/notifications/unread-count', route: BACKGROUND_POLL_PATH },
+      { url: `${BACKGROUND_POLL_PATH}/`, route: BACKGROUND_POLL_PATH },
+    ];
+    for (const c of cases) expect(accessLogEntry({ ...base, ...c, background: true }), JSON.stringify(c)).not.toBeNull();
   });
 
   it('**헬스체크와 정적 자산은 남기지 않는다** (A.1-7)', () => {

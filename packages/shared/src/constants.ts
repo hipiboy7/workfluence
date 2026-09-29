@@ -229,12 +229,15 @@ export const CSRF_HEADER = 'x-workfluence-request';
 export const CSRF_HEADER_VALUE = '1';
 
 /**
- * **배경 요청** 표시 (P17 병합 전 검토) — 사람이 하지 않고 화면이 주기로 보내는 요청(알림 수를 30초마다 묻는 것)에 붙인다. 서버는 이 요청으로
- * **세션을 늘리지 않고**(유휴 만료가 뜻을 잃지 않게 — `CLAUDE.md` 7절의 유휴 30분) 접근 로그에 남기지 않는다(5xx만). 붙여서 얻는 것은
- * 자기 세션이 늘지 않는 것뿐이라 위조해도 해가 없다
+ * **배경 요청** 표시 (P17 설계서 A.1-8) — 사람이 하지 않고 화면이 주기로 보내는 요청(알림 수를 30초마다 묻는 것)에 붙인다. 서버는 이 표시가 붙은
+ * 요청으로 **세션을 늘리지 않는다**(유휴 만료가 뜻을 잃지 않게 — `CLAUDE.md` 7절의 유휴 30분). 어느 경로든 그렇다 — 붙여서 얻는 것은 자기 세션이
+ * 늘지 않는 것뿐이다. **접근 로그(앱·nginx)에서 빼는 것은 `BACKGROUND_POLL_PATH`의 GET 하나뿐이다**(5xx는 남긴다) — 표시는 누구나 붙이므로, 경로를
+ * 보지 않으면 표시 하나로 모든 요청이 로그에서 사라진다(좁은 재점검)
  */
 export const BACKGROUND_HEADER = 'x-wf-background';
 export const BACKGROUND_HEADER_VALUE = '1';
+/** 화면이 주기로 부르는 경로 — 안 읽은 알림 수. nginx 설정(`deploy/nginx.conf`의 `$wf_loggable`)에도 같은 글이 있다(`pnpm verify:docs`가 대조한다) */
+export const BACKGROUND_POLL_PATH = '/api/notifications/unread-count';
 
 /** 로컬 계정 비밀번호 정책 (사용자 결정 2026-09-15: 8자·2종. 잠금 5회/15분 유지) */
 export const PASSWORD_POLICY = {
