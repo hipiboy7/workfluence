@@ -1,16 +1,33 @@
 // F-009 체험 묶음을 여는 스크립트 — 묶음 안의 app\launcher.mjs로 돈다(scripts/win-bundle.ts가 넣는다). Node 기본 모듈만 쓴다.
 //   start [--no-browser] : 처음이면 설정·데이터베이스·첫 관리자를 만든다. 데이터베이스와 앱을 띄우고 브라우저를 연다. Ctrl+C·창 닫기로 둘 다 멈춘다.
 //                          이미 떠 있으면 브라우저만 열고 끝낸다
-//   stop                 : 남은 앱과 데이터베이스를 멈춘다(창을 그냥 닫았을 때)
+//   stop                 : 남은 앱과 데이터베이스를 멈춘다(창을 그냥 닫았을 때). 확인하지 못한 것은 건드리지 않고, 그렇다고 말하고 1로 끝난다
 // 데이터베이스는 pg_ctl로 띄운다 — 관리자 권한 창에서도 뜬다(scripts/dev-db.ts와 같은 까닭). 데이터는 묶음 안의 data\에 남는다.
 // 설정 키의 이름(WF_*)을 여기서 쓴다 — 키를 더하거나 바꾸면 이 파일도 같이 고친다(CLAUDE.md 5절).
 /* global process, console, setTimeout, fetch, AbortSignal, Buffer -- Node가 주는 것들(이 파일은 묶음 안에서 Node로만 돈다) */
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { connect, createServer } from 'node:net';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const APP = dirname(fileURLToPath(import.meta.url));
@@ -21,10 +38,13 @@ const DATA = join(ROOT, 'data');
 const PGDATA = join(DATA, 'pgdata');
 const SETTINGS = join(DATA, 'settings.env');
 const PIDFILE = join(DATA, 'launcher.pid');
-// initdb가 끝까지 갔다는 표시 — PG_VERSION은 initdb가 처음에 써서 반쯤 만든 데이터베이스와 가리지 못한다
+// initdb가 끝까지 갔다는 표시 — PG_VERSION은 initdb가 처음에 써서 반쯤 만든 데이터베이스와 가리지 못한다. 표시는 pgdata 밖에 있어 pgdata와 따로 놀 수
+// 있다(표시만 지워지거나 pgdata만 옮겨 온다) — 그래서 표시가 없을 때는 pgdata 안의 사실로 다시 본다(`pgState`)
 const PG_READY = join(DATA, 'pgdata.ready');
 // 앞선 판이 쓰던 표시(첫 관리자를 만들었다). 지금은 "그 데이터베이스는 다 만들어졌다"의 증거로만 읽는다
 const LEGACY_SEEDED = join(DATA, 'seeded');
+// PostgreSQL이 사용자 객체에 주는 첫 번호(FirstNormalObjectId) — initdb가 만드는 데이터베이스(template1·template0·postgres)는 이보다 작다
+const FIRST_NORMAL_OID = 16384;
 const SYS32 = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
 // 처음 설정의 기본값 — 만든 뒤에는 data\settings.env가 정한다. 데이터베이스는 개발용(5433)과 겹치지 않는 자리
 const DEFAULT_DB_PORT = 5439;
@@ -35,19 +55,27 @@ const DLL_NOT_FOUND = 3221225781;
 const MAX_PATH = 259;
 // 다른 실행이 PID 파일을 막 만들어 아직 번호를 쓰지 않았을 수 있는 시간
 const FRESH_LOCK_MS = 30_000;
+// PowerShell이 끝까지 돌았다는 마지막 줄
+const PS_END = 'WF-TRIAL-END';
+// 이 PC의 다른 계정 모두를 가리키는 SID — Everyone · Authenticated Users · Users
+const OTHERS_SIDS = ['S-1-1-0', 'S-1-5-11', 'S-1-5-32-545'];
+// 쓰기로 치는 권한 — WriteData · AppendData · DeleteSubdirectoriesAndFiles · Delete · ChangePermissions · TakeOwnership · GENERIC_ALL · GENERIC_WRITE
+const WRITE_RIGHTS = 0x2 | 0x4 | 0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
 
 const exe = (name) => join(BIN, `${name}.exe`);
 const say = (s) => console.log(`[체험] ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errText = (e) => (e instanceof Error ? e.message : String(e));
 
-// 이 실행이 맡은 것 — 멈출 때 이것만 치운다. 다른 실행이 띄운 데이터베이스를 멈추지 않는다
-const state = { lock: false, ownDb: false, app: null, stopping: false };
+// 이 실행이 맡은 것 — 멈출 때 이것만 치운다. 다른 실행이 띄운 데이터베이스를 멈추지 않는다.
+// tmp: 끝날 때 지울 파일(비밀번호를 담은 임시 파일 — 실패로 끝나도 지운다). hidden: 확인하지 못한 Node가 있다(권한이 다른 창·PowerShell을 쓸 수 없다)
+const state = { lock: false, ownDb: false, app: null, stopping: false, tmp: [], hidden: null };
 
 function cleanup() {
   const app = state.app;
   if (app && app.exitCode === null && app.signalCode === null) app.kill();
   if (state.ownDb && stopDatabase() === 'failed') console.error(`[체험] 데이터베이스를 멈추지 못했다 — 멈추기.cmd를 누른다`);
+  for (const f of state.tmp) rmSync(f, { force: true });
   if (state.lock) rmSync(PIDFILE, { force: true });
 }
 
@@ -89,36 +117,79 @@ function writeOrFail(path, text) {
 }
 
 /**
- * 이 묶음의 node.exe로 도는 다른 프로세스 — [{ pid, kind }]. kind: 'start'(여는 스크립트의 start) · 'app'(앱) · 'other'. 알 수 없으면 null.
- * 실행 파일 경로(ExecutablePath)가 지금 이 node.exe와 같은 것만 본다 — 다른 폴더의 묶음, 이 PC의 다른 Node 프로그램은 건드리지 않는다.
- * 경로 비교는 PowerShell 안에서 한다(환경변수로 넘긴다 — 한글 경로가 출력 인코딩을 거치지 않는다)
+ * PowerShell 한 줄을 돌려 출력 줄을 돌려준다. 스크립트는 **표준 입력으로** 넘긴다(`-Command -`) — 명령줄에 base64로 인코딩한 스크립트를 싣는
+ * 모양(`-EncodedCommand`)은 회사 보안 도구가 흔히 막거나 경보를 낸다. 마지막에 끝 표시(`PS_END`)를 찍어 끝까지 돌았는지 본다 — 막혔거나 도중에
+ * 멈췄으면 null(호출하는 쪽이 "확인하지 못했다"로 다룬다). 스크립트와 출력은 ASCII만 쓴다(경로는 환경변수로 넘기고 base64로 돌려받는다)
  */
-function bundleProcesses() {
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    '$c = [StringComparison]::OrdinalIgnoreCase',
-    "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $env:TRIAL_NODE, $c) } | ForEach-Object {",
-    '  $cl = [string]$_.CommandLine',
-    "  $k = if ($cl.IndexOf('\\api\\dist\\main.js', $c) -ge 0) { 'app' } elseif ($cl.IndexOf('\\app\\launcher.mjs', $c) -ge 0 -and $cl -match '\\sstart(\\s|$)') { 'start' } else { 'other' }",
-    "  '{0} {1}' -f $_.ProcessId, $k",
-    '}',
-  ].join('\n');
-  const r = spawnSync(join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+function powershell(line, env = {}) {
+  const r = spawnSync(join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '-'], {
+    input: `${line}; '${PS_END}'\r\n`,
     encoding: 'utf8',
-    env: { ...process.env, TRIAL_NODE: process.execPath },
+    env: { ...process.env, ...env },
     windowsHide: true,
     timeout: 60_000,
   });
-  if (r.error || r.status !== 0) return null;
-  return r.stdout
-    .split(/\r?\n/)
-    .map((l) => l.trim().split(' '))
-    .filter(([pid, kind]) => /^\d+$/.test(pid ?? '') && kind)
-    .map(([pid, kind]) => ({ pid: Number(pid), kind }))
-    .filter((p) => p.pid !== process.pid);
+  if (r.error || typeof r.stdout !== 'string') return null;
+  const lines = r.stdout.split(/\r?\n/).map((l) => l.trim());
+  const end = lines.lastIndexOf(PS_END);
+  return end < 0 ? null : lines.slice(0, end);
 }
 
-const taskkill = (pid) => spawnSync(join(SYS32, 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }).status === 0;
+/**
+ * 견줄 수 있는 모양의 경로 — 실제 경로(8.3 짧은 이름을 긴 이름으로, subst 드라이브·폴더 연결을 실제 자리로)를 소문자·`\`로. 읽지 못하면 글자 그대로를
+ * 같은 모양으로 맞춘다
+ */
+function canonical(p) {
+  let r = resolve(p);
+  try {
+    r = realpathSync.native(p);
+  } catch {
+    // 읽을 수 없는 자리다 — 글자 그대로 견준다
+  }
+  return r.replace(/^\\\\\?\\/, '').replace(/\//g, '\\').toLowerCase();
+}
+
+/**
+ * 이 묶음의 node.exe일 수 있는 다른 프로세스 — [{ pid, kind, mine }]. 알 수 없으면(PowerShell을 쓸 수 없다) null.
+ * - mine: 'yes'(실행 파일이 지금 이 node.exe다 — 경로는 `canonical`로 맞춰 견준다) · 'unknown'(실행 파일 경로가 비었다 — 권한이 다른 창의 프로세스는
+ *   보이지 않는다). 다른 폴더의 묶음, 이 PC의 다른 Node 프로그램('no')은 돌려주지 않는다
+ * - kind: 'start'(여는 스크립트의 start) · 'app'(앱) · 'other' · 'unknown'(명령줄이 비었다 — 역시 권한이 다를 때)
+ */
+function bundleProcesses() {
+  const out = powershell(
+    [
+      "$ErrorActionPreference = 'Stop'",
+      '$c = [StringComparison]::OrdinalIgnoreCase',
+      "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | ForEach-Object { " +
+        '$cl = [string]$_.CommandLine; $p = [string]$_.ExecutablePath; ' +
+        "$k = if (-not $cl) { 'unknown' } elseif ($cl.IndexOf('\\api\\dist\\main.js', $c) -ge 0) { 'app' } " +
+        "elseif ($cl.IndexOf('\\app\\launcher.mjs', $c) -ge 0 -and $cl -match '\\sstart(\\s|$)') { 'start' } else { 'other' }; " +
+        "$e = if ($p) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($p)) } else { '-' }; " +
+        "'{0} {1} {2}' -f $_.ProcessId, $k, $e }",
+    ].join('; '),
+  );
+  if (out === null) return null;
+  const me = canonical(process.execPath);
+  const procs = [];
+  for (const line of out) {
+    const m = /^(\d+) (start|app|other|unknown) (\S+)$/.exec(line);
+    if (!m || Number(m[1]) === process.pid) continue;
+    const mine = m[3] === '-' ? 'unknown' : canonical(Buffer.from(m[3], 'base64').toString('utf8')) === me ? 'yes' : 'no';
+    if (mine !== 'no') procs.push({ pid: Number(m[1]), kind: m[2], mine });
+  }
+  return procs;
+}
+
+/** 확인하지 못한 것 — 이 묶음의 것인지, 무엇을 도는지 모르는 Node */
+const unverified = (p) => p.mine === 'unknown' || p.kind === 'unknown';
+
+const taskkill = (pid) => spawnSync(join(SYS32, 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).status === 0;
+
+/** 그 번호가 지금 node.exe인가(PowerShell 없이 — tasklist) */
+function isNodePid(pid) {
+  const t = spawnSync(join(SYS32, 'tasklist.exe'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true });
+  return /"node\.exe"/i.test(t.stdout ?? '');
+}
 
 /** PID 파일의 번호 — 없거나 읽지 못하면 null */
 function lockPid() {
@@ -133,7 +204,8 @@ function lockPid() {
 /**
  * 이 실행이 띄우는 것으로 PID 파일을 잡는다(없을 때만 만든다 — 두 번 눌러도 하나만 뜬다).
  * 이미 있으면 그 번호가 **이 묶음의 여는 스크립트(start)로 살아 있는지** 본다 — 아니면 낡은 파일이라 치우고 다시 잡는다.
- * 돌려주는 값: null(잡았다) 또는 떠 있는 실행의 PID('?'면 확인하지 못했지만 떠 있는 것으로 본다)
+ * **판정할 수 없으면 모른다로 다룬다** — 그 번호의 Node를 볼 수 없으면(권한이 다른 창, PowerShell을 쓸 수 없다) 떠 있는 것으로 보고 파일을 지우지 않는다.
+ * 돌려주는 값: null(잡았다) 또는 { pid, unsure } — pid는 떠 있는 실행의 번호('?'면 아직 번호가 없다), unsure는 확인하지 못한 까닭
  */
 function acquireLock() {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -155,28 +227,36 @@ function acquireLock() {
       } catch {
         // 그새 지워졌다
       }
-      if (age < FRESH_LOCK_MS) return '?';
+      if (age < FRESH_LOCK_MS) return { pid: '?', unsure: null };
     } else {
       const procs = bundleProcesses();
       if (procs === null) {
         // 확인할 길이 없다 — 그 번호가 아직 node.exe면 떠 있는 것으로 본다(끝내지는 않는다)
-        const t = spawnSync(join(SYS32, 'tasklist.exe'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
-        if (/"node\.exe"/i.test(t.stdout ?? '')) return pid;
-      } else if (procs.some((p) => p.pid === pid && p.kind === 'start')) return pid;
+        if (isNodePid(pid)) return { pid, unsure: 'PowerShell을 쓸 수 없어 확인하지 못했다' };
+      } else {
+        const p = procs.find((q) => q.pid === pid);
+        if (p && p.mine === 'yes' && p.kind === 'start') return { pid, unsure: null };
+        if (p && unverified(p)) return { pid, unsure: '권한이 다른 창(관리자 권한 등)의 Node라 이 창에서는 무엇인지 보이지 않는다' };
+      }
     }
     say('지난 실행이 남긴 data\\launcher.pid를 치운다(그 번호는 이 묶음의 실행이 아니다)');
     rmSync(PIDFILE, { force: true });
   }
-  return '?';
+  return { pid: '?', unsure: null };
 }
 
-/** 앞서 끝나지 않고 남은 이 묶음의 앱(여는 스크립트는 죽고 앱만 남은 것)을 멈춘다 — 3000번을 쥐고 있다 */
+/** 앞서 끝나지 않고 남은 이 묶음의 앱(여는 스크립트는 죽고 앱만 남은 것)을 멈춘다 — 3000번을 쥐고 있다. 확인하지 못한 Node는 건드리지 않고 기억만 한다 */
 function stopOrphanApps() {
   const procs = bundleProcesses();
-  if (!procs) return;
-  for (const p of procs.filter((q) => q.kind === 'app')) {
+  if (!procs) {
+    state.hidden = 'PowerShell을 쓸 수 없어 이 묶음의 앱이 남았는지 확인하지 못했다 — 작업 관리자의 "세부 정보"에서 이 폴더의 node.exe를 끝낸 뒤 다시 누른다';
+    return;
+  }
+  if (procs.some(unverified))
+    state.hidden = '권한이 다른 창(관리자 권한 등)에서 띄운 Node가 있다 — 이 묶음을 그렇게 띄웠으면 그 창을 닫거나 멈추기.cmd를 같은 권한으로 누른다';
+  for (const p of procs.filter((q) => q.mine === 'yes' && q.kind === 'app')) {
     say(`앞서 남은 이 묶음의 앱(PID ${p.pid})을 멈춘다`);
-    taskkill(p.pid);
+    if (!taskkill(p.pid)) say(`경고: 앞서 남은 앱(PID ${p.pid})을 멈추지 못했다`);
   }
 }
 
@@ -216,16 +296,50 @@ function parseEnv(text) {
 const envLine = (k, v) => `${k}=${/[\s#'"{}]/.test(v) ? `'${v}'` : v}`;
 
 /**
- * data\ 에는 비밀 값(settings.env)과 데이터베이스가 든다 — 상속을 끊고 지금 사용자·SYSTEM·Administrators만 둔다.
- * C:\ 바로 아래 폴더는 다른 로컬 계정도 고칠 수 있게 상속받는다. 실패하면 경고만 한다(체험은 계속된다)
+ * data\ 의 권한과 이 폴더의 쓰기 권한을 본다 — { narrow, open } (모르면 null). narrow: data\ 가 상속을 끊고 지금 사용자·SYSTEM·Administrators만 둔다.
+ * open: 이 폴더를 이 PC의 다른 계정(Everyone·Authenticated Users·Users)도 고칠 수 있다(C:\ 바로 아래에 만든 폴더가 그렇다)
+ */
+function aclFacts() {
+  const out = powershell(
+    [
+      "$ErrorActionPreference = 'Stop'",
+      '$id = [Security.Principal.SecurityIdentifier]',
+      "$ok = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')",
+      '$d = Get-Acl -LiteralPath $env:TRIAL_DATA',
+      '$dr = @($d.GetAccessRules($true, $true, $id))',
+      '$bad = @($dr | Where-Object { $_.IsInherited -or ($ok -notcontains $_.IdentityReference.Value) })',
+      '$narrow = $d.AreAccessRulesProtected -and $dr.Count -gt 0 -and $bad.Count -eq 0',
+      `$others = @(${OTHERS_SIDS.map((x) => `'${x}'`).join(', ')})`,
+      `$open = @((Get-Acl -LiteralPath $env:TRIAL_ROOT).GetAccessRules($true, $true, $id) | Where-Object { $_.AccessControlType -eq 'Allow' -and $others -contains $_.IdentityReference.Value -and (([int]$_.FileSystemRights) -band ${WRITE_RIGHTS}) })`,
+      "'{0} {1}' -f [int]$narrow, [int]($open.Count -gt 0)",
+    ].join('; '),
+    { TRIAL_DATA: DATA, TRIAL_ROOT: ROOT },
+  );
+  const m = out && /^([01]) ([01])$/.exec(out[out.length - 1] ?? '');
+  return m ? { narrow: m[1] === '1', open: m[2] === '1' } : null;
+}
+
+/**
+ * data\ 에는 비밀 값(settings.env)과 데이터베이스가 든다 — **시작할 때마다** 상속을 끊고 지금 사용자·SYSTEM·Administrators만 둔다(이미 그렇면 그대로).
+ * 탐색기로 폴더를 복사하면 data\ 가 새 자리의 상속을 받는다 — 처음 한 번만 좁히면 복사한 뒤에는 넓은 채로 남는다. 실패하면 경고만 한다(체험은 계속된다).
+ * 이 폴더(실행 파일) 자체는 좁히지 않는다 — 다른 계정이 고칠 수 있는 자리면 그렇다고 말한다(읽어보기·체험 가이드 10.2절)
  */
 function restrictData() {
+  const facts = aclFacts();
+  if (facts?.open)
+    say(
+      '경고: 이 폴더는 이 PC의 다른 계정도 고칠 수 있다(C:\\ 바로 아래에 만든 폴더가 그렇다) — 다른 사람이 이 PC에 로그인하면 실행 파일(node\\node.exe 등)을 ' +
+        '바꿔 둘 수 있다. 혼자 쓰는 PC에서만 쓰거나, 내 사용자 폴더(C:\\Users\\<이름>) 아래로 옮긴다(이름이 영문일 때 — 읽어보기.txt)',
+    );
+  if (facts?.narrow) return;
+  if (!facts) say('data 폴더의 권한을 PowerShell로 읽지 못했다 — 다시 좁힌다');
   const who = spawnSync(join(SYS32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
   const sid = /S-1-[\d-]+/.exec(who.stdout ?? '')?.[0];
   const r = sid
     ? spawnSync(join(SYS32, 'icacls.exe'), [DATA, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'], { stdio: 'ignore', windowsHide: true })
     : null;
   if (!r || r.status !== 0) say('경고: data 폴더의 권한을 좁히지 못했다 — 이 PC를 다른 사람과 같이 쓰면 data\\settings.env의 비밀 값을 읽을 수 있다');
+  else say('data 폴더의 권한을 지금 사용자·관리자만 열 수 있게 좁혔다');
 }
 
 /** 처음 실행 — `.env.example`을 바탕으로 비밀 값을 무작위로 만든다. 비밀은 이 파일에만 있다 */
@@ -249,8 +363,6 @@ function createSettings() {
   const lines = ['# workfluence 체험 설정 — 처음 실행에서 만들었다. 비밀 값이 들어 있다(이 폴더 밖으로 보내지 않는다)'];
   lines.push('# 자리(경로)와 데이터베이스 주소는 시작할 때마다 이 폴더의 지금 위치로 다시 쓴다. 자리 번호는 WF_PORT(앱)·WF_PG_EMBEDDED_PORT(데이터베이스)만 고친다');
   for (const [k, v] of Object.entries(s)) lines.push(envLine(k, v));
-  mkdirSync(DATA, { recursive: true });
-  restrictData();
   writeOrFail(SETTINGS, lines.join('\r\n') + '\r\n');
 }
 
@@ -294,11 +406,29 @@ function syncSettings(text, settings) {
   return { ...settings, ...want };
 }
 
-/** 앱과 표 만들기에 넘길 환경 — 이 컴퓨터에 남은 WF_ 변수는 뺀다(앱의 설정 검사는 모르는 WF_ 키가 있으면 뜨지 않는다) */
-function childEnv(settings) {
+/**
+ * 이 판의 앱이 모르는 설정 키를 뺀다 — 앱의 설정 검사는 모르는 WF_ 키가 있으면 뜨지 않는다(CLAUDE.md 5절). 옛 묶음의 data\ 를 새 묶음으로 옮겨 오면
+ * 없어졌거나 이름이 바뀐 키가 남는다. 그 줄은 **파일에서 지우지 않고** 앱에 넘기지 않는다(사람이 쓴 파일이다 — 옛 묶음으로 돌아가도 그대로 쓰인다).
+ * 아는 키는 묶음의 env.example(`.env.example` — 앱의 설정 검사와 키가 같다, 시험이 강제한다)이 정한다
+ */
+function knownSettings(settings) {
+  const known = new Set(Object.keys(parseEnv(readFileSync(join(APP, 'env.example'), 'utf8'))));
+  const unknown = Object.keys(settings).filter((k) => k.startsWith('WF_') && !known.has(k));
+  if (unknown.length)
+    say(`경고: data\\settings.env의 ${unknown.join(', ')}는 이 판의 앱이 모르는 설정이다(옛 묶음의 설정일 수 있다) — 앱에 넘기지 않는다. 메모장으로 그 줄을 지우면 이 경고가 없어진다`);
+  return Object.fromEntries(Object.entries(settings).filter(([k]) => !unknown.includes(k)));
+}
+
+/**
+ * 앱·표 만들기·첫 관리자에 넘길 환경 — 이 컴퓨터에 남은 WF_ 변수는 뺀다(앱의 설정 검사는 모르는 WF_ 키가 있으면 뜨지 않는다).
+ * `WF_ROOT_PASSWORD`는 첫 관리자(시드)에만 넘긴다(`seed`) — 떠 있는 앱에는 넘기지 않는다(P13 FR-1422, 운영의 compose와 같다)
+ */
+function childEnv(settings, { seed = false } = {}) {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('WF_')) env[k] = v;
-  return { ...env, ...settings };
+  const out = { ...env, ...settings };
+  if (!seed) delete out.WF_ROOT_PASSWORD;
+  return out;
 }
 
 /** 한 자리가 비었는가 — 'free' · 'busy'(다른 프로그램이 듣는다) · 'denied'(Windows가 막아 둔 자리) */
@@ -329,7 +459,9 @@ async function requireFreePort(port, host, key, what) {
   if (st === 'free') return;
   const change = `data\\settings.env의 ${key}=${port}를 다른 수(예: ${port + 100})로 바꿔 저장하고 다시 누른다`;
   if (st === 'denied') fail(`${what} 자리 ${port}번을 Windows가 막아 두었다(Hyper-V·WSL 등이 잡아 두는 범위일 수 있다) — ${change}`);
-  fail(`${what} 자리 ${port}번을 다른 프로그램이 쓰고 있다(다른 폴더의 체험 묶음·"가" 길의 pnpm start 등) — 그 프로그램을 끄거나, ${change}`);
+  // 확인하지 못한 Node가 있으면(`stopOrphanApps`) 그것이 이 묶음의 앱일 수 있다 — 자리를 바꾸기 전에 그것부터 본다
+  const maybeOurs = state.hidden && what === '앱' ? `. 다만 ${state.hidden}` : '';
+  fail(`${what} 자리 ${port}번을 다른 프로그램이 쓰고 있다(다른 폴더의 체험 묶음·"가" 길의 pnpm start 등) — 그 프로그램을 끄거나, ${change}${maybeOurs}`);
 }
 
 /**
@@ -389,17 +521,58 @@ function stopDatabase() {
 }
 
 /**
- * 데이터베이스가 다 만들어졌는가 — 데이터 폴더가 있고 initdb가 끝났다는 표시가 있어야 한다(`data\pgdata`만 지우면 표시가 남는다 — 그때는 새로 만든다).
- * 표시가 없으면 앞선 판의 흔적(첫 관리자를 만들었다는 표시)으로 본다 — 첫 관리자까지 갔으면 데이터베이스는 다 만들어졌다
+ * 한 번이라도 서버로 떴거나 앱의 데이터가 든 데이터베이스인가 — pgdata 안의 사실만 본다.
+ * - `postmaster.opts`: 서버가 뜰 때마다 쓰고 멈춰도 남는다. initdb는 서버를 띄우지 않아 쓰지 않는다
+ * - `base\<번호>`가 `FIRST_NORMAL_OID` 이상: initdb 뒤에 만든 데이터베이스(앱의 workfluence)가 있다
  */
-function pgReady() {
-  if (!existsSync(join(PGDATA, 'PG_VERSION'))) return false;
-  if (existsSync(PG_READY)) return true;
-  if (existsSync(LEGACY_SEEDED)) {
-    writeOrFail(PG_READY, new Date().toISOString());
-    return true;
+function usedCluster() {
+  if (existsSync(join(PGDATA, 'postmaster.opts'))) return true;
+  try {
+    return readdirSync(join(PGDATA, 'base')).some((n) => /^\d+$/.test(n) && Number(n) >= FIRST_NORMAL_OID);
+  } catch {
+    return false;
   }
-  return false;
+}
+
+/**
+ * 데이터베이스 폴더의 상태 — 'none'(없다·비었다) · 'ready'(다 만들었다) · 'half'(만들다 끊겼다).
+ * 끝났다는 표시(`PG_READY`)는 pgdata 밖에 있어 pgdata와 따로 놀 수 있다 — `data\pgdata`만 지우면 표시가 남고(그때는 'none'), 표시만 지우거나
+ * pgdata만 옮겨 오면 표시가 없다. **표시가 없다는 것만으로 쓰던 데이터베이스를 반쯤 만든 것으로 보지 않는다** — pgdata 안의 사실(`usedCluster`)로 다시 본다
+ */
+function pgState() {
+  if (!existsSync(PGDATA)) return 'none';
+  let names = [];
+  try {
+    names = readdirSync(PGDATA);
+  } catch {
+    return 'half';
+  }
+  if (!names.length) return 'none';
+  if (!names.includes('PG_VERSION')) return 'half';
+  if (existsSync(PG_READY)) return 'ready';
+  if (usedCluster() || existsSync(LEGACY_SEEDED)) {
+    writeOrFail(PG_READY, new Date().toISOString());
+    return 'ready';
+  }
+  return 'half';
+}
+
+/**
+ * 끝까지 만들지 못한 데이터베이스 폴더를 **지우지 않고 옆으로 옮긴다**(`data\pgdata.broken-<시각>`) — 판정이 틀렸어도 데이터가 남는다. 옮기지 못하면
+ * (그 폴더의 파일을 누가 쥐고 있다) 까닭을 말하고 멈춘다
+ */
+function setAside() {
+  const stamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/[-:]/g, '');
+  const aside = join(DATA, `pgdata.broken-${stamp}`);
+  try {
+    renameSync(PGDATA, aside);
+  } catch (e) {
+    fail(
+      `끝까지 만들지 못한 데이터베이스(data\\pgdata)를 옆으로 옮기지 못했다(${e.code ?? errText(e)}) — 멈추기.cmd를 누르고 다시 누른다. ` +
+        '그래도 이 말이 나오면 작업 관리자에서 이 폴더의 postgres.exe를 끝낸다',
+    );
+  }
+  say(`data\\pgdata는 끝까지 만들어지지 않았다(처음 실행이 끊겼다) — 지우지 않고 data\\${basename(aside)}로 옮겨 두고 새로 만든다. 쓸 것이 없으면 그 폴더는 지워도 된다`);
 }
 
 async function healthy(url, app) {
@@ -413,20 +586,36 @@ async function healthy(url, app) {
 
 const openBrowserAt = (url) => spawn('explorer.exe', [url], { detached: true, stdio: 'ignore' }).unref();
 
-async function alreadyRunning(pid, openBrowser) {
-  let port = DEFAULT_APP_PORT;
+const appPortOfSettings = () => {
   try {
-    port = Number(parseEnv(readFileSync(SETTINGS, 'utf8')).WF_PORT) || port;
+    return Number(parseEnv(readFileSync(SETTINGS, 'utf8')).WF_PORT) || DEFAULT_APP_PORT;
   } catch {
     // 설정이 아직 없다 — 먼저 연 실행이 처음 설정을 만드는 중이다
+    return DEFAULT_APP_PORT;
   }
-  const url = `http://127.0.0.1:${port}`;
+};
+
+async function alreadyRunning({ pid, unsure }, openBrowser) {
+  const url = `http://127.0.0.1:${appPortOfSettings()}`;
   const up = await healthy(url, null);
   say(`이미 떠 있다${pid === '?' ? '' : ` (PID ${pid})`} — ${up ? `브라우저에서 ${url}` : '아직 뜨는 중이다. 먼저 연 창을 본다'}`);
+  if (unsure)
+    say(
+      `다만 그 번호가 이 묶음의 실행인지 ${unsure} — 떠 있지 않은데 이 말이 되풀이되면 모든 명령 창을 닫고 data\\launcher.pid를 지운 뒤 다시 누른다`,
+    );
   say('멈추려면 먼저 연 창에서 Ctrl+C, 창을 닫았으면 멈추기.cmd');
   if (up && openBrowser) openBrowserAt(url);
   if (!up && process.env.TRIAL_NO_PAUSE !== '1') await sleep(5000);
-  process.exit(0);
+  // 확인하지 못했고 답도 없으면 1 — 창이 닫히지 않아 위의 말을 읽는다
+  process.exit(unsure && !up ? 1 : 0);
+}
+
+/** 첫 관리자(시드)가 실패한 까닭 한 줄 — 시드의 오류 문장에서 스택을 뺀다 */
+function seedReason(stderr) {
+  const line = String(stderr ?? '')
+    .split(/\r?\n/)
+    .find((l) => l.trim() && !/^\s+at /.test(l));
+  return (line ?? '').replace(/^\[seed\] 실패:\s*/, '').replace(/^Error:\s*/, '').trim();
 }
 
 async function start(openBrowser) {
@@ -441,13 +630,16 @@ async function start(openBrowser) {
   }
   const running = acquireLock();
   if (running !== null) return alreadyRunning(running, openBrowser);
+  restrictData();
   warnLongPath();
   stopOrphanApps();
   ensureLinks();
-  rmSync(join(DATA, 'pw.tmp'), { force: true });
+  const pw = join(DATA, 'pw.tmp');
+  state.tmp.push(pw);
+  rmSync(pw, { force: true });
 
   if (!existsSync(SETTINGS)) {
-    if (pgReady())
+    if (pgState() === 'ready')
       fail(
         'data\\settings.env가 없는데 데이터베이스(data\\pgdata)는 있다 — 그 데이터베이스의 비밀번호가 settings.env에만 있었다. ' +
           'settings.env를 되돌리거나, 처음부터 다시 하려면 data 폴더를 통째로 지우고 다시 누른다',
@@ -457,7 +649,7 @@ async function start(openBrowser) {
   let settings = parseEnv(readFileSync(SETTINGS, 'utf8'));
   const dbPort = portOf(settings, 'WF_PG_EMBEDDED_PORT');
   const appPort = portOf(settings, 'WF_PORT');
-  settings = syncSettings(readFileSync(SETTINGS, 'utf8'), settings);
+  settings = knownSettings(syncSettings(readFileSync(SETTINGS, 'utf8'), settings));
   const env = childEnv(settings);
 
   await requireFreePort(appPort, '0.0.0.0', 'WF_PORT', '앱');
@@ -466,22 +658,18 @@ async function start(openBrowser) {
 
   // 떠 있는 데이터베이스는 다 만들어진 것이다(initdb는 서버를 띄운 채 끝나지 않는다)
   if (dbUp && !existsSync(PG_READY)) writeOrFail(PG_READY, new Date().toISOString());
-  if (!pgReady()) {
+  const pg = pgState();
+  // 이 실행이 데이터베이스를 새로 만든다 — 그러면 첫 관리자가 꼭 있어야 한다(아래 시드)
+  const fresh = pg !== 'ready';
+  if (fresh) {
     rmSync(PG_READY, { force: true });
-    if (existsSync(PGDATA)) {
-      say('처음 실행이 중간에 끊겨 반쯤 만든 데이터베이스를 지우고 다시 만든다');
-      rmSync(PGDATA, { recursive: true, force: true });
-    }
-    say('처음이라 데이터베이스를 만든다 — 1~2분 걸린다');
-    const pw = join(DATA, 'pw.tmp');
+    if (pg === 'half') setAside();
+    say('데이터베이스를 만든다 — 1~2분 걸린다');
     writeOrFail(pw, settings.WF_PG_EMBEDDED_PASSWORD);
-    try {
-      runOrFail(exe('initdb'), ['-D', PGDATA, '-U', 'workfluence', `--pwfile=${pw}`, '-A', 'scram-sha-256', '-E', 'UTF8', '--locale=C'], '데이터베이스를 만들지 못했다', {
-        hint: PATH_HINT,
-      });
-    } finally {
-      rmSync(pw, { force: true });
-    }
+    runOrFail(exe('initdb'), ['-D', PGDATA, '-U', 'workfluence', `--pwfile=${pw}`, '-A', 'scram-sha-256', '-E', 'UTF8', '--locale=C'], '데이터베이스를 만들지 못했다', {
+      hint: PATH_HINT,
+    });
+    rmSync(pw, { force: true });
     writeOrFail(PG_READY, new Date().toISOString());
   }
   if (dbUp) {
@@ -503,14 +691,33 @@ async function start(openBrowser) {
     fail(`데이터베이스(workfluence)를 만들지 못했다 — ${errText(e)}${auth}`);
   }
   runOrFail(process.execPath, [join(API, 'dist', 'db', 'migrate.js')], '표를 만들지 못했다', { cwd: API, env });
-  // 첫 관리자 — 시드는 멱등이고 비밀번호를 덮어쓰지 않는다(apps/api/src/db/seed.ts 머리말). 새로 만들었을 때만 비밀번호를 보인다
-  const seed = runOrFail(process.execPath, [join(API, 'dist', 'db', 'seed.js')], '첫 관리자를 만들지 못했다', { cwd: API, env, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' });
+  // 첫 관리자 — 시작할 때마다 돈다: 시드는 멱등이고 비밀번호를 덮어쓰지 않으며(apps/api/src/db/seed.ts 머리말) 빠진 것을 채운다. 표시 파일에 기대지 않아
+  // 데이터베이스를 다시 만든 뒤에도 root가 생긴다. **이미 쓰던 데이터베이스에서는 시드가 실패해도 위키를 띄운다** — 거기서 나는 실패(그 아이디가 root가
+  // 아니다 등)는 root가 이미 따로 있거나 사람이 설정을 고친 것이라, 막으면 쓰던 위키를 다시 열 길이 없다. 새로 만든 데이터베이스면 멈춘다(root가 없으면 아무도
+  // 로그인하지 못한다). 새로 만들었을 때만 비밀번호를 보인다
+  const seedUser = settings.WF_ROOT_USERNAME || 'root';
+  const seed = spawnSync(process.execPath, [join(API, 'dist', 'db', 'seed.js')], { cwd: API, env: childEnv(settings, { seed: true }), encoding: 'utf8', windowsHide: true });
   const seedOut = String(seed.stdout ?? '').trim();
   if (seedOut) console.log(seedOut);
-  const created = /root 계정 생성/.test(seedOut);
+  let created = false;
+  if (seed.error || seed.status !== 0) {
+    const reason = seed.error?.message ?? seedReason(seed.stderr);
+    const notRoot = /root가 아니다/.test(reason);
+    // 아는 까닭이 아니면 시드가 쓴 것을 그대로 보인다(스택 포함)
+    if (!notRoot && seed.stderr) process.stderr.write(seed.stderr);
+    const hint = notRoot
+      ? `이 묶음의 설정은 data\\settings.env다. 이 경고를 없애려면 그 파일의 WF_ROOT_USERNAME을 지금 root인 계정의 아이디로 바꾼다 — 없는 아이디로 바꾸면 ` +
+        'settings.env에 남은 첫 비밀번호(WF_ROOT_PASSWORD)로 root가 새로 생긴다'
+      : 'data\\settings.env의 WF_ROOT_USERNAME·WF_ROOT_PASSWORD를 본다';
+    if (fresh) fail(`첫 관리자를 만들지 못했다 — ${reason || `종료 코드 ${seed.status}`}. ${hint}`);
+    say(`경고: 첫 관리자(${seedUser})를 확인하지 못했다 — 위키는 그대로 띄운다. 까닭: ${notRoot ? reason.split(' — ')[0] : reason || `종료 코드 ${seed.status}`}`);
+    say(notRoot ? `다른 root 계정으로 로그인해 쓰면 된다. ${hint}` : hint);
+  } else created = /root 계정 생성/.test(seedOut);
 
   const app = spawn(process.execPath, ['--enable-source-maps', join(API, 'dist', 'main.js')], { cwd: API, env, stdio: 'inherit' });
   state.app = app;
+  // 띄우지도 못했으면(실행 파일을 못 찾는다 등) 'exit'이 오지 않는다 — 까닭을 말하고 이번에 띄운 데이터베이스를 멈춘다
+  app.on('error', (e) => fail(`앱을 띄우지 못했다 — ${errText(e)}`));
   app.on('exit', (code) => {
     if (!state.stopping) {
       say(`앱이 끝났다 (종료 코드 ${code}) — 위의 줄을 본다`);
@@ -523,7 +730,7 @@ async function start(openBrowser) {
     // 이 실행의 앱이 살아 있을 때의 답만 받는다 — 같은 자리를 다른 프로그램이 잡았으면 그쪽이 답한다
     if (await healthy(url, app)) {
       say(`위키가 떴다 — 브라우저에서 ${url}`);
-      if (created) say(`처음 로그인: 아이디 ${settings.WF_ROOT_USERNAME} / 비밀번호 ${settings.WF_ROOT_PASSWORD}  (첫 로그인에서 바꾸게 된다)`);
+      if (created) say(`처음 로그인: 아이디 ${seedUser} / 비밀번호 ${settings.WF_ROOT_PASSWORD}  (첫 로그인에서 바꾸게 된다)`);
       say('멈추려면 이 창에서 Ctrl+C (창을 그냥 닫았으면 멈추기.cmd)');
       if (openBrowser) openBrowserAt(url);
       return;
@@ -533,32 +740,66 @@ async function start(openBrowser) {
   if (!state.stopping) fail('앱이 2분 안에 답하지 않았다 — 위의 줄을 본다');
 }
 
-/** 멈추기 — 이 묶음의 여는 스크립트·앱으로 확인된 것만 끝낸다. PID 파일의 번호가 남의 것이면 파일만 지운다 */
-function stop() {
+/**
+ * 멈추기 — 이 묶음의 여는 스크립트·앱으로 확인된 것만 끝낸다. PID 파일의 번호가 남의 것이면 파일만 지운다.
+ * **확인하지 못한 것은 건드리지 않고 그렇다고 말한다**(1로 끝난다): PID 파일의 번호가 권한이 다른 창의 Node라 보이지 않으면 그 실행과 데이터베이스를 그대로
+ * 둔다 — 데이터베이스만 멈추면 앱이 데이터베이스 없이 자리를 쥔 채 남는다. PowerShell을 쓸 수 없으면 여는 스크립트·앱을 끝내지 못한다
+ */
+async function stop() {
   let failed = false;
   let did = false;
+  let keep = false;
   const pid = lockPid();
   const procs = bundleProcesses();
   if (procs === null) {
-    if (existsSync(PIDFILE)) {
-      say('떠 있는 프로세스를 확인하지 못해 끝내지 않는다(PowerShell을 쓸 수 없다) — 위키 창이 열려 있으면 그 창을 닫는다');
+    failed = true;
+    say('떠 있는 프로세스를 확인하지 못했다(PowerShell을 쓸 수 없다) — 여는 스크립트·앱은 끝내지 않는다. 위키 창이 열려 있으면 그 창에서 Ctrl+C');
+    if (pid !== null && isNodePid(pid)) {
+      keep = true;
+      say(`data\\launcher.pid의 번호(${pid})가 아직 떠 있는 Node다 — 이 묶음의 실행일 수 있어 데이터베이스도 그대로 둔다`);
+    } else rmSync(PIDFILE, { force: true });
+  } else {
+    const lock = pid === null ? undefined : procs.find((p) => p.pid === pid);
+    if (lock && unverified(lock)) {
+      keep = true;
+      failed = true;
+      say(
+        `data\\launcher.pid의 번호(${pid})는 권한이 다른 창(관리자 권한 등)의 Node라 이 창에서는 무엇인지 보이지 않는다 — 끝내지 않고 데이터베이스도 그대로 둔다. ` +
+          '그 창에서 Ctrl+C로 멈추거나, 이 멈추기.cmd를 같은 권한으로(마우스 오른쪽 → 관리자 권한으로 실행) 누른다',
+      );
+    } else {
+      if (pid !== null && !(lock && lock.mine === 'yes' && lock.kind === 'start')) say(`data\\launcher.pid의 번호(${pid})는 이 묶음의 실행이 아니다 — 파일만 지운다`);
+      // 여는 스크립트부터(그 아래의 앱도 함께 끝난다), 그다음 홀로 남은 앱. 끝내지 못했는데 아직 떠 있으면 실패다
+      for (const kind of ['start', 'app'])
+        for (const p of procs.filter((q) => q.mine === 'yes' && q.kind === kind)) {
+          if (taskkill(p.pid)) did = true;
+          else if (isNodePid(p.pid)) {
+            failed = true;
+            console.error(`[체험] PID ${p.pid}(${kind === 'start' ? '여는 스크립트' : '앱'})를 끝내지 못했다 — 작업 관리자의 "세부 정보"에서 끝낸다`);
+          }
+        }
       rmSync(PIDFILE, { force: true });
     }
-  } else {
-    if (pid !== null && !procs.some((p) => p.pid === pid && p.kind === 'start')) say(`data\\launcher.pid의 번호(${pid})는 이 묶음의 실행이 아니다 — 파일만 지운다`);
-    // 여는 스크립트부터(그 아래의 앱도 함께 끝난다), 그다음 홀로 남은 앱
-    for (const kind of ['start', 'app'])
-      for (const p of procs.filter((q) => q.kind === kind)) {
-        if (taskkill(p.pid)) did = true;
-      }
-    rmSync(PIDFILE, { force: true });
   }
-  const db = stopDatabase();
-  if (db === 'failed') {
-    failed = true;
-    console.error(`[체험] 데이터베이스를 멈추지 못했다 — ${join(DATA, 'postgres.log')}를 본다. 작업 관리자에서 이 폴더의 postgres.exe를 끝낼 수 있다`);
+  let dbFailed = false;
+  if (!keep) {
+    const db = stopDatabase();
+    if (db === 'failed') {
+      failed = true;
+      dbFailed = true;
+      console.error(`[체험] 데이터베이스를 멈추지 못했다 — ${join(DATA, 'postgres.log')}를 본다. 작업 관리자에서 이 폴더의 postgres.exe를 끝낼 수 있다`);
+    }
+    if (db === 'stopped') did = true;
   }
-  if (db === 'stopped') did = true;
+  if (procs === null) {
+    // 확인하지 못했으니 앱 자리에 아직 위키가 답하는지로 본다
+    const url = `http://127.0.0.1:${appPortOfSettings()}`;
+    if (await healthy(url, null)) console.error(`[체험] ${url}에서 아직 위키가 답한다 — 그 창을 닫거나 작업 관리자의 "세부 정보"에서 이 폴더의 node.exe를 끝낸다`);
+    else if (!keep && !dbFailed) {
+      say(`앱 자리(${url})는 닫혀 있고 데이터베이스는 ${did ? '멈췄다' : '떠 있지 않았다'}`);
+      failed = false;
+    }
+  }
   if (failed) process.exit(1);
   say(did ? '멈췄다' : '떠 있는 것이 없다');
 }
@@ -566,7 +807,7 @@ function stop() {
 const [command, ...rest] = process.argv.slice(2);
 try {
   if (command === 'start') await start(!rest.includes('--no-browser'));
-  else if (command === 'stop') stop();
+  else if (command === 'stop') await stop();
   else fail('쓰는 법: 시작.cmd 또는 멈추기.cmd');
 } catch (e) {
   fail(`예상하지 못한 오류로 멈춘다 — ${errText(e)}`);
