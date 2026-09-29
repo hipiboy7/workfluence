@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DocMark, DocNode } from './document';
-import { pageMarkdown, pageText, renderDocMarkdown } from './markdown';
+import { markdownText, pageMarkdown, pageText, renderDocMarkdown } from './markdown';
 
 /**
  * A등급 — **테스트 먼저** (3절, P10_설계서_Llm D.7·FR-1140~1142).
@@ -361,3 +361,21 @@ describe('검토 반영', () => {
     expect(md({ type: 'codeBlock', attrs: {}, content: [t(many)] }).startsWith('```\n')).toBe(true);
   });
 });
+
+describe('markdownText — 마크다운 안에 넣을 글자 (P18_설계서_Mail FR-1901)', () => {
+  it('**서식·링크·HTML이 되는 기호를 이스케이프한다** — 제목 `*주간*`이 기울임이, `[a](b)`가 링크가 되지 않게', () => {
+    expect(markdownText('*주간* 회의 [a](http://x) <b>굵게</b> `코드` ~취소~ a_b\\c')).toBe(
+      '\\*주간\\* 회의 \\[a\\](http://x) \\<b>굵게\\</b> \\`코드\\` \\~취소\\~ a\\_b\\\\c',
+    );
+  });
+
+  it('줄 머리의 블록 표기(제목·인용·목록·번호)를 이스케이프한다 — 줄마다', () => {
+    expect(markdownText('# 제목')).toBe('\\# 제목');
+    expect(markdownText('> 인용\n- 목록\n1. 번호')).toBe('\\> 인용\n\\- 목록\n1\\. 번호');
+  });
+
+  it('평범한 글은 그대로', () => {
+    expect(markdownText('홍길동 · 회의록 2026-09-29')).toBe('홍길동 · 회의록 2026-09-29');
+  });
+});
+
