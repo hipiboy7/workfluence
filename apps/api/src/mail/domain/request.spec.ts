@@ -50,6 +50,9 @@ describe('mailRequest', () => {
 describe('isSingleRecipient — 받는 사람은 주소 하나 (A.1-3)', () => {
   it('**주소 하나만** — 쉼표로 이은 여럿·줄바꿈·형식이 아닌 것은 아니다. 사내 API의 `receivers`는 쉼표를 목록으로 읽는다(병합 전 보안 검토 2 — 사내 계정의 email은 형식 검사를 지나지 않았다)', () => {
     expect(isSingleRecipient('user@example.internal')).toBe(true);
+    // 한 단어 도메인·대문자도 주소 하나다 — 막으면 부르기 메일이 신호 없이 멈춘다(좁은 재점검 보통 1)
+    expect(isSingleRecipient('user@corp')).toBe(true);
+    expect(isSingleRecipient('Hong.GilDong@Corp.CO.KR')).toBe(true);
     for (const bad of ['me@example.internal, other@example.internal', 'me@example.internal,other@example.internal', 'me@example.internal\r\nBcc: x@example.internal', 'not-an-address', '', ' user@example.internal'])
       expect(isSingleRecipient(bad), JSON.stringify(bad)).toBe(false);
   });
@@ -64,6 +67,8 @@ describe('hideSecret — 응답·오류 글에서 인증 값을 가린다 (FR-19
   it('**JSON으로 이스케이프해 되읊어도 가린다** — `/`를 `\\/`로, `"`·`\\`를 이스케이프해 돌려주는 서버가 있다(자체 점검 3)', () => {
     expect(hideSecret('{"msg":"bad Bearer ab\\/cd+ef=="}', 'Bearer ab/cd+ef==')).toBe('{"msg":"bad ***"}');
     expect(hideSecret('{"msg":"bad k\\"q\\\\1"}', 'k"q\\1')).toBe('{"msg":"bad ***"}');
+    // `<`·`>`·`&`를 `\u003c`처럼 적는 JSON(Go 기본값 등)도(좁은 재점검 6)
+    expect(hideSecret('{"msg":"bad a\\u003cb\\u0026c"}', 'a<b&c')).toBe('{"msg":"bad ***"}');
   });
 
   it('값 앞뒤의 빈칸은 떼고 가린다 — 보낼 때 떼어지므로 서버가 되읊는 값에는 없다(병합 전 보안 검토 4)', () => {
@@ -104,7 +109,12 @@ describe('시험 명령의 까닭 (FR-1905)', () => {
     const err = (code: string | undefined, message: string) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), code ? { code } : {}) });
     expect(failureHint(new TypeError('Cannot convert argument to a ByteString because the character at index 13 has a value of 54620'))).toMatch(/요청을 만들지 못했다/);
     expect(failureHint(new TypeError('Cannot convert argument to a ByteString because the character at index 13 has a value of 54620'))).not.toMatch(/54620|13/);
-    expect(failureHint(err(undefined, 'bad port'))).toMatch(/포트/);
+    // 보내는 이름은 JSON 본문에 들어가 요청 만들기를 깨뜨리지 못한다 — 인증 값만 가리킨다(좁은 재점검 3)
+    expect(failureHint(new TypeError('Cannot convert argument to a ByteString'))).not.toMatch(/WF_MAIL_SENDER_NAME/);
+    expect(failureHint(err(undefined, 'bad port'))).toMatch(/그 포트로는 보낼 수 없다/);
+    // 코드가 있으면 코드로 먼저 가린다 — 호스트 이름에 redirect가 들어도 넘겨주기가 아니다(좁은 재점검 — 순서를 되돌려도 초록이었다)
+    expect(failureHint(err('ENOTFOUND', 'getaddrinfo ENOTFOUND mail-redirect.example.internal'))).toMatch(/호스트 이름을 찾지 못했다/);
+    expect(failureHint(err('CERT_NOT_YET_VALID', 'certificate is not yet valid'))).toMatch(/유효하지 않다/);
     expect(failureHint(err('CERT_HAS_EXPIRED', 'certificate has expired'))).toMatch(/만료/);
     expect(failureHint(err('CERT_HAS_EXPIRED', 'certificate has expired'))).not.toMatch(/ca\.pem/);
     expect(failureHint(err('ERR_TLS_CERT_ALTNAME_INVALID', "Hostname/IP does not match certificate's altnames"))).toMatch(/호스트 이름/);

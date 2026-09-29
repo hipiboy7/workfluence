@@ -55,6 +55,15 @@ describe('mentionMail', () => {
     expect(m.subject).toBe('[위키] 홍 길동 님이 회원님을 불렀습니다');
   });
 
+  it('**한 줄로 만든 뒤 앞뒤 빈칸을 뗀다** — `**x **`는 굵게가 풀린다. 제어 글자뿐인 이름은 이름이 없는 것이다(좁은 재점검 4)', () => {
+    const m = mentionMail({ callerName: '홍길동\u0085', where: '문서', pageTitle: '\u0001회의록\u0085', pageUrl: null });
+    expect(m.markdown.split('\n')[0]).toBe('**홍길동** 님이 문서에서 회원님을 불렀습니다.');
+    expect(m.markdown).toContain('문서: **회의록**');
+    expect(m.subject).toBe('[위키] 홍길동 님이 회원님을 불렀습니다');
+    const none = mentionMail({ callerName: '\u0000\u0085', where: '문서', pageTitle: 't', pageUrl: null });
+    expect(none.subject).toBe('[위키] 문서에서 회원님이 불렸습니다');
+  });
+
   it('링크 주소의 괄호·빈칸은 퍼센트로 바꾼다 — 마크다운 링크가 중간에서 끊기지 않게', () => {
     const m = mentionMail({ callerName: null, where: '문서', pageTitle: 't', pageUrl: 'https://wiki.example.internal/a (b)/pages/x' });
     expect(m.markdown).toContain('[문서 열기](https://wiki.example.internal/a%20%28b%29/pages/x)');

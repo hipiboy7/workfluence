@@ -270,6 +270,8 @@ describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
     expect(() => mail({ WF_MAIL_SENDER_NAME: '위키\u0007' })).toThrow(/WF_MAIL_SENDER_NAME/);
     // 빈칸뿐인 이름은 보내는 이름이 없는 것과 같다(자체 점검 8)
     expect(() => mail({ WF_MAIL_SENDER_NAME: '   ' })).toThrow(/WF_MAIL_SENDER_NAME/);
+    // C1 제어 글자·유니코드 줄 구분자도 — 메일의 한 줄 처리(`oneLine`)와 같은 범위(좁은 재점검 5)
+    for (const bad of ['위키\u0085', '위키\u009b', '위키\u2028']) expect(() => mail({ WF_MAIL_SENDER_NAME: bad }), JSON.stringify(bad)).toThrow(/WF_MAIL_SENDER_NAME/);
   });
 
   it('**켰는데(모의 아님) 주소가 비면 기동 실패** — 켜 놓고 조용히 보내지 못하는 상태를 만들지 않는다', () => {
