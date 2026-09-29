@@ -296,32 +296,47 @@ function parseEnv(text) {
 const envLine = (k, v) => `${k}=${/[\s#'"{}]/.test(v) ? `'${v}'` : v}`;
 
 /**
- * data\ 의 권한과 이 폴더의 쓰기 권한을 본다 — { narrow, open } (모르면 null). narrow: data\ 가 상속을 끊고 지금 사용자·SYSTEM·Administrators만 둔다.
- * open: 이 폴더를 이 PC의 다른 계정(Everyone·Authenticated Users·Users)도 고칠 수 있다(C:\ 바로 아래에 만든 폴더가 그렇다)
+ * data\ 와 그 안의 settings.env(비밀 값)의 권한, 이 폴더의 쓰기 권한을 본다(모르면 null). 권한을 열어 둘 수 있는 것은 지금 사용자·SYSTEM·Administrators(`ok`)뿐이다.
+ * - dataAcl: data\ 가 상속을 끊었고 권한 목록이 `ok`의 항목뿐이다. extra: data\ 에 **따로 준**(물려받지 않은) `ok` 밖의 SID — 좁히는 명령이 남기는 것이다
+ * - fileAcl: settings.env의 권한 목록(물려받은 것까지)이 `ok`의 항목뿐이다. dataOwner·fileOwner: 주인이 `ok`다 — 주인은 권한 목록과 무관하게 권한을 다시 준다
+ * - open: 이 폴더를 이 PC의 다른 계정(Everyone·Authenticated Users·Users)도 고칠 수 있다(C:\ 바로 아래에 만든 폴더가 그렇다). me: 지금 사용자의 SID
  */
 function aclFacts() {
   const out = powershell(
     [
       "$ErrorActionPreference = 'Stop'",
       '$id = [Security.Principal.SecurityIdentifier]',
-      "$ok = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')",
+      '$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
+      "$ok = @($me, 'S-1-5-18', 'S-1-5-32-544')",
       '$d = Get-Acl -LiteralPath $env:TRIAL_DATA',
       '$dr = @($d.GetAccessRules($true, $true, $id))',
       '$bad = @($dr | Where-Object { $_.IsInherited -or ($ok -notcontains $_.IdentityReference.Value) })',
-      '$narrow = $d.AreAccessRulesProtected -and $dr.Count -gt 0 -and $bad.Count -eq 0',
+      '$extra = @($dr | Where-Object { (-not $_.IsInherited) -and ($ok -notcontains $_.IdentityReference.Value) } | ForEach-Object { $_.IdentityReference.Value } | Select-Object -Unique)',
+      '$dAcl = [int]($d.AreAccessRulesProtected -and $dr.Count -gt 0 -and $bad.Count -eq 0)',
+      '$dOwn = [int]($ok -contains $d.GetOwner($id).Value)',
+      '$fAcl = 1',
+      '$fOwn = 1',
+      'if (Test-Path -LiteralPath $env:TRIAL_SETTINGS) { $f = Get-Acl -LiteralPath $env:TRIAL_SETTINGS; ' +
+        '$fAcl = [int](@($f.GetAccessRules($true, $true, $id) | Where-Object { $ok -notcontains $_.IdentityReference.Value }).Count -eq 0); ' +
+        '$fOwn = [int]($ok -contains $f.GetOwner($id).Value) }',
       `$others = @(${OTHERS_SIDS.map((x) => `'${x}'`).join(', ')})`,
       `$open = @((Get-Acl -LiteralPath $env:TRIAL_ROOT).GetAccessRules($true, $true, $id) | Where-Object { $_.AccessControlType -eq 'Allow' -and $others -contains $_.IdentityReference.Value -and (([int]$_.FileSystemRights) -band ${WRITE_RIGHTS}) })`,
-      "'{0} {1}' -f [int]$narrow, [int]($open.Count -gt 0)",
+      "$x = if ($extra.Count) { $extra -join ',' } else { '-' }",
+      "'{0} {1} {2} {3} {4} {5} {6}' -f $dAcl, $dOwn, $fAcl, $fOwn, [int]($open.Count -gt 0), $me, $x",
     ].join('; '),
-    { TRIAL_DATA: DATA, TRIAL_ROOT: ROOT },
+    { TRIAL_DATA: DATA, TRIAL_SETTINGS: SETTINGS, TRIAL_ROOT: ROOT },
   );
-  const m = out && /^([01]) ([01])$/.exec(out[out.length - 1] ?? '');
-  return m ? { narrow: m[1] === '1', open: m[2] === '1' } : null;
+  const m = out && /^([01]) ([01]) ([01]) ([01]) ([01]) (S-1-[\d-]+) (\S+)$/.exec(out[out.length - 1] ?? '');
+  if (!m) return null;
+  const [dataAcl, dataOwner, fileAcl, fileOwner, open] = m.slice(1, 6).map((v) => v === '1');
+  return { dataAcl, dataOwner, fileAcl, fileOwner, open, narrow: dataAcl && dataOwner && fileAcl && fileOwner, me: m[6], extra: m[7] === '-' ? [] : m[7].split(',') };
 }
 
 /**
- * data\ 에는 비밀 값(settings.env)과 데이터베이스가 든다 — **시작할 때마다** 상속을 끊고 지금 사용자·SYSTEM·Administrators만 둔다(이미 그렇면 그대로).
- * 탐색기로 폴더를 복사하면 data\ 가 새 자리의 상속을 받는다 — 처음 한 번만 좁히면 복사한 뒤에는 넓은 채로 남는다. 실패하면 경고만 한다(체험은 계속된다).
+ * data\ 에는 비밀 값(settings.env)과 데이터베이스가 든다 — **시작할 때마다** 보고 지금 사용자·SYSTEM·Administrators만 열 수 있게 한다(이미 그렇면 그대로):
+ * data\ 의 상속을 끊고 셋에게만 주고, 다른 계정에 따로 준 항목을 지우고, settings.env에 따로 준 항목을 지우고(폴더에서 물려받는 것만 남긴다), 주인이 다른
+ * 계정이면(다른 계정의 폴더를 옮겨 왔다) 안의 것까지 지금 사용자로 바꾼다. **고친 뒤 다시 보고**, 아직 넓으면 무엇이 넓은지 말한다(체험은 계속된다).
+ * 탐색기로 폴더를 복사하면 data\ 가 새 자리의 상속을 받는다 — 처음 한 번만 좁히면 복사한 뒤에는 넓은 채로 남는다(T-088).
  * 이 폴더(실행 파일) 자체는 좁히지 않는다 — 다른 계정이 고칠 수 있는 자리면 그렇다고 말한다(읽어보기·체험 가이드 10.2절)
  */
 function restrictData() {
@@ -333,13 +348,29 @@ function restrictData() {
     );
   if (facts?.narrow) return;
   if (!facts) say('data 폴더의 권한을 PowerShell로 읽지 못했다 — 다시 좁힌다');
-  const who = spawnSync(join(SYS32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
-  const sid = /S-1-[\d-]+/.exec(who.stdout ?? '')?.[0];
-  const r = sid
-    ? spawnSync(join(SYS32, 'icacls.exe'), [DATA, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'], { stdio: 'ignore', windowsHide: true })
-    : null;
-  if (!r || r.status !== 0) say('경고: data 폴더의 권한을 좁히지 못했다 — 이 PC를 다른 사람과 같이 쓰면 data\\settings.env의 비밀 값을 읽을 수 있다');
-  else say('data 폴더의 권한을 지금 사용자·관리자만 열 수 있게 좁혔다');
+  const who = facts ? null : spawnSync(join(SYS32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
+  const sid = facts?.me ?? /S-1-[\d-]+/.exec(who?.stdout ?? '')?.[0];
+  const icacls = (args) => spawnSync(join(SYS32, 'icacls.exe'), args, { stdio: 'ignore', windowsHide: true }).status === 0;
+  let ok = Boolean(sid);
+  if (sid && (!facts || !facts.dataAcl)) {
+    ok = icacls([DATA, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F']) && ok;
+    // 위 명령은 이름을 준 셋만 고친다 — 다른 계정에 따로 준 항목은 남는다
+    if (facts?.extra.length) ok = icacls([DATA, '/remove', ...facts.extra.map((x) => `*${x}`)]) && ok;
+  }
+  if (sid && facts && (!facts.dataOwner || !facts.fileOwner)) ok = icacls([DATA, '/setowner', `*${sid}`, '/T', '/C', '/Q']) && ok;
+  if (sid && facts && !facts.fileAcl) ok = icacls([SETTINGS, '/reset']) && ok;
+  const after = facts ? aclFacts() : null;
+  if (after?.narrow || (!after && ok)) {
+    say(`data 폴더의 권한을 지금 사용자·관리자만 열 수 있게 좁혔다${after ? '' : '(PowerShell로 다시 확인하지는 못했다)'}`);
+    return;
+  }
+  const wide = after
+    ? [!after.dataAcl && 'data 폴더의 권한 목록', !after.dataOwner && 'data 폴더의 주인', !after.fileAcl && 'settings.env의 권한 목록', !after.fileOwner && 'settings.env의 주인'].filter(Boolean)
+    : [];
+  say(
+    `경고: data 폴더의 권한을 좁히지 못했다${wide.length ? `(아직 넓은 것: ${wide.join('·')})` : ''} — 이 PC를 다른 사람과 같이 쓰면 data\\settings.env의 비밀 값을 ` +
+      '읽을 수 있다. data 폴더와 settings.env의 속성 → 보안에서 지금 사용자·SYSTEM·Administrators 밖의 항목을 지우고, 주인을 지금 사용자로 바꾼다',
+  );
 }
 
 /** 처음 실행 — `.env.example`을 바탕으로 비밀 값을 무작위로 만든다. 비밀은 이 파일에만 있다 */
@@ -692,9 +723,10 @@ async function start(openBrowser) {
   }
   runOrFail(process.execPath, [join(API, 'dist', 'db', 'migrate.js')], '표를 만들지 못했다', { cwd: API, env });
   // 첫 관리자 — 시작할 때마다 돈다: 시드는 멱등이고 비밀번호를 덮어쓰지 않으며(apps/api/src/db/seed.ts 머리말) 빠진 것을 채운다. 표시 파일에 기대지 않아
-  // 데이터베이스를 다시 만든 뒤에도 root가 생긴다. **이미 쓰던 데이터베이스에서는 시드가 실패해도 위키를 띄운다** — 거기서 나는 실패(그 아이디가 root가
-  // 아니다 등)는 root가 이미 따로 있거나 사람이 설정을 고친 것이라, 막으면 쓰던 위키를 다시 열 길이 없다. 새로 만든 데이터베이스면 멈춘다(root가 없으면 아무도
-  // 로그인하지 못한다). 새로 만들었을 때만 비밀번호를 보인다
+  // 데이터베이스를 다시 만든 뒤에도 root가 생긴다. **실패는 멈춘다 — "그 아이디가 root가 아니다" 하나만 경고로 내리고 위키를 띄운다**: 그 계정이 있고
+  // root가 아니면 root가 따로 있다(마지막 root는 내릴 수 없고, 가입보다 시드가 먼저 root를 만든다) — 막으면 쓰던 위키를 다시 열 길이 없다. 그 밖의 실패
+  // (그 아이디의 계정이 없는데 WF_ROOT_PASSWORD가 비었다 등)는 root가 있는지 모른다 — 띄우면 아무도 로그인하지 못하는 위키일 수 있다. "이번에 데이터베이스를
+  // 만들었나"로 가르지 않는다 — 만든 뒤 시드가 실패하면 다음 시작에서는 이미 만든 데이터베이스다. 새로 만들었을 때만 비밀번호를 보인다
   const seedUser = settings.WF_ROOT_USERNAME || 'root';
   const seed = spawnSync(process.execPath, [join(API, 'dist', 'db', 'seed.js')], { cwd: API, env: childEnv(settings, { seed: true }), encoding: 'utf8', windowsHide: true });
   const seedOut = String(seed.stdout ?? '').trim();
@@ -702,16 +734,20 @@ async function start(openBrowser) {
   let created = false;
   if (seed.error || seed.status !== 0) {
     const reason = seed.error?.message ?? seedReason(seed.stderr);
-    const notRoot = /root가 아니다/.test(reason);
-    // 아는 까닭이 아니면 시드가 쓴 것을 그대로 보인다(스택 포함)
-    if (!notRoot && seed.stderr) process.stderr.write(seed.stderr);
-    const hint = notRoot
-      ? `이 묶음의 설정은 data\\settings.env다. 이 경고를 없애려면 그 파일의 WF_ROOT_USERNAME을 지금 root인 계정의 아이디로 바꾼다 — 없는 아이디로 바꾸면 ` +
-        'settings.env에 남은 첫 비밀번호(WF_ROOT_PASSWORD)로 root가 새로 생긴다'
-      : 'data\\settings.env의 WF_ROOT_USERNAME·WF_ROOT_PASSWORD를 본다';
-    if (fresh) fail(`첫 관리자를 만들지 못했다 — ${reason || `종료 코드 ${seed.status}`}. ${hint}`);
-    say(`경고: 첫 관리자(${seedUser})를 확인하지 못했다 — 위키는 그대로 띄운다. 까닭: ${notRoot ? reason.split(' — ')[0] : reason || `종료 코드 ${seed.status}`}`);
-    say(notRoot ? `다른 root 계정으로 로그인해 쓰면 된다. ${hint}` : hint);
+    if (!/root가 아니다/.test(reason)) {
+      // 아는 까닭이 아니면 시드가 쓴 것을 그대로 보인다(스택 포함)
+      if (seed.stderr && !/WF_ROOT_PASSWORD가 없다/.test(reason)) process.stderr.write(seed.stderr);
+      const hint = /WF_ROOT_PASSWORD가 없다/.test(reason)
+        ? `아이디 ${seedUser}인 계정이 이 데이터베이스에 없어 새로 만들어야 한다 — data\\settings.env의 WF_ROOT_PASSWORD에 첫 비밀번호를 적어 저장하고 ` +
+          '다시 누른다(첫 로그인에서 바꾸게 된다). WF_ROOT_USERNAME을 바꿨으면 그 아이디가 맞는지도 본다'
+        : 'data\\settings.env의 WF_ROOT_USERNAME·WF_ROOT_PASSWORD를 본다';
+      fail(`첫 관리자를 ${fresh ? '만들지' : '확인하지'} 못했다 — ${reason ? reason.split(' — ')[0] : `종료 코드 ${seed.status}`}. ${hint}`);
+    }
+    const hint =
+      `이 묶음의 설정은 data\\settings.env다. 이 경고를 없애려면 그 파일의 WF_ROOT_USERNAME을 지금 root인 계정의 아이디로 바꾼다 — 없는 아이디로 바꾸면 ` +
+      'settings.env에 남은 첫 비밀번호(WF_ROOT_PASSWORD)로 root가 새로 생긴다';
+    say(`경고: 첫 관리자(${seedUser})를 확인하지 못했다 — 위키는 그대로 띄운다. 까닭: ${reason.split(' — ')[0]}`);
+    say(`다른 root 계정으로 로그인해 쓰면 된다. ${hint}`);
   } else created = /root 계정 생성/.test(seedOut);
 
   const app = spawn(process.execPath, ['--enable-source-maps', join(API, 'dist', 'main.js')], { cwd: API, env, stdio: 'inherit' });
@@ -742,17 +778,22 @@ async function start(openBrowser) {
 
 /**
  * 멈추기 — 이 묶음의 여는 스크립트·앱으로 확인된 것만 끝낸다. PID 파일의 번호가 남의 것이면 파일만 지운다.
- * **확인하지 못한 것은 건드리지 않고 그렇다고 말한다**(1로 끝난다): PID 파일의 번호가 권한이 다른 창의 Node라 보이지 않으면 그 실행과 데이터베이스를 그대로
- * 둔다 — 데이터베이스만 멈추면 앱이 데이터베이스 없이 자리를 쥔 채 남는다. PowerShell을 쓸 수 없으면 여는 스크립트·앱을 끝내지 못한다
+ * **확인하지 못한 것은 건드리지 않고 그렇다고 말한다**(1로 끝난다) — 데이터베이스만 멈추면 앱이 데이터베이스 없이 자리를 쥔 채 남는다. 그래서 데이터베이스는
+ * 이 묶음의 Node를 **모두 확인하고 모두 끝냈을 때만** 멈춘다: 권한이 다른 창의 Node(경로·명령줄이 보이지 않는다)가 하나라도 있거나, 끝내지 못한 것이 아직
+ * 떠 있거나, PowerShell을 쓸 수 없어 PID 파일의 번호가 아직 떠 있는 Node면 그대로 둔다. 앱 자리(`WF_PORT`)에 위키가 아직 답하는지는 어느 갈래에서든 본다
  */
 async function stop() {
   let failed = false;
   let did = false;
   let keep = false;
+  // 남은 Node가 이 묶음의 것일 수 있다(권한이 다른 창·PowerShell을 쓸 수 없다·끝내지 못했다) — 앱 자리가 답하면 그것이다
+  let doubt = false;
   const pid = lockPid();
   const procs = bundleProcesses();
+  const sameRights = '그 창에서 Ctrl+C로 멈추거나, 이 멈추기.cmd를 같은 권한으로(마우스 오른쪽 → 관리자 권한으로 실행) 누른다';
   if (procs === null) {
     failed = true;
+    doubt = true;
     say('떠 있는 프로세스를 확인하지 못했다(PowerShell을 쓸 수 없다) — 여는 스크립트·앱은 끝내지 않는다. 위키 창이 열려 있으면 그 창에서 Ctrl+C');
     if (pid !== null && isNodePid(pid)) {
       keep = true;
@@ -760,26 +801,41 @@ async function stop() {
     } else rmSync(PIDFILE, { force: true });
   } else {
     const lock = pid === null ? undefined : procs.find((p) => p.pid === pid);
+    const hidden = procs.filter(unverified);
     if (lock && unverified(lock)) {
       keep = true;
-      failed = true;
-      say(
-        `data\\launcher.pid의 번호(${pid})는 권한이 다른 창(관리자 권한 등)의 Node라 이 창에서는 무엇인지 보이지 않는다 — 끝내지 않고 데이터베이스도 그대로 둔다. ` +
-          '그 창에서 Ctrl+C로 멈추거나, 이 멈추기.cmd를 같은 권한으로(마우스 오른쪽 → 관리자 권한으로 실행) 누른다',
-      );
+      say(`data\\launcher.pid의 번호(${pid})는 권한이 다른 창(관리자 권한 등)의 Node라 이 창에서는 무엇인지 보이지 않는다 — 끝내지 않고 데이터베이스도 그대로 둔다. ${sameRights}`);
     } else {
-      if (pid !== null && !(lock && lock.mine === 'yes' && lock.kind === 'start')) say(`data\\launcher.pid의 번호(${pid})는 이 묶음의 실행이 아니다 — 파일만 지운다`);
-      // 여는 스크립트부터(그 아래의 앱도 함께 끝난다), 그다음 홀로 남은 앱. 끝내지 못했는데 아직 떠 있으면 실패다
+      // 여는 스크립트부터(그 아래의 앱도 함께 끝난다), 그다음 홀로 남은 앱. 끝내지 못했는데 아직 떠 있으면 실패다 — 데이터베이스를 두고 PID 파일도 둔다
+      const alive = [];
       for (const kind of ['start', 'app'])
         for (const p of procs.filter((q) => q.mine === 'yes' && q.kind === kind)) {
           if (taskkill(p.pid)) did = true;
           else if (isNodePid(p.pid)) {
-            failed = true;
+            alive.push(p.pid);
             console.error(`[체험] PID ${p.pid}(${kind === 'start' ? '여는 스크립트' : '앱'})를 끝내지 못했다 — 작업 관리자의 "세부 정보"에서 끝낸다`);
           }
         }
-      rmSync(PIDFILE, { force: true });
+      const ours = lock && lock.mine === 'yes' && lock.kind === 'start';
+      if (!(ours && alive.includes(lock.pid))) {
+        if (pid !== null && !ours) say(`data\\launcher.pid의 번호(${pid})는 이 묶음의 실행이 아니다 — 파일만 지운다`);
+        rmSync(PIDFILE, { force: true });
+      }
+      if (alive.length) {
+        keep = true;
+        doubt = true;
+        say('끝내지 못한 것이 있어 데이터베이스는 그대로 둔다 — 그것을 끝낸 뒤 멈추기.cmd를 다시 누른다');
+      }
+      if (hidden.length) {
+        keep = true;
+        say(
+          `권한이 다른 창(관리자 권한 등)의 Node(PID ${hidden.map((p) => p.pid).join(', ')})가 있어 이 창에서는 이 묶음의 것인지 보이지 않는다 — ` +
+            `데이터베이스는 그대로 둔다. ${sameRights}(이 묶음의 것이 아니면 관리자 권한의 멈추기가 그렇게 알아보고 데이터베이스를 멈춘다)`,
+        );
+      }
     }
+    if (hidden.length) doubt = true;
+    if (keep) failed = true;
   }
   let dbFailed = false;
   if (!keep) {
@@ -791,14 +847,21 @@ async function stop() {
     }
     if (db === 'stopped') did = true;
   }
-  if (procs === null) {
-    // 확인하지 못했으니 앱 자리에 아직 위키가 답하는지로 본다
-    const url = `http://127.0.0.1:${appPortOfSettings()}`;
-    if (await healthy(url, null)) console.error(`[체험] ${url}에서 아직 위키가 답한다 — 그 창을 닫거나 작업 관리자의 "세부 정보"에서 이 폴더의 node.exe를 끝낸다`);
-    else if (!keep && !dbFailed) {
-      say(`앱 자리(${url})는 닫혀 있고 데이터베이스는 ${did ? '멈췄다' : '떠 있지 않았다'}`);
-      failed = false;
-    }
+  // 앱 자리 — 끝낸 프로세스가 자리를 놓기까지 잠깐 기다린다
+  const url = `http://127.0.0.1:${appPortOfSettings()}`;
+  let answering = await healthy(url, null);
+  for (let i = 0; answering && did && i < 10; i++) {
+    await sleep(500);
+    answering = await healthy(url, null);
+  }
+  if (answering && doubt) {
+    failed = true;
+    console.error(`[체험] ${url}에서 아직 위키가 답한다 — 이 묶음의 앱일 수 있다. 그 창을 닫거나 작업 관리자의 "세부 정보"에서 이 폴더의 node.exe를 끝낸다`);
+  } else if (answering) say(`참고: ${url}에서 위키가 답한다 — 이 폴더의 것은 아니다(이 폴더의 Node는 모두 확인했다 — 다른 폴더의 묶음이나 가 길의 pnpm start 등)`);
+  else if (procs === null && !keep && !dbFailed) {
+    // 확인하지 못했지만 앱 자리가 닫혀 있고 데이터베이스도 멈췄다 — 멈춘 것으로 본다
+    say(`앱 자리(${url})는 닫혀 있고 데이터베이스는 ${did ? '멈췄다' : '떠 있지 않았다'}`);
+    failed = false;
   }
   if (failed) process.exit(1);
   say(did ? '멈췄다' : '떠 있는 것이 없다');
