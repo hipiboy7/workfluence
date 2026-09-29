@@ -3,6 +3,7 @@ import { AuditService } from '../audit/audit.service';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import type { MentionOutcome } from '../notifications/notifications.service';
 import { MAIL_SENDER, type MailSender } from './mail.provider';
+import { mentionMail } from './domain/compose';
 import { logLine } from '../common/log-line';
 
 /**
@@ -28,31 +29,20 @@ export class MentionMailService {
   async notify(outcome: MentionOutcome, actorName: string | null, pageTitle: string, actorId?: string): Promise<void> {
     if (!this.env.WF_MAIL_ENABLED || outcome.recipients.length === 0) return;
     try {
-      // **문서 본문을 담지 않는다** (FR-755). 누가 어디서 불렀는지와 링크만.
+      // **문서 본문을 담지 않는다** (FR-755). 누가 어디서 불렀는지와 링크만 — 글은 `domain/compose.ts`가 만든다(평문·마크다운, P18 FR-1901).
       // 메일은 앱 밖으로 나가고, 받는 사람이 그 페이지를 볼 권한을 잃어도 메일은 남는다
       const where = outcome.commentId ? '댓글' : '문서';
+      // 주소가 없으면 **링크를 빼고 보낸다** (자체 점검 21)
+      const pageUrl = this.env.WF_PUBLIC_URL ? `${this.env.WF_PUBLIC_URL}/pages/${outcome.pageId}` : null;
+
       // **누가 불렀는지 확실하지 않으면 이름을 적지 않는다.** 실시간 편집의 자동 저장은
       // "마지막으로 키를 누른 사람"만 알기 때문에, 그 이름을 적으면 **틀린 사람의 이름이**
       // 메일로 나간다 (P6 코드 리뷰 6). 그래서 거기서는 `actorName`이 `null`이고, 대신
-      // **받는 사람별로** 그 멘션을 만든 사람(`calledBy`)이 실려 온다 (P8 FR-905)
-      const compose = (name: string | null): { subject: string; text: string } => ({
-        subject: name ? `[위키] ${name} 님이 회원님을 불렀습니다` : '[위키] 문서에서 회원님이 불렸습니다',
-        text: [
-          name ? `${name} 님이 ${where}에서 회원님을 불렀습니다.` : `${where}에서 회원님이 불렸습니다.`,
-          '',
-          `문서: ${pageTitle}`,
-          // 주소가 없으면 **링크 줄을 아예 빼고 보낸다.** `(주소 미설정)/pages/…`가
-          // 사람 메일함에 가면 안 된다 (자체 점검 21)
-          ...(this.env.WF_PUBLIC_URL ? [`바로 가기: ${this.env.WF_PUBLIC_URL}/pages/${outcome.pageId}`] : []),
-          '',
-          '내용은 위키에서 확인해 주세요.',
-        ].join('\n'),
-      });
-
-      // **한 통씩 따로 보낸다.** 한 `to`에 여럿을 넣으면 서로의 주소와 "누가 함께
-      // 불렸는지"가 드러난다 — 폐쇄망이라도 그것은 알려 줄 일이 아니다 (자체 점검 21)
+      // **받는 사람별로** 그 멘션을 만든 사람(`calledBy`)이 실려 온다 (P8 FR-905).
+      // **한 통씩 따로 보낸다.** 한 통에 여럿을 넣으면 서로의 주소와 "누가 함께
+      // 불렸는지"가 드러난다 — 폐쇄망이라도 그것은 알려 줄 일이 아니다 (자체 점검 21, P18 A.1-3)
       const results = await Promise.all(
-        outcome.recipients.map((r) => this.sender.send({ to: [r.email], ...compose(r.calledBy ?? actorName) })),
+        outcome.recipients.map((r) => this.sender.send({ to: r.email, ...mentionMail({ callerName: r.calledBy ?? actorName, where, pageTitle, pageUrl }) })),
       );
       const ok = results.every(Boolean);
 

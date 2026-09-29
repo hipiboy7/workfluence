@@ -51,7 +51,7 @@ const svc = (over: Partial<AppEnvToken> = {}): MentionMailService => new Mention
 describe('누구의 이름으로 보내나 (P8 FR-905)', () => {
   it('**받는 사람별 `calledBy`가 기본 이름보다 앞선다** — 실시간 편집은 사람마다 부른 사람이 다르다', async () => {
     await svc().notify(outcome([to('a@example.internal', '김철수'), to('b@example.internal', '이영희')]), null, '회의록');
-    expect(sent.map((m) => [m.to[0], m.subject])).toEqual([
+    expect(sent.map((m) => [m.to, m.subject])).toEqual([
       ['a@example.internal', '[위키] 김철수 님이 회원님을 불렀습니다'],
       ['b@example.internal', '[위키] 이영희 님이 회원님을 불렀습니다'],
     ]);
@@ -74,7 +74,7 @@ describe('누구의 이름으로 보내나 (P8 FR-905)', () => {
 describe('보내는 모양 (FR-753~756)', () => {
   it('한 통씩 따로 보내고, 본문은 싣지 않고 링크만 준다', async () => {
     await svc().notify(outcome([to('a@example.internal', null), to('b@example.internal', null)]), '박민수', '회의록');
-    expect(sent.map((m) => m.to)).toEqual([['a@example.internal'], ['b@example.internal']]);
+    expect(sent.map((m) => m.to)).toEqual(['a@example.internal', 'b@example.internal']);
     expect(sent[0].text).toContain('문서: 회의록');
     expect(sent[0].text).toContain('바로 가기: https://wiki.example.internal/pages/00000000-0000-4000-8000-000000000001');
   });

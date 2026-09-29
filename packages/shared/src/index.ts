@@ -4,6 +4,7 @@ export * from './diff';
 export * from './document';
 export * from './html';
 export * from './llm';
+export * from './mail';
 export * from './markdown';
 export * from './permissions';
 export * from './policy';

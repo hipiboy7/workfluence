@@ -22,15 +22,28 @@ function escapeInline(text: string): string {
 /** 줄 머리에서 블록이 되는 표기 — 제목·인용·목록·가로줄·setext 밑줄. 빈칸 셋까지는 들여 써도 같다 (CommonMark) */
 const LINE_START = /^( {0,3})(?:([#>+=-])|(\d+)([.)]))/;
 
+/**
+ * 마크다운 안에 넣을 글자 (P18_설계서_Mail FR-1901) — 서식·링크·HTML이 되는 기호와 줄 머리의 블록 표기를 이스케이프한다. 메일 본문이 문서 제목·사람
+ * 이름을 싣는다. 문서를 마크다운으로 복사할 때(`pageMarkdown`)와 **같은 규칙**이다 — 규칙이 두 벌이면 한쪽만 고쳐진다(1.3절)
+ */
+export function markdownText(text: string): string {
+  return escapeLineStarts(escapeInline(text));
+}
+
+/** 줄 끝 — CR 하나도 줄 끝이다(CommonMark). 나눈 조각에 줄 끝을 남겨 그대로 다시 잇는다 (P18 병합 전 보안 검토 3) */
+const LINE_END = /(\r\n?|\n)/;
+
 function escapeLineStarts(s: string): string {
   return s
-    .split('\n')
-    .map((line) =>
-      line.replace(LINE_START, (_m, space: string, symbol: string | undefined, digits: string | undefined, punct: string | undefined) =>
-        symbol !== undefined ? `${space}\\${symbol}` : `${space}${digits}\\${punct}`,
-      ),
+    .split(LINE_END)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(LINE_START, (_m, space: string, symbol: string | undefined, digits: string | undefined, punct: string | undefined) =>
+            symbol !== undefined ? `${space}\\${symbol}` : `${space}${digits}\\${punct}`,
+          ),
     )
-    .join('\n');
+    .join('');
 }
 
 const allowed = (node: DocNode): boolean => Object.hasOwn(ALLOWED_NODES, node.type);
@@ -62,11 +75,18 @@ function wrapEmphasis(s: string, marker: string): string {
 }
 
 /** 링크는 허용 주소만 (FR-1142). 통과하지 못하면 **글자만** 남긴다. 주소의 빈칸·괄호는 링크를 끊지 않게 바꾼다 */
+/**
+ * 마크다운 링크의 주소 — 괄호·빈칸은 퍼센트로(링크가 중간에서 끊기지 않게, `encodeURIComponent`는 괄호를 두고 간다). 문서 복사의 링크와 메일의 바로 가기
+ * (P18)가 이 한 곳을 쓴다
+ */
+export function markdownLinkTarget(url: string): string {
+  return url.replace(/[\s()]/g, (c) => (c === '(' ? '%28' : c === ')' ? '%29' : encodeURIComponent(c)));
+}
+
 function wrapLink(label: string, mark: DocMark): string {
   const raw = typeof mark.attrs?.href === 'string' ? mark.attrs.href.trim() : '';
   if (!raw || !ALLOWED_LINK_HREF.test(raw)) return label;
-  const href = raw.replace(/[\s()]/g, (c) => (c === '(' ? '%28' : c === ')' ? '%29' : encodeURIComponent(c)));
-  return `[${label}](${href})`;
+  return `[${label}](${markdownLinkTarget(raw)})`;
 }
 
 function renderText(node: DocNode): string {

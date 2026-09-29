@@ -229,4 +229,66 @@ describe('Phase 13 — DB 계정과 최초 계정 (P13 FR-1421·1422)', () => {
       expect(() => parseEnv({ ...valid, WF_DB_APP_ROLE: bad, WF_DB_APP_PASSWORD: APP_PW }), bad).toThrow(/WF_DB_APP_ROLE/);
     }
   });
+
+});
+
+describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
+  const mail = (over: Record<string, string>) => parseEnv({ ...valid, ...over });
+
+  it('기본은 꺼짐·모의·평문·보내는 이름 "위키"·인증 없음', () => {
+    const env = mail({});
+    expect([env.WF_MAIL_ENABLED, env.WF_MAIL_MOCK, env.WF_MAIL_FORMAT, env.WF_MAIL_SENDER_NAME]).toEqual([false, true, 'text', '위키']);
+    expect([env.WF_MAIL_API_URL, env.WF_MAIL_AUTH_HEADER, env.WF_MAIL_AUTH_VALUE]).toEqual(['', '', '']);
+  });
+
+  it('형식은 text·markdown만', () => {
+    expect(mail({ WF_MAIL_FORMAT: 'markdown' }).WF_MAIL_FORMAT).toBe('markdown');
+    expect(() => mail({ WF_MAIL_FORMAT: 'html' })).toThrow(/WF_MAIL_FORMAT/);
+  });
+
+  it('**주소가 틀리면 기동 실패** — http(s)가 아니거나 사용자 정보·질의가 섞였다', () => {
+    expect(mail({ WF_MAIL_API_URL: 'https://mail.example.internal/api/v1/email/send' }).WF_MAIL_API_URL).toBe('https://mail.example.internal/api/v1/email/send');
+    for (const bad of ['mail.example.internal/send', 'https://u:p@mail.example.internal/send', 'https://mail.example.internal/send?key=1'])
+      expect(() => mail({ WF_MAIL_API_URL: bad }), bad).toThrow(/WF_MAIL_API_URL/);
+  });
+
+  it('**인증 헤더 이름과 값은 함께 있다** — 하나만 있으면 기동 실패. 이름·값의 글자도 본다', () => {
+    const env = mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: 'k-1' });
+    expect([env.WF_MAIL_AUTH_HEADER, env.WF_MAIL_AUTH_VALUE]).toEqual(['X-API-Key', 'k-1']);
+    expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key' })).toThrow(/WF_MAIL_AUTH_VALUE/);
+    expect(() => mail({ WF_MAIL_AUTH_VALUE: 'k-1' })).toThrow(/WF_MAIL_AUTH_HEADER/);
+    expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X API Key', WF_MAIL_AUTH_VALUE: 'k-1' })).toThrow(/WF_MAIL_AUTH_HEADER/);
+    expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: 'k\r\nX-Evil: 1' })).toThrow(/WF_MAIL_AUTH_VALUE/);
+    expect(() => mail({ WF_MAIL_AUTH_HEADER: 'X-API-Key', WF_MAIL_AUTH_VALUE: '토큰' })).toThrow(/WF_MAIL_AUTH_VALUE/);
+    expect(() => mail({ WF_MAIL_AUTH_HEADER: 'Content-Type', WF_MAIL_AUTH_VALUE: 'text/plain' })).toThrow(/WF_MAIL_AUTH_HEADER/);
+  });
+
+  it('보내는 이름은 100자까지, 줄바꿈 없이', () => {
+    expect(mail({ WF_MAIL_SENDER_NAME: '사내 위키' }).WF_MAIL_SENDER_NAME).toBe('사내 위키');
+    expect(() => mail({ WF_MAIL_SENDER_NAME: 'a'.repeat(101) })).toThrow(/WF_MAIL_SENDER_NAME/);
+    expect(() => mail({ WF_MAIL_SENDER_NAME: '위키\n알림' })).toThrow(/WF_MAIL_SENDER_NAME/);
+    expect(() => mail({ WF_MAIL_SENDER_NAME: '위키\u0007' })).toThrow(/WF_MAIL_SENDER_NAME/);
+    // 빈칸뿐인 이름은 보내는 이름이 없는 것과 같다(자체 점검 8)
+    expect(() => mail({ WF_MAIL_SENDER_NAME: '   ' })).toThrow(/WF_MAIL_SENDER_NAME/);
+    // C1 제어 글자·유니코드 줄 구분자도 — 메일의 한 줄 처리(`oneLine`)와 같은 범위(좁은 재점검 5)
+    for (const bad of ['위키\u0085', '위키\u009b', '위키\u2028']) expect(() => mail({ WF_MAIL_SENDER_NAME: bad }), JSON.stringify(bad)).toThrow(/WF_MAIL_SENDER_NAME/);
+  });
+
+  it('**켰는데(모의 아님) 주소가 비면 기동 실패** — 켜 놓고 조용히 보내지 못하는 상태를 만들지 않는다', () => {
+    expect(() => mail({ WF_MAIL_ENABLED: 'true', WF_MAIL_MOCK: 'false' })).toThrow(/WF_MAIL_API_URL/);
+    expect(mail({ WF_MAIL_ENABLED: 'true', WF_MAIL_MOCK: 'false', WF_MAIL_API_URL: 'https://mail.example.internal/send' }).WF_MAIL_ENABLED).toBe(true);
+    // 모의면 주소가 없어도 된다(개발)
+    expect(mail({ WF_MAIL_ENABLED: 'true' }).WF_MAIL_MOCK).toBe(true);
+  });
+
+  it('**운영에서 켰는데 모의면 기동 실패** — 메일이 나간다고 믿는데 로그로만 남는다(OIDC 모의와 같은 판단). 끈 채로는 모의 기본값 그대로 뜬다', () => {
+    expect(() => mail({ WF_ENV: 'production', WF_MAIL_ENABLED: 'true' })).toThrow(/WF_MAIL_MOCK/);
+    expect(mail({ WF_ENV: 'production' }).WF_MAIL_MOCK).toBe(true);
+    expect(mail({ WF_ENV: 'production', WF_MAIL_ENABLED: 'true', WF_MAIL_MOCK: 'false', WF_MAIL_API_URL: 'https://mail.example.internal/send' }).WF_MAIL_ENABLED).toBe(true);
+  });
+
+  it('**옛 키(WF_MAIL_FROM·WF_MAIL_API_TOKEN)는 없다** — 뜻이 바뀌었다. 남아 있으면 기동 실패로 알린다(A.1-6)', () => {
+    expect(() => mail({ WF_MAIL_FROM: 'wiki@example.internal' })).toThrow(/WF_MAIL_FROM/);
+    expect(() => mail({ WF_MAIL_API_TOKEN: 'tok' })).toThrow(/WF_MAIL_API_TOKEN/);
+  });
 });

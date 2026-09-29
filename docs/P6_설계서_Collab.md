@@ -18,6 +18,10 @@ Phase 6은 `CLAUDE.md` 1절 표에서 "2단계 (실시간 편집·외부 알림�
 
 ## A.1 확인 필요 — 사내 메일 API의 요청 형식
 
+> **Phase 18이 바꿨다 (2026-09-29).** 사용자가 사내 메일 API의 실제 모양을 주었다 — 아래의 가정은 옛 것이다. 지금의 요청(`subject`·`content`·`receivers`·
+> `sender_name`)과 설정(`WF_MAIL_FORMAT`·`WF_MAIL_SENDER_NAME`·`WF_MAIL_AUTH_HEADER`·`WF_MAIL_AUTH_VALUE` — `WF_MAIL_FROM`·`WF_MAIL_API_TOKEN`은 없어졌다)은
+> [`docs/P18_설계서_Mail.md`](P18_설계서_Mail.md) C·E절이다. 아래와 이 문서 H절의 설정 표는 Phase 6 때의 기록으로 둔다.
+
 사용자가 "메일 전송 API가 있다"고 했고 **그 API의 요청 형식은 아직 모른다.**
 그래서 IdP와 **같은 방식**으로 둔다 (2절 DIP): 주입 토큰 뒤에 인터페이스를 두고,
 개발은 모의 구현으로 하고, 실제 어댑터는 **한 파일**이다.
@@ -94,6 +98,8 @@ Content-Type: application/json
 | FR-746 | 템플릿 변경을 감사로그에 남긴다 | 6절 |
 
 ## B.5 외부 알림 — 메일 (FR-750 ~ FR-757)
+
+> **Phase 18이 바꾼 것 (2026-09-29).** FR-751의 "사내 API는 어댑터 한 파일"은 지금 요청 모양 한 곳(`apps/api/src/mail/domain/request.ts`)과 보내는 길 한 곳(`post.ts`)이다. FR-752 근거의 "나갈 수 있는지 아직 모른다"는 **닿지 않는다**로 확정됐다(P18 착수 쟁점 2 — 실연동은 반입 뒤 현장에서, 보류 18). FR-757의 "끌 수 있다"는 그대로이고, 켰는데 주소가 없으면 이제 기동을 거부한다. 지금의 모양은 [`docs/P18_설계서_Mail.md`](P18_설계서_Mail.md)다.
 
 | # | 요구 | 근거 |
 |---|---|---|
