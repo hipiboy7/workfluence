@@ -131,13 +131,13 @@ describe('감사 기록 단계 (P17 F-010 10번, FR-1840) — 필수는 늘, 양
     expect(dropped(3)).toEqual([]);
   });
 
-  it('2(줄임)는 실시간 편집의 자동 저장 셋만 뺀다', () => {
-    expect(dropped(2)).toEqual(['page.collab.save', 'page.collab.flush', 'page.collab.title']);
+  it('2(줄임)는 실시간 편집의 **자동 저장만** 뺀다 — 사람이 누른 저장(`page.collab.flush`)과 제목 바꾸기(`page.collab.title`)는 고치기라 필수다 (병합 전 보안 검토)', () => {
+    expect(dropped(2)).toEqual(['page.collab.save']);
   });
 
   it('1(최소)은 거기에 첨부 받기·HTML 내보내기·메일 발송 성공·LLM 질문을 더 뺀다 — 나머지는 필수다', () => {
     expect(new Set(dropped(1))).toEqual(
-      new Set(['page.collab.save', 'page.collab.flush', 'page.collab.title', 'attachment.download', 'page.export', 'mail.send', 'llm.ask']),
+      new Set(['page.collab.save', 'attachment.download', 'page.export', 'mail.send', 'llm.ask']),
     );
   });
 
@@ -152,6 +152,8 @@ describe('감사 기록 단계 (P17 F-010 10번, FR-1840) — 필수는 늘, 양
       'user.grants.change',
       'settings.update',
       'page.update',
+      'page.collab.flush',
+      'page.collab.title',
       'page.delete',
       'trash.purge',
       'audit.purge',

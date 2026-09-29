@@ -4,7 +4,7 @@ import { accessLogEntry, type AccessLogInput } from './access-log';
 /**
  * A등급 — 앱 접근 로그 한 줄을 남기나·어느 수준인가·무엇을 싣나 (P11 D.3, FR-1213). **질의 문자열은 어디에도 싣지 않는다**(검색어)
  */
-const base: AccessLogInput = { method: 'GET', url: '/api/pages/p1', route: '/api/pages/:id', status: 200, durationMs: 12.4, userId: 'u1', aborted: false };
+const base: AccessLogInput = { method: 'GET', url: '/api/pages/p1', route: '/api/pages/:id', status: 200, durationMs: 12.4, userId: 'u1', aborted: false, background: false };
 
 describe('accessLogEntry', () => {
   it('**경로 틀·상태·걸린 시간·사용자** — event는 `http.request`, 수준은 info', () => {
@@ -58,6 +58,15 @@ describe('accessLogEntry', () => {
 
   it('로그인하지 않은 요청에는 사용자가 없다', () => {
     expect(accessLogEntry({ ...base, userId: null })?.fields).not.toHaveProperty('userId');
+  });
+
+  it('**배경 요청은 남기지 않는다** — 모든 화면이 알림 수를 30초마다 묻는다(P17 FR-1800). 사람 수 × 하루 2,880줄이 순환 로그를 밀어낸다. 5xx면 남긴다 (병합 전 코드 리뷰)', () => {
+    const poll = { ...base, url: '/api/notifications/unread-count', route: '/api/notifications/unread-count', background: true };
+    expect(accessLogEntry(poll)).toBeNull();
+    expect(accessLogEntry({ ...poll, status: 401 })).toBeNull();
+    expect(accessLogEntry({ ...poll, status: 503 })?.level).toBe('warn');
+    // 표시가 없으면 같은 경로도 남긴다 — 사람이 알림을 열 때
+    expect(accessLogEntry({ ...poll, background: false })?.fields.route).toBe('/api/notifications/unread-count');
   });
 
   it('**헬스체크와 정적 자산은 남기지 않는다** (A.1-7)', () => {
