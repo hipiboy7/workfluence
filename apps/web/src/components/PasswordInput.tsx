@@ -2,7 +2,10 @@ import { useState } from 'react';
 
 /**
  * 비밀번호 칸과 눈 모양 단추 (P17 F-010 1번). 처음은 **감은 눈**이고 가린다. 누르면 **뜬 눈**이 되고 글자로 보인다. 다시 누르면 가린다.
- * 그림은 이 파일 안의 SVG다 — 외부 자원을 쓰지 않는다(`CLAUDE.md` 7절)
+ * 그림은 이 파일 안의 SVG다 — 외부 자원을 쓰지 않는다(`CLAUDE.md` 7절).
+ *
+ * `Field`(P17 설계서 J.5.3) 안에 둔다 — `Field`가 도움말·오류를 `aria-describedby`·`aria-invalid`로 넘기면 칸에 그대로 붙인다.
+ * **비밀번호 변경 화면에만 쓴다** — 로그인·가입·API 키 칸에 두면 "비밀번호"로 칸을 찾는 이름 찾기가 이 단추에도 걸린다(J.5.3)
  */
 export function PasswordInput({
   id,
@@ -10,8 +13,9 @@ export function PasswordInput({
   value,
   onChange,
   autoComplete,
-  invalid,
-  describedBy,
+  'aria-describedby': describedBy,
+  'aria-invalid': invalid,
+  required,
 }: {
   id: string;
   /** 단추의 이름에 쓴다 — "새 비밀번호 보이기" */
@@ -19,8 +23,9 @@ export function PasswordInput({
   value: string;
   onChange: (v: string) => void;
   autoComplete: 'current-password' | 'new-password';
-  invalid?: boolean;
-  describedBy?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
+  required?: boolean;
 }) {
   const [shown, setShown] = useState(false);
   return (
@@ -33,6 +38,7 @@ export function PasswordInput({
         autoComplete={autoComplete}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
+        required={required}
         spellCheck={false}
       />
       <button type="button" className="pw-eye" aria-label={`${name} ${shown ? '가리기' : '보이기'}`} aria-pressed={shown} onClick={() => setShown((v) => !v)}>

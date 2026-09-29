@@ -19,6 +19,8 @@ type Props = {
   onSaveBlocked?: (reason: string | null) => void;
   /** 이 편집기의 Yjs 문서 — 만들 때 넘기고 놓을 때 `null`. 저장하고 보기로가 그 스냅숏을 싣는다 (P13 D.7) */
   onDoc?: (doc: Y.Doc | null) => void;
+  /** 쓰는 칸의 이름이 되는 **보이는 라벨**의 id (P17 J.7) — 없으면 이름은 "본문"이다 */
+  labelledBy?: string;
 };
 
 /**
@@ -56,7 +58,7 @@ export function CollabEditor(props: Props) {
   return <LiveEditor key={live.ydoc.guid} {...props} ydoc={live.ydoc} awareness={live.awareness} />;
 }
 
-function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlocked, ydoc, awareness }: Props & { ydoc: Y.Doc; awareness: Awareness }) {
+function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlocked, labelledBy, ydoc, awareness }: Props & { ydoc: Y.Doc; awareness: Awareness }) {
   const [state, setState] = useState<CollabState>('connecting');
   // 알림 받는 함수가 바뀌어도 다시 붙지 않게 참조로 둔다 — 연결 효과의 의존에 넣으면 부모가 다시 그릴 때마다 끊고 붙는다
   const onSaveBlockedRef = useRef(onSaveBlocked);
@@ -99,8 +101,11 @@ function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlock
 
   const editor = useEditor(
     {
-      // 쓰는 칸은 이름이 있는 입력란이다(P17 F-010 4번 — 모양은 styles.css의 .editor, T-077)
-      editorProps: { attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': '본문' } },
+      // 쓰는 칸은 이름이 있는 입력란이다(P17 F-010 4번 — 모양은 styles.css의 .editor, T-077). 화면에 보이는 라벨이 있으면 그것이 이름이다 —
+      // `label htmlFor`는 편집기의 div를 가리킬 수 없다(P17 J.7)
+      editorProps: {
+        attributes: { role: 'textbox', 'aria-multiline': 'true', ...(labelledBy ? { 'aria-labelledby': labelledBy } : { 'aria-label': '본문' }) },
+      },
       extensions: [
         // 보기·편집용과 **같은 목록**에 실행 취소만 끈다 — Yjs가 자기 실행 취소를 들고 있다 (P9 D.7)
         ...editorExtensions({ collab: true }),

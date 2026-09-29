@@ -9,10 +9,15 @@ import {
   type LlmStreamEvent,
 } from '@workfluence/shared';
 import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { writeClipboard } from '../components/clipboard';
-import { askLlm, batchLlmEvents, chatReducer, daysLeft, initialChat, statusLabel, waitLabel } from '../components/llmStream';
+import { useConfirm } from '../components/ConfirmDialog';
+import { CopyIcon } from '../components/icons';
+import { LlmSideNav } from '../components/LlmSideNav';
+import { askLlm, batchLlmEvents, chatReducer, initialChat, statusLabel, waitLabel } from '../components/llmStream';
+import { EmptyState, Field, FormActions, Loading, Notice, Page, PageHeader, StatusBadge } from '../components/ui';
+import { SideSlot } from '../layout/AppLayout';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -48,10 +53,11 @@ function WaitLabel({ since }: { since: number }) {
 }
 
 /**
- * LLM 질문 (P10_설계서_Llm G절, FR-1110~1139).
+ * LLM 질문 (P10_설계서_Llm G절, FR-1110~1139 · P17 설계서 J.6 LLM 문맥).
  *
- * 왼쪽은 내 대화(고정·최근)와 지켜야 할 상한, 오른쪽은 대화와 흘러나오는 답이다. 흐름을 읽고 상태를 바꾸는 규칙은
- * `components/llmStream.ts`에 있고(브라우저 없이 시험한다), 여기는 그리기와 서버 부르기다.
+ * 내 대화(고정·최근)와 지켜야 할 상한은 **왼쪽 칸**에 있다(`LlmSideNav` — 틀의 `SideSlot`에 그린다, J.3.3). 본문은 글 칸 폭(`--w-read`)의
+ * 메시지와 그 아래의 입력 영역이다. 흐름을 읽고 상태를 바꾸는 규칙은 `components/llmStream.ts`에 있고(브라우저 없이 시험한다), 여기는 그리기와
+ * 서버 부르기다.
  *
  * **답을 받는 동안 다른 대화로 옮기지 못한다** — 흘러나오는 답은 시작한 대화의 것이다. 멈추고 옮긴다. 그래도 **페이지를 떠나거나
  * 뒤로 가기·주소로 다른 대화를 열면 받던 답을 멈춘다**(요청을 끊는다 — 서버는 창을 닫은 것처럼 받은 데까지 저장한다, FR-1122).
@@ -61,6 +67,7 @@ export function LlmPage() {
   const { id } = useParams();
   const nav = useNavigate();
   const [list, setList] = useState<LlmConversationList | null>(null);
+  const [listFailed, setListFailed] = useState(false);
   const [providers, setProviders] = useState<LlmProviderView[] | null>(null);
   const [prompts, setPrompts] = useState<LlmPromptView[]>([]);
   const [conversation, setConversation] = useState<LlmConversationView | null>(null);
@@ -70,6 +77,7 @@ export function LlmPage() {
   const [pageError, setPageError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
+  const [confirm, dialog] = useConfirm();
   const running = useRef<RunningAsk | null>(null);
   const busy = chat.phase !== 'idle';
 
@@ -85,8 +93,14 @@ export function LlmPage() {
   const loadList = useCallback(
     () =>
       api<LlmConversationList>('/api/llm/conversations')
-        .then(setList)
-        .catch((e: unknown) => setPageError(errText(e))),
+        .then((l) => {
+          setList(l);
+          setListFailed(false);
+        })
+        .catch((e: unknown) => {
+          setPageError(errText(e));
+          setListFailed(true);
+        }),
     [],
   );
 
@@ -236,8 +250,10 @@ export function LlmPage() {
     }
   };
 
+  // 지운 대화는 되살릴 수 없다(휴지통 밖 — 6절 LLM 대화) — 한 번 더 묻는다(P17 J.5.10). 확정 단추는 줄의 "{제목} 지우기"와 겹치지 않는 낱말이다
   const remove = async (c: LlmConversationSummary) => {
-    if (!window.confirm(`"${c.title}" 대화를 지운다. 되살릴 수 없다.`)) return;
+    const ok = await confirm({ title: '이 대화를 지울까요?', body: `"${c.title}" 대화를 지운다. 되살릴 수 없다.`, confirmLabel: '없앤다' });
+    if (!ok) return;
     setPageError(null);
     try {
       await api(`/api/llm/conversations/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
@@ -257,75 +273,45 @@ export function LlmPage() {
     }
   };
 
-  const items = list?.items ?? [];
-  const pinned = items.filter((i) => i.pinned);
-  const recent = items.filter((i) => !i.pinned);
-  const limits = list?.limits;
-  const pinFull = !!limits && pinned.length >= limits.pinnedMax;
   const provider = providers?.find((p) => p.id === providerId);
-
-  const item = (c: LlmConversationSummary) => (
-    <li key={c.id} className={c.id === conversation?.id ? 'current' : undefined}>
-      {busy ? <span>{c.title}</span> : <Link to={`/llm/${c.id}`}>{c.title}</Link>}
-      <span className="muted small">
-        {' '}
-        {c.pinned ? '고정' : c.expiresAt ? (daysLeft(c.expiresAt) > 0 ? `${daysLeft(c.expiresAt)}일 뒤 지워짐` : '오늘 지워짐') : ''}
-      </span>{' '}
-      <button
-        type="button"
-        className="linklike small"
-        aria-label={`${c.title} ${c.pinned ? '고정 풀기' : '고정'}`}
-        disabled={busy || (!c.pinned && pinFull)}
-        title={!c.pinned && pinFull ? `고정은 ${limits?.pinnedMax}개까지다 — 하나를 풀고 고정한다` : undefined}
-        onClick={() => void togglePin(c)}
-      >
-        {c.pinned ? '풀기' : '고정'}
-      </button>{' '}
-      <button type="button" className="linklike small" aria-label={`${c.title} 지우기`} disabled={busy} onClick={() => void remove(c)}>
-        지우기
-      </button>
-    </li>
-  );
+  const hasMessages = (conversation?.messages.length ?? 0) > 0 || !!chat.live;
 
   return (
-    <main className="shell wide">
-      <p className="muted small">
-        <Link to="/">← 홈</Link> · <Link to="/llm/prompts">내 지시문</Link>
-      </p>
-      <h1>LLM 질문</h1>
-      {pageError && (
-        <p className="badge fail" role="alert">
-          {pageError}
-        </p>
+    <Page width="read">
+      {dialog}
+      <SideSlot>
+        <LlmSideNav
+          list={list}
+          failed={listFailed}
+          here="chat"
+          currentId={conversation?.id}
+          busy={busy}
+          onNew={startNew}
+          onPin={(c) => void togglePin(c)}
+          onRemove={(c) => void remove(c)}
+        />
+      </SideSlot>
+      <PageHeader title="LLM 질문" description="사내 LLM에 묻는다. 지시문은 새 대화를 시작할 때 고르고, 이어 묻는 대화는 시작할 때의 지시문을 쓴다." />
+      {pageError && <Notice kind="error">{pageError}</Notice>}
+      {providers && providers.length === 0 && (
+        <Notice kind="warning" role={null}>
+          등록된 LLM이 없다 — 시스템 관리자에게 등록을 요청한다.
+        </Notice>
       )}
-      {providers && providers.length === 0 && <p className="card">등록된 LLM이 없다 — 시스템 관리자에게 등록을 요청한다.</p>}
 
-      <div className="llm-layout">
-        <aside className="card llm-list" aria-label="대화 목록">
-          <button type="button" onClick={startNew} disabled={busy}>
-            새 대화
-          </button>
-          {limits && (
-            <p className="muted small">
-              고정 {pinned.length}/{limits.pinnedMax} · 보관 {items.length}/{limits.conversationMax} · 고정하지 않은 대화는 마지막 사용 뒤{' '}
-              {limits.retentionDays}일이 지나면 지워진다
-            </p>
-          )}
-          <h2>고정</h2>
-          <ul>{pinned.length ? pinned.map(item) : <li className="muted small">없다</li>}</ul>
-          <h2>최근</h2>
-          <ul>{recent.length ? recent.map(item) : <li className="muted small">없다</li>}</ul>
-        </aside>
-
-        <section className="card llm-chat" aria-label="대화">
-          <h2>{conversation ? conversation.title : '새 대화'}</h2>
-          {conversation && (
+      <section aria-label="대화">
+        {/* 새 대화에는 제목을 두지 않는다 — 왼쪽 칸의 새 대화 단추와 이름이 겹친다(J.8-1) */}
+        {conversation && (
+          <>
+            <h2>{conversation.title}</h2>
             <p className="muted small">
               지시문: {conversation.promptName ?? '(없음)'}
               {conversation.pinned ? ' · 고정' : ''}
             </p>
-          )}
+          </>
+        )}
 
+        {hasMessages ? (
           <ol className="llm-messages" aria-label="메시지">
             {conversation?.messages.map((m) => {
               const label = statusLabel(m.status);
@@ -333,12 +319,17 @@ export function LlmPage() {
                 <li key={m.id} className={`llm-msg llm-${m.role}`}>
                   <p className="muted small">
                     {m.role === 'user' ? '나' : (m.model ?? 'LLM')}
-                    {label && <span className="badge fail"> {label}</span>}
+                    {label && (
+                      <>
+                        {' '}
+                        <StatusBadge kind={m.status === 'failed' ? 'bad' : 'paused'}>{label}</StatusBadge>
+                      </>
+                    )}
                   </p>
                   <div className="llm-text">{m.content}</div>
                   {m.role === 'assistant' && (
-                    <button type="button" className="linklike small" onClick={() => void copyAnswer(m.content)}>
-                      답 복사
+                    <button type="button" className="subtle sm" onClick={() => void copyAnswer(m.content)}>
+                      <CopyIcon /> 답 복사
                     </button>
                   )}
                 </li>
@@ -353,7 +344,12 @@ export function LlmPage() {
                 <li className="llm-msg llm-assistant" aria-live="polite" aria-label="흘러나오는 답">
                   <p className="muted small">
                     {provider?.model ?? 'LLM'}
-                    {busy && ` — ${chat.phase === 'stopping' ? '멈추는 중…' : chat.phase === 'sending' ? '보내는 중…' : '답을 받는 중…'}`}
+                    {busy && (
+                      <>
+                        {' '}
+                        <StatusBadge kind="wait">{chat.phase === 'stopping' ? '멈추는 중…' : chat.phase === 'sending' ? '보내는 중…' : '답을 받는 중…'}</StatusBadge>
+                      </>
+                    )}
                   </p>
                   {/* 멈추는 중이면 보이지 않는다 — 사람이 멈추라고 했는데 "늦어지고 있다"고 말하지 않는다 (P12 코드 리뷰 10) */}
                   {chat.waitingSince !== null && chat.phase !== 'stopping' && <WaitLabel since={chat.waitingSince} />}
@@ -368,78 +364,78 @@ export function LlmPage() {
               </>
             )}
           </ol>
+        ) : !id ? (
+          <EmptyState title="아직 주고받은 말이 없다" description="지시문과 LLM을 고르고 아래 칸에 질문을 쓴다. 답은 흘러나오는 대로 보인다." />
+        ) : (
+          !conversation && !pageError && <Loading />
+        )}
 
-          {/* 중지는 보내기와 **다른 자리의 다른 단추**다 — 보내기를 두 번 누른 둘째 번이 중지에 닿지 않게. 흐름이 열려야(서버가 자리를 잡아야) 누른다 */}
-          {busy && (
-            <p>
-              <button type="button" onClick={stop} disabled={chat.phase !== 'streaming'}>
-                {chat.phase === 'stopping' ? '멈추는 중…' : '중지'}
-              </button>{' '}
-              <span className="muted small">페이지를 떠나도 멈춘다 — 받은 데까지 저장한다</span>
-            </p>
-          )}
+        {/* 알림은 조치한 자리(입력 영역) 바로 위에 둔다 (P17 J.5.7) */}
+        {chat.error && <Notice kind="error">{chat.error}</Notice>}
+        {chat.notice && <Notice kind="info">{chat.notice}</Notice>}
+        {copied && (
+          <p className="muted small" role="status">
+            {copied}
+          </p>
+        )}
 
-          {chat.error && (
-            <p className="badge fail" role="alert">
-              {chat.error}
-            </p>
+        <form className="llm-compose" onSubmit={submit}>
+          {(!conversation || (providers && providers.length > 0)) && (
+            <div className="inline-form">
+              {!conversation && (
+                <Field id="llm-prompt" label="지시문">
+                  <select id="llm-prompt" className="w-m" value={promptId} onChange={(e) => setPromptId(e.target.value)} disabled={busy}>
+                    <option value="">(없음)</option>
+                    {prompts.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {providers && providers.length > 0 && (
+                <Field id="llm-provider" label="LLM">
+                  <select id="llm-provider" className="w-m" value={providerId} onChange={(e) => setProviderId(e.target.value)} disabled={busy}>
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.model}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+            </div>
           )}
-          {chat.notice && (
-            <p className="badge" role="status">
-              {chat.notice}
-            </p>
-          )}
-          {copied && (
-            <p className="muted small" role="status">
-              {copied}
-            </p>
-          )}
-
-          <form onSubmit={submit}>
-            {!conversation && (
-              <p>
-                <label htmlFor="llm-prompt">지시문</label>{' '}
-                <select id="llm-prompt" value={promptId} onChange={(e) => setPromptId(e.target.value)} disabled={busy}>
-                  <option value="">(없음)</option>
-                  {prompts.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>{' '}
-                <span className="muted small">새 대화를 시작할 때 고른다</span>
-              </p>
-            )}
-            {providers && providers.length > 0 && (
-              <p>
-                <label htmlFor="llm-provider">LLM</label>{' '}
-                <select id="llm-provider" value={providerId} onChange={(e) => setProviderId(e.target.value)} disabled={busy}>
-                  {providers.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · {p.model}
-                    </option>
-                  ))}
-                </select>
-              </p>
-            )}
-            <label htmlFor="llm-question">질문</label>
+          {/* 안내는 칸 아래 도움말이다 — 자리표시(placeholder)는 쓰기 시작하면 사라진다 (P17 J.5.3) */}
+          <Field id="llm-question" label="질문" help="Ctrl+Enter로 보낸다(Enter는 줄 바꿈). 위키 페이지의 '텍스트 복사'·'마크다운 복사'로 가져온 내용을 붙여 넣어도 된다.">
             <textarea
               id="llm-question"
+              className="w-full"
               rows={5}
               value={question}
               maxLength={LLM_LIMITS.questionMaxChars}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={onKey}
-              placeholder="위키 페이지의 '텍스트 복사'·'마크다운 복사'로 가져온 내용을 붙여 넣어도 된다. Ctrl+Enter로 보낸다"
             />
-            <p>
-              <button type="submit" disabled={busy || !providerId || !question.trim()}>
-                보내기
-              </button>
-            </p>
-          </form>
-        </section>
-      </div>
-    </main>
+          </Field>
+          {/* 중지는 보내기와 **다른 자리의 다른 단추**다 — 보내기를 두 번 누른 둘째 번이 중지에 닿지 않게(보내기는 제자리에서 막히고 중지는 그 옆에 생긴다).
+              흐름이 열려야(서버가 자리를 잡아야) 누른다 */}
+          <FormActions>
+            <button type="submit" className="primary" disabled={busy || !providerId || !question.trim()}>
+              보내기
+            </button>
+            {busy && (
+              <>
+                <button type="button" className="danger" onClick={stop} disabled={chat.phase !== 'streaming'}>
+                  {chat.phase === 'stopping' ? '멈추는 중…' : '중지'}
+                </button>
+                <span className="muted small">페이지를 떠나도 멈춘다 — 받은 데까지 저장한다</span>
+              </>
+            )}
+          </FormActions>
+        </form>
+      </section>
+    </Page>
   );
 }

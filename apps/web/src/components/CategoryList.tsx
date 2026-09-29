@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CATEGORY_NAME_MAX, type CategoryView } from '@workfluence/shared';
 import { api } from '../api';
+import { useConfirm } from './ConfirmDialog';
 
 /** 지우기를 묻는 말 — 쓰던 공간(휴지통 포함)이 몇 개 "분류 없음"이 되는지 말한다 (P15 FR-1624) */
 export function confirmDeleteCategoryText(c: CategoryView): string {
@@ -16,7 +17,10 @@ export function confirmDeleteCategoryText(c: CategoryView): string {
  * `title`로 보인다(`meId`가 있으면 만든 사람인지 가려 말한다). `editableOnly`면 할 수 있는 줄만 보인다(공간의 관리 칸 — 남의 분류를 늘어놓지 않는다).
  *
  * 바꾸거나 지운 뒤 `onChanged`를 부른다 — 부르는 쪽이 분류와 스페이스를 다시 읽는다(지운 분류를 쓰던 공간은 분류 없음이 된다). 알림과 거절의 까닭은
- * 부르는 쪽의 알림 칸에 싣는다(`onNotice`·`onError`) — 칸이 둘이면 어느 것이 방금의 결과인지 헷갈린다
+ * 부르는 쪽의 알림 칸에 싣는다(`onNotice`·`onError`) — 칸이 둘이면 어느 것이 방금의 결과인지 헷갈린다.
+ *
+ * **표 모양의 줄 목록이다**(P17 J.5.5 `.row-list`) — 한 줄에 이름 칸 · 쓰임 · 조치(오른쪽). `ul`/`li`로 둔다 — 두 화면의 시험이 "분류 목록" 목록과
+ * 그 줄(`li`)로 찾는다. 지우기는 되살릴 수 없어 확인 대화로 묻는다(J.5.10) — 대화는 이 부품이 그린다
  */
 export function CategoryList({
   categories,
@@ -36,6 +40,7 @@ export function CategoryList({
   meId?: string;
 }) {
   const [renaming, setRenaming] = useState<Record<string, string>>({});
+  const [confirm, dialog] = useConfirm();
   const shown = editableOnly ? categories.filter((c) => c.access.canRename || c.access.canDelete) : categories;
 
   // 할 수 없는 까닭 — 만든 사람이면 남의 공간이 써서, 아니면 만든 사람이 아니어서다(서버의 거절과 같은 말)
@@ -71,53 +76,61 @@ export function CategoryList({
     );
   };
 
-  const remove = (c: CategoryView) => {
-    if (!window.confirm(confirmDeleteCategoryText(c))) return;
-    void act(
+  const remove = async (c: CategoryView) => {
+    // 확정 단추는 부른 단추(지우기)의 이름을 품지 않는다 — 시험과 사람이 둘을 헷갈리지 않게 (J.5.10)
+    if (!(await confirm({ title: '분류를 지울까요?', body: confirmDeleteCategoryText(c), confirmLabel: '지운다' }))) return;
+    await act(
       () => api(`/api/categories/${c.id}`, { method: 'DELETE' }),
       (c.usage?.spaces ?? 0) > 0 ? `분류 "${c.name}"을(를) 지웠다 — 쓰던 공간 ${c.usage?.spaces}개는 분류 없음이 됐다.` : `분류 "${c.name}"을(를) 지웠다.`,
     );
   };
 
   return (
-    <div>
+    <>
       {shown.length === 0 ? (
         <p className="muted small">{emptyText}</p>
       ) : (
-        <ul aria-label="분류 목록">
+        <ul className="row-list" aria-label="분류 목록">
           {shown.map((c) => {
             const value = renaming[c.id] ?? c.name;
             return (
               <li key={c.id}>
                 <input
                   aria-label={`분류 ${c.name} 이름`}
+                  className="w-m"
                   value={value}
                   maxLength={CATEGORY_NAME_MAX}
                   disabled={!c.access.canRename}
                   onChange={(e) => setRenaming((r) => ({ ...r, [c.id]: e.target.value }))}
-                />{' '}
-                <button
-                  type="button"
-                  onClick={() => rename(c)}
-                  disabled={!c.access.canRename || value.trim() === c.name}
-                  title={c.access.canRename ? undefined : why(c)}
-                >
-                  이름 바꾸기
-                </button>{' '}
-                <button type="button" onClick={() => remove(c)} disabled={!c.access.canDelete} title={c.access.canDelete ? undefined : why(c)}>
-                  지우기
-                </button>{' '}
-                {/* 쓰임은 바꿀 수 있는 사람과 만든 사람에게만 온다 (P15 병합 전 검토) */}
-                {c.usage && (
-                  <span className="muted small">
-                    공간 {c.usage.spaces}개{c.usage.otherSpaces > 0 ? ` (만든 사람의 것이 아닌 공간 ${c.usage.otherSpaces}개)` : ''}
-                  </span>
-                )}
+                />
+                {/* 쓰임은 바꿀 수 있는 사람과 만든 사람에게만 온다 (P15 병합 전 검토). 없어도 자리는 둔다 — 조치가 오른쪽 끝에 붙는다 */}
+                <span className="grow muted small">
+                  {c.usage && (
+                    <>
+                      공간 {c.usage.spaces}개{c.usage.otherSpaces > 0 ? ` (만든 사람의 것이 아닌 공간 ${c.usage.otherSpaces}개)` : ''}
+                    </>
+                  )}
+                </span>
+                <span className="actions">
+                  <button
+                    type="button"
+                    className="sm"
+                    onClick={() => rename(c)}
+                    disabled={!c.access.canRename || value.trim() === c.name}
+                    title={c.access.canRename ? undefined : why(c)}
+                  >
+                    이름 바꾸기
+                  </button>
+                  <button type="button" className="danger sm" onClick={() => void remove(c)} disabled={!c.access.canDelete} title={c.access.canDelete ? undefined : why(c)}>
+                    지우기
+                  </button>
+                </span>
               </li>
             );
           })}
         </ul>
       )}
-    </div>
+      {dialog}
+    </>
   );
 }

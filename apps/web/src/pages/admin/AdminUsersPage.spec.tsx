@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { MeView, UserView } from '@workfluence/shared';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../auth';
@@ -15,6 +15,7 @@ type Call = { method: string; url: string; body: unknown };
 let calls: Call[] = [];
 let me: MeView;
 let rows: UserView[];
+let listStatus = 200;
 
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
@@ -34,6 +35,7 @@ const user = (over: Partial<UserView>): UserView => ({
 
 beforeEach(() => {
   calls = [];
+  listStatus = 200;
   me = { id: 'r1', username: 'root', displayName: '시스템 관리자', role: 'root', mustChangePassword: false, grants: [], hasPassword: true };
   rows = [user({ id: 'a1', username: 'boss', role: 'admin' }), user({ id: 'm1', username: 'alice' })];
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
@@ -43,6 +45,7 @@ beforeEach(() => {
     calls.push({ method, url, body });
     if (url === '/api/auth/me') return Promise.resolve(json(200, me));
     if (method === 'GET' && url.startsWith('/api/users?')) {
+      if (listStatus !== 200) return Promise.resolve(json(listStatus, { message: '권한이 없다: user.manage' }));
       const p = new URL(url, 'http://t').searchParams;
       const q = (p.get('q') ?? '').toLowerCase();
       const status = p.get('status');
@@ -56,6 +59,7 @@ beforeEach(() => {
       rows = rows.map((r) => (r.id === id ? { ...r, status: verb === 'suspend' ? 'suspended' : 'active' } : r));
       return Promise.resolve(json(200, rows.find((r) => r.id === id)));
     }
+    if (method === 'POST' && /^\/api\/users\/[^/]+\/reset-password$/.test(url)) return Promise.resolve(json(200, { temporaryPassword: 'Tmp-합성-0001' }));
     if (method === 'PUT' && /^\/api\/users\/[^/]+\/grants$/.test(url)) {
       const id = url.split('/')[3];
       rows = rows.map((r) => (r.id === id ? { ...r, grants: (body as { grants: UserView['grants'] }).grants } : r));
@@ -77,6 +81,17 @@ const renderPage = () =>
       </AuthProvider>
     </MemoryRouter>,
   );
+
+/** 그 줄의 단추 — 글자로 정확히 찾는다(정지와 정지 해제가 한 화면에 있다) */
+const rowButton = (username: string, text: string) =>
+  Array.from(screen.getAllByText(username).find((el) => el.tagName === 'TD')!.closest('tr')!.querySelectorAll('button')).find((b) => b.textContent === text);
+
+/** 확인 대화에 답한다 (P17 J.5.10) — 브라우저 확인 창 대신 화면의 대화다 */
+const reply = async (label: '멈춘다' | '그만두기') => {
+  const dialog = await screen.findByRole('dialog', { name: '이 사용자를 정지할까요?' });
+  fireEvent.click(within(dialog).getByRole('button', { name: label }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+};
 
 describe('AdminUsersPage — 위임', () => {
   it('**root는 관리자에게 LLM 연결 관리를 주고 거둔다** — 목록 전체를 보내고 다시 읽는다', async () => {
@@ -196,6 +211,9 @@ describe('AdminUsersPage — 위임', () => {
     expect(ends.map((b) => b.disabled)).toEqual([true, false, false]);
     expect(resets[0].title).toMatch(/권한이 없다/);
     expect((screen.getByRole('combobox', { name: 'peer 역할' }) as HTMLSelectElement).disabled).toBe(false);
+    // 까닭은 그 줄에 글로도 보인다 (J.5.2)
+    expect(screen.getByText('boss').closest('tr')!.textContent).toContain('이 사용자를 관리할 권한이 없다');
+    expect(screen.getByText('peer').closest('tr')!.textContent).not.toContain('관리할 권한이 없다');
   });
 });
 
@@ -260,7 +278,6 @@ describe('AdminUsersPage — 찾기·거르기·더 보기 (P13 C.6, FR-1450~145
   });
 
   it('**조치 뒤에는 보던 만큼 다시 읽는다** — 처음 100명으로 돌아가 뒤쪽에서 정지한 사람이 화면에서 사라지지 않게 (병합 전 코드 리뷰 10)', async () => {
-    window.confirm = vi.fn(() => true);
     rows = many(150);
     renderPage();
     await screen.findByText('user000');
@@ -269,46 +286,72 @@ describe('AdminUsersPage — 찾기·거르기·더 보기 (P13 C.6, FR-1450~145
     const stop = Array.from(screen.getByText('user120').closest('tr')!.querySelectorAll('button')).find((b) => b.textContent === '정지')!;
     await waitFor(() => expect(stop.disabled).toBe(false));
     fireEvent.click(stop);
+    await reply('멈춘다');
     await waitFor(() => expect(Array.from(screen.getByText('user120').closest('tr')!.querySelectorAll('button')).some((b) => b.textContent === '정지 해제')).toBe(true));
     const lastList = calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/users?')).at(-1)!;
     expect(new URL(lastList.url, 'http://t').searchParams.get('limit')).toBe('150');
     expect(screen.getByText('전체 150명 · 150명 보는 중')).toBeTruthy();
   });
 
-  it('상태는 한국어로 보인다', async () => {
-    rows = [user({ id: 'p1', username: 'wait', status: 'pending' }), user({ id: 's1', username: 'gone', status: 'suspended' })];
+  it('상태는 한국어로 보인다 — 배지의 뜻 색은 승인 대기 ○ · 활성 ✓ · 잠김·정지 ⊘ (J.5.8)', async () => {
+    rows = [
+      user({ id: 'p1', username: 'wait', status: 'pending' }),
+      user({ id: 's1', username: 'gone', status: 'suspended' }),
+      user({ id: 'a2', username: 'fine' }),
+      user({ id: 'l1', username: 'shut', status: 'locked' }),
+    ];
     renderPage();
     await screen.findByText('wait');
-    const badges = Array.from(document.querySelectorAll('td .badge')).map((b) => b.textContent);
-    expect(badges).toEqual(['승인 대기', '정지']);
+    const badges = Array.from(document.querySelectorAll('td .badge')).map((b) => [b.textContent, b.className]);
+    expect(badges).toEqual([
+      ['승인 대기', 'badge wait'],
+      ['정지', 'badge fail'],
+      ['활성', 'badge ok'],
+      ['잠김', 'badge fail'],
+    ]);
+  });
+
+  it('**찾는 사람이 없으면 표 안에 한 줄로 말한다** — 건수는 거르기 줄 오른쪽 끝에', async () => {
+    rows = many(2);
+    renderPage();
+    await screen.findByText('user000');
+    fireEvent.change(screen.getByRole('searchbox', { name: '찾기' }), { target: { value: 'nobody' } });
+    await screen.findByText('찾는 조건에 맞는 사람이 없다.');
+    expect(screen.getByText('전체 0명 · 0명 보는 중').closest('form')!.getAttribute('role')).toBe('search');
   });
 });
 
 describe('AdminUsersPage — 정지 (P13 C.5, FR-1441)', () => {
-  it('**묻고 정지한다** — 그 행은 정지 해제로 바뀐다', async () => {
-    // happy-dom에는 `confirm`이 없다 — 브라우저처럼 둔다
-    const confirm = vi.fn(() => true);
-    window.confirm = confirm;
+  it('**묻고 정지한다** — 확인 대화가 누구를 멈추는지와 끊기는 것을 말하고, 그 행은 정지 해제로 바뀐다 (J.5.10)', async () => {
     renderPage();
     await screen.findByText('alice');
-    const row = screen.getByText('alice').closest('tr')!;
-    const stop = Array.from(row.querySelectorAll('button')).find((b) => b.textContent === '정지')!;
+    const stop = rowButton('alice', '정지')!;
+    // 정지는 위험 단추다 (J.5.2)
+    expect(stop.className).toBe('danger sm');
     await waitFor(() => expect(stop.disabled).toBe(false));
     fireEvent.click(stop);
-    expect(confirm).toHaveBeenCalledTimes(1);
+    const dialog = await screen.findByRole('dialog', { name: '이 사용자를 정지할까요?' });
+    expect(dialog.textContent).toContain('x(alice)님을 정지한다. 세션과 편집 연결이 그 자리에서 끊긴다.');
+    // 잘못 누른 Enter가 정지가 되지 않게 — 처음 초점은 그만두기, 확정은 위험 단추이고 줄의 "정지"를 품지 않는다
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '그만두기' }));
+    expect(within(dialog).getByRole('button', { name: '멈춘다' }).className).toBe('danger solid');
+    expect(within(dialog).queryByRole('button', { name: /정지/ })).toBeNull();
+    expect(calls.some((c) => c.url.endsWith('/suspend'))).toBe(false);
+    await reply('멈춘다');
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/users/m1/suspend')).toBe(true));
-    await waitFor(() => expect(Array.from(screen.getByText('alice').closest('tr')!.querySelectorAll('button')).some((b) => b.textContent === '정지 해제')).toBe(true));
+    await waitFor(() => expect(rowButton('alice', '정지 해제')).toBeTruthy());
+    expect(screen.getByRole('status').textContent).toBe('x님을 정지했다.');
   });
 
-  it('묻는 말에 아니오면 보내지 않는다', async () => {
-    window.confirm = vi.fn(() => false);
+  it('묻는 말에 그만두면 보내지 않는다', async () => {
     renderPage();
     await screen.findByText('alice');
-    const row = screen.getByText('alice').closest('tr')!;
-    const stop = Array.from(row.querySelectorAll('button')).find((b) => b.textContent === '정지')!;
+    const stop = rowButton('alice', '정지')!;
     await waitFor(() => expect(stop.disabled).toBe(false));
     fireEvent.click(stop);
+    await reply('그만두기');
     expect(calls.some((c) => c.url.endsWith('/suspend'))).toBe(false);
+    expect(rowButton('alice', '정지')).toBeTruthy();
   });
 
   it('**자기 자신은 정지하지 못한다** — 그 행의 정지는 눌리지 않는다', async () => {
@@ -316,8 +359,50 @@ describe('AdminUsersPage — 정지 (P13 C.5, FR-1441)', () => {
     renderPage();
     await screen.findByText('alice');
     await waitFor(() => expect(calls.some((c) => c.url === '/api/auth/me')).toBe(true));
-    const mine = Array.from(screen.getAllByText('root').find((el) => el.tagName === 'TD')!.closest('tr')!.querySelectorAll('button')).find((b) => b.textContent === '정지')!;
+    const mine = rowButton('root', '정지')!;
     await waitFor(() => expect(mine.title).toMatch(/자기 자신/));
     expect(mine.disabled).toBe(true);
+    // 누를 수 없는 까닭은 글로도 보인다 (J.5.2) — 그 줄에만
+    expect(screen.getAllByText('root').find((el) => el.tagName === 'TD')!.closest('tr')!.textContent).toContain('자기 자신은 정지할 수 없다');
+    expect(screen.getByText('alice').closest('tr')!.textContent).not.toContain('자기 자신은 정지할 수 없다');
+  });
+});
+
+describe('AdminUsersPage — 화면 체계 (P17 J.6 관리 다섯)', () => {
+  it('**역할 고르기의 글은 "한글 (코드)"이고 값은 코드 그대로다** (J.9-9)', async () => {
+    renderPage();
+    const role = (await screen.findByRole('combobox', { name: 'alice 역할' })) as HTMLSelectElement;
+    expect([...role.options].map((o) => [o.value, o.textContent])).toEqual([
+      ['root', '시스템 관리자 (root)'],
+      ['admin', '관리자 (admin)'],
+      ['member', '일반 사용자 (member)'],
+    ]);
+    expect(role.value).toBe('member');
+  });
+
+  it('**임시 비밀번호는 한 번 보이고 닫으면 사라진다** — 초기화는 위험 단추다', async () => {
+    renderPage();
+    await screen.findByText('alice');
+    const reset = rowButton('alice', '비밀번호 초기화')!;
+    expect(reset.className).toBe('danger sm');
+    await waitFor(() => expect(reset.disabled).toBe(false));
+    fireEvent.click(reset);
+    const note = (await screen.findByText('임시 비밀번호')).closest('.notice')!;
+    expect(note.getAttribute('role')).toBe('note');
+    expect(note.textContent).toContain('alice');
+    expect(note.querySelector('pre code')!.textContent).toBe('Tmp-합성-0001');
+    expect(within(note as HTMLElement).getByText('이 값은 다시 볼 수 없다. 지금 전달한다.')).toBeTruthy();
+    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: '닫기' }));
+    expect(screen.queryByText('임시 비밀번호')).toBeNull();
+  });
+
+  it('**권한이 없으면 같은 틀에 알림띠만** — 거르기 줄과 표를 그리지 않는다', async () => {
+    listStatus = 403;
+    renderPage();
+    expect((await screen.findByRole('alert')).textContent).toContain('권한이 없다');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('사용자 관리');
+    expect(screen.queryByRole('search')).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByText('불러오는 중…')).toBeNull();
   });
 });

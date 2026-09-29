@@ -12,25 +12,37 @@ import { editorExtensions } from './extensions';
  *
  * 쓰는 칸은 **입력란으로 보이고 이름이 있다**(P17 F-010 4·5번) — `role="textbox"`와 `ariaLabel`, 모양은 `styles.css`의 `.editor`. 처음 판은 모양이
  * 없어 빈 칸이 한 줄 높이의 보이지 않는 띠였다 — 댓글을 쓸 수 없었다(T-077)
+ *
+ * 화면에 **보이는 라벨**이 있으면 `labelledBy`로 그 요소를 가리킨다(P17 J.7) — `label htmlFor`는 입력 요소만 가리킬 수 있어 편집기의 `div`를
+ * 가리키면 이름이 붙지 않았다(편집 화면의 "본문"). 둘 다 주면 `labelledBy`가 이긴다 — 보이는 글과 읽히는 이름이 어긋나지 않게
  */
 /** 쓰는 칸이면 이름이 있는 여러 줄 입력란 — 읽기만 하는 본문에는 붙이지 않는다 */
-const textboxAttributes = (editable: boolean, ariaLabel?: string): Record<string, string> =>
-  editable ? { role: 'textbox', 'aria-multiline': 'true', ...(ariaLabel ? { 'aria-label': ariaLabel } : {}) } : {};
+const textboxAttributes = (editable: boolean, ariaLabel?: string, labelledBy?: string): Record<string, string> =>
+  editable
+    ? {
+        role: 'textbox',
+        'aria-multiline': 'true',
+        ...(labelledBy ? { 'aria-labelledby': labelledBy } : ariaLabel ? { 'aria-label': ariaLabel } : {}),
+      }
+    : {};
 
 export function Editor({
   value,
   onChange,
   editable = true,
   ariaLabel,
+  labelledBy,
 }: {
   value: DocNode;
   onChange?: (doc: DocNode) => void;
   editable?: boolean;
   /** 쓰는 칸의 이름 — "댓글 쓰기" */
   ariaLabel?: string;
+  /** 쓰는 칸의 이름이 되는 **보이는 라벨**의 id — 편집 화면의 "본문" */
+  labelledBy?: string;
 }) {
   const editor = useEditor({
-    editorProps: { attributes: textboxAttributes(editable, ariaLabel) },
+    editorProps: { attributes: textboxAttributes(editable, ariaLabel, labelledBy) },
     // 실시간 편집기와 **같은 목록**이다 — 서버 허용 목록과의 대조는 `extensions.spec.ts` (P9 D.7)
     extensions: editorExtensions(),
     content: value,
@@ -46,8 +58,8 @@ export function Editor({
   // 편집 가능 여부와 이름이 바뀌면 따라간다 — 댓글 칸은 **답하기**를 누르면 "답 쓰기"가 된다
   useEffect(() => {
     editor?.setEditable(editable);
-    editor?.setOptions({ editorProps: { attributes: textboxAttributes(editable, ariaLabel) } });
-  }, [editor, editable, ariaLabel]);
+    editor?.setOptions({ editorProps: { attributes: textboxAttributes(editable, ariaLabel, labelledBy) } });
+  }, [editor, editable, ariaLabel, labelledBy]);
 
   return <EditorContent className={editable ? 'editor' : 'editor readonly'} editor={editor} />;
 }

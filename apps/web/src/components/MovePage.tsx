@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { PAGE_TREE_MAX_DEPTH, type PageSummary } from '@workfluence/shared';
 import { api } from '../api';
 import { childrenOf, flattenTree, indentedTitle, subtreeIds } from './pageTree';
+import { FormActions, FormRow, FormRows, FormSection, Loading, Notice } from './ui';
 
 /**
  * 옮기기 칸 (P14_설계서_Spaces D.2, FR-1501·1502·1504). 새 부모(맨 위, 또는 같은 스페이스의 다른 페이지)와 자리(맨 앞, 또는 어느 페이지 다음)를
  * 고른다. **자리는 형제 가운데 몇 번째**(0부터)로 보낸다 — 서버가 새 자리 값을 정한다(P14 D.1).
  *
- * 자기와 그 아래는 목록에서 뺀다 — 편의다. 판정은 서버가 한다(`checkMove` — 깊이 10을 넘는 자리 등). 거절되면 서버의 까닭을 그대로 보인다(FR-1504)
+ * 자기와 그 아래는 목록에서 뺀다 — 편의다. 판정은 서버가 한다(`checkMove` — 깊이 10을 넘는 자리 등). 거절되면 서버의 까닭을 그대로 보인다(FR-1504).
+ *
+ * 모양은 구획 폼이다(P17 설계서 J.5.4) — 페이지 보기의 머리 줄 아래에 펼친다. 구역 이름 "페이지 옮기기"는 제목(h2)이 붙인다 — 시험이 그 이름으로 찾는다
  */
 export function MovePage({ page, onMoved, onCancel }: { page: PageSummary; onMoved: () => void; onCancel: () => void }) {
   const [tree, setTree] = useState<PageSummary[] | null>(null);
@@ -53,47 +56,52 @@ export function MovePage({ page, onMoved, onCancel }: { page: PageSummary; onMov
   };
 
   return (
-    <section className="card" aria-label="페이지 옮기기">
-      <h2>옮기기</h2>
-      {error && <p className="badge fail" role="alert">{error}</p>}
+    <FormSection title="페이지 옮기기" titleId="mv-title">
+      {error && <Notice kind="error">{error}</Notice>}
       {!tree ? (
-        !error && <p className="muted">불러오는 중…</p>
+        !error && <Loading />
       ) : (
         <form onSubmit={(e) => void submit(e)}>
-          <label htmlFor="mv-parent">어디 아래로</label>
-          <select
-            id="mv-parent"
-            value={parentValue}
-            onChange={(e) => {
-              setParentId(e.target.value);
-              setIndex(null);
-            }}
-          >
-            <option value="">맨 위</option>
-            {parents.map((r) => (
-              <option key={r.id} value={r.id}>
-                {indentedTitle(r)}
-              </option>
-            ))}
-          </select>
-          <label htmlFor="mv-at">자리</label>
-          <select id="mv-at" value={chosen} onChange={(e) => setIndex(Number(e.target.value))}>
-            <option value={0}>맨 앞</option>
-            {siblings.map((s, i) => (
-              <option key={s.id} value={i + 1}>
-                {s.title} 다음
-              </option>
-            ))}
-          </select>
-          <p className="muted small">자기 자신과 그 아래로는 옮길 수 없다. 페이지는 {PAGE_TREE_MAX_DEPTH}단계까지 들어간다.</p>
-          <button type="submit" disabled={busy}>
-            옮기기
-          </button>{' '}
-          <button type="button" onClick={onCancel}>
-            닫기
-          </button>
+          <FormRows>
+            <FormRow id="mv-parent" label="어디 아래로" help={`자기 자신과 그 아래로는 옮길 수 없다. 페이지는 ${PAGE_TREE_MAX_DEPTH}단계까지 들어간다.`}>
+              <select
+                id="mv-parent"
+                className="w-l"
+                value={parentValue}
+                onChange={(e) => {
+                  setParentId(e.target.value);
+                  setIndex(null);
+                }}
+              >
+                <option value="">맨 위</option>
+                {parents.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {indentedTitle(r)}
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+            <FormRow id="mv-at" label="자리">
+              <select id="mv-at" className="w-l" value={chosen} onChange={(e) => setIndex(Number(e.target.value))}>
+                <option value={0}>맨 앞</option>
+                {siblings.map((s, i) => (
+                  <option key={s.id} value={i + 1}>
+                    {s.title} 다음
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+          </FormRows>
+          <FormActions>
+            <button type="submit" className="primary" disabled={busy}>
+              옮기기
+            </button>
+            <button type="button" onClick={onCancel}>
+              닫기
+            </button>
+          </FormActions>
         </form>
       )}
-    </section>
+    </FormSection>
   );
 }

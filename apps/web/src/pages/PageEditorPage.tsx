@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import * as Y from 'yjs';
-import { COLLAB_LIMITS, type DocNode, type PageView } from '@workfluence/shared';
+import { COLLAB_LIMITS, type DocNode, type PageView, type SpaceView } from '@workfluence/shared';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { CollabEditor, type CollabState } from '../components/CollabEditor';
 import { Editor } from '../components/Editor';
+import { Breadcrumbs, Field, Loading, Notice, Page, PageHeader, StatusBadge, useDocumentTitle, useReadWide } from '../components/ui';
+import { SideSlot } from '../layout/AppLayout';
+import { SpaceSideNav } from '../layout/SpaceSideNav';
 
 type Conflict = { currentVersionNo: number; baseVersionNo: number; message: string };
 
-/**
- * 편집 (FR-342, FR-343).
- *
- * **충돌하면 안내만 하고 덮어쓰기 버튼을 주지 않는다.** 한 번 허용하면 남의 저장을 지우는
- * 것이 정상 동작이 된다. 최신을 불러와 다시 편집하게 한다.
- */
+const HEADING = '페이지 편집';
+const LOAD_FAILED_TITLE = '페이지를 열 수 없다';
+/** 본문 칸의 보이는 라벨 — 편집기가 이 id로 이름을 받는다(`label htmlFor`는 편집기의 div를 가리킬 수 없다 — P17 J.7) */
+const BODY_LABEL_ID = 'ed-body-label';
+
 /** 실시간 편집에서 제목 입력을 멈추고 이만큼 뒤에 방에 알린다 (P13 FR-1460) */
 const TITLE_SEND_DELAY_MS = 1000;
 
@@ -35,6 +37,17 @@ const snapshotOf = (doc: Y.Doc | null): string | undefined => {
   return b64.length <= COLLAB_LIMITS.maxFlushSnapshotChars ? b64 : undefined;
 };
 
+/**
+ * 편집 (FR-342, FR-343).
+ *
+ * **충돌하면 안내만 하고 덮어쓰기 버튼을 주지 않는다.** 한 번 허용하면 남의 저장을 지우는
+ * 것이 정상 동작이 된다. 최신을 불러와 다시 편집하게 한다.
+ *
+ * 모양은 P17 설계서 J.3.1·J.6(FR-1860)이다 — 한 틀 안에 회색 바탕(`.edit-canvas`)과 위 막대 아래에 붙는 **편집 줄**(← 보기로 · 연결 상태 · 저장
+ * 방식), 그 아래 연결 끊김·거절·자동 저장 멈춤·충돌·저장 실패의 알림띠, 흰 종이(`.paper` — 넓게 보기면 `.paper.wide`, 보기 화면과 같은 값) 안에
+ * 빵부스러기(스페이스 / 페이지) · h1 · 제목 칸 · 본문 칸. 편집 줄은 스크롤해도 붙어 있어 저장 단추와 연결 상태가 늘 보인다. 왼쪽 칸은 스페이스 문맥
+ * (페이지 트리)이다
+ */
 export function PageEditorPage() {
   const { id = '' } = useParams();
   const nav = useNavigate();
@@ -55,6 +68,12 @@ export function PageEditorPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [busy, setBusy] = useState(false);
+  // 빵부스러기의 스페이스 이름 — 읽지 못해도 편집은 된다(빵부스러기만 빠진다)
+  const [space, setSpace] = useState<SpaceView | null>(null);
+  const [wide, toggleWide] = useReadWide();
+  useDocumentTitle(error ? LOAD_FAILED_TITLE : HEADING);
+  // 본문 칸의 라벨을 누르면 편집기로 간다 — 입력 요소의 라벨이 하는 일을 대신한다
+  const bodyRef = useRef<HTMLDivElement | null>(null);
 
   const load = () => {
     setConflict(null);
@@ -69,6 +88,19 @@ export function PageEditorPage() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   };
   useEffect(load, [id]);
+  const spaceId = page?.spaceId;
+  useEffect(() => {
+    if (!spaceId) return;
+    let alive = true;
+    api<SpaceView>(`/api/spaces/${spaceId}`)
+      .then((s) => {
+        if (alive) setSpace(s);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [spaceId]);
   useEffect(() => {
     api<{ collabEnabled: boolean }>('/api/auth/config')
       .then((c) => setCollab(c.collabEnabled))
@@ -196,83 +228,136 @@ export function PageEditorPage() {
     }
   };
 
-  if (error) return <main className="shell"><p className="badge fail" role="alert">{error}</p><Link to="/">← 목록</Link></main>;
-  if (!page || !doc || collab === null) return <main className="shell"><p className="muted">불러오는 중…</p></main>;
+  if (error) {
+    return (
+      <Page width="read">
+        <PageHeader title={LOAD_FAILED_TITLE} />
+        <Notice kind="error">{error}</Notice>
+      </Page>
+    );
+  }
+  if (!page || !doc || collab === null) {
+    return (
+      <>
+        <SideSlot>{page ? <SpaceSideNav spaceId={page.spaceId} currentPageId={id} /> : <Loading />}</SideSlot>
+        <Loading />
+      </>
+    );
+  }
+
+  // 앞 페이지의 스페이스가 남아 있으면 쓰지 않는다 — 다른 스페이스의 페이지로 옮긴 사이 이름이 섞이지 않게
+  const here = space && space.id === page.spaceId ? space : null;
+  const offline = collab && (link === 'offline' || link === 'refused');
+  const blocked = collab && saveBlocked !== null && link !== 'refused';
 
   return (
-    <main className="shell">
-      <p className="muted small"><Link to={`/pages/${id}`}>← 보기로</Link></p>
-      <h1>페이지 편집</h1>
-
-      {conflict && (
-        <section className="card" role="alert">
-          <h2 className="badge fail">다른 사람이 먼저 저장했다</h2>
-          <p>{conflict.message}</p>
-          <p className="muted small">
-            내가 편집을 시작한 버전 v{conflict.baseVersionNo} · 현재 서버 버전 v{conflict.currentVersionNo}
-          </p>
-          {/* 덮어쓰기 버튼을 두지 않는다 (FR-343) */}
-          <button type="button" onClick={load}>최신 내용 불러오기</button>
-          <p className="muted small">지금 쓴 내용은 사라진다. 필요하면 다른 곳에 복사해 둔 뒤 눌러야 한다.</p>
-        </section>
-      )}
-
-      <section className="card">
-        <label htmlFor="ed-title">제목</label>
-        <input id="ed-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
-        <label htmlFor="ed-body">본문</label>
-        <div id="ed-body">
-          {collab && me ? (
-            <CollabEditor pageId={id} me={{ id: me.id, displayName: me.displayName }} onPeers={onPeers} onState={onState} onSaveBlocked={onSaveBlocked} onDoc={onDoc} />
+    <>
+      <SideSlot>
+        <SpaceSideNav spaceId={page.spaceId} currentPageId={id} />
+      </SideSlot>
+      <div className="edit-canvas">
+        <div className="edit-bar">
+          <Link to={`/pages/${id}`}>← 보기로</Link>
+          {collab ? (
+            <>
+              <span className="muted" role="status">
+                {link === 'live' && (peers.length ? `같이 보는 사람: ${peers.join(', ')}` : '같이 보는 사람 없음')}
+                {link === 'connecting' && '연결 중…'}
+              </span>
+              {/* 끊긴 것은 붙어 있는 이 줄에도 보인다 — 긴 문서를 내려가며 쓰면 아래의 알림띠가 화면 밖에 있다. 까닭의 문장은 알림띠가 말한다 */}
+              {offline && <StatusBadge kind="bad">연결 끊김</StatusBadge>}
+              {blocked && <StatusBadge kind="paused">자동 저장 멈춤</StatusBadge>}
+            </>
           ) : (
-            <Editor value={page.content} onChange={setDoc} />
+            <span className="muted">편집을 시작한 버전: v{page.currentVersionNo}</span>
           )}
+          <span className="grow" />
+          <button type="button" className="subtle" aria-pressed={wide} onClick={toggleWide}>
+            넓게 보기
+          </button>
+          {collab && <span className="muted">쓰는 대로 자동으로 저장된다</span>}
+          {/* 끊긴 상태에서 누르면 **저장되지 않는다.** 누를 수 있게 두면 "눌렀으니 됐다"가 된다 */}
+          <button
+            type="button"
+            className="primary"
+            title={collab ? '지금 바로 버전을 남기고 보기로 간다' : undefined}
+            onClick={() => void save()}
+            disabled={busy || conflict !== null || offline}
+          >
+            {busy ? '저장 중…' : collab ? '저장하고 보기로' : '저장'}
+          </button>
         </div>
 
-        {collab ? (
-          <>
-            <p className="muted small" role="status">
-              {link === 'live' && (peers.length ? `같이 보는 사람: ${peers.join(', ')}` : '같이 보는 사람 없음')}
-              {link === 'connecting' && '연결 중…'}
-              {/* **끊긴 것을 반드시 말한다.** 조용히 끊기면 계속 쓰는데 아무에게도 안 가고,
-                  새로고침하면 그 내용이 사라진다 — 가장 나쁜 실패다 */}
-              {link === 'offline' && (
-                <strong className="badge fail">
-                  연결이 끊겼다. 지금 쓰는 내용은 저장되지 않는다 — 다른 곳에 복사한 뒤 새로고침한다
-                </strong>
-              )}
-              {/* **거절로 끊긴 것은 따로 말한다** (P9 FR-1005). 다시 붙어도 같은 편집은 다시 거절된다 —
-                  무엇이 걸렸는지는 관리자가 감사로그에서 본다 */}
-              {link === 'refused' && (
-                <strong className="badge fail">
-                  서버가 이 편집을 받지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다 — 계속되면 관리자에게 알린다
-                </strong>
-              )}
-              {/* **자동 저장이 멈춘 것도 말한다** (P9 FR-1011). 편집은 동료에게 계속 보여 저장되는 줄 알기 쉽다 */}
-              {saveBlocked !== null && link !== 'refused' && (
-                <strong className="badge fail">
-                  자동 저장이 멈췄다: {saveBlocked}. 풀리기 전에는 버전이 남지 않는다 — 모르겠으면 쓰던 내용을 복사해 두고 관리자에게 알린다
-                </strong>
-              )}
+        {conflict && (
+          <Notice kind="error" role="alert">
+            <p>
+              <strong>다른 사람이 먼저 저장했다</strong>
             </p>
-            <p className="muted small">
-              쓰는 대로 자동으로 저장된다. 저장 버튼은 <strong>지금 바로</strong> 남기고 보기로 갈 때 쓴다.
+            <p>{conflict.message}</p>
+            <p className="small">
+              내가 편집을 시작한 버전 v{conflict.baseVersionNo} · 현재 서버 버전 v{conflict.currentVersionNo}
             </p>
-          </>
-        ) : (
-          <p className="muted small">편집을 시작한 버전: v{page.currentVersionNo}</p>
+            <p className="small">지금 쓴 내용은 사라진다. 필요하면 다른 곳에 복사해 둔 뒤 눌러야 한다.</p>
+            {/* 덮어쓰기 버튼을 두지 않는다 (FR-343) */}
+            <div className="actions">
+              <button type="button" onClick={load}>
+                최신 내용 불러오기
+              </button>
+            </div>
+          </Notice>
         )}
+        {/* **끊긴 것을 반드시 말한다.** 조용히 끊기면 계속 쓰는데 아무에게도 안 가고,
+            새로고침하면 그 내용이 사라진다 — 가장 나쁜 실패다. 세 알림은 전에 연결 상태(`status`) 안에 있던 문장 그대로다 */}
+        {collab && link === 'offline' && (
+          <Notice kind="error" role="status">
+            연결이 끊겼다. 지금 쓰는 내용은 저장되지 않는다 — 다른 곳에 복사한 뒤 새로고침한다
+          </Notice>
+        )}
+        {/* **거절로 끊긴 것은 따로 말한다** (P9 FR-1005). 다시 붙어도 같은 편집은 다시 거절된다 —
+            무엇이 걸렸는지는 관리자가 감사로그에서 본다 */}
+        {collab && link === 'refused' && (
+          <Notice kind="error" role="status">
+            서버가 이 편집을 받지 않았다. 쓰던 내용을 다른 곳에 복사한 뒤 새로고침한다 — 계속되면 관리자에게 알린다
+          </Notice>
+        )}
+        {/* **자동 저장이 멈춘 것도 말한다** (P9 FR-1011). 편집은 동료에게 계속 보여 저장되는 줄 알기 쉽다 */}
+        {blocked && (
+          <Notice kind="error" role="status">
+            자동 저장이 멈췄다: {saveBlocked}. 풀리기 전에는 버전이 남지 않는다 — 모르겠으면 쓰던 내용을 복사해 두고 관리자에게 알린다
+          </Notice>
+        )}
+        {saveError && <Notice kind="error">{saveError}</Notice>}
 
-        {/* 끊긴 상태에서 누르면 **저장되지 않는다.** 누를 수 있게 두면 "눌렀으니 됐다"가 된다 */}
-        {saveError && (
-          <p className="badge fail" role="alert">
-            {saveError}
-          </p>
-        )}
-        <button type="button" onClick={() => void save()} disabled={busy || conflict !== null || (collab && (link === 'offline' || link === 'refused'))}>
-          {busy ? '저장 중…' : collab ? '저장하고 보기로' : '저장'}
-        </button>
-      </section>
-    </main>
+        <div className={wide ? 'paper wide' : 'paper'}>
+          {here && <Breadcrumbs items={[{ label: here.name, to: `/spaces/${page.spaceId}` }, { label: page.title }]} />}
+          <h1>{HEADING}</h1>
+          <Field id="ed-title" label="제목">
+            <input id="ed-title" className="title-input" value={title} onChange={(e) => setTitle(e.target.value)} required />
+          </Field>
+          <div className="field">
+            {/* 편집기는 입력 요소가 아니라 `htmlFor`로 묶이지 않는다 — 편집기가 이 라벨을 `aria-labelledby`로 가리키고, 누르면 편집기로 간다 */}
+            <label id={BODY_LABEL_ID} onClick={() => bodyRef.current?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus()}>
+              본문
+            </label>
+            {/* 서식 단추 줄의 자리 — 본문 칸 바로 위에 온다(F-013, 이번에는 두지 않는다 — 착수 쟁점 7) */}
+            <div ref={bodyRef}>
+              {collab && me ? (
+                <CollabEditor
+                  pageId={id}
+                  me={{ id: me.id, displayName: me.displayName }}
+                  onPeers={onPeers}
+                  onState={onState}
+                  onSaveBlocked={onSaveBlocked}
+                  onDoc={onDoc}
+                  labelledBy={BODY_LABEL_ID}
+                />
+              ) : (
+                <Editor value={page.content} onChange={setDoc} labelledBy={BODY_LABEL_ID} />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

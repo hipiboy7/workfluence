@@ -7,9 +7,10 @@ import { AuthProvider } from '../auth';
 import { SpacePage } from './SpacePage';
 
 /**
- * 컴포넌트 시험 — 스페이스 화면 (P14_설계서_Spaces D.2·D.3, FR-1500·1512). 트리는 목록 안의 목록으로 들여쓰고, 새 페이지의 **위치**를 고르며, 페이지
- * 보기의 하위 페이지 만들기(`?parent=`)로 오면 그 부모를 골라 둔다. Crew에 넣을 때 역할을 고르고 넣은 뒤 바꾼다. 서버는 가짜 `fetch`다 — Crew를 바꾸면
- * 화면이 스페이스를 다시 읽는다(그때 무엇이 남는지가 병합 전 검토의 쟁점이었다)
+ * 컴포넌트 시험 — 스페이스 화면 (P14_설계서_Spaces D.2·D.3, FR-1500·1512 · P17 설계서 J.6 스페이스 문맥). 트리는 왼쪽 칸에 있고(틀 없이 그리면
+ * 제자리에 그려진다 — `SideSlot`) 목록 안의 목록으로 들여쓰며, 새 페이지의 **위치**를 고르고, 페이지 보기의 하위 페이지 만들기(`?parent=`)로 오면 그
+ * 부모를 골라 둔다. Crew에 넣을 때 역할을 고르고 넣은 뒤 바꾸며, 빼기는 확인 대화로 묻는다. 서버는 가짜 `fetch`다 — Crew를 바꾸면 화면이 스페이스를
+ * 다시 읽는다(그때 무엇이 남는지가 병합 전 검토의 쟁점이었다)
  */
 
 type Call = { method: string; url: string; body: unknown };
@@ -103,6 +104,7 @@ const renderAt = (url: string) =>
     </MemoryRouter>,
   );
 const writes = () => calls.filter((c) => c.method !== 'GET');
+const reads = (url: string) => calls.filter((c) => c.method === 'GET' && c.url === url).length;
 const where = () => (screen.getByLabelText('위치') as HTMLSelectElement).value;
 /** 목록의 바로 아래 줄들 — [이름, 들여쓰기] */
 const lines = (list: HTMLElement) => [...list.children].map((li) => [li.querySelector('a')?.textContent, (li as HTMLElement).style.marginLeft]);
@@ -162,6 +164,41 @@ describe('SpacePage — 트리와 하위 페이지', () => {
     fireEvent.click(screen.getByRole('button', { name: '만들기' }));
     await screen.findByText('편집 화면');
     expect(writes()[0].body).toMatchObject({ parentId: null });
+  });
+});
+
+describe('SpacePage — 머리와 왼쪽 칸 (P17 J.3.3·J.3.5)', () => {
+  it('**h1은 이름 하나**이고 종류·키·분류는 설명 줄에 — 중지되면 "중지됨 — 읽기만 된다"가 함께 보인다', async () => {
+    answerSpace = () => Promise.resolve(json(200, { ...space, status: 'suspended', suspendedByOwner: true, categoryName: '운영', description: '운영 문서' }));
+    renderAt('/spaces/s1');
+    const h1 = await screen.findByRole('heading', { level: 1 });
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(h1.textContent).toBe('운영팀');
+    const description = h1.parentElement!.querySelector('.description')!;
+    expect(description.textContent).toContain('팀 · ABCD · 운영');
+    expect(description.textContent).toContain('운영 문서');
+    expect(within(description as HTMLElement).getByText('중지됨 — 읽기만 된다').className).toBe('badge paused');
+  });
+
+  it('**트리는 왼쪽 칸에 있고, 이 화면이 읽은 것을 넘긴다** — 왼쪽 칸이 스페이스와 트리를 다시 부르지 않는다', async () => {
+    renderAt('/spaces/s1');
+    const list = await screen.findByRole('list', { name: '페이지 트리' });
+    // 틀 없이 그리면 왼쪽 칸의 내용이 제자리에 그려진다(`SideSlot`) — 본문에 트리를 따로 두지 않는다
+    expect(list.closest('.side-inline')).not.toBeNull();
+    expect(screen.getAllByRole('list', { name: '페이지 트리' })).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect([reads('/api/spaces/s1'), reads('/api/pages?spaceId=s1')]).toEqual([1, 1]);
+  });
+
+  it('**왼쪽 칸의 새 페이지(`#new-page`)로 오면 제목 칸으로 간다** — 주소의 뒤만 바뀌면 브라우저는 스크롤하지 않는다', async () => {
+    renderAt('/spaces/s1#new-page');
+    const box = await screen.findByLabelText('새 페이지 제목');
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    expect(box.closest('form')!.id).toBe('new-page');
+    // 다시 읽어도(Crew를 바꾼 뒤) 초점을 빼앗지 않는다 — 그 이동에 한 번만
+    (screen.getByLabelText('kim 역할') as HTMLSelectElement).focus();
+    await reloadByCrew();
+    expect(document.activeElement).toBe(screen.getByLabelText('kim 역할'));
   });
 });
 
@@ -253,6 +290,32 @@ describe('SpacePage — Crew의 역할 (FR-1512)', () => {
     expect(writes()[0]).toEqual({ method: 'PATCH', url: '/api/spaces/s1/members/u2', body: { role: 'viewer' } });
   });
 
+  it('**Crew는 표다** — 이름·아이디·역할 열, owner 줄에는 빼기가 없다', async () => {
+    renderAt('/spaces/s1');
+    const table = await screen.findByRole('table', { name: 'Crew' });
+    await within(table).findByText('kim');
+    expect(within(table).getAllByRole('columnheader').map((th) => th.textContent)).toEqual(['이름', '아이디', '역할', '조치']);
+    const [owner, kim] = within(table).getAllByRole('row').slice(1);
+    expect(within(owner).queryByRole('button', { name: '제거' })).toBeNull();
+    expect(within(kim).getByRole('button', { name: '제거' }).className).toBe('danger sm');
+  });
+
+  it('**Crew에서 빼기는 한 번 더 묻는다** — 그만두면 보내지 않고, 확정하면 뺀다 (J.5.10)', async () => {
+    renderAt('/spaces/s1');
+    fireEvent.click(await screen.findByRole('button', { name: '제거' }));
+    const dialog = await screen.findByRole('dialog');
+    // 누구를 빼는지와 되돌리는 길을 말한다. 확정 단추는 부른 단추(제거)의 이름을 품지 않는다
+    expect(dialog.textContent).toContain('"김"(kim)을(를) 이 스페이스의 Crew에서 뺀다');
+    expect(dialog.textContent).toContain('다시 넣으면 돌아온다');
+    fireEvent.click(within(dialog).getByRole('button', { name: '그만두기' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(writes()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: '제거' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '뺀다' }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]).toEqual({ method: 'DELETE', url: '/api/spaces/s1/members/u2', body: undefined });
+  });
+
   it('**관리자가 건 중지 동안 주인에게는 Crew를 바꾸는 칸이 없고 까닭이 보인다** — Crew 목록은 그대로 보인다 (P16 FR-1702)', async () => {
     const frozen: SpaceView = {
       ...space,
@@ -325,6 +388,8 @@ describe('SpacePage — Crew의 역할 (FR-1512)', () => {
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     expect(await screen.findByText('관리자가 중지한 스페이스라 Crew를 바꾸지 못한다 — 관리자에게 부탁한다. 다시 쓰게 되면 주인도 바꾼다.')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe('관리자가 중지한 스페이스다 — Crew는 관리자가 바꾼다');
+    // 거절은 조치한 구획(Crew) 안에 보인다 — 새 페이지 칸 위가 아니다 (J.5.7)
+    expect(screen.getByRole('table', { name: 'Crew' }).closest('section')!.contains(screen.getByRole('alert'))).toBe(true);
     expect(screen.queryByLabelText('아이디로 Crew 추가')).toBeNull();
     expect(spaceGets).toBe(2);
   });

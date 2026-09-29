@@ -8,8 +8,9 @@ import { Link, useLocation } from 'react-router';
  * - 도움말·오류는 칸 아래에 있고 칸의 `aria-describedby`로 이어진다. 오류가 있으면 `aria-invalid`(FR-1855)
  */
 
-/** 경로의 구역 이름 — 탭 제목과 주 메뉴가 같이 쓴다 (FR-1854) */
+/** 경로의 구역 이름 — 탭 제목과 주 메뉴가 같이 쓴다 (FR-1854). 로그인 전 화면에는 구역이 없다 */
 export function sectionOf(pathname: string): string {
+  if (pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/find-account')) return '';
   if (pathname.startsWith('/admin')) return '관리';
   if (pathname.startsWith('/llm')) return 'LLM 질문';
   if (pathname.startsWith('/search') || pathname.startsWith('/labels')) return '검색';
@@ -24,7 +25,7 @@ export function useDocumentTitle(title: string | null | undefined) {
   const { pathname } = useLocation();
   useEffect(() => {
     const section = sectionOf(pathname);
-    document.title = title ? (title === section ? `${title} - workfluence` : `${title} - ${section} - workfluence`) : 'workfluence';
+    document.title = title ? (!section || title === section ? `${title} - workfluence` : `${title} - ${section} - workfluence`) : 'workfluence';
   }, [title, pathname]);
 }
 
@@ -157,11 +158,12 @@ export function Field({
 }) {
   return (
     <div className="field">
+      {/* "필수"는 label 밖이다 — label 안에 두면 라벨 이름이 "이름필수"가 되어 이름으로 칸을 찾지 못한다(J.5.3) */}
       {label && (
-        <label htmlFor={id}>
-          {label}
+        <div className="field-head">
+          <label htmlFor={id}>{label}</label>
           {required && <Required />}
-        </label>
+        </div>
       )}
       {wire(children, id, help, error, required)}
       <FieldNotes id={id} help={help} error={error} />
