@@ -18,6 +18,10 @@
  *   허용 파일, `CLAUDE.md` 7절의 상용 구성 요소. 앱 폴더에 두면 Windows가 System32보다 먼저 찾는다), 그리고 `COPYRIGHT`(PostgreSQL)·
  *   `THIRD_PARTY_NOTICES.txt`(구성 요소마다 판·라이선스·소스 위치와 원문 — 원문은 `scripts/win-notices/`). 아래 `PG_COMPONENTS`에 없는 파일이
  *   `pgsql/bin`에 있거나 판이 다르면 멈춘다 — 고지 없이 새 라이브러리가 들어가지 않게 한다
+ *
+ * **어떤 실행 파일도 쓰지 않는 파일**(구성 요소의 `unused` — wxWidgets·curl·pldebugger 등, 라이선스 판단을 기다린다 — 체험 가이드 10.3절)은 지금 그대로 넣는다.
+ * 그 목록을 묶음 밖의 `.local/win-bundle/unused-files.json`에 적는다 — 워크플로가 그 파일들을 뺀 사본을 띄워 "빼도 뜨는가"를 본다(참고 시험).
+ * `pnpm win:bundle -- --drop-unused`면 묶음에서도 뺀다(고지에서도 그 구성 요소가 빠진다) — 기본은 넣는다
  */
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -51,6 +55,12 @@ type Component = {
   files: RegExp | null;
   /** `scripts/win-notices/`의 원문 */
   texts: string[];
+  /**
+   * 이 구성 요소의 파일 가운데 **어떤 실행 파일(postgres·initdb·pg_ctl)도 가져오지 않는 것**(PE import로 확인 — 아래 목록 머리말). `pgsql/share/extension`의
+   * 파일은 `unusedShare`. 모든 파일이 여기 들면 그 구성 요소는 통째로 뺄 수 있다
+   */
+  unused?: RegExp;
+  unusedShare?: RegExp;
   source: string;
   note?: string;
 };
@@ -67,6 +77,7 @@ const PG_COMPONENTS: Component[] = [
     versionOf: 'postgres.exe',
     license: 'PostgreSQL License',
     files: /^(postgres|initdb|pg_ctl)\.exe$|^lib(pq|ecpg|ecpg_compat|pgtypes)\.dll$/i,
+    unused: /^lib(ecpg|ecpg_compat|pgtypes)\.dll$/i,
     texts: ['postgresql-COPYRIGHT.txt'],
     source: 'https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.bz2',
     note: 'pgsql\\lib의 확장 모듈(아래 둘을 뺀 .dll)과 pgsql\\share 포함. Windows 빌드는 EDB의 배포판을 embedded-postgres가 다시 묶은 것이다',
@@ -86,6 +97,7 @@ const PG_COMPONENTS: Component[] = [
     versionOf: 'icuuc67.dll',
     license: 'ICU License (Unicode)',
     files: /^icu(dt|in|io|tu|uc)67\.dll$|^testplug\.dll$/i,
+    unused: /^icu(io|tu)67\.dll$|^testplug\.dll$/i,
     texts: ['icu-LICENSE.txt'],
     source: 'https://github.com/unicode-org/icu/releases/tag/release-67-1',
     note: 'testplug.dll은 ICU 빌드의 시험용 플러그인이다',
@@ -100,7 +112,16 @@ const PG_COMPONENTS: Component[] = [
     texts: ['libxml2-Copyright.txt'],
     source: 'https://gitlab.gnome.org/GNOME/libxml2/-/tags/v2.15.3',
   },
-  { name: 'libxslt', version: '1.1.45', license: 'MIT', files: /^libxslt\.dll$/i, texts: ['libxslt-Copyright.txt'], source: 'https://gitlab.gnome.org/GNOME/libxslt/-/tags/v1.1.45' },
+  {
+    name: 'libxslt',
+    version: '1.1.45',
+    license: 'MIT',
+    files: /^libxslt\.dll$/i,
+    unused: /^libxslt\.dll$/i,
+    texts: ['libxslt-Copyright.txt'],
+    source: 'https://gitlab.gnome.org/GNOME/libxslt/-/tags/v1.1.45',
+    note: 'pgsql\\lib\\pgxml.dll(xml2 확장)만 쓴다',
+  },
   { name: 'LZ4', version: '1.10.0', versionOf: 'liblz4.dll', license: 'BSD-2-Clause', files: /^liblz4\.dll$/i, texts: ['lz4-LICENSE.txt'], source: 'https://github.com/lz4/lz4/releases/tag/v1.10.0' },
   {
     name: 'Zstandard',
@@ -112,7 +133,16 @@ const PG_COMPONENTS: Component[] = [
     source: 'https://github.com/facebook/zstd/releases/tag/v1.5.7',
     note: 'BSD-3-Clause와 GPL-2.0의 이중 라이선스 — BSD-3-Clause로 받는다',
   },
-  { name: 'curl (libcurl)', version: '8.20.0', versionOf: 'libcurl.dll', license: 'curl', files: /^libcurl\.dll$/i, texts: ['curl-COPYING.txt'], source: 'https://curl.se/download/curl-8.20.0.tar.xz' },
+  {
+    name: 'curl (libcurl)',
+    version: '8.20.0',
+    versionOf: 'libcurl.dll',
+    license: 'curl',
+    files: /^libcurl\.dll$/i,
+    unused: /^libcurl\.dll$/i,
+    texts: ['curl-COPYING.txt'],
+    source: 'https://curl.se/download/curl-8.20.0.tar.xz',
+  },
   {
     name: 'mingw-w64 winpthreads',
     version: '(판 표시 없음 — 파일 판 1.0.0.0)',
@@ -145,6 +175,7 @@ const PG_COMPONENTS: Component[] = [
     versionOf: 'wxbase3210u_vc_x64_custom.dll',
     license: 'wxWindows Library Licence 3.1 (LGPL-2.0-or-later + 바이너리 예외)',
     files: /^wx(base|msw)3210u_\w+\.dll$/i,
+    unused: /^wx(base|msw)3210u_\w+\.dll$/i,
     texts: ['wxwidgets-licence.txt', 'lgpl-2.0.txt'],
     source: 'https://github.com/wxWidgets/wxWidgets/releases/tag/v3.2.10',
   },
@@ -153,6 +184,8 @@ const PG_COMPONENTS: Component[] = [
     version: '(판 표시 없음)',
     license: 'Artistic-2.0 — Copyright (c) 2004-2024 EnterpriseDB Corporation',
     files: /^plugin_debugger\.dll$/i,
+    unused: /^plugin_debugger\.dll$/i,
+    unusedShare: /^pldbgapi/i,
     texts: ['artistic-2.0.txt'],
     source: 'https://github.com/EnterpriseDB/pldebugger',
     note: 'pgsql\\share\\extension의 pldbgapi* 포함',
@@ -162,6 +195,8 @@ const PG_COMPONENTS: Component[] = [
     version: '(판 표시 없음)',
     license: 'PostgreSQL License 계열 (EnterpriseDB)',
     files: /^system_stats\.dll$/i,
+    unused: /^system_stats\.dll$/i,
+    unusedShare: /^system_stats/i,
     texts: ['system_stats-LICENSE.txt'],
     source: 'https://github.com/EnterpriseDB/system_stats',
   },
@@ -180,8 +215,12 @@ const textFile = (s: string): string => '\ufeff' + s.replace(/\r\n/g, '\n').repl
 function readme(folderMax: number): string {
   return `workfluence 체험 묶음 (Windows)
 
-1. 이 폴더를 짧은 영문 경로에 둔다 — 예: C:\\wf. 다운로드 폴더 안에 그대로 풀지 않는다.
+1. 이 폴더를 짧은 영문 경로에 둔다. 다운로드 폴더 안에 그대로 풀지 않는다.
    이 폴더의 경로가 ${folderMax}자를 넘으면 압축을 풀 때 파일이 빠지고, 영문이 아닌 글자가 있으면 데이터베이스가 뜨지 않을 수 있다.
+   - 권하는 자리: 내 사용자 폴더 아래 — 예: C:\\Users\\<이름>\\wf. 이 PC의 다른 계정이 이 폴더의 파일을 고칠 수 없다.
+     다만 사용자 이름에 영문이 아닌 글자(한글 등)가 있으면 그 자리는 쓰지 않는다 — 위의 까닭으로 데이터베이스가 뜨지 않을 수 있다.
+   - 그럴 때는 C:\\wf 같은 자리. C:\\ 바로 아래에 만든 폴더는 이 PC의 다른 계정도 고칠 수 있다 — 누가 실행 파일(node\\node.exe 등)을
+     바꿔 두면 다음에 시작.cmd 를 누를 때 그것이 내 권한으로 돈다. 다른 사람이 로그인하지 않는 PC에서만 쓴다(시작할 때 창도 알린다).
 2. 시작.cmd 를 두 번 누른다.
    - 처음에는 데이터베이스를 만드느라 1~2분 걸린다.
    - "위키가 떴다"가 나오면 브라우저가 열린다(http://127.0.0.1:3000 — 자리 번호를 바꿨으면 그 수).
@@ -191,6 +230,10 @@ function readme(folderMax: number): string {
 3. 멈추기: 그 창에서 Ctrl+C. 창을 그냥 닫았으면 멈추기.cmd 를 누른다.
 4. 다시 쓰기: 시작.cmd 를 다시 누른다. 데이터는 data 폴더에 남는다. 멈춘 뒤에는 이 폴더를 옮겨도 된다(데이터·첨부가 함께 간다).
 5. 처음부터 다시: 멈춘 뒤 data 폴더를 통째로 지운다. 모두 지우기: 멈춘 뒤 이 폴더를 통째로 지운다.
+   처음 실행이 중간에 끊겼으면 시작.cmd 를 다시 누른다 — 끝까지 만들지 못한 데이터베이스는 지우지 않고 data\\pgdata.broken-<시각> 으로
+   옮겨 두고 새로 만든다(쓸 것이 없으면 그 폴더는 지워도 된다).
+6. 새 묶음으로 옮기기: 두 묶음을 모두 멈추고, 옛 묶음의 data 폴더를 새 묶음의 폴더에 복사한 뒤 새 묶음의 시작.cmd 를 누른다.
+   새 묶음이 모르는 설정 줄이 settings.env 에 있으면 창이 그 이름을 알리고 앱에 넘기지 않는다.
 
 - "Windows의 PC 보호" 창이 뜨면 "추가 정보" -> "실행"을 누른다. 내려받은 파일이라 붙는 표시다
   (zip 파일의 속성에서 "차단 해제"를 켜고 풀면 뜨지 않는다).
@@ -198,7 +241,7 @@ function readme(folderMax: number): string {
   상태로 뜬다 — 허용하면(또는 방화벽이 꺼져 있거나 3000번을 열어 두었으면) 같은 망의 다른 PC가 암호화 없는 http로 로그인 화면에
   닿는다. 이 PC 안의 브라우저는 허용하지 않아도 된다. 데이터베이스는 이 PC 안에서만 접속을 받는다.
 - 운영 설치가 아니다 — 암호화 연결(TLS) 없이 http로 뜬다. 합성 데이터로만 써 본다. 혼자 쓰는 PC에서 쓴다
-  (data 폴더는 처음 실행에서 지금 사용자와 관리자만 열 수 있게 권한을 좁힌다 — 비밀 값이 들어 있다).
+  (data 폴더는 시작할 때마다 지금 사용자와 관리자만 열 수 있게 권한을 좁힌다 — 비밀 값이 들어 있다. 이 폴더의 나머지는 좁히지 않는다 — 1번).
 - 3000번(앱)이나 5439번(데이터베이스) 자리를 다른 프로그램이 쓰면 시작.cmd가 까닭을 말하고 멈춘다 —
   data\\settings.env 의 WF_PORT(앱)나 WF_PG_EMBEDDED_PORT(데이터베이스)를 다른 수로 바꿔 저장하고 다시 누른다.
 
@@ -227,7 +270,7 @@ function productVersions(dir: string): Map<string, string> {
  * `pgsql/`의 고지 — 모든 파일이 어느 구성 요소인지 가리고, 판이 적은 것과 같은지 보고, `COPYRIGHT`와 `THIRD_PARTY_NOTICES.txt`를 쓴다.
  * 하나라도 어긋나면 멈춘다
  */
-function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string[]): void {
+function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string[], dropped: boolean): void {
   const bin = join(pgDir, 'bin');
   const lib = join(pgDir, 'lib');
   const owner = new Map<Component, string[]>();
@@ -251,9 +294,11 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
   if (unknown.length) throw new Error(`고지에 없는 파일이 묶음에 들어간다 — scripts/win-bundle.ts의 PG_COMPONENTS에 더하고 원문을 scripts/win-notices/에 둔다: ${unknown.join(', ')}`);
   const versions = productVersions(bin);
   const wrong: string[] = [];
-  for (const c of PG_COMPONENTS) {
+  // 뺀 구성 요소(`--drop-unused`로 파일이 모두 빠졌다)는 고지에서도 뺀다
+  const present = PG_COMPONENTS.filter((c) => !(dropped && c.unused && !owner.has(c)));
+  for (const c of present) {
     if (!owner.has(c)) wrong.push(`${c.name}: 파일이 없다(구성이 바뀌었다)`);
-    if (!c.versionOf) continue;
+    if (!c.versionOf || (dropped && c.unused?.test(c.versionOf))) continue;
     const v = versions.get(c.versionOf.toLowerCase()) ?? '';
     if (!v.startsWith(c.version)) wrong.push(`${c.name}: ${c.versionOf}의 판이 ${v || '(없음)'} — 고지는 ${c.version}`);
   }
@@ -275,7 +320,7 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
     '',
     '== 구성 요소 ==',
   ];
-  for (const c of PG_COMPONENTS) {
+  for (const c of present) {
     lines.push('', `${c.name} ${c.version} — ${c.license}`, `  파일: ${(owner.get(c) ?? []).join(', ')}`, `  소스: ${c.source}`);
     if (c.note) lines.push(`  참고: ${c.note}`);
     lines.push(`  원문: ${c.texts.join(', ')}`);
@@ -298,7 +343,7 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
   const section = (title: string, body: string): void => {
     lines.push('', '='.repeat(78), title, '='.repeat(78), '', body.trimEnd());
   };
-  for (const c of PG_COMPONENTS)
+  for (const c of present)
     for (const t of c.texts)
       if (!seen.has(t)) {
         seen.add(t);
@@ -306,6 +351,16 @@ function writePgNotices(pgDir: string, wrapperLicense: string, vcRuntime: string
       }
   section('원문: embedded-postgres LICENSE', wrapperLicense);
   writeFileSync(join(pgDir, 'THIRD_PARTY_NOTICES.txt'), textFile(lines.join('\n') + '\n'));
+}
+
+/** 어떤 실행 파일도 쓰지 않는 파일 — `pgsql/` 안의 상대 경로(`\\` 구분). VC++ 런타임은 뺄 수 없다(실행 파일이 쓴다) */
+function unusedFiles(pgDir: string): string[] {
+  const found: string[] = [];
+  for (const sub of ['bin', 'lib'])
+    for (const f of readdirSync(join(pgDir, sub))) if (PG_COMPONENTS.some((c) => c.unused?.test(f))) found.push(`pgsql\\${sub}\\${f}`);
+  const ext = join(pgDir, 'share', 'extension');
+  if (existsSync(ext)) for (const f of readdirSync(ext)) if (PG_COMPONENTS.some((c) => c.unusedShare?.test(f))) found.push(`pgsql\\share\\extension\\${f}`);
+  return found;
 }
 
 /** 묶음 안의 상대 경로(파일)를 긴 것부터 `n`개 */
@@ -345,6 +400,7 @@ function pruneToolCaches(dir: string): number {
 
 async function main(): Promise<void> {
   if (process.platform !== 'win32') throw new Error('Windows에서만 만든다 — 묶음의 네이티브 파일(argon2·PostgreSQL·node.exe)이 이 컴퓨터의 것이어야 한다');
+  const dropUnused = process.argv.includes('--drop-unused');
   rmSync(out, { recursive: true, force: true });
   mkdirSync(join(out, 'app'), { recursive: true });
 
@@ -400,8 +456,13 @@ async function main(): Promise<void> {
   const copied = VC_RUNTIME.filter((d) => existsSync(join(sys32, d)));
   if (!copied.includes('vcruntime140.dll') || !copied.includes('msvcp140.dll')) throw new Error(`VC++ 런타임이 이 컴퓨터에 없다: ${sys32}`);
   for (const d of copied) cpSync(join(sys32, d), join(out, 'pgsql', 'bin', d));
-  // 6-1) 고지 — 모든 파일의 구성 요소·판을 확인하고 COPYRIGHT·THIRD_PARTY_NOTICES.txt를 쓴다
-  writePgNotices(join(out, 'pgsql'), readFileSync(join(pkgDir, wrapperLicense), 'utf8'), copied);
+  // 6-1) 어떤 실행 파일도 쓰지 않는 파일 — 목록은 묶음 밖에 적고(워크플로의 참고 시험), `--drop-unused`면 뺀다
+  const unused = unusedFiles(join(out, 'pgsql'));
+  writeFileSync(join(dirname(out), 'unused-files.json'), JSON.stringify(unused, null, 1));
+  if (dropUnused) for (const f of unused) rmSync(join(out, ...f.split('\\')), { force: true });
+  console.log(`[win-bundle] 어떤 실행 파일도 쓰지 않는 파일 ${unused.length}개 — ${dropUnused ? '뺐다' : '넣었다(--drop-unused면 뺀다)'}`);
+  // 6-2) 고지 — 모든 파일의 구성 요소·판을 확인하고 COPYRIGHT·THIRD_PARTY_NOTICES.txt를 쓴다
+  writePgNotices(join(out, 'pgsql'), readFileSync(join(pkgDir, wrapperLicense), 'utf8'), copied, dropUnused);
   // 7) 경로 길이 — 탐색기는 260자를 넘는 경로를 풀지 못한다
   const top = longestPaths(out, 5);
   const longest = top[0]?.length ?? 0;
