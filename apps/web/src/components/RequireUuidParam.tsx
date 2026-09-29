@@ -1,7 +1,7 @@
 import { isUuid } from '@workfluence/shared';
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { Notice, Page, useDocumentTitle } from './ui';
+import { Notice, Page, PageHeader } from './ui';
 
 /**
  * 주소의 `:id`가 **식별자 모양일 때만** 그 화면을 그린다 (P10 종료 루틴 — 경로 조작).
@@ -19,11 +19,14 @@ export function RequireUuidParam({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** 잘못된 주소 — 한 틀 안에 알림띠와 **← 홈** (P17 설계서 J.6). 식별자 모양이 아닌 id와 없는 경로가 같이 쓴다 */
+/**
+ * 잘못된 주소 — 한 틀 안에 머리(h1 "찾을 수 없다" — 탭 제목도 같다)와 알림띠, **← 홈** (P17 설계서 J.6). 식별자 모양이 아닌 id와 없는 경로가 같이
+ * 쓴다. 화면마다 h1이 하나다(FR-1854) — 없으면 보조기기의 제목 탐색에 이 화면이 잡히지 않는다(병합 전 검토 10)
+ */
 export function NotFoundPage() {
-  useDocumentTitle('찾을 수 없다');
   return (
     <Page>
+      <PageHeader title="찾을 수 없다" />
       <Notice kind="error">주소가 올바르지 않다 — 찾을 수 없다</Notice>
       <p>
         <Link to="/">← 홈</Link>

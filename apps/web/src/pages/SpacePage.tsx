@@ -305,7 +305,7 @@ export function SpacePage() {
             </table>
           </div>
           {canManageMembers && (
-            // 칸 + 단추 한 줄 (J.5.4). `required`는 칸에 둔다 — Field의 보이는 "필수"는 label 안에 들어가 라벨 글이 바뀐다(시험은 라벨로 칸을 찾는다)
+            // 칸 + 단추 한 줄 (J.5.4)
             <form
               className="inline-form"
               onSubmit={(e) => {
@@ -316,8 +316,8 @@ export function SpacePage() {
                 });
               }}
             >
-              <Field id="crew-user" label="아이디로 Crew 추가">
-                <input id="crew-user" className="w-m" value={username} onChange={(e) => setUsername(e.target.value)} required />
+              <Field id="crew-user" label="아이디로 Crew 추가" required>
+                <input id="crew-user" className="w-m" value={username} onChange={(e) => setUsername(e.target.value)} />
               </Field>
               <Field id="crew-role" label="역할">
                 <select id="crew-role" className="w-s" value={addRole} onChange={(e) => setAddRole(e.target.value as MemberRole)}>

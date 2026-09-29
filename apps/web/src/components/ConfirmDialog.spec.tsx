@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useConfirm, type ConfirmOptions } from './ConfirmDialog';
 
@@ -64,6 +65,67 @@ describe('확인 대화', () => {
     });
     expect(answers).toEqual([false, false]);
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it.each([
+    ['그만두기', '그만두기'],
+    ['확정', '지운다'],
+  ])('**%s 뒤 초점은 부른 단추로 돌아간다** — body로 빠지지 않는다(키보드 사용자가 제자리를 잃지 않는다, 병합 전 검토 15)', async (_what, label) => {
+    render(<Harness opts={OPTS} onAnswer={() => undefined} />);
+    const opener = screen.getByRole('button', { name: '삭제' });
+    opener.focus();
+    await act(async () => {
+      fireEvent.click(opener);
+    });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '그만두기' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: label }));
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('Esc로 닫아도 부른 단추로 돌아간다. 부른 단추가 그 사이 사라졌으면 돌려보내지 않는다', async () => {
+    function Vanishing() {
+      const [confirm, dialog] = useConfirm();
+      const [shown, setShown] = useState(true);
+      return (
+        <>
+          {shown && (
+            <button type="button" onClick={() => void confirm(OPTS).then(() => undefined)}>
+              삭제
+            </button>
+          )}
+          <button type="button" onClick={() => setShown(false)}>
+            줄 없애기
+          </button>
+          {dialog}
+        </>
+      );
+    }
+    render(<Vanishing />);
+    const opener = screen.getByRole('button', { name: '삭제' });
+    opener.focus();
+    await act(async () => {
+      fireEvent.click(opener);
+    });
+    await act(async () => {
+      screen.getByRole('dialog').dispatchEvent(new Event('cancel', { cancelable: true }));
+    });
+    expect(document.activeElement).toBe(opener);
+
+    await act(async () => {
+      fireEvent.click(opener);
+    });
+    // 대화가 열린 사이 부른 줄이 사라진다(다른 사람이 지웠다 — 목록을 다시 읽었다)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '줄 없애기', hidden: true }));
+    });
+    expect(opener.isConnected).toBe(false);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '그만두기' }));
+    });
+    expect(document.activeElement).not.toBe(opener);
   });
 
   it('위험하지 않은 확정은 주 단추다', async () => {

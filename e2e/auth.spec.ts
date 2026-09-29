@@ -66,6 +66,19 @@ test('가입 요청 → 승인 → 로그인 → 비밀번호 변경', async ({ 
   await page.getByLabel('새 비밀번호', { exact: true }).fill('E2e-Changed-2026!');
   await page.getByLabel('새 비밀번호 확인', { exact: true }).fill('E2e-Changed-2026!');
   await page.getByRole('button', { name: '변경', exact: true }).click();
+  // **바뀐 결과를 본다** — 위 막대의 "{이름}님"은 누르기 전부터 있어 서버가 거절해도 참이었다(T-066과 같은 모양 — 병합 전 검토 2).
+  // 성공하면 홈(h1 "스페이스")으로 간다. 그리고 옛 비밀번호는 거절되고 새 비밀번호로 들어온다
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/');
+  await expect(page.getByRole('heading', { level: 1, name: '스페이스', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '로그아웃' }).click();
+  await expect(page).toHaveURL(/\/login/);
+  await page.getByLabel('아이디').fill(member.username);
+  await page.getByLabel('비밀번호').fill(member.password);
+  await page.getByRole('button', { name: '로그인' }).click();
+  await expect(page.getByRole('alert')).toContainText('아이디 또는 비밀번호가 올바르지 않다');
+  await page.getByLabel('비밀번호').fill('E2e-Changed-2026!');
+  await page.getByRole('button', { name: '로그인' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: '스페이스', exact: true })).toBeVisible();
   await expect(page.getByText(`${member.displayName}님`)).toBeVisible();
 });
 
@@ -117,8 +130,9 @@ test('관리자가 잠금 해제·비밀번호 초기화·역할 변경을 한�
   await row.getByRole('combobox').selectOption('admin');
   await expect(row.getByRole('combobox')).toHaveValue('admin');
 
-  // 비밀번호 초기화 (POST /api/users/:id/reset-password) — 임시 비밀번호가 1회 보인다
+  // 비밀번호 초기화 (POST /api/users/:id/reset-password) — 한 번 묻고(병합 전 검토 22), 임시 비밀번호가 1회 보인다
   await row.getByRole('button', { name: '비밀번호 초기화' }).click();
+  await confirmInDialog(page, '새로 만든다');
   await expect(page.getByText('임시 비밀번호')).toBeVisible();
   await expect(page.getByText('이 값은 다시 볼 수 없다. 지금 전달한다.')).toBeVisible();
 
@@ -141,7 +155,8 @@ test('비밀번호 찾기의 초기화 요청이 관리자의 알림 영역에 �
   const asker = { username: `e2e-ask-${stamp}`, displayName: 'E2E 요청자', password: 'E2e-Asker-2026!', email: `e2e-ask-${stamp}@example.internal` };
   made.push(asker.username);
   await createMember(asker);
-  const said = `${asker.displayName} (${asker.username})님이 비밀번호 초기화를 요청했다`;
+  // 본인의 요청이라고 말하지 않는다 — 아이디·email만으로 누구나 보낸다(병합 전 검토 22)
+  const said = `${asker.displayName} (${asker.username})님의 아이디·email로 비밀번호 초기화가 요청됐다`;
 
   await page.goto('/find-account');
   const form = page.locator('form').filter({ has: page.getByRole('heading', { name: '비밀번호 찾기' }) });
@@ -168,6 +183,8 @@ test('비밀번호 찾기의 초기화 요청이 관리자의 알림 영역에 �
   await expect(page.getByRole('searchbox')).toHaveValue(asker.username);
   const row = page.getByRole('row').filter({ hasText: asker.username });
   await row.getByRole('button', { name: '비밀번호 초기화' }).click();
+  // 본인 확인을 말하는 확인 대화를 지난다
+  expect(await confirmInDialog(page, '새로 만든다')).toContain('본인이 요청했는지 먼저 확인한다');
   await expect(page.getByText('임시 비밀번호')).toBeVisible();
 
   // 초기화했으니 그 알림은 읽음이다 — 읽음 단추가 없다

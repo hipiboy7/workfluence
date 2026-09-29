@@ -18,6 +18,13 @@ const PREVIEW_TITLE_ID = 'version-preview-title';
  */
 export function PageHistoryPage() {
   const { id = '' } = useParams();
+  // **페이지마다 새로 만든다** (P17 병합 전 검토 14) — 같은 경로의 다른 id로 곧바로 옮겨 가면 앞 페이지의 버전 목록·고른 버전·비교·미리보기가 남아
+  // 복원이 새 페이지에 옛 목록의 번호로 갈 수 있었다. 트리의 링크는 보기로 가므로 이력 화면끼리 옮기는 일은 드물어 왼쪽 칸도 함께 새로 만든다
+  return <PageHistoryScreen key={id} />;
+}
+
+function PageHistoryScreen() {
+  const { id = '' } = useParams();
   const nav = useNavigate();
   const [versions, setVersions] = useState<PageVersionView[] | null>(null);
   const [preview, setPreview] = useState<(PageVersionView & { content: DocNode }) | null>(null);

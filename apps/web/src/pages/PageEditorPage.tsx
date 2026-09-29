@@ -5,7 +5,7 @@ import { COLLAB_LIMITS, type DocNode, type PageView, type SpaceView } from '@wor
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { CollabEditor, type CollabState } from '../components/CollabEditor';
-import { Editor } from '../components/Editor';
+import { EDIT_SCROLL_MARGIN, Editor } from '../components/Editor';
 import { Breadcrumbs, Field, Loading, Notice, Page, PageHeader, StatusBadge, useDocumentTitle, useReadWide } from '../components/ui';
 import { SideSlot } from '../layout/AppLayout';
 import { SpaceSideNav } from '../layout/SpaceSideNav';
@@ -50,6 +50,13 @@ const snapshotOf = (doc: Y.Doc | null): string | undefined => {
  */
 export function PageEditorPage() {
   const { id = '' } = useParams();
+  // **페이지마다 새로 만든다** (P17 병합 전 검토 14) — 같은 경로의 다른 id로 곧바로 옮겨 가면(뒤로 가기 등) 이 화면이 그대로 남아 앞 페이지의
+  // 제목·본문·보낸 제목·연결 상태를 들고 있을 수 있었다. 트리의 링크는 보기로 가므로 편집 화면끼리 옮기는 일은 드물어 왼쪽 칸도 함께 새로 만든다
+  return <PageEditorScreen key={id} />;
+}
+
+function PageEditorScreen() {
+  const { id = '' } = useParams();
   const nav = useNavigate();
   const { me } = useAuth();
   // 실시간 편집이 켜져 있는지는 **서버가 말해 준다** (FR-711). 화면이 짐작하면
@@ -68,6 +75,8 @@ export function PageEditorPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [busy, setBusy] = useState(false);
+  // 실시간 편집을 끈 화면에서 사람이 본문을 고쳤는가 — 떠나기 전에 묻는다(아래)
+  const [bodyEdited, setBodyEdited] = useState(false);
   // 빵부스러기의 스페이스 이름 — 읽지 못해도 편집은 된다(빵부스러기만 빠진다)
   const [space, setSpace] = useState<SpaceView | null>(null);
   const [wide, toggleWide] = useReadWide();
@@ -79,6 +88,7 @@ export function PageEditorPage() {
     setConflict(null);
     setError(null);
     setSaveError(null);
+    setBodyEdited(false);
     api<PageView>(`/api/pages/${id}`)
       .then((p) => {
         setPage(p);
@@ -159,6 +169,22 @@ export function PageEditorPage() {
   const onPeers = useCallback((names: string[]) => setPeers(names), []);
   const onState = useCallback((s: CollabState) => setLink(s), []);
   const onSaveBlocked = useCallback((r: string | null) => setSaveBlocked(r), []);
+
+  // **실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫거나 새로 고치기 전에 묻는다** (P17 병합 전 검토 18). 실시간 편집은 서버가 쓰는 대로
+  // 저장하므로 묻지 않는다. 본문은 편집기가 사람이 고쳤다고 알릴 때만 친다(`onEdit` — 처음 그릴 때 편집기가 다듬어 알리는 값은 고친 것이 아니다).
+  // 앱 안의 링크(왼쪽 칸의 트리·위 막대)로 떠나는 것은 막지 못한다 — 그것을 막는 `useBlocker`는 데이터 라우터(`createBrowserRouter`)에서만 되고
+  // 이 앱은 `BrowserRouter`다(`App.tsx`). 라우터를 바꾸는 것은 모든 경로를 다시 짜는 일이라 이번에 하지 않는다
+  const unsaved = collab === false && page !== null && (title !== page.title || bodyEdited);
+  useEffect(() => {
+    if (!unsaved) return;
+    const ask = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Chrome·Edge 119 전은 이 값이 있어야 묻는다
+      e.returnValue = true;
+    };
+    window.addEventListener('beforeunload', ask);
+    return () => window.removeEventListener('beforeunload', ask);
+  }, [unsaved]);
 
   const save = async () => {
     // **실시간 편집에서는 서버가 이미 저장하고 있다.** 여기서 또 PATCH를 보내면
@@ -331,8 +357,8 @@ export function PageEditorPage() {
         <div className={wide ? 'paper wide' : 'paper'}>
           {here && <Breadcrumbs items={[{ label: here.name, to: `/spaces/${page.spaceId}` }, { label: page.title }]} />}
           <h1>{HEADING}</h1>
-          <Field id="ed-title" label="제목">
-            <input id="ed-title" className="title-input" value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <Field id="ed-title" label="제목" required>
+            <input id="ed-title" className="title-input" value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
           <div className="field">
             {/* 편집기는 입력 요소가 아니라 `htmlFor`로 묶이지 않는다 — 편집기가 이 라벨을 `aria-labelledby`로 가리키고, 누르면 편집기로 간다 */}
@@ -350,9 +376,10 @@ export function PageEditorPage() {
                   onSaveBlocked={onSaveBlocked}
                   onDoc={onDoc}
                   labelledBy={BODY_LABEL_ID}
+                  scrollMargin={EDIT_SCROLL_MARGIN}
                 />
               ) : (
-                <Editor value={page.content} onChange={setDoc} labelledBy={BODY_LABEL_ID} />
+                <Editor value={page.content} onChange={setDoc} onEdit={() => setBodyEdited(true)} labelledBy={BODY_LABEL_ID} scrollMargin={EDIT_SCROLL_MARGIN} />
               )}
             </div>
           </div>

@@ -274,7 +274,12 @@ describe('SpacePage — Crew의 역할 (FR-1512)', () => {
   it('**넣을 때 역할을 고른다** — viewer로도 넣는다', async () => {
     renderAt('/spaces/s1');
     await screen.findByLabelText('아이디로 Crew 추가');
-    fireEvent.change(screen.getByLabelText('아이디로 Crew 추가'), { target: { value: 'lee' } });
+    // 아이디 칸은 필수다 — 보이는 "필수"는 label 밖이라 라벨로 정확히 찾는다(FR-1855 · 병합 전 검토 11). 역할은 고르기라 비지 않는다
+    const who = screen.getByLabelText('아이디로 Crew 추가') as HTMLInputElement;
+    expect(who.required).toBe(true);
+    expect(who.closest('.field')!.querySelector('.field-head .req')!.textContent).toBe('필수');
+    expect(screen.getByLabelText('역할').closest('.field')!.querySelector('.req')).toBeNull();
+    fireEvent.change(who, { target: { value: 'lee' } });
     fireEvent.change(screen.getByLabelText('역할'), { target: { value: 'viewer' } });
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     await waitFor(() => expect(writes()).toHaveLength(1));

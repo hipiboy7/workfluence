@@ -60,11 +60,11 @@ export function FindAccountPage() {
               )}
             </Notice>
           )}
-          <Field id="fi-email" label="email">
-            <input id="fi-email" className="w-full" type="email" value={id.email} onChange={(e) => setId({ ...id, email: e.target.value })} required />
+          <Field id="fi-email" label="email" required>
+            <input id="fi-email" className="w-full" type="email" value={id.email} onChange={(e) => setId({ ...id, email: e.target.value })} />
           </Field>
-          <Field id="fi-name" label="이름">
-            <input id="fi-name" className="w-full" value={id.displayName} onChange={(e) => setId({ ...id, displayName: e.target.value })} required />
+          <Field id="fi-name" label="이름" required>
+            <input id="fi-name" className="w-full" value={id.displayName} onChange={(e) => setId({ ...id, displayName: e.target.value })} />
           </Field>
           <FormActions>
             <button type="submit" className="primary">
@@ -90,11 +90,11 @@ export function FindAccountPage() {
           {pwSent && (
             <Notice kind="success">요청을 접수했다. 아이디와 email이 맞으면 관리자의 알림에 간다 — 관리자가 초기화한 임시 비밀번호를 받아 로그인한다.</Notice>
           )}
-          <Field id="fp-username" label="아이디">
-            <input id="fp-username" className="w-full" value={pw.username} onChange={(e) => setPw({ ...pw, username: e.target.value })} required />
+          <Field id="fp-username" label="아이디" required>
+            <input id="fp-username" className="w-full" value={pw.username} onChange={(e) => setPw({ ...pw, username: e.target.value })} />
           </Field>
-          <Field id="fp-email" label="email">
-            <input id="fp-email" className="w-full" type="email" value={pw.email} onChange={(e) => setPw({ ...pw, email: e.target.value })} required />
+          <Field id="fp-email" label="email" required>
+            <input id="fp-email" className="w-full" type="email" value={pw.email} onChange={(e) => setPw({ ...pw, email: e.target.value })} />
           </Field>
           <FormActions>
             <button type="submit" className="primary">

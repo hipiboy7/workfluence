@@ -304,8 +304,8 @@ export function AdminSpacesPage() {
         />
         {/* 칸 하나 + 단추 한 줄 (J.5.4) */}
         <form className="inline-form" onSubmit={addCategory}>
-          <Field id="cat-new" label="새 분류">
-            <input id="cat-new" className="w-m" value={newCategory} maxLength={CATEGORY_NAME_MAX} onChange={(e) => setNewCategory(e.target.value)} required />
+          <Field id="cat-new" label="새 분류" required>
+            <input id="cat-new" className="w-m" value={newCategory} maxLength={CATEGORY_NAME_MAX} onChange={(e) => setNewCategory(e.target.value)} />
           </Field>
           <button type="submit" className="primary" disabled={busy}>
             만들기

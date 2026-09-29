@@ -40,6 +40,17 @@ async function login(page: Page) {
   await expect(page).not.toHaveURL(/\/login/);
 }
 
+/**
+ * **데이터가 온 뒤에 잰다** (병합 전 검토 1) — 화면은 머리(h1)를 먼저 그리고 목록·표는 응답 뒤에 그린다. h1만 보고 재면 불러오는 중인 화면을 재고
+ * 찍어, 표·거르기 줄이 들어온 뒤 넘쳐도 초록불이었다(T-066과 같은 모양). 요청이 멎고, 본문과 왼쪽 칸의 "불러오는 중…"이 모두 사라지고, 그 화면의
+ * 내용(`ready` — 표·목록·빈 상태·본문)이 보일 때까지 기다린다
+ */
+async function settle(page: Page, ready?: string) {
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.app-body .loading')).toHaveCount(0);
+  if (ready) await expect(page.locator(`#main :is(${ready})`).first()).toBeVisible();
+}
+
 /** 가로 스크롤과 본문 폭 */
 async function measure(page: Page) {
   return page.evaluate(() => {
@@ -79,19 +90,21 @@ test('PC 폭에서 모든 주요 화면이 넓고 가로로 넘치지 않으며,
   expect(created.ok()).toBe(true);
   const { id: pageId } = (await created.json()) as { id: string };
 
-  const screens: { name: string; path: string; table?: boolean }[] = [
-    { name: 'home', path: '/', table: true },
-    { name: 'space', path: `/spaces/${spaceId}`, table: true },
-    { name: 'page-view', path: `/pages/${pageId}` },
-    { name: 'page-edit', path: `/pages/${pageId}/edit` },
-    { name: 'history', path: `/pages/${pageId}/history`, table: true },
+  // `ready` — 데이터가 왔다는 표시(표·목록·빈 상태·본문). 검색은 찾을 말이 없으면 칸만 있다
+  const screens: { name: string; path: string; table?: boolean; ready?: string }[] = [
+    { name: 'home', path: '/', table: true, ready: 'table, .empty-state' },
+    // 팀 스페이스라 Crew 표가 있다
+    { name: 'space', path: `/spaces/${spaceId}`, table: true, ready: 'table' },
+    { name: 'page-view', path: `/pages/${pageId}`, ready: '.doc .editor' },
+    { name: 'page-edit', path: `/pages/${pageId}/edit`, ready: '.paper .editor' },
+    { name: 'history', path: `/pages/${pageId}/history`, table: true, ready: '.row-list' },
     { name: 'search', path: '/search', table: true },
-    { name: 'notifications', path: '/notifications', table: true },
-    { name: 'trash', path: '/trash', table: true },
-    { name: 'llm', path: '/llm' },
-    { name: 'admin-users', path: '/admin/users', table: true },
-    { name: 'admin-audit', path: '/admin/audit' },
-    { name: 'admin-llm', path: '/admin/llm', table: true },
+    { name: 'notifications', path: '/notifications', table: true, ready: '.row-list, .empty-state' },
+    { name: 'trash', path: '/trash', table: true, ready: '.row-list, .empty-state' },
+    { name: 'llm', path: '/llm', ready: '.empty-state' },
+    { name: 'admin-users', path: '/admin/users', table: true, ready: 'tbody tr' },
+    { name: 'admin-audit', path: '/admin/audit', ready: 'tbody tr' },
+    { name: 'admin-llm', path: '/admin/llm', table: true, ready: 'table' },
   ];
 
   for (const width of [1280, 1920]) {
@@ -99,6 +112,7 @@ test('PC 폭에서 모든 주요 화면이 넓고 가로로 넘치지 않으며,
     for (const s of screens) {
       await page.goto(s.path);
       await expect(page.locator('#main h1').first()).toBeVisible();
+      await settle(page, s.ready);
       // 왼쪽 칸이 보인다 — 1280은 처음 접히는 폭(1280 미만)의 바로 위다
       await expect(page.locator('#side')).toBeVisible();
       const m = await measure(page);

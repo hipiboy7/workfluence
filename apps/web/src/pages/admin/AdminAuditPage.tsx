@@ -6,54 +6,43 @@ import { can } from '@workfluence/shared';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { AuditLevelCard } from '../../components/AuditLevelCard';
-import { AUDIT_ACTION_NAMES, auditActionName } from '../../components/auditNames';
+import { AUDIT_ACTION_NAMES, auditActionName, auditTargetLabel, auditTargetName } from '../../components/auditNames';
 import { withCode } from '../../components/labels';
 import { CodeBlock, EmptyState, Field, FilterBar, Loading, Notice, Page, PageHeader } from '../../components/ui';
 
-/** uuid 모양의 대상 — 칸에는 앞 8자만 보이고 전체는 `title`로 (J.6 관리 다섯) */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 상세 요약의 길이 — 넘으면 펼쳐 본다 */
 const DETAIL_SUMMARY_MAX = 80;
 
-/** 대상의 이름 — 감사 행에는 이름 칸이 없어 상세가 싣는 이름(아이디·이름·제목)을 쓴다. 없으면 `null` */
-function targetName(e: AuditEventView): string | null {
-  const d = e.detail;
-  if (!d) return null;
-  for (const k of ['username', 'name', 'title'] as const) {
-    const v = d[k];
-    if (typeof v === 'string' && v.trim()) return v;
-  }
-  return null;
-}
-
-/** 대상 칸 — 이름이 있으면 이름, 없으면 식별자(uuid는 앞 8자). 전체 식별자는 `title`로 늘 볼 수 있다 */
+/**
+ * 대상 칸 — 첫 줄은 종류(한글)와, 상세가 그 대상 자신의 이름을 실으면 그 이름("페이지 · 회의록"), 둘째 줄은 **전체 식별자**(작은 고정폭 글).
+ * 식별자를 자르지 않는다 — 앱 로그의 `pageId`·`spaceId`로 화면에서 찾는다. 이름은 종류마다 정한 키만 본다(`AUDIT_TARGET_NAME_KEY`) — Crew 추가의
+ * 상세 `username`은 넣은 사람이지 대상(스페이스)이 아니다. 이름은 행위자가 지은 글일 수 있어(페이지 제목) 종류와 식별자가 늘 곁에 있다(P17 병합 전
+ * 검토 6·16·23)
+ */
 function Target({ e }: { e: AuditEventView }) {
   if (!e.targetId) return <>-</>;
-  const full = e.targetType ? `${e.targetType} ${e.targetId}` : e.targetId;
-  const name = targetName(e);
-  if (name) {
-    return (
-      <span className="break-any" title={full}>
-        {name}
-      </span>
-    );
-  }
-  return UUID.test(e.targetId) ? (
-    <span className="mono" title={full}>
-      {e.targetId.slice(0, 8)}
-    </span>
-  ) : (
-    <span className="break-any" title={full}>
-      {e.targetId}
-    </span>
+  const name = auditTargetLabel(e.targetType, e.detail);
+  return (
+    <>
+      {e.targetType && (
+        <div className="break-any">
+          {auditTargetName(e.targetType)}
+          {name && <> · {name}</>}
+        </div>
+      )}
+      <div className="mono small break-any">{e.targetId}</div>
+    </>
   );
 }
 
-/** 상세 한 줄 요약 — "키: 값 · 키: 값". 길면 잘라 두고 펼치면 전체 JSON이다 (J.5.12 CodeBlock) */
+/**
+ * 상세 한 줄 요약 — "키: 값 · 키: 값". 글 값도 **따옴표째**(`JSON.stringify`) 보인다 — 행위자가 지은 글(제목 등)이 구분자(" · ", ": ")를 흉내 내어 다른
+ * 키·값처럼 읽히지 않게(병합 전 검토 23). 길면 잘라 두고 펼치면 전체 JSON이다 (J.5.12 CodeBlock)
+ */
 function Detail({ detail }: { detail: Record<string, unknown> | null }) {
   if (!detail) return <>-</>;
   const line = Object.entries(detail)
-    .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
     .join(' · ');
   if (line.length <= DETAIL_SUMMARY_MAX) return <span className="break-any">{line}</span>;
   return (

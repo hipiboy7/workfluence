@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PageHistoryPage } from './PageHistoryPage';
 
@@ -120,5 +120,38 @@ describe('PageHistoryPage', () => {
     renderPage();
     await screen.findByRole('navigation', { name: '현재 위치' });
     expect(within(list()).queryByRole('button', { name: '이 버전으로 복원' })).toBeNull();
+  });
+
+  it('**다른 페이지의 이력으로 곧바로 옮기면 앞 페이지의 고른 버전·목록을 들고 가지 않는다** — 화면을 페이지마다 새로 만든다 (병합 전 검토 14)', async () => {
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/pages/p2/versions') return Promise.resolve(json(200, [{ ...versions[1], title: '주간 보고' }]));
+      if (url === '/api/pages/p2') return Promise.resolve(json(200, { ...pageSummary, id: 'p2', title: '주간 보고', currentVersionNo: 1, content: doc('셋째') }));
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    function Go() {
+      const nav = useNavigate();
+      return (
+        <button type="button" onClick={() => void nav('/pages/p2/history')}>
+          다른 이력으로
+        </button>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/pages/p1/history']}>
+        <Go />
+        <Routes>
+          <Route path="/pages/:id/history" element={<PageHistoryPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole('list', { name: '버전 목록' });
+    fireEvent.click(within(row(2)).getByRole('checkbox', { name: '비교' }));
+    expect(screen.getByText(/지금 고른 것: v2/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '다른 이력으로' }));
+    await waitFor(() => expect(within(list()).getAllByRole('listitem')).toHaveLength(1));
+    expect(screen.getByText(/지금 고른 것: 없음/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: '← 보기로' }).getAttribute('href')).toBe('/pages/p2');
   });
 });

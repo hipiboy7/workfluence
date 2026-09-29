@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../auth';
-import { AppLayout } from './AppLayout';
+import { AppLayout, SideSlot } from './AppLayout';
 
 /**
  * 컴포넌트 시험 — 한 틀의 위 막대와 기본 문맥의 왼쪽 칸 (P17 설계서 J.3.2·J.3.3, FR-1850). 예전에는 홈 한 줄의 메뉴였다 — 그 시험
@@ -49,6 +49,18 @@ const renderAt = (path = '/') =>
             <Route path="/" element={<p>홈 본문</p>} />
             <Route path="/search" element={<p>검색 본문</p>} />
             <Route path="/admin/*" element={<p>관리 본문</p>} />
+            <Route path="/form" element={<input aria-label="아무 칸" />} />
+            <Route
+              path="/space"
+              element={
+                <>
+                  <SideSlot>
+                    <p>스페이스 트리</p>
+                  </SideSlot>
+                  <p>스페이스 본문</p>
+                </>
+              }
+            />
           </Route>
           <Route path="/login" element={<p>로그인 화면</p>} />
         </Routes>
@@ -153,5 +165,83 @@ describe('AppLayout — 왼쪽 칸의 관리 링크 (J.3.3 · P15 D.5)', () => {
     const links = within(quick).getAllByRole('link');
     expect(texts(links)).toEqual(['알림함', '내 지시문']);
     expect(links.map((l) => l.getAttribute('href'))).toEqual(['/notifications', '/llm/prompts']);
+  });
+});
+
+describe('AppLayout — 왼쪽 칸 접기 (J.3.3·J.3.6, FR-1853 · 병합 전 검토 3)', () => {
+  const realWidth = window.innerWidth;
+  const setWidth = (w: number) => Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+  afterEach(() => setWidth(realWidth));
+
+  const body = () => document.querySelector('.app-body')!;
+  const toggleButton = () => screen.getByRole('button', { name: /^왼쪽 칸 (접기|펴기)$/ });
+
+  it.each([
+    ['1280 이상이면 펴져 있다', 1280, false],
+    ['1280보다 좁으면 처음에 접혀 있다', 1279, true],
+  ])('저장한 값이 없을 때 — %s', async (_what, width, collapsed) => {
+    setWidth(width);
+    renderAt();
+    await screen.findByRole('banner');
+    expect(body().classList.contains('side-collapsed')).toBe(collapsed);
+    expect(toggleButton().getAttribute('aria-expanded')).toBe(String(!collapsed));
+    expect(toggleButton().getAttribute('aria-label')).toBe(collapsed ? '왼쪽 칸 펴기' : '왼쪽 칸 접기');
+    expect(toggleButton().getAttribute('aria-controls')).toBe('side');
+  });
+
+  it('**단추로 접고 펴며, 브라우저가 기억한다** — 다시 그려도(다른 화면·새로 고침) 그 상태다. 기억한 값이 폭보다 앞선다', async () => {
+    setWidth(1440);
+    renderAt();
+    await screen.findByRole('banner');
+    fireEvent.click(toggleButton());
+    expect(body().classList.contains('side-collapsed')).toBe(true);
+    expect(toggleButton().getAttribute('aria-expanded')).toBe('false');
+    expect(toggleButton().getAttribute('aria-label')).toBe('왼쪽 칸 펴기');
+    expect(window.localStorage.getItem('wf:side-collapsed')).toBe('1');
+
+    cleanup();
+    renderAt();
+    await screen.findByRole('banner');
+    expect(body().classList.contains('side-collapsed')).toBe(true);
+    fireEvent.click(toggleButton());
+    expect(body().classList.contains('side-collapsed')).toBe(false);
+    expect(window.localStorage.getItem('wf:side-collapsed')).toBe('0');
+
+    // 좁은 창이어도 편 것을 기억했으면 펴져 있다
+    cleanup();
+    setWidth(1000);
+    renderAt();
+    await screen.findByRole('banner');
+    expect(body().classList.contains('side-collapsed')).toBe(false);
+  });
+
+  it('**Ctrl+[ 로 접고 편다** — 입력칸 안에서는 먹지 않는다(글에 [ 를 친다)', async () => {
+    setWidth(1440);
+    renderAt('/form');
+    await screen.findByRole('banner');
+    fireEvent.keyDown(document.body, { key: '[', ctrlKey: true });
+    expect(body().classList.contains('side-collapsed')).toBe(true);
+    fireEvent.keyDown(document.body, { key: '[', ctrlKey: true });
+    expect(body().classList.contains('side-collapsed')).toBe(false);
+    // Ctrl 없이는 아무 일도 없다
+    fireEvent.keyDown(document.body, { key: '[' });
+    expect(body().classList.contains('side-collapsed')).toBe(false);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '아무 칸' }), { key: '[', ctrlKey: true });
+    expect(body().classList.contains('side-collapsed')).toBe(false);
+  });
+
+  it('**화면이 왼쪽 칸을 차지하면 기본 문맥(바로가기)이 사라지고 그 내용이 왼쪽 칸에 간다** — 떠나면 돌아온다', async () => {
+    renderAt('/space');
+    expect(await screen.findByText('스페이스 본문')).toBeTruthy();
+    const side = document.getElementById('side')!;
+    expect(within(side).getByText('스페이스 트리')).toBeTruthy();
+    // 본문(main)에는 그리지 않는다 — 포털이다
+    expect(within(screen.getByRole('main')).queryByText('스페이스 트리')).toBeNull();
+    expect(screen.queryByRole('navigation', { name: '바로가기' })).toBeNull();
+
+    fireEvent.click(within(screen.getByRole('navigation', { name: '주 메뉴' })).getByRole('link', { name: '검색' }));
+    expect(await screen.findByText('검색 본문')).toBeTruthy();
+    expect(await screen.findByRole('navigation', { name: '바로가기' })).toBeTruthy();
+    expect(screen.queryByText('스페이스 트리')).toBeNull();
   });
 });

@@ -186,6 +186,21 @@ export function AdminUsersPage() {
     });
   };
 
+  const resetPassword = async (u: UserView) => {
+    // 되돌릴 수 없고 그 사람의 세션과 편집 연결이 그 자리에서 끊긴다 — 한 번 묻는다(J.5.10, P17 병합 전 검토 22). 초기화 요청 알림은 본인의 요청이라는
+    // 보증이 아니다(아이디·email만으로 누구나 보낸다) — 본인 확인을 여기서도 말한다. 확정 단추는 줄의 "비밀번호 초기화"를 품지 않는다
+    const ok = await confirm({
+      title: '이 사용자의 비밀번호를 초기화할까요?',
+      body: `${u.displayName}(${u.username})님의 비밀번호를 임시 값으로 바꾼다. 세션과 편집 연결이 그 자리에서 끊기고, 임시 비밀번호는 이 화면에 한 번만 보인다. 요청을 받고 하는 것이면 본인이 요청했는지 먼저 확인한다.`,
+      confirmLabel: '새로 만든다',
+    });
+    if (!ok) return;
+    void act(async () => {
+      const r = await api<{ temporaryPassword: string }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
+      setTemporary({ username: u.username, password: r.temporaryPassword });
+    });
+  };
+
   // 받기 전에 거절됐다 — 권한이 없거나 서버에 닿지 않는다. 같은 틀에 알림띠만 둔다
   const failed = !loaded && error !== null;
 
@@ -320,12 +335,7 @@ export function AdminUsersPage() {
                           className="danger sm"
                           disabled={!manages}
                           title={reason}
-                          onClick={() =>
-                            void act(async () => {
-                              const r = await api<{ temporaryPassword: string }>(`/api/users/${u.id}/reset-password`, { method: 'POST' });
-                              setTemporary({ username: u.username, password: r.temporaryPassword });
-                            })
-                          }
+                          onClick={() => void resetPassword(u)}
                         >
                           비밀번호 초기화
                         </button>

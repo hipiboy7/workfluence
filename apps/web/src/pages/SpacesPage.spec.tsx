@@ -121,7 +121,13 @@ describe('SpacesPage — 홈 (P17 J.6)', () => {
     expect(form.className).toBe('inline-form');
     const button = within(form).getByRole('button', { name: '만들기' });
     expect(button.className).toBe('primary');
-    fireEvent.change(screen.getByLabelText('이름'), { target: { value: '새 팀' } });
+    // 필수 칸은 `required`와 보이는 "필수"(FR-1855) — "필수"는 label 밖이라 라벨 이름은 "이름" 그대로다(정확 일치로 찾는다 — 병합 전 검토 11)
+    const nameBox = screen.getByLabelText('이름') as HTMLInputElement;
+    expect(nameBox.required).toBe(true);
+    const head = nameBox.closest('.field')!.querySelector('.field-head')!;
+    expect(head.querySelector('label')!.textContent).toBe('이름');
+    expect(head.querySelector('.req')!.textContent).toBe('필수');
+    fireEvent.change(nameBox, { target: { value: '새 팀' } });
     fireEvent.click(button);
     expect(await screen.findByRole('link', { name: '새 팀' })).toBeTruthy();
     expect(calls.find((c) => c.method === 'POST')).toEqual({ method: 'POST', url: '/api/spaces', body: { name: '새 팀', kind: 'team' } });

@@ -51,11 +51,11 @@ export function LoginPage() {
         <h2>로그인</h2>
         {error && <Notice kind="error">{error}</Notice>}
         <form className="form-stack" onSubmit={submit}>
-          <Field id="username" label="아이디">
-            <input id="username" className="w-full" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
+          <Field id="username" label="아이디" required>
+            <input id="username" className="w-full" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
           </Field>
-          <Field id="password" label="비밀번호">
-            <input id="password" className="w-full" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+          <Field id="password" label="비밀번호" required>
+            <input id="password" className="w-full" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
           </Field>
           <FormActions>
             <button type="submit" className="primary" disabled={busy}>

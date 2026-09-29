@@ -337,19 +337,21 @@ export function useReadWide(): [boolean, () => void] {
     }
   };
   const [wide, setWide] = useState(read);
+  // 같은 화면의 다른 부품(보기의 글 칸과 이력의 미리보기 등)도 **알림에 실린 값**으로 맞춘다 — 저장소를 다시 읽으면, 쓰지 못했을 때(막은 정책·
+  // 할당량) 옛 값을 읽어 누른 쪽까지 되돌렸다(P17 병합 전 검토 8)
   useEffect(() => {
-    const on = () => setWide(read());
+    const on = (e: Event) => setWide((e as CustomEvent<boolean>).detail);
     window.addEventListener(READ_WIDE_EVENT, on);
     return () => window.removeEventListener(READ_WIDE_EVENT, on);
   }, []);
   const toggle = useCallback(() => {
+    const next = !wide;
     try {
-      window.localStorage.setItem(READ_WIDE_KEY, read() ? '0' : '1');
+      window.localStorage.setItem(READ_WIDE_KEY, next ? '1' : '0');
     } catch {
-      // 기억하지 못해도 이 화면에서는 바뀐다
+      // 기억하지 못해도 이 화면에서는 바뀐다 — 값은 알림이 싣는다
     }
-    setWide((v) => !v);
-    window.dispatchEvent(new Event(READ_WIDE_EVENT));
-  }, []);
+    window.dispatchEvent(new CustomEvent<boolean>(READ_WIDE_EVENT, { detail: next }));
+  }, [wide]);
   return [wide, toggle];
 }

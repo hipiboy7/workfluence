@@ -380,6 +380,24 @@ describe('AdminUsersPage — 화면 체계 (P17 J.6 관리 다섯)', () => {
     expect(role.value).toBe('member');
   });
 
+  it('**비밀번호 초기화는 한 번 묻는다** — 세션이 끊기고 임시 값이 한 번 보인다는 것과 본인 확인. 그만두면 보내지 않는다 (병합 전 검토 22)', async () => {
+    renderPage();
+    await screen.findByText('alice');
+    const reset = rowButton('alice', '비밀번호 초기화')!;
+    await waitFor(() => expect(reset.disabled).toBe(false));
+    fireEvent.click(reset);
+    const dialog = await screen.findByRole('dialog', { name: '이 사용자의 비밀번호를 초기화할까요?' });
+    expect(dialog.textContent).toContain('x(alice)님의 비밀번호를 임시 값으로 바꾼다. 세션과 편집 연결이 그 자리에서 끊기고, 임시 비밀번호는 이 화면에 한 번만 보인다.');
+    expect(dialog.textContent).toContain('본인이 요청했는지 먼저 확인한다');
+    // 확정 단추는 줄의 단추 이름을 품지 않는다 — 시험이 둘을 헷갈리지 않게(J.5.10)
+    expect(within(dialog).getByRole('button', { name: '새로 만든다' }).className).toBe('danger solid');
+    expect(within(dialog).queryByRole('button', { name: /초기화/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: '그만두기' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(calls.filter((c) => c.url.endsWith('/reset-password'))).toEqual([]);
+    expect(screen.queryByText('임시 비밀번호')).toBeNull();
+  });
+
   it('**임시 비밀번호는 한 번 보이고 닫으면 사라진다** — 초기화는 위험 단추다', async () => {
     renderPage();
     await screen.findByText('alice');
@@ -387,6 +405,8 @@ describe('AdminUsersPage — 화면 체계 (P17 J.6 관리 다섯)', () => {
     expect(reset.className).toBe('danger sm');
     await waitFor(() => expect(reset.disabled).toBe(false));
     fireEvent.click(reset);
+    const dialog = await screen.findByRole('dialog', { name: '이 사용자의 비밀번호를 초기화할까요?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '새로 만든다' }));
     const note = (await screen.findByText('임시 비밀번호')).closest('.notice')!;
     expect(note.getAttribute('role')).toBe('note');
     expect(note.textContent).toContain('alice');

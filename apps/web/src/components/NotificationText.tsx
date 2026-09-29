@@ -7,11 +7,13 @@ import type { NotificationView } from '@workfluence/shared';
  */
 export function NotificationText({ n }: { n: NotificationView }) {
   if (n.kind === 'password.reset.request') {
-    // 요청한 사람을 사용자 관리에서 찾아 초기화한다 — 찾기 칸에 아이디를 넣어 연다. 요청은 감사로그에도 있다(`auth.password.recover`)
+    // 그 사람을 사용자 관리에서 찾아 초기화한다 — 찾기 칸에 아이디를 넣어 연다. 요청은 감사로그에도 있다(`auth.password.recover`).
+    // **본인의 요청이라고 말하지 않는다** (P17 병합 전 검토 22) — 요청은 로그인 없이 아이디와 email만으로 만들어지고, 그 둘을 아는 것은 본인이라는
+    // 보증이 아니다(P1 설계서 2.4절). 그래서 "누구의 아이디·email로 요청됐다"고 말하고 본인 확인을 먼저 하라고 한다
     return (
       <>
         <strong>{n.actorName ?? '(알 수 없는 사용자)'}</strong>
-        {n.actorUsername && <> ({n.actorUsername})</>}님이 비밀번호 초기화를 요청했다
+        {n.actorUsername && <> ({n.actorUsername})</>}님의 아이디·email로 비밀번호 초기화가 요청됐다 — 본인에게 확인한 뒤 초기화한다
         {n.actorUsername && (
           <>
             {' · '}

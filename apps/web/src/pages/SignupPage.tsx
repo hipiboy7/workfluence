@@ -46,17 +46,17 @@ export function SignupPage() {
           <>
             {error && <Notice kind="error">{error}</Notice>}
             <form className="form-stack" onSubmit={submit}>
-              <Field id="su-username" label="아이디">
-                <input id="su-username" className="w-full" value={form.username} onChange={set('username')} required />
+              <Field id="su-username" label="아이디" required>
+                <input id="su-username" className="w-full" value={form.username} onChange={set('username')} />
               </Field>
-              <Field id="su-name" label="이름">
-                <input id="su-name" className="w-full" value={form.displayName} onChange={set('displayName')} required />
+              <Field id="su-name" label="이름" required>
+                <input id="su-name" className="w-full" value={form.displayName} onChange={set('displayName')} />
               </Field>
-              <Field id="su-email" label="email">
-                <input id="su-email" className="w-full" type="email" value={form.email} onChange={set('email')} required />
+              <Field id="su-email" label="email" required>
+                <input id="su-email" className="w-full" type="email" value={form.email} onChange={set('email')} />
               </Field>
-              <Field id="su-pw" label="비밀번호" help={ruleText}>
-                <input id="su-pw" className="w-full" type="password" value={form.password} onChange={set('password')} autoComplete="new-password" required />
+              <Field id="su-pw" label="비밀번호" help={ruleText} required>
+                <input id="su-pw" className="w-full" type="password" value={form.password} onChange={set('password')} autoComplete="new-password" />
               </Field>
               <FormActions>
                 <button type="submit" className="primary" disabled={busy}>

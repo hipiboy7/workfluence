@@ -43,10 +43,11 @@ describe('AuditLevelCard', () => {
     expect(panel().open).toBe(false);
     const minimal = screen.getByRole('radio', { name: new RegExp(AUDIT_LEVEL_TEXT[1].name) });
     // 빠지는 것은 코드가 아니라 한글 이름 — 규칙(`AUDIT_MIN_LEVEL`)에서 뽑는다
-    expect(screen.getByText('남기지 않는 것: 실시간 편집 자동 저장, 실시간 편집 바로 저장, 실시간 편집 제목 바꾸기')).toBeTruthy();
+    // 단계 2는 자동 저장만 뺀다 — 사람이 누른 저장·제목 바꾸기는 고치기라 필수다(P17 설계서 I절 7, 병합 전 검토)
+    expect(screen.getByText('남기지 않는 것: 실시간 편집 자동 저장')).toBeTruthy();
     expect(minimal.getAttribute('aria-describedby')).toBe('audit-level-1-dropped');
     expect(document.getElementById('audit-level-1-dropped')!.textContent).toBe(
-      '남기지 않는 것: 첨부 받기, HTML 내보내기, 실시간 편집 자동 저장, 실시간 편집 바로 저장, 실시간 편집 제목 바꾸기, 메일 발송 성공, LLM 질문',
+      '남기지 않는 것: 첨부 받기, HTML 내보내기, 실시간 편집 자동 저장, 메일 발송 성공, LLM 질문',
     );
     // 같은 단계로는 저장하지 않는다
     expect((screen.getByRole('button', { name: '단계 저장' }) as HTMLButtonElement).disabled).toBe(true);

@@ -12,7 +12,8 @@ export type ConfirmOptions = {
   danger?: boolean;
 };
 
-type Pending = ConfirmOptions & { resolve: (ok: boolean) => void };
+/** `opener` — 부를 때 초점이 있던 요소. 닫은 뒤 그리로 돌려보낸다 */
+type Pending = ConfirmOptions & { resolve: (ok: boolean) => void; opener: HTMLElement | null };
 
 /**
  * 확인 대화 (P17 설계서 J.5.10, FR-1858). 브라우저 내장 `<dialog>`와 `showModal()`을 쓴다 — 초점 가두기·Esc·맨 위 층을 브라우저가 맡는다
@@ -25,7 +26,8 @@ export function useConfirm(): [(opts: ConfirmOptions) => Promise<boolean>, React
   const confirm = useCallback(
     (opts: ConfirmOptions) =>
       new Promise<boolean>((resolve) => {
-        setPending({ ...opts, resolve });
+        const active = document.activeElement;
+        setPending({ ...opts, resolve, opener: active instanceof HTMLElement && active !== document.body ? active : null });
       }),
     [],
   );
@@ -42,7 +44,15 @@ export function useConfirm(): [(opts: ConfirmOptions) => Promise<boolean>, React
   return [confirm, dialog];
 }
 
-function ConfirmDialog({ title, body, confirmLabel, cancelLabel = '그만두기', danger = true, onClose }: ConfirmOptions & { onClose: (ok: boolean) => void }) {
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  cancelLabel = '그만두기',
+  danger = true,
+  opener,
+  onClose,
+}: ConfirmOptions & { opener: HTMLElement | null; onClose: (ok: boolean) => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -61,6 +71,17 @@ function ConfirmDialog({ title, body, confirmLabel, cancelLabel = '그만두기'
       if (d.open) d.close();
     };
   }, [onClose]);
+  // 닫은 뒤(위의 정리 다음) 초점을 부른 단추로 돌려보낸다 (P17 병합 전 검토 15). React는 대화를 문서에서 먼저 떼고 정리를 나중에 부른다 — 그래서 `close()`가 떨어진
+  // 대화에서 불려 브라우저의 "이전 초점 되돌리기"가 일어나지 않고 초점이 body로 빠졌다(키보드 사용자가 제자리를 잃는다). 부른 단추가 그 사이
+  // 사라졌으면(지운 줄) 돌려보내지 않는다
+  const openerRef = useRef(opener);
+  useEffect(
+    () => () => {
+      const el = openerRef.current;
+      if (el?.isConnected) el.focus();
+    },
+    [],
+  );
   return (
     <dialog ref={ref} className="confirm" aria-labelledby="confirm-title">
       <h2 id="confirm-title">{title}</h2>

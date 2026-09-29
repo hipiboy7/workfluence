@@ -54,9 +54,8 @@ export function SpacesPage() {
           <h2 id="sp-create-title">팀 스페이스 만들기</h2>
           {/* 칸 하나 + 단추 한 줄 (J.5.4) — 라벨 '이름'은 시험이 찾는 이름이다 */}
           <form className="inline-form" aria-labelledby="sp-create-title" onSubmit={create}>
-            {/* `required`는 칸에 둔다 — Field의 보이는 "필수"는 label 안에 들어가 라벨 글이 '이름필수'가 된다(칸 하나짜리 줄에는 필요도 없다) */}
-            <Field id="sp-name" label="이름">
-              <input id="sp-name" className="w-m" value={name} onChange={(e) => setName(e.target.value)} required />
+            <Field id="sp-name" label="이름" required>
+              <input id="sp-name" className="w-m" value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
             <button type="submit" className="primary">
               만들기

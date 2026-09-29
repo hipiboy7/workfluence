@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { CollabLink, colorFor, type CollabState } from './collabLink';
+import type { ScrollMargin } from './Editor';
 import { editorExtensions } from './extensions';
 
 export type { CollabState } from './collabLink';
@@ -21,6 +22,8 @@ type Props = {
   onDoc?: (doc: Y.Doc | null) => void;
   /** 쓰는 칸의 이름이 되는 **보이는 라벨**의 id (P17 J.7) — 없으면 이름은 "본문"이다 */
   labelledBy?: string;
+  /** 창 위를 가리는 막대만큼 띄워 커서를 보이게 한다 — 편집 화면의 `EDIT_SCROLL_MARGIN` (P17 병합 전 검토 17) */
+  scrollMargin?: ScrollMargin;
 };
 
 /**
@@ -58,7 +61,7 @@ export function CollabEditor(props: Props) {
   return <LiveEditor key={live.ydoc.guid} {...props} ydoc={live.ydoc} awareness={live.awareness} />;
 }
 
-function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlocked, labelledBy, ydoc, awareness }: Props & { ydoc: Y.Doc; awareness: Awareness }) {
+function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlocked, labelledBy, scrollMargin, ydoc, awareness }: Props & { ydoc: Y.Doc; awareness: Awareness }) {
   const [state, setState] = useState<CollabState>('connecting');
   // 알림 받는 함수가 바뀌어도 다시 붙지 않게 참조로 둔다 — 연결 효과의 의존에 넣으면 부모가 다시 그릴 때마다 끊고 붙는다
   const onSaveBlockedRef = useRef(onSaveBlocked);
@@ -105,6 +108,8 @@ function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlock
       // `label htmlFor`는 편집기의 div를 가리킬 수 없다(P17 J.7)
       editorProps: {
         attributes: { role: 'textbox', 'aria-multiline': 'true', ...(labelledBy ? { 'aria-labelledby': labelledBy } : { 'aria-label': '본문' }) },
+        // 붙어 있는 막대 뒤로 커서가 숨지 않게 — 만들 때 한 번 준다(편집 화면의 값은 바뀌지 않는다)
+        ...(scrollMargin ? { scrollMargin, scrollThreshold: scrollMargin } : {}),
       },
       extensions: [
         // 보기·편집용과 **같은 목록**에 실행 취소만 끈다 — Yjs가 자기 실행 취소를 들고 있다 (P9 D.7)

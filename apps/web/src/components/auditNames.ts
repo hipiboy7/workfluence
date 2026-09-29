@@ -80,3 +80,50 @@ export const AUDIT_ACTION_NAMES: Record<AuditAction, string> = {
 export function auditActionName(code: string): string | null {
   return Object.prototype.hasOwnProperty.call(AUDIT_ACTION_NAMES, code) ? AUDIT_ACTION_NAMES[code as AuditAction] : null;
 }
+
+/**
+ * 감사 대상 종류(`targetType`)의 한글 이름 (P17 병합 전 검토 23) — 감사로그의 대상 칸이 "페이지 · 회의록"처럼 종류를 먼저 보인다. 이름만 보이면 행위자가
+ * 지은 제목(다른 페이지의 제목·남의 아이디)이 대상처럼 읽혔다. 종류는 서버가 `audit.record`에 넘기는 글이다 — 모르는 종류는 그 글 그대로 보인다
+ */
+export const AUDIT_TARGET_NAMES: Readonly<Record<string, string>> = {
+  user: '사용자',
+  username: '아이디',
+  email: 'email',
+  oidc_sub: '사내 계정',
+  page: '페이지',
+  space: '스페이스',
+  category: '분류',
+  template: '템플릿',
+  attachment: '첨부',
+  comment: '댓글',
+  settings: '운영 설정',
+  system: '시스템',
+  'llm.provider': 'LLM 연결',
+  'llm.conversation': 'LLM 대화',
+};
+
+/**
+ * 대상 종류마다 **그 대상 자신의 이름**을 싣는 상세 키 (병합 전 검토 6·16) — 상세에는 대상이 아닌 이름도 있다(Crew 추가의 `username`은 넣은
+ * 사람이지 스페이스가 아니다). 여기 없는 종류는 이름 없이 식별자만 보인다
+ */
+export const AUDIT_TARGET_NAME_KEY: Readonly<Record<string, string>> = {
+  user: 'username',
+  page: 'title',
+  space: 'name',
+  category: 'name',
+  template: 'name',
+  attachment: 'filename',
+  'llm.provider': 'name',
+};
+
+/** 대상 종류의 한글 이름 — 모르면 그 글 그대로. 자기 속성만 본다(`constructor` 같은 이름이 이름으로 읽히지 않게) */
+export function auditTargetName(type: string): string {
+  return Object.prototype.hasOwnProperty.call(AUDIT_TARGET_NAMES, type) ? AUDIT_TARGET_NAMES[type] : type;
+}
+
+/** 상세가 싣는 대상 자신의 이름 — 그 종류의 키에 비지 않은 글이 있을 때만. 없으면 `null` */
+export function auditTargetLabel(type: string | null, detail: Record<string, unknown> | null): string | null {
+  if (!type || !detail || !Object.prototype.hasOwnProperty.call(AUDIT_TARGET_NAME_KEY, type)) return null;
+  const v = detail[AUDIT_TARGET_NAME_KEY[type]];
+  return typeof v === 'string' && v.trim() ? v : null;
+}

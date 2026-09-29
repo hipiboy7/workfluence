@@ -20,12 +20,17 @@ const cache = new Map<string, Entry>();
 export function SpaceSideNav({ spaceId, currentPageId, space, pages }: { spaceId: string; currentPageId?: string; space?: SpaceView | null; pages?: PageSummary[] | null }) {
   const given = space && pages ? { space, pages } : null;
   const [entry, setEntry] = useState<Entry | null>(given ?? cache.get(spaceId) ?? null);
+  // 스스로 부른 것이 실패했다 — 들고 있는 트리가 없으면 "불러오는 중"에 머물지 않고 그렇게 말한다(P17 병합 전 검토 5, FR-1861)
+  const [failed, setFailed] = useState(false);
+  // **다시 읽기**를 누른 횟수 — 바뀌면 다시 부른다
+  const [attempt, setAttempt] = useState(0);
   const { pathname, hash } = useLocation();
 
   useEffect(() => {
     if (given) {
       cache.set(spaceId, given);
       setEntry(given);
+      setFailed(false);
       return;
     }
     let alive = true;
@@ -36,9 +41,14 @@ export function SpaceSideNav({ spaceId, currentPageId, space, pages }: { spaceId
           const e = { space: s, pages: p };
           cache.set(spaceId, e);
           setEntry(e);
+          setFailed(false);
         })
-        .catch(() => undefined);
+        // 들고 있던 트리가 있으면 그것을 그대로 보인다 — 다음 알림(TREE_CHANGED)이나 다시 읽기가 다시 부른다
+        .catch(() => {
+          if (alive) setFailed(true);
+        });
     setEntry(cache.get(spaceId) ?? null);
+    setFailed(false);
     void load();
     const onChanged = (e: Event) => {
       if ((e as CustomEvent<string>).detail === spaceId) void load();
@@ -49,9 +59,19 @@ export function SpaceSideNav({ spaceId, currentPageId, space, pages }: { spaceId
       window.removeEventListener(TREE_CHANGED, onChanged);
     };
     // 넘겨받은 값이 바뀌면(화면이 다시 읽었다) 그것을 쓴다
-  }, [spaceId, given?.space, given?.pages]);
+  }, [spaceId, given?.space, given?.pages, attempt]);
 
-  if (!entry) return <p className="loading">불러오는 중…</p>;
+  if (!entry) {
+    if (!failed) return <p className="loading">불러오는 중…</p>;
+    return (
+      <div className="side-group">
+        <p className="side-meta">트리를 읽지 못했다.</p>
+        <button type="button" className="sm" onClick={() => setAttempt((n) => n + 1)}>
+          다시 읽기
+        </button>
+      </div>
+    );
+  }
   const s = entry.space;
   const home = pathname === `/spaces/${spaceId}` && hash !== '#new-page';
   return (

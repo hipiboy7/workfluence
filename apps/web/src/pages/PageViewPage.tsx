@@ -56,7 +56,10 @@ export function PageViewPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [wide, toggleWide] = useReadWide();
-  useDocumentTitle(page?.title ?? (loadError ? LOAD_FAILED_TITLE : null));
+  // **주소의 페이지를 읽은 뒤에만 그 페이지다** (P17 병합 전 검토 14). 트리에서 다른 페이지로 가면 응답이 오기 전까지 앞 페이지를 들고 있다 — 그
+  // 사이 앞 페이지의 제목·조치를 그리면 "삭제"가 옛 제목을 보인 채 새 페이지(주소의 id)를 지운다. 그동안은 불러오는 중이다
+  const current = page && page.id === id ? page : null;
+  useDocumentTitle(current?.title ?? (loadError ? LOAD_FAILED_TITLE : null));
 
   useEffect(() => {
     // 트리에서 다른 페이지로 가면 이 화면은 그대로 있고 주소만 바뀐다 — 앞 페이지의 칸·오류를 닫고, 늦게 온 앞 페이지의 응답은 버린다
@@ -109,23 +112,36 @@ export function PageViewPage() {
       </>
     );
   }
+  // 왼쪽 칸은 **앞 페이지를 들고 있는 동안에도 같은 자리에** 그린다 — 트리의 펼침·접음이 페이지를 옮겨 다녀도 남는다(아래 본문과 같은 모양)
+  const side = (
+    <SideSlot>
+      {/* 이 화면이 읽은 스페이스와 트리를 넘긴다 — 빵부스러기와 트리가 같은 목록을 보고, 넘긴 뒤로는 왼쪽 칸이 따로 부르지 않는다. 넘기기 전(처음
+          여는 동안)에는 왼쪽 칸이 들고 있던 트리를 먼저 보이고 스스로 한 번 부른다 — 옮길 때마다 비었다가 다시 그려지지 않게(J.5.11) */}
+      <SpaceSideNav spaceId={page.spaceId} currentPageId={id} space={here?.space ?? null} pages={here?.pages ?? null} />
+    </SideSlot>
+  );
+  if (!current) {
+    return (
+      <Page width="full">
+        {side}
+        <Loading />
+      </Page>
+    );
+  }
 
   const canWrite = here?.space.access.canWrite ?? false;
+  // 지우는 것은 **그린 페이지**다 — 주소의 id가 아니라 화면에 제목이 보이는 그 페이지
   const remove = () =>
-    void api(`/api/pages/${id}`, { method: 'DELETE' })
+    void api(`/api/pages/${current.id}`, { method: 'DELETE' })
       .then(() => {
-        announceTreeChanged(page.spaceId);
-        nav(`/spaces/${page.spaceId}`);
+        announceTreeChanged(current.spaceId);
+        nav(`/spaces/${current.spaceId}`);
       })
       .catch((e: unknown) => setActionError(e instanceof Error ? e.message : String(e)));
 
   return (
     <Page width="full">
-      <SideSlot>
-        {/* 이 화면이 읽은 스페이스와 트리를 넘긴다 — 빵부스러기와 트리가 같은 목록을 보고, 넘긴 뒤로는 왼쪽 칸이 따로 부르지 않는다. 넘기기 전(처음
-            여는 동안)에는 왼쪽 칸이 들고 있던 트리를 먼저 보이고 스스로 한 번 부른다 — 옮길 때마다 비었다가 다시 그려지지 않게(J.5.11) */}
-        <SpaceSideNav spaceId={page.spaceId} currentPageId={id} space={here?.space ?? null} pages={here?.pages ?? null} />
-      </SideSlot>
+      {side}
       <div className="doc-head">
         <Breadcrumbs items={crumbs} />
         {canWrite && (
@@ -145,7 +161,9 @@ export function PageViewPage() {
           </div>
         )}
       </div>
-      <div className={wide ? 'doc wide' : 'doc'}>
+      {/* 본문 쪽은 **페이지마다 새로 만든다**(`key`) — 라벨 입력·첨부·댓글 초안과 "답하기"·템플릿 칸이 다른 페이지로 따라가지 않게(병합 전 검토 14).
+          왼쪽 칸은 이 밖이라 트리의 펼침이 남는다 */}
+      <div key={id} className={wide ? 'doc wide' : 'doc'}>
         {actionError && <Notice kind="error">{actionError}</Notice>}
         {moving && canWrite && (
           <MovePage

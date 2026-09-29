@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { MeView } from '@workfluence/shared';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
@@ -97,6 +97,12 @@ const renderPage = () =>
     </MemoryRouter>,
   );
 const titleBox = () => screen.getByLabelText('제목') as HTMLInputElement;
+/** 창을 닫거나 새로 고치려 한다 — 화면이 막으면(묻는다) 참 */
+const leaving = () => {
+  const e = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
+};
 const save = () => fireEvent.click(screen.getByRole('button', { name: '저장하고 보기로' }));
 
 describe('PageEditorPage — 실시간 편집의 저장하고 보기로', () => {
@@ -229,6 +235,30 @@ describe('PageEditorPage — 편집 화면의 모양 (P17 J.6 · FR-1860)', () =
     expect(box.hasAttribute('aria-label')).toBe(false);
     expect(screen.getByText('편집을 시작한 버전: v3')).toBeTruthy();
     expect(screen.queryByText('쓰는 대로 자동으로 저장된다')).toBeNull();
+  });
+
+  it('**실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫기 전에 묻는다** — 고치지 않았거나 되돌렸으면 묻지 않는다 (병합 전 검토 18)', async () => {
+    collabEnabled = false;
+    renderPage();
+    const box = await screen.findByRole('textbox', { name: '본문' });
+    // 처음 그린 편집기가 불러온 본문을 넣는 것은 고친 것이 아니다
+    expect(leaving()).toBe(false);
+    fireEvent.change(titleBox(), { target: { value: '고친 제목' } });
+    expect(leaving()).toBe(true);
+    fireEvent.change(titleBox(), { target: { value: '옛 제목' } });
+    expect(leaving()).toBe(false);
+    // 본문을 고친다 — 편집기의 입력과 같은 길(편집기가 알린다)
+    await act(async () => {
+      (box as HTMLElement & { editor: { commands: { insertContent: (t: string) => void } } }).editor.commands.insertContent('새 글');
+    });
+    expect(leaving()).toBe(true);
+  });
+
+  it('실시간 편집 화면은 묻지 않는다 — 서버가 쓰는 대로 저장한다', async () => {
+    renderPage();
+    await screen.findByText('실시간 편집기');
+    fireEvent.change(titleBox(), { target: { value: '고친 제목' } });
+    expect(leaving()).toBe(false);
   });
 
   it('REST 저장이 409면 편집 줄 아래 알림띠가 말하고 **덮어쓰기 단추 없이** 최신 내용 불러오기만 둔다 — 저장은 막힌다 (FR-343)', async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import type { MeView, PageSummary, PageView, SpaceView } from '@workfluence/shared';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../auth';
@@ -212,6 +212,48 @@ describe('PageViewPage — 머리 줄과 글 칸 (P17 J.3.5·J.6)', () => {
     } finally {
       window.removeEventListener(TREE_CHANGED, onChanged);
     }
+  });
+
+  it('**트리로 다른 페이지로 가는 사이 앞 페이지의 제목·조치를 보이지 않는다** — 삭제가 옛 제목을 보인 채 새 페이지로 가지 않고, 트리의 접음은 남는다 (병합 전 검토 14)', async () => {
+    tree = [summary('p1', null, '회의록'), summary('p2', null, '주간 보고'), summary('p3', 'p2', '월요일')];
+    const second: PageView = { ...basePage, id: 'p2', title: '주간 보고', currentVersionNo: 5 };
+    let answer: (r: Response) => void = () => undefined;
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (url === '/api/pages/p2') {
+        calls.push({ method, url });
+        if (method === 'DELETE') return Promise.resolve(json(200, { ok: true }));
+        // 둘째 페이지의 응답은 시험이 보낼 때까지 오지 않는다
+        return new Promise<Response>((r) => (answer = r));
+      }
+      return base(input as RequestInfo, init);
+    }) as unknown as typeof fetch;
+    renderPage();
+    await screen.findByRole('heading', { level: 1, name: '회의록' });
+    // 트리의 "주간 보고" 가지를 접어 둔다 — 페이지를 옮겨도 그대로여야 한다
+    fireEvent.click(screen.getByRole('button', { name: '주간 보고 접기' }));
+    expect(screen.queryByRole('link', { name: '월요일' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('link', { name: '주간 보고' }));
+    // 응답을 기다리는 동안 — 앞 페이지의 제목·조치·본문이 없다. 불러오는 중이다
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 1, name: '회의록' })).toBeNull());
+    expect(screen.queryByRole('button', { name: '삭제' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '편집' })).toBeNull();
+    expect(screen.getByText('불러오는 중…')).toBeTruthy();
+    // 왼쪽 칸은 그대로다 — 접은 가지가 접힌 채이고 지금 페이지는 새 주소의 것이다
+    expect(screen.getByRole('button', { name: '주간 보고 펼치기' }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('link', { name: '주간 보고' }).getAttribute('aria-current')).toBe('page');
+    expect(calls.filter((c) => c.method === 'DELETE')).toEqual([]);
+
+    await act(async () => {
+      answer(json(200, second));
+    });
+    expect(await screen.findByRole('heading', { level: 1, name: '주간 보고' })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: '삭제' }));
+    expect(await screen.findByText('스페이스 화면')).toBeTruthy();
+    expect(calls.filter((c) => c.method === 'DELETE')).toEqual([{ method: 'DELETE', url: '/api/pages/p2' }]);
   });
 
   it('**열지 못하면 까닭을 알림띠로 말한다** — 흩어진 "← 목록" 링크는 없다(위 막대가 있다)', async () => {
