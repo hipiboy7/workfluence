@@ -12,7 +12,9 @@ name: Windows 묶음 (F-009)
 # 언제 도나 — 코드가 바뀐 main 커밋마다(문서만 바뀐 커밋은 돌지 않는다), exp/windows-local에 올린 커밋마다(병합 전에 러너로 확인한다), 그리고
 # 수동 실행(Actions 화면의 Run workflow). 수동 실행은 이 파일이 기본 브랜치(main)에 있어야 보이고, 고른 브랜치에도 이 파일과 `pnpm win:bundle`이 있어야
 # 한다 — Phase 브랜치의 화면을 미리 보려면 그 브랜치에 F-009가 들어간 main을 먼저 들인다.
-# 시험이 실패하거나 취소되면 올린 묶음을 지운다 — 받을 수 있는 묶음은 시험을 통과한 것뿐이다
+# **pull request에는 돌지 않는다** — Windows 러너는 Linux의 두 배 값으로 치고 한 번에 수 분이다. 설정 키를 바꾼 Phase가 묶음을 깨는지는 병합 뒤 main의
+# 실행으로 본다(CLAUDE.md 1.1절 8-1 ⑥).
+# 시험이 실패하거나 취소되면 올린 묶음을 지운다 — 받을 수 있는 묶음은 시험을 통과한 것뿐이다. 지우는 쓰기 권한은 따로 둔 작업(discard)만 쥔다
 on:
   push:
     branches: [main, exp/windows-local]
@@ -23,10 +25,9 @@ concurrency:
   group: windows-local-${{ github.ref }}
   cancel-in-progress: true
 
+# 빌드·시험 작업은 읽기 전용이다 — 설치 스크립트(allowBuilds)와 빌드한 코드가 그 작업에서 돈다
 permissions:
   contents: read
-  # 시험을 통과하지 못한 실행의 묶음을 지운다
-  actions: write
 
 jobs:
   bundle:
@@ -37,9 +38,11 @@ jobs:
         shell: powershell
     env:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
-      # 시험 폴더(RUNNER_TEMP 아래) — 공백이 든 경로, 옮긴 뒤의 경로. 한글 경로는 run 블록 안에서 문자 코드로 만든다
+      # 시험 폴더(RUNNER_TEMP 아래) — 공백이 든 경로, 옮긴 뒤의 경로, 옛 data를 옮겨 온 새 묶음, 쓰지 않는 DLL을 뺀 사본. 한글 경로는 run 블록 안에서 문자 코드로 만든다
       TRIAL_FIRST: bundle test\workfluence
       TRIAL_MOVED: moved here\wf2
+      TRIAL_NEW: new bundle\wf3
+      TRIAL_TRIMMED: trimmed\wf4
     steps:
       - uses: actions/checkout@v4
 
@@ -74,7 +77,6 @@ jobs:
       # 묶음 — 풀지 않은 처음 모양(data 폴더가 없다). 받으면 zip이다. **점으로 시작하는 폴더도 담는다** — 앱 부품의 실제 내용은 node_modules\.pnpm에 있는데,
       # upload-artifact v4는 그런 폴더를 기본으로 빼서 받은 묶음이 `Cannot find module 'pg'`로 멈췄다(사용자가 실제로 받아 걸렸다, 2026-09-28, T-076)
       - name: 묶음 올리기
-        id: bundle
         uses: actions/upload-artifact@v4
         with:
           name: workfluence-windows-trial
@@ -91,13 +93,18 @@ jobs:
           path: ${{ runner.temp }}/artifact
 
       # 사람이 하는 것과 같게 — 저장소 밖의 빈 폴더(공백이 든 경로)에 복사해 시작.cmd를 누른다. 차례:
-      #   1) 처음 시작 → 첫 로그인·비밀번호 바꾸기 → 띄운 채 시작.cmd를 한 번 더(첫 인스턴스가 그대로 답하는가) → 첨부 올리기 → 멈추기.cmd → 남은 것이 없는가
-      #   2) 다시 시작(데이터가 남았나, 첫 비밀번호를 다시 보이지 않는가) → 멈추기
+      #   1) 처음 시작 → 첫 로그인·비밀번호 바꾸기 → 띄운 채 시작.cmd를 한 번 더 — 같은 폴더를 다른 모양의 경로(subst 드라이브, 8.3 짧은 이름)로 불러도
+      #      첫 인스턴스를 알아보는가 → 첨부 올리기 → subst 드라이브의 멈추기.cmd → 남은 것이 없는가
+      #   2) 다시 시작(데이터가 남았나, 첫 비밀번호를 다시 보이지 않는가) → root를 하나 더 만들고 원래 root를 admin으로 내린다 → 멈추기
+      #   2b) 다시 시작 — 첫 관리자(시드)가 "root가 아니다"로 실패해도 위키가 뜨고 data\settings.env를 말하는가 → root로 되돌리고 멈추기
       #   3) 폴더를 옮겨 다시 시작 → 옮기기 전에 올린 첨부가 내려받아지는가 → 멈추기
+      #   3b) 새 묶음에 옛 data를 복사해 시작 — 새 판이 모르는 WF_ 키를 알리고 넘기지 않는가, 복사로 넓어진 data 권한을 다시 좁히는가, 데이터·첨부가 있는가
       #   4) 낡은 PID 파일(남의 프로세스 번호)로 멈추기.cmd — 그 프로세스를 건드리지 않는가
       #   5) 3000번을 다른 프로그램이 쥔 채 시작.cmd — 까닭(WF_PORT)을 말하고 멈추고, 데이터베이스를 남기지 않는가
-      #   6) 복구 — data\pgdata만 지우고 다시 시작, 끝났다는 표시가 없는(반쯤 만든) 데이터베이스로 다시 시작: 새로 만들고 첫 비밀번호로 root가 로그인되는가
+      #   6) 복구 — data\pgdata만 지우기(새로 만든다), 끝났다는 표시만 사라진 쓰던 데이터베이스(데이터가 남아야 한다), 정말 반쯤 만든 데이터베이스(PG_VERSION만
+      #      있고 pg_control이 없다 — 지우지 않고 data\pgdata.broken-<시각>으로 옮기고 새로 만든다)
       #   7) 한글이 든 경로(참고 — 이 러너는 영어 Windows라 실패해도 이 단계를 실패로 치지 않는다)
+      #   8) 어떤 실행 파일도 쓰지 않는 DLL을 뺀 사본(참고 — 라이선스 판단을 위한 것. 받는 묶음에는 그대로 들어 있다, scripts/win-bundle.ts)
       - name: 빈 폴더에서 띄워 보기
         run: |
           try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
@@ -106,6 +113,7 @@ jobs:
           $got = (Get-ChildItem -Recurse -File -Force $src).Count
           "files: staged $staged, downloaded $got"
           if ($got -ne $staged) { throw "the downloaded bundle has $got files but the staged one has $staged" }
+          $unused = @(Get-Content -Raw '.local\win-bundle\unused-files.json' | ConvertFrom-Json)
           $startCmd = (-join ([char[]](0xC2DC, 0xC791))) + '.cmd'
           $stopCmd = (-join ([char[]](0xBA48, 0xCD94, 0xAE30))) + '.cmd'
           $logs = Join-Path $env:RUNNER_TEMP 'bundle-test'
@@ -123,6 +131,8 @@ jobs:
             Write-Output "=== $name : $word $detail"
           }
           function Read-Shared([string]$p) { try { $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite'); try { (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $fs.Dispose() } } catch { '' } }
+          function Get-Said([string]$tag) { return (Read-Shared (Join-Path $logs "$tag.out.log")) + (Read-Shared (Join-Path $logs "$tag.err.log")) }
+          function New-Secret([string]$prefix) { $v = $prefix + [guid]::NewGuid().ToString('N').Substring(0, 12); Write-Output "::add-mask::$v" | Out-Host; $script:secrets.Add($v); return $v }
           # secrets from data\settings.env are masked before any launcher output reaches the log
           function Protect-Secrets([string]$dir) {
             $f = Join-Path $dir 'data\settings.env'
@@ -169,6 +179,8 @@ jobs:
             Hide (Read-Shared (Join-Path $logs "$tag.err.log"))
             Write-Output '::endgroup::'
           }
+          # every launcher run: its process checks went through PowerShell (the fallback lines name PowerShell)
+          function Test-Checks([string]$tag) { Mark "$tag - process checks ran (no PowerShell fallback line)" (-not (Get-Said $tag).Contains('PowerShell')) '' }
           function Test-DbStopped([string]$dir) {
             $code = Invoke-Quiet (Join-Path $dir 'pgsql\bin\pg_ctl.exe') ('status -D "' + (Join-Path $dir 'data\pgdata') + '"') 'pgctl-status'
             return ($code -ne 0)
@@ -177,25 +189,51 @@ jobs:
             $prefix = $dir.TrimEnd('\') + '\'
             return @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })
           }
-          function Stop-Trial([string]$dir, [string]$tag) {
-            $code = Invoke-Quiet (Join-Path $dir $stopCmd) '' "$tag.stop"
+          # stop.cmd of the folder, or of another spelling of the same folder ($via)
+          function Stop-Trial([string]$dir, [string]$tag, [string]$via = '') {
+            if (-not $via) { $via = $dir }
+            $code = Invoke-Quiet (Join-Path $via $stopCmd) '' "$tag.stop"
             for ($i = 0; $i -lt 30; $i++) { if (-not (Test-Health)) { break }; Start-Sleep -Seconds 1 }
             Mark "$tag - stop.cmd exit 0" ($code -eq 0) "exit $code"
             Mark "$tag - app port closed" (-not (Test-Health)) ''
             Mark "$tag - database stopped (pg_ctl status is not 0)" (Test-DbStopped $dir) ''
             $left = Get-BundleProcs $dir
             Mark "$tag - no postgres.exe or node.exe of the bundle left" ($left.Count -eq 0) (($left | ForEach-Object { "$($_.Name)#$($_.ProcessId)" }) -join ' ')
+            Test-Checks "$tag.stop"
           }
-          function Login([string]$pw) {
-            $body = @{ username = 'root'; password = $pw } | ConvertTo-Json -Compress
+          function Login([string]$pw, [string]$user = 'root') {
+            $body = @{ username = $user; password = $pw } | ConvertTo-Json -Compress
             $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$base/api/auth/login" -Headers $h -ContentType 'application/json' -Body $body -SessionVariable s
             $cookie = [string]$r.Headers['Set-Cookie']
             if ($cookie -notmatch '^wf\.sid=') { throw 'no wf.sid session cookie' }
             if ($cookie -match '(?i);\s*secure') { throw 'session cookie is Secure: a browser will not send it back over http' }
             return $s
           }
+          function Set-Password($s, [string]$from, [string]$to) {
+            $cp = @{ currentPassword = $from; newPassword = $to } | ConvertTo-Json -Compress
+            return (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$base/api/auth/change-password" -Headers $h -ContentType 'application/json' -Body $cp -WebSession $s).StatusCode
+          }
+          function Set-Role($s, [string]$id, [string]$role) {
+            return Invoke-RestMethod -Method Patch -Uri "$base/api/users/$id/role" -Headers $h -ContentType 'application/json' -Body ('{"role":"' + $role + '"}') -WebSession $s
+          }
           function Get-Text($r) { if ($r.Content -is [byte[]]) { return [Text.Encoding]::UTF8.GetString($r.Content) } return [string]$r.Content }
+          function Test-Attachment([string]$tag, [string]$pw) {
+            if (-not $att) { Mark "$tag - attachment from before downloads (200, same content)" $false 'no attachment'; return }
+            try {
+              $s = Login $pw
+              $r = Invoke-WebRequest -UseBasicParsing -Uri "$base/api/attachments/$($att.id)" -WebSession $s
+              Mark "$tag - attachment from before downloads (200, same content)" ($r.StatusCode -eq 200 -and (Get-Text $r) -eq $payload) "HTTP $($r.StatusCode)"
+            } catch { Mark "$tag - attachment from before downloads (200, same content)" $false $_.Exception.Message }
+          }
+          # data\ is closed to everyone but this user, SYSTEM and Administrators, and does not inherit
+          function Get-DataAcl([string]$dir) {
+            $acl = Get-Acl -LiteralPath (Join-Path $dir 'data')
+            $who = @($acl.Access | ForEach-Object { $_.IdentityReference.Value })
+            return @{ narrow = ($acl.AreAccessRulesProtected -and -not ($who | Where-Object { $_ -match 'Users$' })); who = ($who -join ', ') }
+          }
+          function First-Password([string]$dir) { return (Select-String -LiteralPath (Join-Path $dir 'data\settings.env') -Pattern '^WF_ROOT_PASSWORD=(.*)$').Matches[0].Groups[1].Value.Trim("'") }
 
+          $letter = $null
           try {
             # --- 1) fresh folder with a space in the path ---
             $dir = Join-Path $env:RUNNER_TEMP $env:TRIAL_FIRST
@@ -206,39 +244,49 @@ jobs:
             Protect-Secrets $dir
             Show-Logs 'first'
             Mark 'first start (init db, tables, first admin)' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
-            $acl = Get-Acl -LiteralPath (Join-Path $dir 'data')
-            $who = @($acl.Access | ForEach-Object { $_.IdentityReference.Value })
-            Mark 'data folder: inheritance cut, no Users group (icacls)' ($acl.AreAccessRulesProtected -and -not ($who | Where-Object { $_ -match 'Users$' })) ($who -join ', ')
-            $newPw = 'Wf-New-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
-            Write-Output "::add-mask::$newPw"
-            $script:secrets.Add($newPw)
+            Test-Checks 'first'
+            $acl = Get-DataAcl $dir
+            Mark 'data folder: inheritance cut, no Users group (icacls)' $acl.narrow $acl.who
+            $newPw = New-Secret 'Wf-New-'
             $pw = ''
             $att = $null
             $payload = 'workfluence bundle attachment ' + [guid]::NewGuid().ToString('N')
+            $subst = $null
             if ($up) {
               $spa = Invoke-WebRequest -UseBasicParsing -Uri "$base/login"
               Mark 'GET /login (screen)' ($spa.StatusCode -eq 200) "HTTP $($spa.StatusCode)"
-              $pw = (Select-String -LiteralPath (Join-Path $dir 'data\settings.env') -Pattern '^WF_ROOT_PASSWORD=(.*)$').Matches[0].Groups[1].Value.Trim("'")
+              $pw = First-Password $dir
               Mark 'first password shown in the window' ((Read-Shared (Join-Path $logs 'first.out.log')).Contains($pw)) ''
               try {
                 $s = Login $pw
-                $cp = @{ currentPassword = $pw; newPassword = $newPw } | ConvertTo-Json -Compress
-                $c = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$base/api/auth/change-password" -Headers $h -ContentType 'application/json' -Body $cp -WebSession $s
-                Mark 'root login over http + change password' ($c.StatusCode -ge 200 -and $c.StatusCode -lt 300) "HTTP $($c.StatusCode)"
+                $c = Set-Password $s $pw $newPw
+                Mark 'root login over http + change password' ($c -ge 200 -and $c -lt 300) "HTTP $c"
               } catch { Mark 'root login over http + change password' $false $_.Exception.Message }
 
-              # start.cmd again while it runs: the second one exits at once, the first keeps answering
-              $p2 = Start-Trial $dir 'double'
-              $exited = $p2.WaitForExit(120000)
-              if (-not $exited) { try { $p2.Kill() } catch { } }
-              Show-Logs 'double'
-              Mark 'start.cmd while running exits at once with 0' ($exited -and $p2.ExitCode -eq 0) $(if ($exited) { "exit $($p2.ExitCode)" } else { 'still running after 120 s' })
+              # start.cmd again while it runs, through another spelling of the same folder: the second one exits at once, the first keeps answering
+              $letter = @('W', 'X', 'Y', 'Z', 'V', 'U', 'T') | Where-Object { -not (Test-Path -LiteralPath "$($_):\") } | Select-Object -First 1
+              $code = Invoke-Quiet (Join-Path $env:SystemRoot 'System32\subst.exe') ("$($letter): `"$dir`"") 'subst'
+              $subst = "$($letter):\"
+              Mark 'subst drive for the same folder' ($code -eq 0 -and (Test-Path -LiteralPath (Join-Path $subst $startCmd))) "$subst exit $code"
+              $spellings = @(@{ tag = 'double'; via = $subst; name = 'subst drive' })
+              $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($dir).ShortPath
+              if ($short -and $short -ne $dir) { $spellings += @{ tag = 'double-short'; via = $short; name = '8.3 short name' } }
+              else { Mark 'second start through the 8.3 short name (reference)' $false 'this volume has no 8.3 names' $false }
+              foreach ($sp in $spellings) {
+                $p2 = Start-Trial $sp.via $sp.tag
+                $exited = $p2.WaitForExit(120000)
+                if (-not $exited) { try { $p2.Kill() } catch { } }
+                Show-Logs $sp.tag
+                Mark "start.cmd through the $($sp.name) while running exits at once with 0" ($exited -and $p2.ExitCode -eq 0) $(if ($exited) { "exit $($p2.ExitCode) via $($sp.via)" } else { 'still running after 120 s' })
+                Test-Checks $sp.tag
+              }
               $alive = $true
               for ($i = 0; $i -lt 5; $i++) { Start-Sleep -Seconds 2; if (-not (Test-Health)) { $alive = $false } }
-              Mark 'first instance still answers after the second start' $alive ''
+              Mark 'first instance still answers after the second starts' $alive ''
               Mark 'first instance database still running' (-not (Test-DbStopped $dir)) ''
               $starts = @(Get-BundleProcs $dir | Where-Object { $_.Name -eq 'node.exe' -and ([string]$_.CommandLine) -match 'launcher\.mjs"?\s+start' })
               Mark 'exactly one launcher running' ($starts.Count -eq 1) "$($starts.Count)"
+              Mark 'PID file still there' (Test-Path -LiteralPath (Join-Path $dir 'data\launcher.pid')) ''
 
               # an attachment to find again after moving the folder
               try {
@@ -252,19 +300,44 @@ jobs:
                 Mark 'upload an attachment' ([bool]$att.id) ''
               } catch { Mark 'upload an attachment' $false $_.Exception.Message }
             }
-            Stop-Trial $dir 'first'
+            # stop through the subst drive: the launcher and app were started from the long path
+            Stop-Trial $dir 'first' $subst
+            if ($letter) { Invoke-Quiet (Join-Path $env:SystemRoot 'System32\subst.exe') "$($letter): /D" 'subst-off' | Out-Null; $letter = $null }
 
-            # --- 2) start again: nothing is created again and the data is still there ---
+            # --- 2) start again: nothing is created again and the data is still there. Then a second root demotes the first one ---
             $p = Start-Trial $dir 'second'
             $up = Wait-Health $p 'second'
             Protect-Secrets $dir
             Show-Logs 'second'
             Mark 'second start (existing data)' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            $rootId = $null
+            $root2Pw = New-Secret 'Wf-Root2-'
             if ($up) {
               try { Login $newPw | Out-Null; Mark 'login with the changed password (data kept)' $true '' } catch { Mark 'login with the changed password (data kept)' $false $_.Exception.Message }
               if ($pw) { Mark 'first password not shown again' (-not (Read-Shared (Join-Path $logs 'second.out.log')).Contains($pw)) '' }
+              try {
+                $s = Login $newPw
+                $rootId = (Invoke-RestMethod -Uri "$base/api/auth/me" -WebSession $s).id
+                $body = @{ username = 'root2'; displayName = 'second root'; email = 'root2@example.test'; password = $root2Pw; role = 'root' } | ConvertTo-Json -Compress
+                Invoke-RestMethod -Method Post -Uri "$base/api/users" -Headers $h -ContentType 'application/json' -Body $body -WebSession $s | Out-Null
+                $r = Set-Role (Login $root2Pw 'root2') $rootId 'admin'
+                Mark 'a second root demotes the first root to admin' ($r.role -eq 'admin') "role $($r.role)"
+              } catch { Mark 'a second root demotes the first root to admin' $false $_.Exception.Message }
             }
             Stop-Trial $dir 'second'
+
+            # --- 2b) the seed now fails ("not root"): the wiki still comes up and the warning names data\settings.env ---
+            $p = Start-Trial $dir 'seedwarn'
+            $up = Wait-Health $p 'seedwarn'
+            Show-Logs 'seedwarn'
+            $said = Get-Said 'seedwarn'
+            Mark 'root demoted: start still comes up (the seed failure is a warning)' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            Mark 'root demoted: the warning names data\settings.env and WF_ROOT_USERNAME' ($said.Contains('settings.env') -and $said.Contains('WF_ROOT_USERNAME')) ''
+            if ($up) {
+              try { Login $newPw | Out-Null; Mark 'root demoted: data kept (login with the changed password)' $true '' } catch { Mark 'root demoted: data kept (login with the changed password)' $false $_.Exception.Message }
+              try { $r = Set-Role (Login $root2Pw 'root2') $rootId 'root'; Mark 'root restored by the second root' ($r.role -eq 'root') "role $($r.role)" } catch { Mark 'root restored by the second root' $false $_.Exception.Message }
+            }
+            Stop-Trial $dir 'seedwarn'
 
             # --- 3) move the stopped folder and start again: the attachment comes along ---
             $moved = Join-Path $env:RUNNER_TEMP $env:TRIAL_MOVED
@@ -275,17 +348,34 @@ jobs:
             Protect-Secrets $moved
             Show-Logs 'moved'
             Mark 'start after moving the folder' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            Mark 'moved: the seed is fine again (no warning)' (-not (Get-Said 'moved').Contains('WF_ROOT_USERNAME')) ''
             $storage = (Select-String -LiteralPath (Join-Path $moved 'data\settings.env') -Pattern '^WF_STORAGE_PATH=(.*)$').Matches[0].Groups[1].Value.Trim("'")
             Mark 'settings follow the folder (WF_STORAGE_PATH)' ($storage -eq (Join-Path $moved 'data\attachments')) $storage
-            if ($up -and $att) {
-              try {
-                $s = Login $newPw
-                $r = Invoke-WebRequest -UseBasicParsing -Uri "$base/api/attachments/$($att.id)" -WebSession $s
-                Mark 'attachment from before the move downloads (200, same content)' ($r.StatusCode -eq 200 -and (Get-Text $r) -eq $payload) "HTTP $($r.StatusCode)"
-              } catch { Mark 'attachment from before the move downloads (200, same content)' $false $_.Exception.Message }
-            } else { Mark 'attachment from before the move downloads (200, same content)' $false 'no app or no attachment' }
+            if ($up) { Test-Attachment 'moved' $newPw }
             Mark 'old folder not recreated' (-not (Test-Path -LiteralPath $dir)) ''
             Stop-Trial $moved 'moved'
+
+            # --- 3b) a new bundle folder with the old data copied in: an older settings line the app does not know, and data\ copied with inherited rights ---
+            $newb = Join-Path $env:RUNNER_TEMP $env:TRIAL_NEW
+            New-Item -ItemType Directory -Force (Split-Path $newb) | Out-Null
+            Copy-Item -Recurse $src $newb
+            Copy-Item -Recurse (Join-Path $moved 'data') (Join-Path $newb 'data')
+            Add-Content -LiteralPath (Join-Path $newb 'data\settings.env') -Value 'WF_REMOVED_IN_A_NEWER_BUNDLE=1'
+            $before = Get-DataAcl $newb
+            Mark 'new bundle: the copied data folder inherits (before start)' (-not $before.narrow) $before.who
+            $p = Start-Trial $newb 'newbundle'
+            $up = Wait-Health $p 'newbundle'
+            Show-Logs 'newbundle'
+            $said = Get-Said 'newbundle'
+            Mark 'new bundle with the old data: starts' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            Mark 'new bundle: names the unknown WF_ key and still starts' ($up -and $said.Contains('WF_REMOVED_IN_A_NEWER_BUNDLE')) ''
+            $after = Get-DataAcl $newb
+            Mark 'new bundle: data folder narrowed again at start' $after.narrow $after.who
+            if ($up) {
+              try { Login $newPw | Out-Null; Mark 'new bundle: login with the changed password (data came along)' $true '' } catch { Mark 'new bundle: login with the changed password (data came along)' $false $_.Exception.Message }
+              Test-Attachment 'new bundle' $newPw
+            }
+            Stop-Trial $newb 'newbundle'
 
             # --- 4) a stale PID file holding someone else's process number ---
             $dummy = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\PING.EXE') -ArgumentList '-n 300 127.0.0.1' -PassThru -WindowStyle Hidden
@@ -301,28 +391,57 @@ jobs:
             $listener.Start()
             try {
               $code = Invoke-Quiet (Join-Path $moved $startCmd) '--no-browser' 'busy'
-              $said = (Read-Shared (Join-Path $logs 'busy.out.log')) + (Read-Shared (Join-Path $logs 'busy.err.log'))
+              $said = Get-Said 'busy'
               Show-Logs 'busy'
               Mark 'port 3000 taken: start.cmd stops with 1 and names WF_PORT' ($code -eq 1 -and $said.Contains('WF_PORT')) "exit $code"
               Mark 'port 3000 taken: no database left running' (Test-DbStopped $moved) ''
               Mark 'port 3000 taken: no PID file left' (-not (Test-Path -LiteralPath (Join-Path $moved 'data\launcher.pid'))) ''
             } finally { $listener.Stop() }
 
-            # --- 6) recovery: only data\pgdata deleted (the done-marker stays), then a half-made cluster (no done-marker) ---
-            $firstPwNow = (Select-String -LiteralPath (Join-Path $moved 'data\settings.env') -Pattern '^WF_ROOT_PASSWORD=(.*)$').Matches[0].Groups[1].Value.Trim("'")
-            foreach ($case in @('pgdata-deleted', 'half-made')) {
-              if ($case -eq 'pgdata-deleted') { Remove-Item -LiteralPath (Join-Path $moved 'data\pgdata') -Recurse -Force }
-              else { Remove-Item -LiteralPath (Join-Path $moved 'data\pgdata.ready') -Force }
-              $p = Start-Trial $moved $case
-              $up = Wait-Health $p $case
-              Show-Logs $case
-              Mark "$case - starts again with a new database" $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
-              if ($up) {
-                Mark "$case - first password shown again (root made anew)" ((Read-Shared (Join-Path $logs "$case.out.log")).Contains($firstPwNow)) ''
-                try { Login $firstPwNow | Out-Null; Mark "$case - root login with the first password" $true '' } catch { Mark "$case - root login with the first password" $false $_.Exception.Message }
-              }
-              Stop-Trial $moved $case
+            # --- 6) recovery ---
+            $firstPwNow = First-Password $moved
+            $pw3 = New-Secret 'Wf-Third-'
+            $data = Join-Path $moved 'data'
+            # 6a) only data\pgdata deleted (the done-marker stays): a new database and root with the first password; then use it (change the password)
+            Remove-Item -LiteralPath (Join-Path $data 'pgdata') -Recurse -Force
+            $p = Start-Trial $moved 'pgdata-deleted'
+            $up = Wait-Health $p 'pgdata-deleted'
+            Show-Logs 'pgdata-deleted'
+            Mark 'pgdata deleted - starts again with a new database' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            if ($up) {
+              Mark 'pgdata deleted - first password shown again (root made anew)' ((Read-Shared (Join-Path $logs 'pgdata-deleted.out.log')).Contains($firstPwNow)) ''
+              try { $s = Login $firstPwNow; $c = Set-Password $s $firstPwNow $pw3; Mark 'pgdata deleted - root login with the first password, then change it' ($c -ge 200 -and $c -lt 300) "HTTP $c" } catch { Mark 'pgdata deleted - root login with the first password, then change it' $false $_.Exception.Message }
             }
+            Stop-Trial $moved 'pgdata-deleted'
+            # 6b) the done-marker lost from a database in use: the data must stay
+            Remove-Item -LiteralPath (Join-Path $data 'pgdata.ready') -Force
+            $p = Start-Trial $moved 'marker-lost'
+            $up = Wait-Health $p 'marker-lost'
+            Show-Logs 'marker-lost'
+            Mark 'marker lost - starts' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            if ($up) {
+              try { Login $pw3 | Out-Null; Mark 'marker lost - the database was kept (login with the changed password)' $true '' } catch { Mark 'marker lost - the database was kept (login with the changed password)' $false $_.Exception.Message }
+              Mark 'marker lost - first password not shown (root not made anew)' (-not (Read-Shared (Join-Path $logs 'marker-lost.out.log')).Contains($firstPwNow)) ''
+            }
+            Mark 'marker lost - nothing set aside' (@(Get-ChildItem -LiteralPath $data -Directory -Filter 'pgdata.broken-*').Count -eq 0) ''
+            Mark 'marker lost - done-marker written back' (Test-Path -LiteralPath (Join-Path $data 'pgdata.ready')) ''
+            Stop-Trial $moved 'marker-lost'
+            # 6c) a really half-made cluster (initdb cut off: PG_VERSION but no global\pg_control) and no marker: set aside, not deleted, then made anew
+            Remove-Item -LiteralPath (Join-Path $data 'pgdata') -Recurse -Force
+            Remove-Item -LiteralPath (Join-Path $data 'pgdata.ready') -Force
+            New-Item -ItemType Directory -Force (Join-Path $data 'pgdata\global') | Out-Null
+            [IO.File]::WriteAllText((Join-Path $data 'pgdata\PG_VERSION'), "17`n")
+            $p = Start-Trial $moved 'half-made'
+            $up = Wait-Health $p 'half-made'
+            Show-Logs 'half-made'
+            Mark 'half-made - starts again with a new database' $up $(if ($up) { 'HTTP 200' } else { 'no answer' })
+            $aside = @(Get-ChildItem -LiteralPath $data -Directory -Filter 'pgdata.broken-*')
+            Mark 'half-made - set aside as data\pgdata.broken-*, not deleted' ($aside.Count -eq 1 -and (Test-Path -LiteralPath (Join-Path $aside[0].FullName 'PG_VERSION')) -and (Get-Said 'half-made').Contains('pgdata.broken-')) (($aside | ForEach-Object { $_.Name }) -join ' ')
+            if ($up) {
+              Mark 'half-made - first password shown again (root made anew)' ((Read-Shared (Join-Path $logs 'half-made.out.log')).Contains($firstPwNow)) ''
+              try { Login $firstPwNow | Out-Null; Mark 'half-made - root login with the first password' $true '' } catch { Mark 'half-made - root login with the first password' $false $_.Exception.Message }
+            }
+            Stop-Trial $moved 'half-made'
 
             # --- 7) a folder with Korean characters (for reference: this runner is English Windows) ---
             $ko = Join-Path $env:RUNNER_TEMP ((-join ([char[]](0xCCB4, 0xD5D8))) + ' test\workfluence')
@@ -333,9 +452,29 @@ jobs:
             Protect-Secrets $ko
             Show-Logs 'korean'
             Mark 'Korean path (reference only)' $up $(if ($up) { 'HTTP 200' } else { 'no answer - see the korean log' }) $false
+            Mark 'Korean path: no DB password file left behind (pw.tmp)' (-not (Test-Path -LiteralPath (Join-Path $ko 'data\pw.tmp'))) ''
             Invoke-Quiet (Join-Path $ko $stopCmd) '' 'korean.stop' | Out-Null
+
+            # --- 8) the files no executable imports taken out (for reference: the license question, docs 10.3) ---
+            try {
+              $trim = Join-Path $env:RUNNER_TEMP $env:TRIAL_TRIMMED
+              New-Item -ItemType Directory -Force (Split-Path $trim) | Out-Null
+              Copy-Item -Recurse $src $trim
+              foreach ($f in $unused) { Remove-Item -LiteralPath (Join-Path $trim $f) -Force }
+              "removed $($unused.Count) files: $($unused -join ', ')"
+              $p = Start-Trial $trim 'trimmed'
+              $up = Wait-Health $p 'trimmed'
+              Protect-Secrets $trim
+              Show-Logs 'trimmed'
+              $ok = $false
+              if ($up) { try { Login (First-Password $trim) | Out-Null; $ok = $true } catch { } }
+              Mark "without the $($unused.Count) unused files: starts and root logs in (reference only)" ($up -and $ok) $(if ($up) { "HTTP 200, login $ok" } else { 'no answer - see the trimmed log' }) $false
+              Invoke-Quiet (Join-Path $trim $stopCmd) '' 'trimmed.stop' | Out-Null
+            } catch { Mark 'without the unused files (reference only)' $false $_.Exception.Message $false }
           } catch {
             Mark 'test script' $false $_.Exception.Message
+          } finally {
+            if ($letter) { Invoke-Quiet (Join-Path $env:SystemRoot 'System32\subst.exe') "$($letter): /D" 'subst-off' | Out-Null }
           }
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '| part | result | detail |'
@@ -345,22 +484,12 @@ jobs:
           if ($script:failed -gt 0) { throw "$($script:failed) part(s) failed" }
           exit 0
 
-      # 받을 수 있는 묶음은 시험을 통과한 것뿐이다 — 실패·취소된 실행의 묶음은 지운다
-      - name: 시험을 통과하지 못한 묶음 지우기
-        if: ${{ (failure() || cancelled()) && steps.bundle.outputs.artifact-id != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/${{ steps.bundle.outputs.artifact-id }}"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          'deleted the untested bundle artifact'
-
       # 올리는 로그에서 비밀 값을 지운다(창에 보인 첫 비밀번호 등) — 시험 단계가 도중에 멈춰도 여기서 지운다
       - name: 로그에서 비밀 값 지우기
         if: ${{ always() }}
         run: |
           $secrets = New-Object System.Collections.Generic.List[string]
-          $dirs = @($env:TRIAL_FIRST, $env:TRIAL_MOVED, ((-join ([char[]](0xCCB4, 0xD5D8))) + ' test\workfluence'))
+          $dirs = @($env:TRIAL_FIRST, $env:TRIAL_MOVED, $env:TRIAL_NEW, $env:TRIAL_TRIMMED, ((-join ([char[]](0xCCB4, 0xD5D8))) + ' test\workfluence'))
           foreach ($d in $dirs) {
             $f = Join-Path (Join-Path $env:RUNNER_TEMP $d) 'data\settings.env'
             if (-not (Test-Path -LiteralPath $f)) { continue }
@@ -393,5 +522,25 @@ jobs:
           if-no-files-found: ignore
           path: |
             ${{ runner.temp }}/bundle-test/*.log
-            ${{ runner.temp }}/bundle test/workfluence/data/postgres.log
             ${{ runner.temp }}/moved here/wf2/data/postgres.log
+            ${{ runner.temp }}/new bundle/wf3/data/postgres.log
+
+  # 받을 수 있는 묶음은 시험을 통과한 것뿐이다 — 실패·취소된 실행의 묶음은 지운다. **쓰기 권한(actions: write)은 이 작업만 쥔다** — 저장소 코드를 받지도 돌리지도
+  # 않는다. 이 실행의 결과물 가운데 이름이 맞는 것을 찾아 지운다(시험 작업이 도중에 끊겨도 찾는다)
+  discard:
+    needs: bundle
+    if: ${{ failure() || cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 시험을 통과하지 못한 묶음 지우기
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          ids=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "workfluence-windows-trial") | .id')
+          if [ -z "$ids" ]; then echo 'no bundle artifact in this run'; exit 0; fi
+          for id in $ids; do gh api -X DELETE "repos/$REPO/actions/artifacts/$id"; echo "deleted the untested bundle artifact $id"; done
