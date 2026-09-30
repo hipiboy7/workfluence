@@ -195,3 +195,100 @@ export function parseManifest(text: string): Manifest {
   }
   return { version: kv.version, gitSha: kv.gitSha, builtAt: kv.builtAt, images };
 }
+
+/**
+ * **Docker 설치 묶음** (P20_설계서_Install D절, FR-2101) — 대상 RHEL 9 서버에 Docker가 없을 때만 들고 간다. 묶음을 만드는 서버에 **깔린 판**의
+ * RPM을 받아 싼다(`pnpm release:docker`, 리눅스빌드 가이드 12-1절). 현장에는 Node가 없어 반입 가이드 0.3절 ②가 같은 판정을 셸 한 줄씩으로 한다.
+ *
+ * - `top` — Docker의 넷(Apache-2.0)과 Docker가 늘 요구하는 `container-selinux`(Red Hat) — 컨테이너를 쓴 적 없는 서버에는 없다
+ * - `deps` — **firewalld가 없는 RHEL 9에 모자란 것**(Red Hat): Docker가 요구하는 방화벽 부품과 그것이 쓰는 라이브러리. firewalld가 있는 표준 설치에는
+ *   이미 있다. 판이 만든 서버의 부 버전에 묶여(`iptables-nft`는 같은 판의 `iptables-libs`를 요구한다) 대상이 같은 부 버전일 때만 쓴다(0.3절 ④).
+ *   처음 판은 빈 RHEL 9 대신 UBI로 계산해 **모든 서버에 이미 있는 셋**(`iptables-libs`·`libnetfilter_conntrack`·`libnfnetlink`)을 골랐다 — 병합 전
+ *   자체 점검 1이 Docker 거래를 되돌린 RPM DB 사본으로 다시 셌다
+ *
+ * Red Hat의 부품(GPL 계열 — `jansson`은 MIT)은 고치지 않고 싣는다 — 사용자 승인 2026-09-30(`CLAUDE.md` 7절)
+ */
+export const DOCKER_BUNDLE_RPMS = {
+  top: ['docker-ce', 'docker-ce-cli', 'containerd.io', 'docker-compose-plugin', 'container-selinux'],
+  deps: ['iptables-nft', 'nftables', 'libnftnl', 'jansson'],
+} as const;
+
+/** Docker의 RPM 서명 키(Docker Release (CE rpm))의 지문 — gpg가 사람에게 보이는 모양 그대로(네 자리씩 띄어 쓴다). 판정은 공백을 빼고 한다 */
+export const DOCKER_KEY_FINGERPRINT = '060A 61C5 1B55 8A7F 742B  77AA C52F EB6B 621E 9F35';
+
+/**
+ * 묶음의 키 파일을 판정한다 — `gpg --show-keys --with-colons`의 출력. **키가 하나이고 그 지문이 Docker의 것**이어야 한다.
+ *
+ * 첫 키의 지문만 보면 **키를 하나 더 붙인 파일이 통과한다** — `rpm --import`는 파일의 키를 전부 들이므로, 붙인 키로 서명한 RPM이
+ * `digests signatures OK`가 된다(병합 전 보안 검토 S1). 주 키(`pub`)의 수를 세고, 그 바로 뒤의 `fpr`(주 키의 지문)을 견준다 —
+ * 부속 키(`sub`) 뒤의 `fpr`은 보지 않는다. 돌려주는 것은 문제 한 줄, 통과면 `null`
+ */
+export function dockerKeyProblem(colons: string): string | null {
+  const expected = DOCKER_KEY_FINGERPRINT.replace(/\s+/g, '').toUpperCase();
+  let keys = 0;
+  let primary: string | null = null;
+  let afterPub = false;
+  for (const raw of colons.split('\n')) {
+    const f = raw.trim().split(':');
+    if (f[0] === 'pub') {
+      keys += 1;
+      afterPub = true;
+    } else if (f[0] === 'fpr' && afterPub) {
+      if (keys === 1) primary = (f[9] ?? '').toUpperCase();
+      afterPub = false;
+    } else if (f[0] === 'sub') {
+      afterPub = false;
+    }
+  }
+  if (keys === 0) return '키 파일에 키가 없다';
+  if (keys > 1) return `키 파일에 키가 ${keys}개다 — Docker의 키 하나여야 한다`;
+  if (primary !== expected) return `키의 지문이 Docker의 것이 아니다 (${primary ?? '없음'})`;
+  return null;
+}
+
+/**
+ * `rpm -K`의 출력에서 **서명이 맞지 않는 것**을 고른다 — 빈 목록이면 통과.
+ *
+ * 서명이 없는 RPM은 `digests OK`만 내고 **종료 코드 0**이다 — `NOT OK`·`NOKEY`를 찾는 판정은 그것을 통과시킨다(병합 전 보안 검토 S1).
+ * 그래서 맞는 모양(`<파일>: digests signatures OK`)만 통과로 보고, 그 밖의 줄은 모두 문제다. **결과가 없는 RPM도 문제다** — 보지 않은 것은
+ * 통과가 아니다(T-029와 같은 판단). `files`는 `rpm -K`에 넘긴 이름 그대로다
+ */
+export function rpmSignatureProblems(output: string, files: readonly string[]): string[] {
+  const want = new Set(files);
+  const seen = new Set<string>();
+  const problems: string[] = [];
+  for (const raw of output.split('\n')) {
+    const line = raw.trimEnd();
+    if (!line) continue;
+    const i = line.lastIndexOf(': ');
+    const file = i < 0 ? '' : line.slice(0, i);
+    const verdict = i < 0 ? '' : line.slice(i + 2);
+    if (!want.has(file)) {
+      problems.push(line);
+      continue;
+    }
+    seen.add(file);
+    if (verdict !== 'digests signatures OK') problems.push(`${file}: 서명이 맞지 않는다 (${verdict})`);
+  }
+  for (const f of files) if (!seen.has(f)) problems.push(`${f}: 서명 결과가 없다`);
+  return problems;
+}
+
+export type PackageRow = { file: string; license: string; vendor: string };
+
+/**
+ * 묶음의 부품 목록(`PACKAGES.txt`). **첫 줄은 묶음을 만든 서버의 RHEL 판 그대로**다 — 현장이 `cat /etc/redhat-release`와 견주어 `deps/`를
+ * 쓸지 정한다(반입 가이드 0.3절 ④). 다음 줄부터 RPM마다 파일·라이선스·만든 곳을 탭으로 가른다 — 라이선스 목록이자 판의 기록이다
+ * (`CLAUDE.md` 7절 — 반입 산출물에 라이선스 목록)
+ */
+export function formatPackages(release: string, rows: readonly PackageRow[]): string {
+  const r = release.trim();
+  if (!r || /[\r\n]/.test(r)) throw new Error('RHEL 판이 한 줄이 아니다');
+  if (rows.length === 0) throw new Error('RPM이 하나도 없다');
+  for (const row of rows) {
+    for (const v of [row.file, row.license, row.vendor]) {
+      if (/[\t\r\n]/.test(v)) throw new Error(`칸에 탭·줄바꿈이 있다: ${JSON.stringify(v)}`);
+    }
+  }
+  return [r, ...rows.map((row) => `${row.file}\t${row.license}\t${row.vendor}`), ''].join('\n');
+}
