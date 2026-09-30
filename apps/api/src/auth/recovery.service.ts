@@ -9,7 +9,7 @@ import {
   type Role,
   type UserStatus,
 } from '@workfluence/shared';
-import { and, desc, eq, gt, isNull, lt, ne, or } from 'drizzle-orm';
+import { and, desc, eq, lt, or } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { logLine } from '../common/log-line';
@@ -23,13 +23,19 @@ import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 import { afterSuccess } from './domain/lockout';
-import { linkExpiresAt, mailThrottled, newResetToken, passwordMark, resetLinkProblem, resetLinkUrl, resetMailAvailable, tokenDigest } from './domain/reset-link';
+import { linkExpiresAt, mailThrottled, newResetToken, passwordMark, resetLinkProblem, resetLinkUrl, resetMailAvailable, throttleReleasedAt, tokenDigest, type ResetLinkProblem } from './domain/reset-link';
 
 /** 틀린 링크는 **하나의 문장**이다 (FR-2007) — 없는 값·지난 값·쓴 값·비밀번호가 바뀐 뒤의 값·받을 수 없게 된 계정. 까닭은 감사에만 남는다 */
 export const RESET_LINK_INVALID = '링크가 맞지 않거나 기한이 지났다 — 비밀번호 찾기에서 다시 요청한다';
 
 /** 메일 재설정 요청의 결과 — 감사의 `result`다(FR-2010). 응답은 늘 같다 */
 export type ResetMailResult = 'issued' | 'throttled' | 'ineligible' | 'unmatched';
+
+/** 링크 판정(`resetLinkProblem`)이 보는 계정의 모양 */
+const account = (u: UserRow) => ({ ...u, role: u.role as Role, status: u.status as UserStatus });
+
+/** 링크를 쓰지 못한 까닭 — 감사의 `reason`(FR-2007). `unknown`은 없는 값이다(먼저 쓰였거나 새 요청이 지웠다) */
+type RefuseReason = ResetLinkProblem | 'unknown';
 
 /** 받을 수 있는 계정인가 — 비밀번호가 있는 로컬 계정이고 공유 규칙이 받는다(`canResetPasswordByMail`) */
 const eligible = (u: UserRow): boolean =>
@@ -76,7 +82,8 @@ export class RecoveryService {
    *
    * 사용자 행을 **잠그고** 다시 본다 — 동시에 두 요청이 와도 한 통이고(간격 판정과 쓰기 사이가 벌어지지 않게), 그 사이 정지됐으면 보내지 않는다. 한 사람에게
    * 살아 있는 링크는 하나다 — 그 사람의 옛 행을 지우고 넣는다(기한이 지난 남의 행도 함께 지운다). 메일은 **커밋한 뒤에** 보낸다 — 되돌릴 수 없다(P6 FR-754).
-   * 보내기가 실패하면 그 값을 지운다 — 남기면 간격 동안 다시 받을 수 없다(A.1-7)
+   * 보내기가 실패하면 **간격만 푼다**(`throttleReleasedAt`) — 곧바로 다시 요청할 수 있게(A.1-7). 값은 지우지 않는다: 메일 API가 받아 놓고 시간 제한 뒤에
+   * 답하면(또는 앞단이 5xx를 주면) 이미 닿은 링크가 죽는다(병합 전 코드 리뷰 4). 새 요청은 옛 값을 지운다
    */
   async requestResetMail(dto: RecoverPasswordDto, ip?: string, now: Date = new Date()): Promise<ResetMailResult> {
     const found = await this.users.findByEmailAndName(dto.email, dto.displayName);
@@ -116,7 +123,7 @@ export class RecoveryService {
     const url = resetLinkUrl(this.env.WF_PUBLIC_URL, token);
     // 공개 주소가 없으면 여기 오지 않는다(`available`) — 그래도 링크 없는 메일은 보내지 않는다
     const ok = url !== null && (await this.sender.send({ to: issued.email, ...passwordResetMail({ name: issued.user.displayName, url, minutes: PASSWORD_RESET.linkMinutes }) }));
-    if (!ok) await this.db.delete(passwordResetTokens).where(eq(passwordResetTokens.id, issued.rowId));
+    if (!ok) await this.db.update(passwordResetTokens).set({ createdAt: throttleReleasedAt(now) }).where(eq(passwordResetTokens.id, issued.rowId));
     // 결과를 감사에 — "메일이 안 왔다"에 답한다(P6 FR-756). 주소는 싣지 않는다
     await this.audit.record({
       action: ok ? 'mail.send' : 'mail.fail',
@@ -141,38 +148,40 @@ export class RecoveryService {
     const digest = tokenDigest(dto.token);
     const link = await this.db.query.passwordResetTokens.findFirst({ where: eq(passwordResetTokens.tokenHash, digest) });
     const user = link ? await this.users.findById(link.userId) : undefined;
-    const problem = !link ? 'unknown' : !user ? 'ineligible' : resetLinkProblem(link, { ...user, role: user.role as Role, status: user.status as UserStatus }, now);
+    const problem: RefuseReason | null = !link ? 'unknown' : !user ? 'ineligible' : resetLinkProblem(link, account(user), now);
     if (problem || !user) return this.refuse(problem ?? 'ineligible', user?.id ?? null, ip);
 
-    const done = await this.auth.inAccountLine(user.username, async () => {
+    const refused = await this.auth.inAccountLine(user.username, async (): Promise<RefuseReason | null> => {
       const nextHash = await this.users.preparePassword(dto.newPassword);
-      const ok = await this.db.transaction(async (tx) => {
-        const [taken] = await tx
-          .delete(passwordResetTokens)
-          .where(and(eq(passwordResetTokens.tokenHash, digest), gt(passwordResetTokens.expiresAt, now)))
-          .returning({ id: passwordResetTokens.id });
-        if (!taken) return false;
-        // **읽은 비밀번호 그대로이고 여전히 받을 수 있는 계정일 때만** — 줄에 서기 전에 본인 변경·관리자 초기화·정지·root가 됐으면 바꾸지 않는다
+      const outcome = await this.db.transaction(async (tx): Promise<RefuseReason | null> => {
+        // **사용자 행을 잠그고 줄 앞과 같은 판정을 다시 한다**(병합 전 코드 리뷰 6·9) — 줄에서 기다리는 사이 기한이 지났거나, 본인 변경·관리자 초기화로
+        // 비밀번호가 바뀌었거나, 정지·root가 됐으면 바꾸지 않고 **그 까닭**을 남긴다. 받는 계정의 규칙은 `resetLinkProblem`(공유 `canResetPasswordByMail`) 하나다
+        const locked = await this.users.lockForUpdate({ id: user.id }, tx);
+        // 값을 지우며 가져온다 — 동시에 두 번 써도 하나만 가져간다(한 번, FR-2003)
+        const [taken] = await tx.delete(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, digest)).returning();
+        if (!taken) return 'unknown';
+        const again = !locked ? 'ineligible' : resetLinkProblem(taken, account(locked), now);
+        if (again || !locked) return again ?? 'ineligible';
         const [changed] = await tx
           .update(users)
           .set({ passwordHash: nextHash, mustChangePassword: false, ...afterSuccess(), updatedAt: now })
-          .where(and(eq(users.id, user.id), eq(users.passwordHash, user.passwordHash!), eq(users.status, 'active'), ne(users.role, 'root'), isNull(users.oidcSub)))
+          .where(and(eq(users.id, user.id), eq(users.passwordHash, locked.passwordHash!)))
           .returning({ id: users.id });
-        if (!changed) return false;
+        if (!changed) return 'changed';
         await tx.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, user.id));
         await this.users.destroyAllSessions(user.id, tx);
         await this.notifications.resolveRecoveryRequests(user.id, tx);
         await this.audit.record({ action: 'auth.password.reset', actorId: user.id, targetType: 'user', targetId: user.id, detail: { ok: true }, ip }, tx);
-        return true;
+        return null;
       });
-      if (ok) this.users.revokeConnections(user.id);
-      return ok;
+      if (outcome === null) this.users.revokeConnections(user.id);
+      return outcome;
     });
-    if (!done) return this.refuse('changed', user.id, ip);
+    if (refused) return this.refuse(refused, user.id, ip);
   }
 
   /** 틀린 링크 — 감사에 까닭을 남기고 하나의 문장으로 거절한다 (FR-2007) */
-  private async refuse(reason: string, userId: string | null, ip?: string): Promise<never> {
+  private async refuse(reason: RefuseReason, userId: string | null, ip?: string): Promise<never> {
     await this.audit.record({
       action: 'auth.password.reset',
       actorId: null,

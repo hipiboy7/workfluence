@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PASSWORD_RESET, maskEmail, type Principal } from '@workfluence/shared';
+import { PASSWORD_RESET, RATE_LIMITS, maskEmail, type Principal } from '@workfluence/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
@@ -172,15 +173,25 @@ describe('내 email로 재설정 링크 — 보낸다 (FR-2002·2005)', () => {
     await expect(recovery.resetPassword({ token: first, newPassword: 'New-pw-2026x' }, undefined, t5)).rejects.toThrow(RESET_LINK_INVALID);
   });
 
-  it('**보내기가 실패하면 그 값을 지운다** — 남기면 5분 동안 다시 받을 수 없다. 감사에 `mail.fail`', async () => {
+  it('**보내기가 실패하면 링크는 두고 간격만 푼다** — 곧바로 다시 받는다(새 요청이 옛 값을 지운다). 감사에 `mail.fail`(병합 전 코드 리뷰 4)', async () => {
     await addLocal();
+    const now = new Date();
     sender.ok = false;
-    expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL })).toBe('issued');
-    expect(await db.select().from(passwordResetTokens)).toEqual([]);
+    expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL }, undefined, now)).toBe('issued');
+    const [row] = await db.select().from(passwordResetTokens);
+    expect(now.getTime() - row.createdAt.getTime()).toBe(PASSWORD_RESET.mailIntervalMinutes * min);
     expect(await auditOf('mail.fail')).toHaveLength(1);
     sender.ok = true;
-    expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL })).toBe('issued');
-    expect(await db.select().from(passwordResetTokens)).toHaveLength(1);
+    expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL }, undefined, new Date(now.getTime() + 1000))).toBe('issued');
+    expect((await db.select().from(passwordResetTokens)).map((r) => r.tokenHash)).toEqual([sha(tokenOf(sender.sent[1]))]);
+  });
+
+  it('**"실패"로 끝났어도 메일이 닿았으면 그 링크를 쓴다** — 메일 API가 받아 놓고 시간 제한 뒤에 답한 경우(병합 전 코드 리뷰 4)', async () => {
+    await addLocal();
+    sender.ok = false;
+    await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL });
+    await recovery.resetPassword({ token: tokenOf(sender.sent[0]), newPassword: 'New-pw-2026x' });
+    await expect(auth.login({ username: 'alice', password: 'New-pw-2026x' })).resolves.toBeTruthy();
   });
 
   it('**동시에 두 요청이 와도 한 통** — 사용자 행을 잠그고 간격을 본다', async () => {
@@ -243,6 +254,37 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
     }
   });
 
+  it('**줄에서 기다리는 사이 바뀐 것은 줄 안에서 다시 보고 그 까닭을 남긴다** — 관리자 초기화는 `changed`, root가 되면 `ineligible`(병합 전 코드 리뷰 6·9)', async () => {
+    const reasons: string[] = [];
+    for (const change of ['reset', 'root'] as const) {
+      await resetTables(db);
+      settings.invalidate();
+      const { alice, token } = await issued();
+      let release!: () => void;
+      const held = auth.inAccountLine('alice', () => new Promise<void>((r) => (release = r)));
+      const reset = recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
+      await new Promise((r) => setTimeout(r, 100));
+      if (change === 'reset') await usersSvc.resetPassword(alice.id, ROOT);
+      else await db.update(users).set({ role: 'root' }).where(eq(users.id, alice.id));
+      release();
+      await held;
+      await expect(reset).rejects.toThrow(new BadRequestException(RESET_LINK_INVALID));
+      const [f] = (await auditOf('auth.password.reset')).filter((x) => !(x.detail as { ok: boolean }).ok);
+      reasons.push((f.detail as { reason: string }).reason);
+      // 비밀번호는 새 것이 아니다
+      await expect(auth.login({ username: 'alice', password: 'New-pw-2026x' })).rejects.toThrow();
+    }
+    expect(reasons).toEqual(['changed', 'ineligible']);
+  });
+
+  it('**정지하면 링크도 지운다** — 풀어도 옛 링크는 살아나지 않는다(병합 전 자체 점검 13)', async () => {
+    const { alice, token } = await issued();
+    await usersSvc.suspend(alice.id, ROOT);
+    expect(await db.select().from(passwordResetTokens)).toEqual([]);
+    await usersSvc.unsuspend(alice.id, ROOT);
+    await expect(recovery.resetPassword({ token, newPassword: 'New-pw-2026x' })).rejects.toThrow(new BadRequestException(RESET_LINK_INVALID));
+  });
+
   it('**한 번만** — 쓴 링크는 같은 400 문장이고 감사에 까닭이 남는다', async () => {
     const { token } = await issued();
     await recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
@@ -257,6 +299,9 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
     const r = await Promise.allSettled([recovery.resetPassword({ token, newPassword: 'First-pw-2026' }), recovery.resetPassword({ token, newPassword: 'Later-pw-2026' })]);
     expect(r.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
     expect(r.filter((x) => x.status === 'rejected')).toHaveLength(1);
+    // 늦은 쪽의 까닭은 "먼저 쓰였다"(없는 값) — "비밀번호가 바뀌었다"가 아니다(병합 전 코드 리뷰 6)
+    const fails = (await auditOf('auth.password.reset')).filter((x) => !(x.detail as { ok: boolean }).ok);
+    expect(fails.map((x) => (x.detail as { reason: string }).reason)).toEqual(['unknown']);
     const logins = await Promise.allSettled(['First-pw-2026', 'Later-pw-2026'].map((password) => auth.login({ username: 'alice', password })));
     expect(logins.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
     expect((await usersSvc.findById(alice.id))!.passwordHash).not.toBe(alice.passwordHash);
@@ -401,6 +446,55 @@ describe('경로 — 응답은 곧바로, 늘 같다 (NFR-191)', () => {
     expect(c.emailHelp({ username: 'alice', displayName: '앨리스' }, req)).toEqual({ ok: true });
     await vi.waitFor(() => expect(sender.sent).toHaveLength(1), { timeout: 5000 });
     await expect(c.config()).resolves.toMatchObject({ resetMailEnabled: true });
+    // **응답 뒤의 일이 끝나기를 기다린다** — 다음 시험의 표 비우기 뒤에 늦게 닿는 행이 없게(병합 전 코드 리뷰 11 · 자체 점검 9)
+    await vi.waitFor(
+      async () => {
+        expect(await auditOf('auth.password.reset.request')).toHaveLength(2);
+        expect(await auditOf('auth.email.help')).toHaveLength(1);
+        expect(await auditOf('mail.send')).toHaveLength(1);
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it('**운영 설정을 읽지 못하면 메일 재설정만 끄고 답한다** — 실시간 편집·사내 로그인은 그대로, 줄은 `auth.config_failed`(병합 전 코드 리뷰 5)', async () => {
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const get = vi.spyOn(settings, 'get').mockRejectedValueOnce(new Error('연결을 얻지 못했다'));
+    try {
+      await expect(controller(recovery).config()).resolves.toEqual({ oidcEnabled: false, collabEnabled: true, resetMailEnabled: false });
+      expect(JSON.stringify(error.mock.calls)).toContain('auth.config_failed');
+    } finally {
+      get.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it('**응답 뒤의 일이 우리 쪽에서 실패하면 error 한 줄** — `auth.reset_mail_failed`·`auth.email_help_failed`(FR-2012)', async () => {
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const mail = vi.spyOn(recovery, 'requestResetMail').mockRejectedValueOnce(new Error('x'));
+    const help = vi.spyOn(recovery, 'requestEmailHelp').mockRejectedValueOnce(new Error('y'));
+    try {
+      recovery.startResetMail({ displayName: '앨리스', email: EMAIL });
+      recovery.startEmailHelp({ username: 'alice', displayName: '앨리스' });
+      await vi.waitFor(() => {
+        const said = JSON.stringify(error.mock.calls);
+        expect(said).toContain('auth.reset_mail_failed');
+        expect(said).toContain('auth.email_help_failed');
+      });
+    } finally {
+      mail.mockRestore();
+      help.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it('**새 경로 셋은 IP별 제한을 단다** — 값은 `RATE_LIMITS` 한 곳(FR-2011)', () => {
+    // 가드가 읽는 표시(`@RateLimit` — `apps/api/src/common/rate-limit.guard.ts`의 열쇠)
+    const limit = (h: keyof AuthController) => new Reflector().get('wf:rate-limit', AuthController.prototype[h] as () => unknown);
+    expect(limit('resetMail')).toEqual(RATE_LIMITS.resetMail);
+    expect(limit('resetPassword')).toEqual(RATE_LIMITS.resetPassword);
+    expect(limit('emailHelp')).toEqual(RATE_LIMITS.emailHelp);
+    expect(limit('recoverPassword')).toEqual(RATE_LIMITS.recoverPassword);
   });
 
   it('**쓰지 않으면 404** — 요청도, 이미 보낸 링크도(A.1-9). 화면은 단추를 보이지 않는다', async () => {

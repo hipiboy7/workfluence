@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Module, NotFoundException, Post, Query, Redirect, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Logger, Module, NotFoundException, Post, Query, Redirect, Req, UseGuards } from '@nestjs/common';
 import {
   RATE_LIMITS,
   changePasswordDto,
@@ -13,6 +13,7 @@ import {
 } from '@workfluence/shared';
 import type { Request } from 'express';
 import 'express-session';
+import { logLine } from '../common/log-line';
 import { RevocationBus } from '../common/revocation.bus';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
 import { RateLimit, RateLimitGuard, RateLimitStore } from '../common/rate-limit.guard';
@@ -53,6 +54,8 @@ async function startSession(req: Request, userId: string): Promise<void> {
 @Controller('api/auth')
 @UseGuards(AuthGuard, RateLimitGuard)
 export class AuthController {
+  private readonly log = new Logger('Auth');
+
   constructor(
     private readonly auth: AuthService,
     @Inject(APP_ENV) private readonly env: AppEnvToken,
@@ -103,7 +106,20 @@ export class AuthController {
     // 실시간 편집 여부를 화면이 알아야 한다 (FR-711). 꺼져 있으면 단독 편집기를 띄운다 —
     // 화면이 모르면 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다.
     // 메일 재설정을 쓸 수 있는지도 준다(P19 FR-2008) — 아니면 비밀번호 찾기가 그 단추를 보이지 않는다
-    return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED, resetMailEnabled: await this.recovery.available() };
+    return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED, resetMailEnabled: await this.resetMailOn() };
+  }
+
+  /**
+   * 메일 재설정을 쓸 수 있나 — **운영 설정을 읽지 못하면 끈 것으로 답한다**(병합 전 코드 리뷰 5). 이 경로가 통째로 실패하면 편집 화면이 실시간 편집을
+   * 모른 채 혼자 편집으로 떨어지고 로그인 화면이 사내 로그인 단추를 감춘다 — 두 값은 `.env`라 실패하지 않는다
+   */
+  private async resetMailOn(): Promise<boolean> {
+    try {
+      return await this.recovery.available();
+    } catch (e) {
+      this.log.error(logLine('auth.config_failed', '화면 설정에 메일 재설정을 싣지 못했다 — 끈 것으로 답한다', {}, e));
+      return false;
+    }
   }
 
   /**
