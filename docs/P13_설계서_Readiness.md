@@ -167,7 +167,7 @@ Phase 13은 "지금 만든 것으로 배포하고 운영할 수 있는가"를 �
   8절 첫 백업과 운영가이드 10절은 `tools`의 tar를 쓴다. 새 절로 **버전 갱신**(새 묶음 → 이미지 올리기 → 표 만들기 → 다시 띄우기 → 사후 검증).
 - linux서버배포가이드: 머리말·3~5절을 지금 코드로 — main, `deploy/.env`의 필수 키 셋(`WF_PG_PASSWORD`·`WF_PG_APP_PASSWORD`·`WF_SESSION_SECRET` —
   compose가 강제한다)과 첫 root의 `WF_ROOT_PASSWORD`(시드만 쓴다), 커밋 라벨을 단 빌드, `pnpm release:bundle` → `pnpm release:verify` → tar.
-- 묶음: 문서 다섯을 `docs/` 아래에 원래 이름으로 넣는다 — 문서끼리의 상대 링크가 묶음 안에서도 이어진다. `반입절차.md`는 맨 위에 그대로 둔다.
+- 묶음: 문서 다섯을 `docs/` 아래에 원래 이름으로 넣는다 — 문서끼리의 상대 링크가 묶음 안에서도 이어진다. `반입절차.md`는 맨 위에 그대로 둔다. (2026-09-30부터 가이드는 저장소처럼 `docs/guide/`·`docs/learnSystem/`에 있고 묶음도 그 자리에 싣는다 — `CLAUDE.md` 10.4절)
 - 커밋 라벨: Dockerfile에 빌드 인자로 커밋을 받아 `org.opencontainers.image.revision` 라벨을 단다. 묶기 전에 `docker inspect`의 라벨과
   `git rev-parse HEAD`를 견준다. 같은 자리에서 `git status --porcelain`이 비었는지, 앱 이미지 이름이 `WF_APP_IMAGE`를 비운 compose의
   이름과 같은지도 본다(FR-1407 — 기본 이름은 compose에게 묻는다).
