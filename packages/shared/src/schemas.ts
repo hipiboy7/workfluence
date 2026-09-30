@@ -93,11 +93,32 @@ export const findIdDto = z.object({
 });
 export type FindIdDto = z.infer<typeof findIdDto>;
 
+/**
+ * **비밀번호 찾기** — 관리자에게 초기화 요청과 내 email로 재설정 링크가 **같은 두 칸**을 받는다 (P19 FR-2000 — 사용자 원문 3번 "사용자의 이름과 처음에
+ * 입력한 이메일", 답 "이름은 표시 이름"). 예전(P1 FR-209a·P17)의 초기화 요청은 아이디+email이었다. email은 겹치지 않아 둘이 맞는 계정은 하나다
+ */
 export const recoverPasswordDto = z.object({
-  username: usernameSchema,
+  displayName: displayNameSchema,
   email: emailSchema,
 });
 export type RecoverPasswordDto = z.infer<typeof recoverPasswordDto>;
+
+/** **email이 기억나지 않을 때** 시스템 관리자에게 확인 요청 — 아이디 + 표시 이름 (P19 FR-2009, 착수 쟁점 2) */
+export const emailHelpDto = z.object({
+  username: usernameSchema,
+  displayName: displayNameSchema,
+});
+export type EmailHelpDto = z.infer<typeof emailHelpDto>;
+
+/** 재설정 링크의 값 — `PASSWORD_RESET.tokenBytes`(32)바이트의 base64url, 채움(`=`) 없이 43자 (P19 C.3) */
+export const RESET_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+/** **링크로 새 비밀번호 정하기** (P19 FR-2006). 모양이 아닌 값은 DB에 가 보지도 않는다. 새 비밀번호의 바닥만 계약이 보고 세기는 서비스가 본다(FR-521) */
+export const resetPasswordDto = z.object({
+  token: z.string().regex(RESET_TOKEN_PATTERN, '링크가 맞지 않는다'),
+  newPassword: passwordSchema.max(256),
+});
+export type ResetPasswordDto = z.infer<typeof resetPasswordDto>;
 
 export const changePasswordDto = z
   .object({
@@ -250,6 +271,8 @@ export const policyPatchDto = z
     llmRetentionDays: z.number().int().optional(),
     llmConversationMax: z.number().int().optional(),
     llmPinnedMax: z.number().int().optional(),
+    // 메일 재설정 켜기·끄기 — 0 끔 · 1 켬 (P19 FR-2008)
+    passwordResetMail: z.number().int().optional(),
   })
   .strict();
 export type PolicyPatchDto = z.infer<typeof policyPatchDto>;

@@ -157,6 +157,18 @@ export function canManageUser(actor: Principal, target: { role: Role; grants?: r
   return grantsForRole(target.role, target.grants ?? []).every((g) => can(actor, g));
 }
 
+/**
+ * **내 email로 재설정 링크를 받을 수 있는 계정인가** (P19 FR-2002, 착수 쟁점 1). member·admin의 **활성 로컬** 계정만.
+ * - root는 받지 않는다 — root의 메일함 하나가 뚫리면 시스템 전체가 넘어간다(사용자 결정 "(가) member·admin만, root는 제외"). 다른 root나 서버 담당자가 푼다
+ * - 사내 계정(`local: false`)은 받지 않는다 — 비밀번호를 붙이면 IdP가 강제하던 인증을 건너뛴다(FR-217, 관리자 초기화와 같다)
+ * - 승인 대기·정지는 받지 않는다 — 로그인할 수 없는 계정이다
+ *
+ * 링크를 **보낼 때와 쓸 때** 둘 다 본다 — 그 사이 정지되거나 root가 된 사람은 쓰지 못한다(`resetLinkProblem`)
+ */
+export function canResetPasswordByMail(u: { role: Role; status: UserStatus; local: boolean }): boolean {
+  return u.local && u.status === 'active' && u.role !== 'root';
+}
+
 /** 정지·해제의 대상 (P13 C.5) */
 export type UserTarget = { id: string; role: Role; status: UserStatus; grants?: readonly string[] };
 

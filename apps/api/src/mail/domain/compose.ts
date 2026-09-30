@@ -49,6 +49,29 @@ export function mentionMail(input: { callerName: string | null; where: '댓글' 
   };
 }
 
+/**
+ * 비밀번호 재설정 링크 한 통 (P19_설계서_Recovery C.4, A.1-15). 받는 사람은 그 계정의 주인이다 — 요청은 누구나 남의 이름·email로 할 수 있어,
+ * **요청하지 않았으면 지워도 된다 — 비밀번호는 바뀌지 않는다**를 적는다. 이름은 한 줄로 만든 뒤 앞뒤 빈칸을 떼고, 남는 것이 없으면 이름 없이 부른다
+ */
+export function passwordResetMail(input: { name: string; url: string; minutes: number }): MailContent {
+  const name = oneLine(input.name).trim() || null;
+  const { url, minutes } = input;
+  const opening = '비밀번호 재설정을 요청하셨습니다.';
+  const once = `${minutes}분 동안 한 번만 쓸 수 있습니다.`;
+  const closing = '요청하지 않으셨다면 이 메일을 지우셔도 됩니다 — 비밀번호는 바뀌지 않습니다.';
+  const text = [name ? `${name} 님, ${opening}` : opening, '', `아래 주소를 열어 새 비밀번호를 정해 주세요. ${once}`, url, '', closing].join('\n');
+  const markdown = [
+    name ? `**${mdText(name)}** 님, ${opening}` : opening,
+    '',
+    `아래 링크를 열어 새 비밀번호를 정해 주세요. ${once}`,
+    '',
+    `[새 비밀번호 정하기](${markdownLinkTarget(url)})`,
+    '',
+    closing,
+  ].join('\n');
+  return { subject: '[위키] 비밀번호 재설정', text, markdown };
+}
+
 /** 시험 명령이 보내는 한 통 (FR-1905) — 보낸 때(`sentAt`, ISO)를 싣는다: 여러 번 보냈을 때 어느 것이 닿았는지 가린다 */
 export function testMail(sentAt: string): MailContent {
   return {

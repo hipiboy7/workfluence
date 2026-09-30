@@ -104,6 +104,11 @@ export const AUDIT_ACTIONS = [
   'llm.provider.delete',
   'llm.ask',
   'llm.conversation.purge',
+  // Phase 19 (P19_설계서_Recovery FR-2010) — 비밀번호를 잊었을 때. 메일 재설정 요청(맞았나·보냈나), 링크로 새 비밀번호를 정함(성공·까닭),
+  // email이 기억나지 않아 시스템 관리자에게 확인 요청. 관리자에게 초기화 요청은 `auth.password.recover` 그대로
+  'auth.password.reset.request',
+  'auth.password.reset',
+  'auth.email.help',
 ] as const;
 
 /**
@@ -155,6 +160,10 @@ export const LOG_EVENTS = [
   'auth.oidc_email_dropped',
   // 비밀번호 찾기 — 초기화 요청을 관리자의 알림으로 만들지 못했다. 우리 쪽 결함이라 error — 요청은 감사 기록에 남았다 (P17 NFR-170)
   'auth.recover_notify_failed',
+  // 비밀번호를 잊었을 때 (P19 FR-2012) — 응답 뒤에 도는 일(재설정 값 만들기·메일 보내기, 시스템 관리자에게 알리기)이 우리 쪽 결함으로 실패했다. error —
+  // 요청은 감사 기록에 남는다. 메일 API의 거절·연결 실패는 메일 줄(`mail.rejected`·`mail.failed`)이다
+  'auth.reset_mail_failed',
+  'auth.email_help_failed',
   // 세션 파기 버스
   'session.revoke_failed',
   // 메일
@@ -277,8 +286,10 @@ export const LIST_PAGE_LIMIT = 200;
  * - `mention` — 문서·댓글에서 불렸다
  * - `password.reset.request` — 누가 로그인 화면의 비밀번호 찾기로 초기화를 요청했다. 그 사람을 **관리할 수 있는** 관리자·시스템 관리자에게
  *   간다(`canManageUser`). 요청한 사람이 `actor_id`이고 페이지는 없다
+ * - `email.confirm.request` — 누가 "이메일이 기억이 안나시나요?"로 email 확인을 요청했다(P19 FR-2009). **시스템 관리자(root)만** 받고 지금 root일 때만
+ *   보인다. 요청한 사람이 `actor_id`이고 페이지는 없다
  */
-export const NOTIFICATION_KINDS = ['mention', 'password.reset.request'] as const;
+export const NOTIFICATION_KINDS = ['mention', 'password.reset.request', 'email.confirm.request'] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 /** 모든 화면의 알림 영역 (P17 F-010 8번) — 안 읽은 수를 이 간격마다, 그리고 화면을 옮길 때 다시 묻는다. 서버가 밀어 주는 길은 없다 */
@@ -316,6 +327,25 @@ export const RATE_LIMITS = {
    * 세션을 쥔 사람이 틀린 현재 비밀번호를 거듭 보내 그 계정의 로그인과 변경을 뒤로 민다. 성공은 돌려준다(로그인과 같다)
    */
   changePassword: { max: 5, windowSec: 60 },
+  /**
+   * 비밀번호를 잊었을 때 (P19 FR-2011). 메일 재설정 요청·email 확인 요청은 관리자 요청(`recoverPassword`)과 같다 — 누구나 남의 이름으로 부를 수
+   * 있는 요청이다(계정마다의 간격은 `PASSWORD_RESET`). 링크 쓰기는 틀린 비밀번호 규칙으로 다시 누를 수 있게 넉넉하다 — 값은 추측할 수 없다
+   */
+  resetMail: { max: 3, windowSec: 600 },
+  resetPassword: { max: 10, windowSec: 600 },
+  emailHelp: { max: 3, windowSec: 600 },
+} as const;
+
+/**
+ * 메일 재설정 링크 (P19_설계서_Recovery A.1-4·5·7). **바꾸면 보안 판단이 바뀌는 설계 고정값**이라 운영 설정이 아니라 여기 둔다(5절 둘째 칸).
+ * - `linkMinutes` — 링크의 기한. 메일이 늦게 닿아도 쓰고, 새어 나간 링크가 오래 살지 않는다
+ * - `mailIntervalMinutes` — 한 계정에 메일을 다시 보내기까지. 누구나 남의 이름·email로 요청할 수 있다 — 한 사람의 메일함을 채우지 못하게
+ * - `tokenBytes` — 값의 무작위 바이트. 추측할 수 없어 빠른 해시(SHA-256)로 둔다
+ */
+export const PASSWORD_RESET = {
+  linkMinutes: 30,
+  mailIntervalMinutes: 5,
+  tokenBytes: 32,
 } as const;
 
 /**
