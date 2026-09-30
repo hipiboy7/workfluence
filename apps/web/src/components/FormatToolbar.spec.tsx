@@ -74,6 +74,10 @@ describe('FormatToolbar', () => {
       fireEvent.change(choose, { target: { value: 'h1' } });
     });
     expect(e.isActive('heading', { level: 1 })).toBe(true);
+    // 편집기는 초점을 한 박자 늦게 옮긴다 — 기다린 뒤에도 칸에 있어야 한다(돌연변이 W6: 곧바로 보면 초점을 옮겨도 초록이었다)
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
     expect(document.activeElement).toBe(choose);
     act(() => {
       fireEvent.pointerDown(choose);
