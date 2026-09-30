@@ -37,20 +37,23 @@ export function mailApiUrlProblem(raw: string): string | null {
 
 /**
  * **메일 속 링크의 주소**(`WF_PUBLIC_URL`)가 틀렸으면 까닭, 맞으면 `null` (빈 값은 부르는 쪽이 본다 — 링크 없는 메일이다, P19 병합 전 자체 점검 5).
- * `http(s)`만, 사용자 정보·질의·조각 없이 — 뒤에 경로와 조각(`/reset-password#t=…`)을 붙인다. 스킴이 없는 값은 메일에서 열리지 않는 링크가 된다
+ * `http(s)`의 **호스트와 포트까지만** — 뒤에 경로와 조각(`/pages/…`·`/reset-password#t=…`)을 붙인다. 위키는 그 주소의 맨 위에서 돈다(화면 빌드의 `base`·nginx의
+ * `location /`) — 경로가 있으면 링크가 열리지 않는다(좁은 재점검 1). 스킴이 없는 값도 열리지 않는 링크가 된다. 빈 질의·빈 조각·역슬래시는 주소 해석이 지워
+ * 버리므로 원문에서 본다
  */
 export function publicUrlProblem(raw: string): string | null {
+  const value = raw.trim();
+  if (/[?#\\]/.test(value)) return '주소에 질의(?)·조각(#)·역슬래시를 넣지 않는다 — https://호스트:포트까지만 적는다';
   let u: URL;
   try {
-    u = new URL(raw.trim());
+    u = new URL(value);
   } catch {
     return '주소 형식이 아니다 — https://호스트:포트 모양으로 적는다(사람들이 브라우저에 치는 주소)';
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return '주소는 http 또는 https여야 한다';
   if (!u.hostname) return '주소 형식이 아니다 — 호스트가 없다';
   if (u.username || u.password) return '주소에 사용자 정보(아이디·비밀번호)를 넣지 않는다';
-  if (u.search) return '주소에 질의(?…)를 넣지 않는다';
-  if (u.hash) return '주소에 조각(#…)을 넣지 않는다';
+  if (u.pathname !== '/') return '주소에 경로를 붙이지 않는다 — 위키는 그 주소의 맨 위에서 돈다. https://호스트:포트까지만 적는다';
   return null;
 }
 

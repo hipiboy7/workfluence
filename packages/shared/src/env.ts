@@ -177,10 +177,12 @@ export const envSchema = z
       .string()
       .default('')
       .superRefine((v, ctx) => {
-        // 스킴이 없으면 메일 속 링크가 열리지 않는다 — 재설정 메일은 링크가 전부다 (P19 병합 전 자체 점검 5, `publicUrlProblem`)
+        // 스킴이 없거나 경로가 붙으면 메일 속 링크가 열리지 않는다 — 재설정 메일은 링크가 전부다 (P19 병합 전 자체 점검 5 · 좁은 재점검 1, `publicUrlProblem`)
         const problem = v.trim() === '' ? null : publicUrlProblem(v);
         if (problem) ctx.addIssue({ code: 'custom', message: problem });
-      }),
+      })
+      // **호스트와 포트로 맞춰 둔다**(끝의 `/`를 뗀다) — 링크를 만드는 두 곳(부르기 메일·재설정 메일)이 같은 값을 쓴다
+      .transform((v) => (v.trim() === '' ? '' : new URL(v.trim()).origin)),
 
     // --- Phase 10: 사내 LLM (P10_설계서_Llm I절) ---
     /**
