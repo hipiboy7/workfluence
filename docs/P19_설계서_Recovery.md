@@ -48,6 +48,7 @@ email이 기억나지 않으면 **"이메일이 기억이 안나시나요?"**로
 | 17 | 서식 단추 줄은 **편집 줄 아래에 붙어** 긴 문서에서도 보인다. 커서가 그 뒤에 숨지 않게 편집 화면의 여백(`EDIT_SCROLL_MARGIN`)에 줄 높이를 더한다 | 붙지 않으면 긴 문서의 끝을 고칠 때 단추를 쓰려고 맨 위로 올라가야 한다. 붙은 막대가 커서를 가린 적이 있다(P17 병합 전 검토 17) | 없음 |
 | 18 | 단추 줄은 **Tab 한 번으로 들어가고 화살표로 옮긴다**(한 번에 하나만 Tab 자리 — WAI-ARIA toolbar). 단추마다 한국어 이름과 단축키(`굵게 (Ctrl+B)`), 지금 켜진 것은 `aria-pressed`, 쓸 수 없는 것은 비활성. 누른 뒤 초점은 본문으로 돌아간다 | 단추가 스무 개 가까이라 모두 Tab 자리이면 본문에 가기까지 스무 번을 누른다. 그림 단추는 이름 없이 뜻을 전하지 못한다(P17 J.5.12) | 없음 |
 | 19 | 링크 단추는 **화면 안의 대화**(`<dialog>` — 확인 대화와 같은 틀)로 주소를 받는다. 주소는 편집기와 서버가 쓰는 같은 판정(`linkAllowed` — http(s)·내부 경로·앵커)으로 보고 아니면 까닭을 말한다. 고른 글이 없으면 주소를 글로 넣는다. 링크 위에서는 고치기·빼기 | `window.prompt`는 화면 모양과 맞지 않고 E2E가 창을 따로 받아야 한다(P17 J.5.10). 판정이 서버와 다르면 그 문서의 저장이 멈춘다(P9 B.2 — `mailto:`) | 없음 |
+| 21 | **사용자 관리 목록의 이름 아래에 email**을 보인다 | email 확인 요청(FR-2009)을 받은 시스템 관리자가 알려 줄 값을 볼 곳이 없었다 — 목록은 email로 찾을 수는 있어도 보이지 않았다(E2E가 찾은 빈틈, 2026-09-30). 관리자는 계정을 만들 때 email을 적는 사람이라 새로 드러나는 것이 아니다 | 없음 |
 | 20 | 되돌리기·다시는 편집기가 이미 가진 명령이다 — 혼자 쓸 때는 편집기의 이력, 실시간 편집에서는 **Yjs의 되돌리기**(내 편집만 되돌린다) | 실시간 편집에서 편집기의 이력을 켜면 내 되돌리기가 남의 편집까지 되돌린다(P9 D.7 — 그래서 꺼 두었다) | 없음 |
 
 ## B. 요구사항
@@ -67,7 +68,7 @@ email이 기억나지 않으면 **"이메일이 기억이 안나시나요?"**로
 | FR-2008 | **쓸 수 있는가** — `GET /api/auth/config`가 `resetMailEnabled`(메일 켜짐 · 공개 주소 · 운영 설정 `passwordResetMail`=1)를 준다. 아니면 화면은 단추를 보이지 않고 `reset-mail`·`reset-password`는 404. 운영 설정 화면의 "세션·계정" 묶음에 켜기·끄기(기본 켬) | A등급 `packages/shared/src/policy.spec.ts` · 통합 · 화면 시험 |
 | FR-2009 | **"이메일이 기억이 안나시나요?"** — 비밀번호 찾기의 email 칸 옆 단추가 안내 화면(`/find-account/email`)으로 간다. 아이디 + 표시 이름을 보내면(`POST /api/auth/email-help`) 둘 다 맞는 활성 로컬 계정일 때만 시스템 관리자(자기 제외)의 알림(`email.confirm.request`)에 간다. 응답은 같다. 읽지 않은 같은 요청은 또 만들지 않는다. 알림은 지금 root일 때만 보이고 세어진다. 알림을 누르면 사용자 관리에서 그 아이디를 찾는다 | 통합 · 화면 시험 · E2E |
 | FR-2010 | **감사** — `auth.password.reset.request`(메일 재설정 요청 — `found`·`result`: `sent`·`throttled`·`ineligible`·`unmatched`), `auth.password.reset`(링크로 바꿈 — 성공은 `actor`, 실패는 까닭), `auth.email.help`(email 확인 요청 — `found`), `mail.send`·`mail.fail`(상세 `kind: "password_reset"`). email은 가린다(`maskEmail`), 값·링크는 싣지 않는다. 모두 필수 기록이다(단계와 무관 — `mail.send`만 P17대로 단계 2부터) | 통합 |
-| FR-2011 | **IP별 제한**(`RATE_LIMITS`) — 메일 재설정 요청 3건/10분, 새 비밀번호 정하기 10건/10분, email 확인 요청 3건/10분. 관리자 요청은 그대로(3건/10분) | 통합 `apps/api/src/common/rate-limit.guard` 시험 틀 · A등급 상수 |
+| FR-2011 | **IP별 제한**(`RATE_LIMITS`) — 메일 재설정 요청 3건/10분, 새 비밀번호 정하기 10건/10분, email 확인 요청 3건/10분. 관리자 요청은 그대로(3건/10분) | A등급 `packages/shared/src/constants.spec.ts`(값) · 경로마다의 `@RateLimit`(`apps/api/src/auth/auth.module.ts` — 가드는 P1 그대로) |
 | FR-2012 | **실패를 구조화해 남긴다** — 응답 뒤에 도는 일(값 만들기·보내기·알림)이 우리 쪽 결함으로 실패하면 error 한 줄(`auth.reset_mail_failed`·`auth.email_help_failed`). 메일 API의 거절·연결 실패는 Phase 18의 줄(`mail.rejected`·`mail.failed`) | 통합 · `pnpm verify:docs`(장애대응 가이드에 코드가 있다) |
 | FR-2013 | **화면** — 비밀번호 찾기 카드에 이름·email과 단추 둘("내 email로 재설정 링크 받기" — 쓸 수 있을 때만, "관리자에게 초기화 요청"), 결과는 카드 안에. 링크 화면(`/reset-password`)은 새 비밀번호와 확인 칸(눈 모양·규칙 안내·다르면 까닭 — P17 FR-1810 그대로) | 화면 시험 · E2E |
 
@@ -198,15 +199,15 @@ email이 기억나지 않으면 **"이메일이 기억이 안나시나요?"**로
 
 | 모듈 | 등급 | 시험 |
 |---|---|---|
-| `packages/shared/src/schemas.ts` — `recoverPasswordDto`(이름+email), `resetMailDto`, `resetPasswordDto`, `emailHelpDto` | A | `packages/shared/src/schemas.spec.ts` |
+| `packages/shared/src/schemas.ts` — `recoverPasswordDto`(이름+email — 관리자 요청과 메일 재설정이 같이 쓴다), `resetPasswordDto`(`RESET_TOKEN_PATTERN`), `emailHelpDto` | A | `packages/shared/src/schemas.spec.ts` |
 | `packages/shared/src/permissions.ts` — `canResetPasswordByMail` | A | `packages/shared/src/permissions.spec.ts` |
 | `packages/shared/src/policy.ts` — `passwordResetMail` | A | `packages/shared/src/policy.spec.ts` |
 | `packages/shared/src/constants.ts` — `PASSWORD_RESET`, `RATE_LIMITS`, `AUDIT_ACTIONS`, `LOG_EVENTS`, `NOTIFICATION_KINDS` | A | `packages/shared/src/constants.spec.ts` |
 | `apps/api/src/auth/domain/reset-link.ts` | A | `apps/api/src/auth/domain/reset-link.spec.ts` |
 | `apps/api/src/mail/domain/compose.ts` — `passwordResetMail` | A | `apps/api/src/mail/domain/compose.spec.ts` |
 | `apps/api/src/auth/recovery.service.ts` · `auth.module.ts`(경로) · `auth.service.ts` · `users.service.ts` · `notifications.service.ts` · `db/schema.ts` · `drizzle/0013_recovery.sql` | B | 통합 `apps/api/src/auth/recovery.integration.spec.ts` · `auth.integration.spec.ts` · `notifications.integration.spec.ts` |
-| `apps/web/src/pages/FindAccountPage.tsx` · `EmailHelpPage.tsx` · `ResetPasswordPage.tsx` · `components/NotificationText.tsx` · `pages/admin/AdminPolicyPage.tsx` · `components/policyNames.ts` | B(web) | 화면 시험(같은 이름의 `.spec.tsx`) |
-| `apps/web/src/components/formatActions.ts` · `FormatToolbar.tsx` · `LinkDialog.tsx` · `icons.tsx` · `Editor.tsx` · `CollabEditor.tsx` · `Comments.tsx` · `pages/PageEditorPage.tsx` · `styles.css` | B(web) | `formatActions.spec.ts` · `FormatToolbar.spec.tsx` · `LinkDialog.spec.tsx` |
+| `apps/web/src/pages/FindAccountPage.tsx` · `EmailHelpPage.tsx` · `ResetPasswordPage.tsx` · `components/NotificationText.tsx` · `pages/admin/AdminPolicyPage.tsx` · `components/policyNames.ts` · `pages/admin/AdminUsersPage.tsx`(이름 아래 email — A.1-21) · `components/ui.tsx`(`Field`의 `aside`) | B(web) | 화면 시험(같은 이름의 `.spec.tsx`) |
+| `apps/web/src/components/formatActions.ts` · `FormatToolbar.tsx` · `LinkDialog.tsx` · `icons.tsx` · `Editor.tsx` · `CollabEditor.tsx` · `Comments.tsx` · `pages/PageEditorPage.tsx` · `styles.css` | B(web) | `formatActions.spec.ts` · `FormatToolbar.spec.tsx`(링크 대화 포함) |
 | `e2e/recovery.spec.ts`(가짜 사내 메일 서버를 스스로 띄운다) · `e2e/format.spec.ts` | C | `pnpm test:e2e` |
 
 ## F. 설정 항목
