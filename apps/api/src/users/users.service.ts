@@ -30,7 +30,7 @@ import { RevocationBus } from '../common/revocation.bus';
 import { DB, type Db } from '../db/db.module';
 import { byName } from '../db/order';
 import { SettingsService } from '../settings/settings.service';
-import { users, type UserRow } from '../db/schema';
+import { passwordResetTokens, users, type UserRow } from '../db/schema';
 
 /**
  * 마지막 root 강등을 줄 세우는 잠금의 이름 (FR-233). 잠그지 않으면 root 둘을 두 요청이 동시에 내릴 때 둘 다 "root 2명"을 세고
@@ -449,17 +449,14 @@ export class UsersService {
   }
 
   /**
-   * 비밀번호 찾기 요청의 대상을 **조회만** 한다. 비밀번호를 바꾸지 않는다.
+   * 비밀번호 찾기 요청의 대상을 **조회만** 한다. 비밀번호를 바꾸지 않는다 — **표시 이름 + email**이 맞는 **활성** 계정 (P19 FR-2000, 예전에는 아이디+email).
    *
-   * **미인증 경로에서 비밀번호를 발급하지 않는다.** 아이디와 사내 email은 위키에서 사실상
-   * 공개 정보라 "둘을 아는 사람 = 본인"이 성립하지 않는다. 메일 같은 대역 외 전달 수단이
-   * 없는 폐쇄망에서는 자가 재설정을 안전하게 만들 방법이 없으므로 **기능을 두지 않고**
-   * 관리자 초기화(인증·권한 검사가 있는 경로)로 보낸다.
+   * **미인증 경로에서 비밀번호를 발급하지 않는다**(FR-209a). 이름과 사내 email은 위키에서 사실상 공개 정보라 "둘을 아는 사람 = 본인"이 성립하지 않는다 —
+   * 관리자 초기화(인증·권한 검사가 있는 경로)로 보내거나, 그 계정의 email로 링크를 보낸다(메일함을 가진 것이 본인 확인 — `RecoveryService`)
    */
-  async findRecoveryTarget(username: string, email: string, tx: Db = this.db): Promise<UserRow | null> {
-    const user = await this.findByUsername(username, tx);
-    if (!user || !user.email || user.email !== email.toLowerCase() || user.status !== 'active') return null;
-    return user;
+  async findRecoveryTarget(displayName: string, email: string, tx: Db = this.db): Promise<UserRow | null> {
+    const user = await this.findByEmailAndName(email, displayName, tx);
+    return user && user.status === 'active' ? user : null;
   }
 
   /**
@@ -468,7 +465,7 @@ export class UsersService {
    * 판정은 공유 함수(`suspendProblem`)가 한다 — 관리의 우열(P11), 자기 자신, 활성 계정만, 마지막 활성 root. 대상 행을 **잠그고** 읽는다
    * (`lockForUpdate` — 판정과 쓰기 사이에 위임·역할이 바뀌지 않게). root를 셀 때는 root 강등과 **같은 줄**에 선다(`LAST_ROOT_LOCK`) —
    * 둘이 동시에 root 둘을 하나씩 정지·강등하면 root가 0명이 된다. 정지하는 순간 세션을 모두 지우고 열린 실시간 편집 연결을 끊는다
-   * (RevocationBus — 강제 종료와 같다). 이전 상태를 돌려준다 — 호출부가 감사에 싣는다
+   * (RevocationBus — 강제 종료와 같다). 메일 재설정 링크도 지운다(P19). 이전 상태를 돌려준다 — 호출부가 감사에 싣는다
    */
   async suspend(id: string, actor: Principal, tx: Db = this.db): Promise<{ row: UserRow; before: UserStatus }> {
     const opened = tx === this.db;
@@ -485,6 +482,8 @@ export class UsersService {
       this.assertAllowed(suspendProblem(actor, { id: target.id, role: target.role as Role, status: before, grants: target.grants }, activeRoots));
       const [row] = await t.update(users).set({ status: 'suspended', updatedAt: sql`now()` }).where(eq(users.id, id)).returning();
       await t.execute(sql`DELETE FROM sessions WHERE sess->>'userId' = ${id}`);
+      // 메일 재설정 링크도 지운다 — 정지는 그 계정으로 들어오는 길을 모두 끊는다. 풀어도 옛 링크가 살아나지 않는다(P19 병합 전 자체 점검 13)
+      await t.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, id));
       return { row, before };
     });
     // **끊는 알림은 커밋한 뒤에** (FR-1442, 병합 전 검토). 트랜잭션을 여기서 열었으면 지금이 커밋 뒤다. 호출부가 넘긴 트랜잭션이면 커밋은

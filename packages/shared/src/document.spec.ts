@@ -75,6 +75,18 @@ describe('validateDocument', () => {
     expect(validateDocument(doc(para(text('l', [{ type: 'link' }])))).ok).toBe(false);
   });
 
+  it('**바깥 주소를 위키 안 주소로 꾸민 것**을 거부한다 — 브라우저는 `\\`를 `/`로 읽고 탭·줄바꿈을 지운다(P19 보안 검토 3)', () => {
+    const link = (href: string) => doc(para(text('l', [{ type: 'link', attrs: { href } }])));
+    // 모두 브라우저에서는 `//evil.example/` — 이 위키 밖으로 간다
+    for (const href of ['/\\evil.example/', '/\t/evil.example/', '/\n/evil.example/', '/\r/evil.example/', '/\t\\evil.example/']) {
+      expect(validateDocument(link(href)).ok, JSON.stringify(href)).toBe(false);
+      expect(markProblems('link', { href }), JSON.stringify(href)).toEqual(['허용되지 않는 링크 주소']);
+    }
+    // 위키 안 주소는 그대로 — 가운데의 `\\`는 경로 글자다
+    expect(validateDocument(link('/pages/a\\b')).ok).toBe(true);
+    expect(validateDocument(link('/')).ok).toBe(true);
+  });
+
   it('heading level, text 노드 형태, attrs·marks·content 타입을 검사한다', () => {
     expect(validateDocument(doc({ type: 'heading', attrs: { level: 9 }, content: [text('x')] })).ok).toBe(false);
     expect(validateDocument(doc(para({ type: 'text', text: '' }))).ok).toBe(false);

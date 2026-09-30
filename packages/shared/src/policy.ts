@@ -28,6 +28,9 @@ export const POLICY_DEFAULTS = {
   // Phase 17 (P17_설계서_Ui I절) — 감사 기록 단계. 3 전체 · 2 줄임 · 1 최소. 사용자 결정 2026-09-28 "필수는 늘, 나머지만 단계" → "10번 제안대로".
   // 바꾸는 사람은 시스템 관리자뿐이고(감사로그 화면), 기본은 지금처럼 모두 남긴다
   auditLevel: 3,
+  // Phase 19 (P19_설계서_Recovery A.1-9·14, FR-2008) — 메일 재설정 켜기(1)·끄기(0). 사내 보안 검토가 메일 도달만의 본인 확인을 받지 않으면 코드를
+  // 고치지 않고 끄는 자리다. 끄면 단추가 사라지고 이미 보낸 링크도 막힌다. 사내 메일(`WF_MAIL_ENABLED`)과 공개 주소(`WF_PUBLIC_URL`)도 있어야 쓰인다
+  passwordResetMail: 1,
 };
 
 /**
@@ -71,6 +74,7 @@ const RANGES: Record<string, { min: number; max: number }> = {
   // 0이면 고정을 쓰지 않는다. **대화 수보다 작아야 한다**는 짝 규칙은 `policyConsistencyProblems`가 본다
   llmPinnedMax: { min: 0, max: 999 },
   auditLevel: { min: 1, max: 3 },
+  passwordResetMail: { min: 0, max: 1 },
 };
 
 /**

@@ -7,6 +7,7 @@ import * as Y from 'yjs';
 import { CollabLink, colorFor, type CollabState } from './collabLink';
 import type { ScrollMargin } from './Editor';
 import { editorExtensions } from './extensions';
+import { FormatToolbar } from './FormatToolbar';
 
 export type { CollabState } from './collabLink';
 
@@ -22,8 +23,10 @@ type Props = {
   onDoc?: (doc: Y.Doc | null) => void;
   /** 쓰는 칸의 이름이 되는 **보이는 라벨**의 id (P17 J.7) — 없으면 이름은 "본문"이다 */
   labelledBy?: string;
-  /** 창 위를 가리는 막대만큼 띄워 커서를 보이게 한다 — 편집 화면의 `EDIT_SCROLL_MARGIN` (P17 병합 전 검토 17) */
+  /** 창 위를 가리는 막대만큼 띄워 커서를 보이게 한다 — 편집 화면의 `EDIT_SCROLL_MARGIN` (P17 병합 전 코드 리뷰 18) */
   scrollMargin?: ScrollMargin;
+  /** 서식 단추 줄 (P19 FR-2020·2025) — 되돌리기·다시는 Yjs의 것이다(내 편집만) */
+  toolbar?: 'full' | 'compact';
 };
 
 /**
@@ -61,7 +64,7 @@ export function CollabEditor(props: Props) {
   return <LiveEditor key={live.ydoc.guid} {...props} ydoc={live.ydoc} awareness={live.awareness} />;
 }
 
-function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlocked, labelledBy, scrollMargin, ydoc, awareness }: Props & { ydoc: Y.Doc; awareness: Awareness }) {
+function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlocked, labelledBy, scrollMargin, toolbar, ydoc, awareness }: Props & { ydoc: Y.Doc; awareness: Awareness }) {
   const [state, setState] = useState<CollabState>('connecting');
   // 알림 받는 함수가 바뀌어도 다시 붙지 않게 참조로 둔다 — 연결 효과의 의존에 넣으면 부모가 다시 그릴 때마다 끊고 붙는다
   const onSaveBlockedRef = useRef(onSaveBlocked);
@@ -128,5 +131,10 @@ function LiveEditor({ pageId, me, editable = true, onPeers, onState, onSaveBlock
     editor?.setEditable(editable);
   }, [editor, editable]);
 
-  return <EditorContent className={editable ? 'editor' : 'editor readonly'} editor={editor} />;
+  return (
+    <>
+      {editable && toolbar && <FormatToolbar editor={editor} variant={toolbar} />}
+      <EditorContent className={editable ? 'editor' : 'editor readonly'} editor={editor} />
+    </>
+  );
 }

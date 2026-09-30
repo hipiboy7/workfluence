@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Field, FormRow, useReadWide } from './ui';
+import { Field, FormRow, sectionOf, useReadWide } from './ui';
 
 /**
  * 컴포넌트 시험 — 문서 글 칸의 **넓게 보기** (P17 설계서 J.3.4, 착수 쟁점 5 · 병합 전 검토 8). 보기와 편집·이력이 같은 값을 쓰고 브라우저가 기억한다.
@@ -91,5 +91,17 @@ describe('Field·FormRow — 필수 표시 (J.5.3, FR-1855 · 병합 전 검토 
     }
     expect((screen.getByLabelText('메모') as HTMLInputElement).required).toBe(false);
     expect(screen.getByLabelText('메모').closest('.field')!.querySelector('.req')).toBeNull();
+  });
+});
+
+/** 탭 제목의 구역 (P17 FR-1854) — 로그인 전 화면에는 구역이 없다. 예전에는 새 비밀번호 정하기에 "스페이스"가 붙었다(P19 병합 전 코드 리뷰 추가 10) */
+describe('sectionOf', () => {
+  it('로그인 전 화면은 구역이 없다 — 비밀번호 찾기·email 확인 요청·새 비밀번호 정하기도', () => {
+    for (const p of ['/login', '/signup', '/find-account', '/find-account/root', '/find-account/email', '/reset-password']) expect(sectionOf(p), p).toBe('');
+  });
+
+  it('나머지는 메뉴의 구역', () => {
+    expect(sectionOf('/admin/users')).toBe('관리');
+    expect(sectionOf('/pages/x')).toBe('스페이스');
   });
 });

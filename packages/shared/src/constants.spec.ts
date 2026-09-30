@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, COLLAB_LIMITS, DB_POOL, LIST_PAGE_LIMIT, LIST_SEARCH_MAX, LLM_TIMINGS, LOG_EVENTS, PAGE_POSITION_GAP, PAGE_POSITION_LIMIT, PAGE_TREE_LOCK_WAIT_MS, RATE_LIMITS, REQUEST_ID_PATTERN, SPACE_LIST_MAX, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
+import { AUDIT_ACTIONS, COLLAB_LIMITS, NOTIFICATION_KINDS, PASSWORD_RESET, DB_POOL, LIST_PAGE_LIMIT, LIST_SEARCH_MAX, LLM_TIMINGS, LOG_EVENTS, PAGE_POSITION_GAP, PAGE_POSITION_LIMIT, PAGE_TREE_LOCK_WAIT_MS, RATE_LIMITS, REQUEST_ID_PATTERN, SPACE_LIST_MAX, TABLE_LIMITS, USER_LIST_MAX, USER_LIST_PAGE, USER_STATUSES } from './constants';
 
 /** 설계 고정값 중 **이름의 모양**이 규칙인 것 (P11 D.4, FR-1214·1218) */
 
@@ -89,6 +89,42 @@ describe('사용자 상태와 감사 종류 — P13 계정 정지 (FR-1440·1444
 describe('RATE_LIMITS — IP별 요청 제한', () => {
   it('**비밀번호 변경도 센다 — 분당 5건** (P13 좁은 자체 점검 6). 변경은 그 계정의 로그인과 같은 줄에 서서(D.4), 제한이 없으면 세션을 쥔 사람이 틀린 현재 비밀번호로 그 계정의 로그인과 변경을 뒤로 민다. 성공은 돌려준다(로그인과 같다)', () => {
     expect(RATE_LIMITS.changePassword).toEqual({ max: 5, windowSec: 60 });
+  });
+
+  it('**비밀번호를 잊었을 때의 세 요청** (P19 FR-2011) — 메일 재설정 요청·email 확인 요청은 관리자 요청과 같이 10분에 3건, 링크 쓰기는 10분에 10건(틀린 비밀번호 규칙으로 다시 누를 수 있게)', () => {
+    expect(RATE_LIMITS.resetMail).toEqual({ max: 3, windowSec: 600 });
+    expect(RATE_LIMITS.emailHelp).toEqual({ max: 3, windowSec: 600 });
+    expect(RATE_LIMITS.resetPassword).toEqual({ max: 10, windowSec: 600 });
+    expect(RATE_LIMITS.recoverPassword).toEqual({ max: 3, windowSec: 600 });
+  });
+});
+
+describe('PASSWORD_RESET — 메일 재설정 링크 (P19 A.1-4·5·7)', () => {
+  it('**30분 · 한 계정에 5분에 한 통 · 값은 32바이트**', () => {
+    expect(PASSWORD_RESET).toEqual({ linkMinutes: 30, mailIntervalMinutes: 5, tokenBytes: 32 });
+  });
+
+  it('간격이 기한보다 짧다 — 기한 안에 다시 받을 수 있다', () => {
+    expect(PASSWORD_RESET.mailIntervalMinutes).toBeLessThan(PASSWORD_RESET.linkMinutes);
+  });
+});
+
+describe('NOTIFICATION_KINDS (P19 FR-2009)', () => {
+  it('**email 확인 요청**이 있다 — 시스템 관리자만 받는다', () => {
+    expect(NOTIFICATION_KINDS).toEqual(['mention', 'password.reset.request', 'email.confirm.request']);
+  });
+
+  it('감사 행위에 세 요청이 있다 — 메일 재설정 요청·링크 쓰기·email 확인 요청', () => {
+    for (const a of ['auth.password.reset.request', 'auth.password.reset', 'auth.email.help']) expect(AUDIT_ACTIONS as readonly string[]).toContain(a);
+  });
+
+  it('응답 뒤에 도는 일이 실패하면 남는 줄이 있다 — 우리 쪽 결함이라 error (FR-2012)', () => {
+    expect(LOG_EVENTS).toContain('auth.reset_mail_failed');
+    expect(LOG_EVENTS).toContain('auth.email_help_failed');
+  });
+
+  it('화면 설정(`/api/auth/config`)이 운영 설정을 읽지 못하면 메일 재설정만 끄고 줄을 남긴다 — 우리 쪽 결함이라 error (병합 전 코드 리뷰 5)', () => {
+    expect(LOG_EVENTS).toContain('auth.config_failed');
   });
 });
 

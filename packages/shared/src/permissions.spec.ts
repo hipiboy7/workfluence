@@ -7,6 +7,7 @@ import {
   canAssignRole,
   canGrant,
   canManageUser,
+  canResetPasswordByMail,
   categoryAccess,
   checkPasswordPolicy,
   countCharClasses,
@@ -500,5 +501,27 @@ describe('passwordRuleText (P13 FR-1472)', () => {
 
   it('종류가 1이면 종류는 말하지 않는다 — 어떤 글자든 된다', () => {
     expect(passwordRuleText({ minLength: 10, minCharClasses: 1 })).toBe('10자 이상, 공백 없이');
+  });
+});
+
+describe('canResetPasswordByMail — 내 email로 재설정 링크를 받을 수 있는 계정 (P19 FR-2002, 착수 쟁점 1)', () => {
+  const local = { role: 'member' as const, status: 'active' as const, local: true };
+
+  it('**member·admin의 활성 로컬 계정**만 받는다', () => {
+    expect(canResetPasswordByMail(local)).toBe(true);
+    expect(canResetPasswordByMail({ ...local, role: 'admin' })).toBe(true);
+  });
+
+  it('**root는 받지 않는다** — root의 메일함 하나가 뚫리면 시스템 전체가 넘어간다(사용자 결정 "(가) member·admin만, root는 제외")', () => {
+    expect(canResetPasswordByMail({ ...local, role: 'root' })).toBe(false);
+  });
+
+  it('**사내 계정은 받지 않는다** — 비밀번호를 붙이면 IdP가 강제하던 인증을 건너뛴다(FR-217)', () => {
+    expect(canResetPasswordByMail({ ...local, local: false })).toBe(false);
+  });
+
+  it('**승인 대기·정지는 받지 않는다** — 로그인할 수 없는 계정이다', () => {
+    expect(canResetPasswordByMail({ ...local, status: 'pending' })).toBe(false);
+    expect(canResetPasswordByMail({ ...local, status: 'suspended' })).toBe(false);
   });
 });

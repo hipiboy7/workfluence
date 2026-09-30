@@ -6,3 +6,4 @@ ecf3c884adc5df87a62915a3b164726b415ae26c:packages/shared/src/schemas.spec.ts:gen
 552073317bfc2c0792412008c3bc3c8cd0f81c94:apps/api/src/llm/openai.client.spec.ts:generic-api-key:215
 608db4343da3b94c60fce3f18a38f8d68a5f50d4:packages/shared/src/env.spec.ts:generic-api-key:218
 78f3bfe6c02eb87822f670bc028742e4a71b262f:docs/internal/검토서_트러블슈팅.md:generic-api-key:1190
+1c85f10d5e34cffbcb47de9bb17e64e8d384a34b:apps/api/src/auth/recovery.integration.spec.ts:generic-api-key:237

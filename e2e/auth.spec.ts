@@ -89,10 +89,12 @@ test('로그인하지 않으면 보호된 화면에서 로그인으로 보낸다
 
 test('계정 찾기는 없는 정보에도 같은 모양으로 답한다 (FR-208)', async ({ page }) => {
   await page.goto('/find-account');
-  await page.getByLabel('email').first().fill('nobody@example.internal');
-  await page.getByLabel('이름').fill('없는사람');
-  await page.getByRole('button', { name: '찾기' }).click();
-  await expect(page.getByText('일치하는 정보로 찾을 수 없다')).toBeVisible();
+  // 비밀번호 찾기도 이름·email 칸이다(P19 FR-2000) — 아이디 찾기 카드 안에서 찾는다
+  const form = page.locator('form').filter({ has: page.getByRole('heading', { name: '아이디 찾기' }) });
+  await form.getByLabel('email').fill('nobody@example.internal');
+  await form.getByLabel('이름').fill('없는사람');
+  await form.getByRole('button', { name: '찾기' }).click();
+  await expect(form.getByText('일치하는 정보로 찾을 수 없다')).toBeVisible();
 });
 
 /**
@@ -155,14 +157,14 @@ test('비밀번호 찾기의 초기화 요청이 관리자의 알림 영역에 �
   const asker = { username: `e2e-ask-${stamp}`, displayName: 'E2E 요청자', password: 'E2e-Asker-2026!', email: `e2e-ask-${stamp}@example.internal` };
   made.push(asker.username);
   await createMember(asker);
-  // 본인의 요청이라고 말하지 않는다 — 아이디·email만으로 누구나 보낸다(병합 전 검토 22)
-  const said = `${asker.displayName} (${asker.username})님의 아이디·email로 비밀번호 초기화가 요청됐다`;
+  // 본인의 요청이라고 말하지 않는다 — 이름·email만으로 누구나 보낸다(병합 전 검토 22). 두 칸은 표시 이름과 email이다(P19 FR-2000)
+  const said = `${asker.displayName} (${asker.username})님의 이름·email로 비밀번호 초기화가 요청됐다`;
 
   await page.goto('/find-account');
   const form = page.locator('form').filter({ has: page.getByRole('heading', { name: '비밀번호 찾기' }) });
-  await form.getByLabel('아이디').fill(asker.username);
+  await form.getByLabel('이름').fill(asker.displayName);
   await form.getByLabel('email').fill(asker.email);
-  await form.getByRole('button', { name: '초기화 요청' }).click();
+  await form.getByRole('button', { name: '관리자에게 초기화 요청' }).click();
   await expect(form.getByText('요청을 접수했다', { exact: false })).toBeVisible();
 
   await page.goto('/login');

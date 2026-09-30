@@ -311,6 +311,25 @@ export const notifications = pgTable(
   (t) => [index('notifications_user_idx').on(t.userId, t.readAt, t.createdAt)],
 );
 
+/**
+ * 메일 재설정 링크 (P19_설계서_Recovery C.3, `0013_recovery`). **값은 두지 않는다** — SHA-256만(`tokenHash`). `passwordMark`는 발급 때의 비밀번호 해시에서
+ * 뽑은 표시다 — 비밀번호가 바뀌면 링크가 죽는다(A.1-4). 한 사람에게 살아 있는 링크는 하나다(`RecoveryService`)
+ */
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    passwordMark: text('password_mark').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex('password_reset_tokens_hash_uq').on(t.tokenHash), index('password_reset_tokens_user_idx').on(t.userId, t.createdAt)],
+);
+
 /** 운영 조절값 (CLAUDE.md 5절 세 번째 분류). 관리 화면은 Phase 4. */
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
@@ -448,6 +467,7 @@ export type NewUserRow = typeof users.$inferInsert;
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type SettingRow = typeof settings.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
+export type PasswordResetTokenRow = typeof passwordResetTokens.$inferSelect;
 export type PageRealtimeRow = typeof pageRealtime.$inferSelect;
 export type PageTemplateRow = typeof pageTemplates.$inferSelect;
 export type LlmProviderRow = typeof llmProviders.$inferSelect;

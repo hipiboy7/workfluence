@@ -77,8 +77,22 @@ export function AdminPolicyPage() {
 
   /** 숫자 값 한 줄 — 칸 뒤에 단위. 칸과 단위가 한 줄이라 도움말은 칸에 직접 잇는다(`FormRow`는 자식 하나에만 잇는다) */
   const numberRow = (k: PolicyNumberKey) => {
-    const { name, unit, help: meaning } = POLICY_NAMES[k];
+    const { name, unit, help: meaning, choices } = POLICY_NAMES[k];
     const help = k === 'uploadMaxMb' ? `이 서버의 천장 ${policy.uploadCeilingMb}MB — 그 위로는 올리지 못한다.` : meaning;
+    // 값이 몇 가지뿐이면 고르는 칸 — 메일 재설정 켜기·끄기(P19 FR-2008). 값은 숫자 그대로 보낸다(서버의 범위 판정이 같다)
+    if (choices) {
+      return (
+        <FormRow key={k} id={k} label={withCode(name, k)} help={help}>
+          <select id={k} className="w-s" value={draft[k] ?? policy[k]} onChange={(e) => setDraft({ ...draft, [k]: Number(e.target.value) })}>
+            {choices.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </FormRow>
+      );
+    }
     return (
       <FormRow key={k} id={k} label={withCode(name, k)} help={help}>
         <div className="inline">

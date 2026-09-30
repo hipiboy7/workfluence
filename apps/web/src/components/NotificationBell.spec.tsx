@@ -86,7 +86,7 @@ describe('NotificationBell', () => {
     expect(bell.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(bell);
     const panel = await screen.findByRole('region', { name: '최근 알림' });
-    await waitFor(() => expect(panel.textContent).toContain('앨리스 (alice)님의 아이디·email로 비밀번호 초기화가 요청됐다 — 본인에게 확인한 뒤 초기화한다'));
+    await waitFor(() => expect(panel.textContent).toContain('앨리스 (alice)님의 이름·email로 비밀번호 초기화가 요청됐다 — 본인에게 확인한 뒤 초기화한다'));
     expect(panel.textContent).toContain('밥님이 불렀다');
     expect(screen.getByRole('link', { name: '회의록' }).getAttribute('href')).toBe('/pages/11111111-1111-4111-8111-111111111111');
     expect(screen.getByRole('link', { name: '알림함에서 모두 보기' }).getAttribute('href')).toBe('/notifications');

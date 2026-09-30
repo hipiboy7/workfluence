@@ -68,3 +68,80 @@ export const UserIcon = () => (
     <path d="M4 21a8 8 0 0 1 16 0" />
   </Svg>
 );
+
+// ---- 서식 단추 줄 (P19 D.1) — 글자 서식은 그 모양의 글자(`FormatGlyph`), 나머지는 선 그림 ----
+
+/** 글자 서식의 모양 — 굵은 B, 기운 I, 밑줄 U, 줄 그은 S. 그림 대신 그 서식을 입힌 글자 하나다 */
+export const FormatGlyph = ({ kind }: { kind: 'bold' | 'italic' | 'underline' | 'strike' }) => (
+  <span className={`fmt-glyph fmt-${kind}`} aria-hidden="true">
+    {{ bold: 'B', italic: 'I', underline: 'U', strike: 'S' }[kind]}
+  </span>
+);
+
+export const CodeIcon = () => (
+  <Svg>
+    <path d="M9 7l-5 5 5 5M15 7l5 5-5 5" />
+  </Svg>
+);
+
+export const BulletListIcon = () => (
+  <Svg>
+    <path d="M10 6h10M10 12h10M10 18h10" />
+    <circle cx="5" cy="6" r="1" />
+    <circle cx="5" cy="12" r="1" />
+    <circle cx="5" cy="18" r="1" />
+  </Svg>
+);
+
+export const OrderedListIcon = () => (
+  <Svg>
+    <path d="M10 6h10M10 12h10M10 18h10M4 4.5l1.5-1V9M3.5 13.5a1.5 1.5 0 1 1 2.6 1L3.5 17h3" />
+  </Svg>
+);
+
+export const QuoteIcon = () => (
+  <Svg>
+    <path d="M5 6v12M9 8h11M9 12h11M9 16h7" />
+  </Svg>
+);
+
+export const CodeBlockIcon = () => (
+  <Svg>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M10 9l-3 3 3 3M14 9l3 3-3 3" />
+  </Svg>
+);
+
+export const RuleIcon = () => (
+  <Svg>
+    <path d="M3 12h18" />
+  </Svg>
+);
+
+export const LinkIcon = () => (
+  <Svg>
+    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+  </Svg>
+);
+
+export const TableIcon = () => (
+  <Svg>
+    <rect x="3" y="4" width="18" height="16" rx="1" />
+    <path d="M3 10h18M3 15h18M9 4v16M15 4v16" />
+  </Svg>
+);
+
+export const UndoIcon = () => (
+  <Svg>
+    <path d="M9 14L4 9l5-5" />
+    <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+  </Svg>
+);
+
+export const RedoIcon = () => (
+  <Svg>
+    <path d="M15 14l5-5-5-5" />
+    <path d="M20 9H10a6 6 0 0 0 0 12h3" />
+  </Svg>
+);

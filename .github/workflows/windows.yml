@@ -233,13 +233,18 @@ jobs:
           Write-Output '::endgroup::'
           Mark 'pnpm test (unit + integration)' ($code -eq 0) "exit $code"
 
-          # --- E2E: mock company login and an LLM key, added to the process env only (.env stays the trial setup) ---
+          # --- E2E: mock company login, an LLM key and the mail the recovery test catches (its fake in-house mail API listens on 3199 —
+          #     e2e/recovery.spec.ts, scripts/e2e.ts), added to the process env only (.env stays the trial setup) ---
           Stop-Tree $app
           $env:WF_OIDC_ENABLED = 'true'
           $env:WF_OIDC_MOCK = 'true'
           $env:WF_LLM_MASTER_KEY = $env:TRIAL_LLM_KEY
+          $env:WF_MAIL_ENABLED = 'true'
+          $env:WF_MAIL_MOCK = 'false'
+          $env:WF_MAIL_API_URL = 'http://127.0.0.1:3199/api/v1/email/send'
+          $env:WF_PUBLIC_URL = 'http://127.0.0.1:3000'
           $app = Start-Bg 'app-e2e' 'start'
-          Remove-Item Env:WF_OIDC_ENABLED, Env:WF_OIDC_MOCK, Env:WF_LLM_MASTER_KEY
+          Remove-Item Env:WF_OIDC_ENABLED, Env:WF_OIDC_MOCK, Env:WF_LLM_MASTER_KEY, Env:WF_MAIL_ENABLED, Env:WF_MAIL_MOCK, Env:WF_MAIL_API_URL, Env:WF_PUBLIC_URL
           if (Wait-Health $app) {
             $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD '.local\ms-playwright'
             Write-Output '::group::playwright install chromium'

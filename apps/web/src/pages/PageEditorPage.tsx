@@ -6,6 +6,7 @@ import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { CollabEditor, type CollabState } from '../components/CollabEditor';
 import { EDIT_SCROLL_MARGIN, Editor } from '../components/Editor';
+import { useBarHeightVar } from '../components/stickyBars';
 import { Breadcrumbs, Field, Loading, Notice, Page, PageHeader, StatusBadge, useDocumentTitle, useReadWide } from '../components/ui';
 import { SideSlot } from '../layout/AppLayout';
 import { SpaceSideNav } from '../layout/SpaceSideNav';
@@ -62,6 +63,8 @@ function PageEditorScreen() {
   // 실시간 편집이 켜져 있는지는 **서버가 말해 준다** (FR-711). 화면이 짐작하면
   // 꺼진 서버에 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다
   const [collab, setCollab] = useState<boolean | null>(null);
+  // 편집 줄은 같이 보는 사람이 많거나 창이 좁으면 두 줄로 접힌다 — 그 높이를 아래에 붙는 서식 단추 줄과 여백이 쓴다(`stickyBars.ts`)
+  const editBarRef = useBarHeightVar('--edit-bar-h');
   const [peers, setPeers] = useState<string[]>([]);
   const [link, setLink] = useState<CollabState>('connecting');
   // 서버가 알린 **자동 저장이 멈춘 까닭** (P9 FR-1011). 풀리면 `null`
@@ -170,7 +173,7 @@ function PageEditorScreen() {
   const onState = useCallback((s: CollabState) => setLink(s), []);
   const onSaveBlocked = useCallback((r: string | null) => setSaveBlocked(r), []);
 
-  // **실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫거나 새로 고치기 전에 묻는다** (P17 병합 전 검토 18). 실시간 편집은 서버가 쓰는 대로
+  // **실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫거나 새로 고치기 전에 묻는다** (P17 병합 전 코드 리뷰 19). 실시간 편집은 서버가 쓰는 대로
   // 저장하므로 묻지 않는다. 본문은 편집기가 사람이 고쳤다고 알릴 때만 친다(`onEdit` — 처음 그릴 때 편집기가 다듬어 알리는 값은 고친 것이 아니다).
   // 앱 안의 링크(왼쪽 칸의 트리·위 막대)로 떠나는 것은 막지 못한다 — 그것을 막는 `useBlocker`는 데이터 라우터(`createBrowserRouter`)에서만 되고
   // 이 앱은 `BrowserRouter`다(`App.tsx`). 라우터를 바꾸는 것은 모든 경로를 다시 짜는 일이라 이번에 하지 않는다
@@ -282,7 +285,7 @@ function PageEditorScreen() {
         <SpaceSideNav spaceId={page.spaceId} currentPageId={id} />
       </SideSlot>
       <div className="edit-canvas">
-        <div className="edit-bar">
+        <div ref={editBarRef} className="edit-bar">
           <Link to={`/pages/${id}`}>← 보기로</Link>
           {collab ? (
             <>
@@ -365,7 +368,7 @@ function PageEditorScreen() {
             <label id={BODY_LABEL_ID} onClick={() => bodyRef.current?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus()}>
               본문
             </label>
-            {/* 서식 단추 줄의 자리 — 본문 칸 바로 위에 온다(F-013, 이번에는 두지 않는다 — 착수 쟁점 7) */}
+            {/* 서식 단추 줄은 본문 칸 바로 위 — 편집기 부품이 그린다(P19 F-013, `toolbar="full"`). 편집 줄 아래에 붙는다(A.1-17) */}
             <div ref={bodyRef}>
               {collab && me ? (
                 <CollabEditor
@@ -377,9 +380,17 @@ function PageEditorScreen() {
                   onDoc={onDoc}
                   labelledBy={BODY_LABEL_ID}
                   scrollMargin={EDIT_SCROLL_MARGIN}
+                  toolbar="full"
                 />
               ) : (
-                <Editor value={page.content} onChange={setDoc} onEdit={() => setBodyEdited(true)} labelledBy={BODY_LABEL_ID} scrollMargin={EDIT_SCROLL_MARGIN} />
+                <Editor
+                  value={page.content}
+                  onChange={setDoc}
+                  onEdit={() => setBodyEdited(true)}
+                  labelledBy={BODY_LABEL_ID}
+                  scrollMargin={EDIT_SCROLL_MARGIN}
+                  toolbar="full"
+                />
               )}
             </div>
           </div>

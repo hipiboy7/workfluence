@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 18까지 구현 완료** (2026-09-29). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 19까지 구현 완료** (2026-09-30). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -31,7 +31,7 @@
     │ SQL                               │ OIDC · 메일 발송 · LLM 질문 (HTTP)
     ▼                                   ▼
 [postgres]  문서·사용자·감사로그       [사내 IdP]  외부. Discovery·JWKS
-                                       [사내 메일 API]  외부. 멘션 알림 — 요청 모양은 사용자가 준 설명대로(P18), 실연동은 현장에서 (보류 18)
+                                       [사내 메일 API]  외부. 멘션 알림·비밀번호 재설정 링크(P19) — 요청 모양은 사용자가 준 설명대로(P18), 실연동은 현장에서 (보류 18)
                                        [사내 LLM (vLLM)]  외부. OpenAI 호환. 관리자가 등록한 주소 (보류 29)
     │
     ▼
@@ -65,7 +65,8 @@ workfluence/
 │   │   │   │                     (요청 번호·요청 문맥·접근 로그·event 줄) / [P13] like.ts · domain/scram.ts (SCRAM 확인값)
 │   │   │   ├── health/           [P0] /api/health (DB까지 확인)
 │   │   │   ├── auth/             [P1] 로컬 로그인·OIDC·세션·가드 / [P13] domain/{keyed-serial,concurrency-gate,argon-slots}.ts
-│   │   │   │                     (한 계정씩 줄 세우기·argon2 동시 실행 상한)
+│   │   │   │                     (한 계정씩 줄 세우기·argon2 동시 실행 상한) / [P19] recovery.service.ts · domain/reset-link.ts
+│   │   │   │                     (메일 재설정 링크 — 값은 해시만·30분·한 번, email 확인 요청)
 │   │   │   ├── users/            [P1] 가입·승인·초기화·역할 / [P13] password.ts (해시·확인을 트랜잭션 밖에서) · 정지·찾기
 │   │   │   ├── audit/            [P1] append-only 기록·조회
 │   │   │   ├── settings/         [P0 테이블 / P4 화면] 운영 정책값 (세 겹 출처 · 캐시)
@@ -77,11 +78,13 @@ workfluence/
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
-│   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계) / [P8] scanMentions·callerFor
+│   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계) / [P8] scanMentions·callerFor /
+│   │   │   │                     [P17] 비밀번호 초기화 요청 알림 / [P19] email 확인 요청 알림 · 계정 찾기 알림 읽음(resolveRecoveryRequests)
 │   │   │   ├── trash/            [P4] 휴지통·되살리기
 │   │   │   ├── labels/           [P4] 라벨
 │   │   │   ├── templates/        [P6] 페이지 템플릿
-│   │   │   ├── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http). [P18] domain/{request,compose}(요청 모양·메일 글) · post(보내는 길 — 앱과 시험 명령이 함께)
+│   │   │   ├── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http). [P18] domain/{request,compose}(요청 모양·메일 글) · post(보내는 길 — 앱과 시험 명령이 함께) /
+│   │   │   │                     [P19] compose의 재설정 메일
 │   │   │   └── llm/              [P10] 사내 LLM 질문 — domain/{secret,openai,think,conversation}.ts ·
 │   │   │                         LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
@@ -94,6 +97,8 @@ workfluence/
 │                                 [P17] styles.css (토큰·요소 기본값·부품 — 화면별 CSS 없음) · layout/{AppLayout,AuthLayout,SpaceSideNav}.tsx
 │                                 (한 틀 = 위 막대·왼쪽 칸(SideSlot)·본문, 카드 틀, 스페이스 문맥의 왼쪽 칸과 페이지 트리) ·
 │                                 components/{ui,ConfirmDialog,icons,labels,LlmSideNav,NotificationBell,auditNames,policyNames}.ts(x)
+│                                 [P19] components/{formatActions.ts,FormatToolbar,LinkDialog}.tsx (서식 단추 줄 — 단추 목록·판정·실행은 React 밖) ·
+│                                 pages/{ResetPasswordPage,EmailHelpPage}.tsx (링크로 새 비밀번호 · email 확인 요청)
 ├── packages/shared/              [P0] 서버·클라이언트 공유 계약
 │   └── src/{env,constants,document,permissions,policy,security,schemas,release,diff,html,llm,markdown,mail}.ts
 ├── e2e/                          Playwright
@@ -104,7 +109,7 @@ workfluence/
 └── docs/                         산출물 / docs/internal 작업 기록 / docs/prompts 요청 기록
 ```
 
-`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P18]`은 해당 Phase에서 추가한다.
+`[P0]`는 Phase 0에서 만드는 것, `[P1]`~`[P19]`는 해당 Phase에서 추가한다.
 
 ### 2.1 의존 방향
 
@@ -125,7 +130,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `env.ts` | `WF_*` 환경 스키마(strict), 파싱, `.env.example` 키 추출 | 서버가 쓰고, 테스트가 `.env.example`과 대조한다 |
 | `constants.ts` | 역할·상태·Crew 역할·감사 이벤트·문서 스키마 버전·정책 기본값·CSRF 헤더 | 화면 문구와 서버 판정이 같은 목록을 봐야 한다 |
 | `document.ts` | 문서 JSON 허용 목록(노드·속성·마크·자식·노드별 마크), 검증, 속성·마크 판정 함수, 텍스트 추출 | **서버 검증 · 실시간 편집의 관문 · 편집기가 같은 목록을 본다.** 편집기 쪽은 대조 테스트(`apps/web/src/components/extensions.spec.ts`)가 강제한다 — 어긋나면 편집기가 만든 문서를 서버가 받지 않는다 (P9 D.7) |
-| `permissions.ts` | `can()`·`spaceAccess()`·`categoryAccess()`·위임 규칙표(`DELEGATION` — 받는 역할과 주는 사람, `canGrant`)·역할과 위임의 우열(`canManageUser` — Phase 11부터 위임도 본다)·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
+| `permissions.ts` | `can()`·`spaceAccess()`·`categoryAccess()`·위임 규칙표(`DELEGATION` — 받는 역할과 주는 사람, `canGrant`)·역할과 위임의 우열(`canManageUser` — Phase 11부터 위임도 본다)·메일 재설정을 받는 계정(`canResetPasswordByMail`, P19)·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
 | `security.ts` | ID·email 마스킹, 임시 비밀번호·식별자 생성 (난수 소스 주입) | 난수를 주입받아 순수 함수로 두면 테스트가 결정적이다 |
 | `schemas.ts` | API 요청 DTO(zod) + 응답 뷰 타입 | 서버 검증과 클라이언트 타입이 한 정의에서 나온다 |
 | `release.ts` | 반입 묶음의 필수 구성 목록 | 문서가 아니라 코드가 단일 출처다 (`CLAUDE.md` 8.3절) |
@@ -166,6 +171,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `llm_prompts` | `id`, `user_id`, `name`, `content` — (`user_id`,`name`) uq | P10 | 사람마다의 지시문. 보존 기간이 없다 |
 | `llm_conversations` | `id`, `user_id`, `title`, `provider_id`(SET NULL), `prompt_name`, `system_prompt`, `pinned_at`, `retain_from`, `updated_at` | P10 | 보관 규칙은 세 시각이다 — `updated_at`(순서)·`retain_from`(보존 기간의 기준)·`pinned_at`(고정). 지시문은 시작할 때의 복사본 |
 | `llm_messages` | `id`, `seq`(차례), `conversation_id`(CASCADE), `role`, `content`, `model`, `status` | P10 | 질문과 답. 생각 과정은 넣지 않는다. 대화와 수명이 같다 |
+| `password_reset_tokens` | `id`, `user_id`(CASCADE), `token_hash` uq, `password_mark`, `created_at`, `expires_at` | P19 | 메일 재설정 링크. **값은 두지 않고 SHA-256만** — DB가 새어도 링크가 되지 않는다. `password_mark`는 발급 때의 비밀번호 해시에서 뽑은 표시로, 비밀번호가 어느 길로 바뀌었든 링크를 죽인다. 한 사람에게 살아 있는 것은 하나다 (`P19_설계서_Recovery` C.3) |
 
 ### 3.2 규약
 
@@ -201,7 +207,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 
 - **가드는 판정하지 않는다.** 데이터를 모아 공유 함수에 넘기고 결과만 쓴다. 판정 규칙이 한 곳에 있어야 화면과 서버가 어긋나지 않는다.
 - 응답의 스페이스 객체에 `access`를 실어 보낸다. 화면이 같은 규칙을 다시 구현하지 않고 버튼 노출을 결정한다.
-- 기본 거부. **로그인은 언제나 요구한다** — 예외는 `@Public`을 명시한 핸들러(로그인·가입·계정 찾기·화면 설정(`config`)·비밀번호 규칙(`password-rules`, P13))뿐이다.
+- 기본 거부. **로그인은 언제나 요구한다** — 예외는 `@Public`을 명시한 핸들러(로그인·가입·계정 찾기(P19부터 메일 재설정 요청·링크로 새 비밀번호·email 확인 요청도)·화면 설정(`config`)·비밀번호 규칙(`password-rules`, P13))뿐이다.
 - 그 위에 `@RequireAction`으로 행위를 선언하면 `can()`으로 한 번 더 건다. **행위를 선언하지 않은 핸들러는 "로그인한 사람이면 누구나"의 뜻이다** — 데이터 범위를 스스로 좁히는 핸들러(`/api/auth/me` 등)가 여기 해당한다. 남의 데이터를 다루는 핸들러에 선언을 빼면 그것은 결함이다. **예외는 판정이 대상의 상태에 달린 핸들러**다 — 스페이스의 상태 바꾸기·지우기(`spaceAccess`), 분류의 이름 바꾸기·지우기(`categoryAccess`, P15)는 행위를 선언하지 않고 서비스가 대상을 읽어(분류는 잠가) 공유 함수로 판정한다. 선언을 두면 판정할 수 있는 사람까지 가드가 먼저 막는다.
 
 ## 5. 문서(본문) 계약
@@ -307,6 +313,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 16 | 관리자가 건 중지 동안 Crew를 얼린다(보류 35) — `spaceAccess.canManageMembers`에 중지를 건 사람을 넣고(주인은 관리자가 건 중지면 거짓) `crewFrozen`(막힌 주인 — 서버의 까닭과 화면의 안내가 이것 하나를 본다)을 더한다. Crew 쓰기는 판정하고 공간 행을 잠그고 다시 판정한다(`FOR NO KEY UPDATE` — 판정한 상태에서만 쓴다, 권한 없는 사람은 줄에 서지 않는다). 데이터·마이그레이션 없음 |
 | 17 | PC 화면과 한 체계의 UI(F-010) — 한 틀(`AppLayout`: 위 막대·왼쪽 칸·본문, 화면이 `SideSlot`으로 왼쪽 칸을 채운다 — 스페이스 안은 페이지 트리, LLM은 대화 목록)과 카드 틀(`AuthLayout`)을 중첩 경로가 씌운다, 토큰·요소 기본값·부품은 `styles.css` 한 파일(화면별 CSS 없음), 공통 부품(`ui.tsx` — 머리·알림띠·Field·구획 폼·거르기 줄·빈 상태·배지)과 확인 대화(`<dialog>`), 역할·운영 설정·감사 행위의 한글 이름. 비밀번호 초기화 요청을 관리자의 알림으로(`password.reset.request` — 받는 사람은 `canManageUser`), 모든 화면의 알림 영역, 감사 기록 단계(운영 설정 `auditLevel`, `AUDIT_MIN_LEVEL` — 필수 기록은 늘). 새 의존성·마이그레이션 없음 |
 | 18 | 사내 메일 API 설정(F-012) — 요청 모양을 사용자가 준 사내 API 설명(`subject`·`content`·`receivers`·`sender_name`)으로 한 곳(`apps/api/src/mail/domain/request.ts`)에 두고, 주소·형식(평문·마크다운)·보내는 이름·인증 헤더를 `WF_MAIL_*` 설정으로(기동 검사는 공유 `mail.ts`·`env.ts`). 메일 글은 `domain/compose.ts`(평문·마크다운 — 마크다운은 공유 `markdownText`로 이스케이프), 제목은 보내는 경계에서 한 줄로. 시험 명령 `apps/api/src/cli/mail-test.ts`(compose `tools`) |
+| 19 | 비밀번호를 잊었을 때 두 길·서식 단추 줄(F-011·F-013) — 두 길의 조건을 표시 이름+email로, 메일 재설정 링크(`auth/recovery.service.ts` · `domain/reset-link.ts` — 32바이트 값의 해시만·30분·한 번·5분에 한 통, 받는 계정은 공유 `canResetPasswordByMail`, 쓰기는 로그인 줄 안에서 세션·링크를 지운다), email 확인 요청(`email.confirm.request` — 받는 사람은 root), 운영 설정 `passwordResetMail`, 표 `password_reset_tokens`(`0013_recovery`). 편집기와 댓글 칸의 서식 단추 줄(`formatActions.ts` — 허용 목록·편집기 스키마는 그대로). 새 `WF_` 키·의존성 없음 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

@@ -1,10 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { MAIL_FORMATS, isHttpHeaderName, isSingleMailAddress, mailApiUrlProblem, mailAuthHeaderProblem, mailHeaderValueProblem } from './mail';
+import { MAIL_FORMATS, isHttpHeaderName, isSingleMailAddress, mailApiUrlProblem, mailAuthHeaderProblem, mailHeaderValueProblem, publicUrlProblem } from './mail';
 
 /**
  * A등급 — **테스트 먼저** (3절, P18_설계서_Mail FR-1904). 사내 메일 API의 설정은 폐쇄망 현장에서 사람이 적는다 — 틀린 값은 기동에서 막는다.
  * 주소에 비밀이 섞이면(사용자 정보·질의) 시험 명령의 창·로그로 나간다 — 비밀은 인증 헤더로만 받는다
  */
+describe('publicUrlProblem — 메일 속 링크의 주소(WF_PUBLIC_URL, P19 병합 전 자체 점검 5)', () => {
+  it('**호스트와 포트까지만** 받는다 — 끝의 `/` 하나는 괜찮다', () => {
+    for (const ok of ['https://wiki.example.internal', 'https://wiki.example.internal:8443', 'http://127.0.0.1:3100', 'https://wiki.example.internal/'])
+      expect(publicUrlProblem(ok), ok).toBeNull();
+  });
+
+  it('**경로를 붙이면 받지 않는다** — 위키는 그 주소의 맨 위에서 돈다. 경로가 있으면 부르기 메일의 링크가 열리지 않는다(`…/wiki/pages/…`·`…//pages/…`, 좁은 재점검 1)', () => {
+    for (const bad of ['https://wiki.example.internal/wiki', 'https://wiki.example.internal/wiki/', 'https://wiki.example.internal//'])
+      expect(publicUrlProblem(bad), bad).toMatch(/경로/);
+  });
+
+  it('**빈 질의·빈 조각·역슬래시도 받지 않는다** — 주소 해석은 그것들을 지워 검사를 지나갔다', () => {
+    for (const bad of ['https://wiki.example.internal?', 'https://wiki.example.internal#', 'https://wiki.example.internal\\x'])
+      expect(publicUrlProblem(bad), JSON.stringify(bad)).not.toBeNull();
+  });
+
+  it('**스킴이 없거나 http(s)가 아니면** 까닭을 말한다 — 그런 링크는 메일에서 열리지 않는다(재설정 메일은 링크가 전부다)', () => {
+    for (const bad of ['wiki.example.internal', 'wiki.example.internal:8443', 'ftp://wiki.example.internal', 'javascript:alert(1)', 'https://'])
+      expect(publicUrlProblem(bad), bad).toMatch(/http|주소/);
+  });
+
+  it('**사용자 정보·질의·조각을 받지 않는다** — 링크 뒤에 붙는 경로·조각(`#t=…`)이 깨진다', () => {
+    expect(publicUrlProblem('https://u:p@wiki.example.internal')).toMatch(/사용자 정보/);
+    expect(publicUrlProblem('https://wiki.example.internal/?a=1')).toMatch(/질의/);
+    expect(publicUrlProblem('https://wiki.example.internal/#x')).toMatch(/조각/);
+  });
+});
+
 describe('mailApiUrlProblem — 사내 메일 API의 보내는 주소', () => {
   it('http(s) 주소는 받는다 — 경로·포트 그대로', () => {
     for (const ok of ['https://mail.example.internal/api/v1/email/send', 'http://mail.example.internal:8080/api/v1/email/send_markdown', 'https://mail.example.internal/send/'])

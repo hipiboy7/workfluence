@@ -93,6 +93,17 @@ const reply = async (label: '멈춘다' | '그만두기') => {
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 };
 
+describe('AdminUsersPage — email (P19 FR-2009)', () => {
+  it('**이름 아래에 email** — 시스템 관리자가 "이메일이 기억이 안나시나요?" 요청을 받고 본인에게 알려 주는 값이다. 없으면 비운다', async () => {
+    rows = [user({ id: 'm1', username: 'alice', displayName: '앨리스', email: 'alice@example.internal' }), user({ id: 'm2', username: 'idp', displayName: '사내' })];
+    renderPage();
+    const cell = (await screen.findByText('앨리스')).closest('td')!;
+    expect(cell.textContent).toBe('앨리스alice@example.internal');
+    expect(screen.getByText('사내').closest('td')!.textContent).toBe('사내');
+    expect(screen.getByRole('columnheader', { name: '이름 · email' })).toBeTruthy();
+  });
+});
+
 describe('AdminUsersPage — 위임', () => {
   it('**root는 관리자에게 LLM 연결 관리를 주고 거둔다** — 목록 전체를 보내고 다시 읽는다', async () => {
     renderPage();
