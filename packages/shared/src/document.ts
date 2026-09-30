@@ -124,7 +124,7 @@ export const MARKS_IN: Record<string, readonly string[]> = {
  * **내부 경로는 `/` 바로 뒤가 `/`·`\`·탭·줄바꿈이 아니다** (P19 병합 전 보안 검토 3). 브라우저는 주소의 `\`를 `/`로 읽고 탭·줄바꿈을 지운다 —
  * `/\evil.example`·`/<탭>/evil.example`은 `//evil.example`(바깥 주소)로 간다. 위키 안 주소처럼 보이는 바깥 링크를 막는다
  */
-export const ALLOWED_LINK_HREF = /^(https?:\/\/|\/(?![\/\\\t\n\r])|#)/i;
+export const ALLOWED_LINK_HREF = /^(https?:\/\/|\/(?![/\\\t\n\r])|#)/i;
 
 export const MAX_DOCUMENT_NODES = 50_000;
 export const MAX_DOCUMENT_DEPTH = 64;

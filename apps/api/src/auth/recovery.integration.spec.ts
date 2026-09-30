@@ -224,6 +224,25 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
     expect(done).toMatchObject({ actorId: alice.id, targetType: 'user', targetId: alice.id });
   });
 
+  it('**새 해시는 그 계정의 줄 안에서 만든다** — 줄 밖에서 만들면 앞선 로그인이 응답 끝에 한 번 더 쓰는 세션 행이 지운 뒤에 되살아난다(P13 D.4 · 병합 전 보안 검토 1)', async () => {
+    const { token } = await issued();
+    let release!: () => void;
+    // 앞선 로그인이 줄을 쥐고 있다
+    const held = auth.inAccountLine('alice', () => new Promise<void>((r) => (release = r)));
+    const hashed = vi.spyOn(usersSvc, 'preparePassword');
+    try {
+      const reset = recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(hashed).not.toHaveBeenCalled();
+      release();
+      await held;
+      await reset;
+      expect(hashed).toHaveBeenCalledTimes(1);
+    } finally {
+      hashed.mockRestore();
+    }
+  });
+
   it('**한 번만** — 쓴 링크는 같은 400 문장이고 감사에 까닭이 남는다', async () => {
     const { token } = await issued();
     await recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });

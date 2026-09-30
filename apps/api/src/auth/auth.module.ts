@@ -40,7 +40,8 @@ function regenerate(req: Request): Promise<void> {
  * **행은 응답이 끝날 때 한 번 더 쓰인다** (좁은 자체 점검 7). `regenerate`가 준 새 세션은 `express-session`이 저장 여부를 가리는 표시를 달지
  * 않아, 여기서 저장해도 응답 끝에 같은 행을 다시 쓴다(있으면 고치고 없으면 넣는다). 로그인은 이것을 계정의 줄 안에서 부르지만 그 두 번째 쓰기는
  * 줄 밖이다 — 지금은 줄에서 기다리던 비밀번호 변경이 세션을 지우기까지 argon2를 두 번 돌아(약 0.3초) 그 쓰기가 늘 먼저 끝난다. **변경의
- * argon2를 줄 밖으로 빼면 이 틈이 다시 열린다** (`AuthService.login`)
+ * argon2를 줄 밖으로 빼면 이 틈이 다시 열린다** (`AuthService.login`). 메일 링크로 새 비밀번호를 정할 때도 같다 — 해시를 줄 안에서 만든다
+ * (`RecoveryService.resetPassword`, P19 병합 전 보안 검토 1)
  */
 async function startSession(req: Request, userId: string): Promise<void> {
   await regenerate(req);

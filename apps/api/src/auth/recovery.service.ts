@@ -132,6 +132,8 @@ export class RecoveryService {
    * **링크로 새 비밀번호를 정한다** (FR-2006·2007). 틀린 링크는 하나의 400 문장이고 까닭은 감사에 남는다.
    *
    * 세기는 살아 있는 정책으로 보고(FR-521) 해시는 트랜잭션 밖에서 만든다(P13 FR-1434) — 약한 비밀번호는 링크를 쓰지 않고 돌려보낸다(다시 누를 수 있게).
+   * **해시도 그 계정의 줄 안에서 만든다**(병합 전 보안 검토 1) — 앞선 로그인은 세션 행을 응답 끝에 줄 밖에서 한 번 더 쓴다(`startSession`, P13 D.4).
+   * 줄에 들자마자 세션을 지우면 그 쓰기가 지운 뒤에 닿아 옛 비밀번호로 들어온 세션이 남는다 — 비밀번호 변경처럼 argon2가 그 사이를 벌린다.
    * 그 계정의 **로그인 줄 안에서**: 값을 지우고(한 번 — 동시에 두 번 써도 하나만 지운다), 읽은 비밀번호 그대로이고 여전히 받을 수 있는 계정일 때만 바꾸고,
    * 잠금을 풀고 변경 강제를 끄고, 그 사람의 링크·세션을 모두 지우고, 남은 계정 찾기 알림을 읽음으로. 편집 연결은 커밋한 뒤에 끊는다(P13 D.5)
    */
@@ -142,8 +144,8 @@ export class RecoveryService {
     const problem = !link ? 'unknown' : !user ? 'ineligible' : resetLinkProblem(link, { ...user, role: user.role as Role, status: user.status as UserStatus }, now);
     if (problem || !user) return this.refuse(problem ?? 'ineligible', user?.id ?? null, ip);
 
-    const nextHash = await this.users.preparePassword(dto.newPassword);
     const done = await this.auth.inAccountLine(user.username, async () => {
+      const nextHash = await this.users.preparePassword(dto.newPassword);
       const ok = await this.db.transaction(async (tx) => {
         const [taken] = await tx
           .delete(passwordResetTokens)
