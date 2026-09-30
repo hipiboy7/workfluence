@@ -95,6 +95,11 @@ export async function cleanup(usernames: string[]): Promise<void> {
   try {
     const ids = (await c.query('SELECT id FROM users WHERE username = ANY($1)', [usernames])).rows.map((r: { id: string }) => r.id);
     if (!ids.length) return;
+    // **먼저 정지하고 잠시 기다린 뒤 지운다** — 다른 파일의 시험이 동시에 돈다. 초기화 요청·email 확인 요청 알림은 "받을 수 있는 관리자·시스템 관리자
+    // 모두"에게 한 번에 넣는데, 그 사이 이 계정을 지우면 넣기가 외래 키(23503)로 통째로 실패해 다른 시험의 관리자도 알림을 받지 못했다(T-095).
+    // 받는 사람은 활성인 계정만이라, 정지가 커밋되면 새로 고르는 알림에서 빠진다
+    await c.query(`UPDATE users SET status = 'suspended' WHERE id = ANY($1)`, [ids]);
+    await new Promise((r) => setTimeout(r, 1000));
     // Phase 10의 LLM 표도 users를 참조한다. 대화를 지우면 메시지는 함께 지워진다(CASCADE). LLM을 지우면 남의 대화는
     // LLM 칸만 빈다(SET NULL) — 그래서 순서는 대화 · 지시문 · LLM이다
     await c.query('DELETE FROM llm_conversations WHERE user_id = ANY($1)', [ids]);
