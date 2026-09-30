@@ -64,7 +64,7 @@ export class RecoveryService {
     @Inject(APP_ENV) private readonly env: AppEnvToken,
   ) {}
 
-  /** 메일 재설정을 쓸 수 있는가 (FR-2008) — 메일 켜짐 · 공개 주소 · 운영 설정. 화면의 단추와 두 경로의 404가 이것 하나를 본다 */
+  /** 메일 재설정을 쓸 수 있는가 (FR-2008) — 메일 켜짐 · 모의 아님 · 공개 주소 · 운영 설정. 화면의 단추와 두 경로의 404가 이것 하나를 본다 */
   async available(): Promise<boolean> {
     const policy = await this.settings.get();
     return resetMailAvailable({ mailEnabled: this.env.WF_MAIL_ENABLED, mailMock: this.env.WF_MAIL_MOCK, publicUrl: this.env.WF_PUBLIC_URL, policy: policy.passwordResetMail });
@@ -148,25 +148,30 @@ export class RecoveryService {
     const link = await this.db.query.passwordResetTokens.findFirst({ where: eq(passwordResetTokens.tokenHash, digest) });
     const user = link ? await this.users.findById(link.userId) : undefined;
     const problem: RefuseReason | null = !link ? 'unknown' : !user ? 'ineligible' : resetLinkProblem(link, account(user), now);
-    if (problem || !user) return this.refuse(problem ?? 'ineligible', user?.id ?? null, ip);
+    if (problem || !user) {
+      await this.recordRefusal(problem ?? 'ineligible', user?.id ?? null, ip);
+      throw new BadRequestException(RESET_LINK_INVALID);
+    }
 
     const refused = await this.auth.inAccountLine(user.username, async (): Promise<RefuseReason | null> => {
       const nextHash = await this.users.preparePassword(dto.newPassword);
       const outcome = await this.db.transaction(async (tx): Promise<RefuseReason | null> => {
+        // 줄 대기와 argon2 사이에 흐른 시간도 본다 — 들어올 때의 시각보다 지금이 늦으면 지금으로(좁은 재점검 5. 시각은 부르는 쪽이 넣는다 — 시험)
+        const at = new Date(Math.max(now.getTime(), Date.now()));
         // **사용자 행을 잠그고 줄 앞과 같은 판정을 다시 한다**(병합 전 코드 리뷰 6·9) — 줄에서 기다리는 사이 기한이 지났거나, 본인 변경·관리자 초기화로
         // 비밀번호가 바뀌었거나, 정지·root가 됐으면 바꾸지 않고 **그 까닭**을 남긴다. 받는 계정의 규칙은 `resetLinkProblem`(공유 `canResetPasswordByMail`) 하나다
         const locked = await this.users.lockForUpdate({ id: user.id }, tx);
-        // 값을 지우며 가져온다 — 동시에 두 번 써도 하나만 가져간다(한 번, FR-2003)
+        // 값을 지우며 가져오고 그 값으로 판정한다 — 동시에 두 번 써도 하나만 가져간다(한 번, FR-2003). 거절이어도 지운 채 둔다 — 다시 쓸 수 없는 링크다
         const [taken] = await tx.delete(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, digest)).returning();
-        if (!taken) return 'unknown';
-        const again = !locked ? 'ineligible' : resetLinkProblem(taken, account(locked), now);
-        if (again || !locked) return again ?? 'ineligible';
+        const reason: RefuseReason | null = !taken ? 'unknown' : !locked ? 'ineligible' : resetLinkProblem(taken, account(locked), at);
+        // **거절은 같은 트랜잭션에 남긴다**(FR-236 — 좁은 재점검 6) — 값을 지운 채 기록이 없으면 "링크가 왜 안 되나"에 답이 없다
+        if (reason || !locked) return this.recordRefusal(reason ?? 'ineligible', user.id, ip, tx);
         const [changed] = await tx
           .update(users)
-          .set({ passwordHash: nextHash, mustChangePassword: false, ...afterSuccess(), updatedAt: now })
+          .set({ passwordHash: nextHash, mustChangePassword: false, ...afterSuccess(), updatedAt: at })
           .where(and(eq(users.id, user.id), eq(users.passwordHash, locked.passwordHash!)))
           .returning({ id: users.id });
-        if (!changed) return 'changed';
+        if (!changed) return this.recordRefusal('changed', user.id, ip, tx);
         await tx.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, user.id));
         await this.users.destroyAllSessions(user.id, tx);
         await this.notifications.resolveRecoveryRequests(user.id, tx);
@@ -176,20 +181,23 @@ export class RecoveryService {
       if (outcome === null) this.users.revokeConnections(user.id);
       return outcome;
     });
-    if (refused) return this.refuse(refused, user.id, ip);
+    if (refused) throw new BadRequestException(RESET_LINK_INVALID);
   }
 
-  /** 틀린 링크 — 감사에 까닭을 남기고 하나의 문장으로 거절한다 (FR-2007) */
-  private async refuse(reason: RefuseReason, userId: string | null, ip?: string): Promise<never> {
-    await this.audit.record({
-      action: 'auth.password.reset',
-      actorId: null,
-      targetType: userId ? 'user' : null,
-      targetId: userId,
-      detail: { ok: false, reason },
-      ip,
-    });
-    throw new BadRequestException(RESET_LINK_INVALID);
+  /** 틀린 링크의 **까닭을 감사에 남긴다**(FR-2007) — 응답은 하나의 문장이다(부르는 쪽이 던진다). 줄 안의 거절은 그 트랜잭션에 */
+  private async recordRefusal(reason: RefuseReason, userId: string | null, ip?: string, tx?: Db): Promise<RefuseReason> {
+    await this.audit.record(
+      {
+        action: 'auth.password.reset',
+        actorId: null,
+        targetType: userId ? 'user' : null,
+        targetId: userId,
+        detail: { ok: false, reason },
+        ip,
+      },
+      tx,
+    );
+    return reason;
   }
 
   /** 요청을 받고 곧바로 돌아간다 — 일은 응답 뒤에 (NFR-191, FR-2012) */

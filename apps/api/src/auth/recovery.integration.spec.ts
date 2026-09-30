@@ -240,12 +240,14 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
   it('**새 해시는 그 계정의 줄 안에서 만든다** — 줄 밖에서 만들면 앞선 로그인이 응답 끝에 한 번 더 쓰는 세션 행이 지운 뒤에 되살아난다(P13 D.4 · 병합 전 보안 검토 1)', async () => {
     const { token } = await issued();
     let release!: () => void;
+    const entered = vi.spyOn(auth, 'inAccountLine');
     // 앞선 로그인이 줄을 쥐고 있다
     const held = auth.inAccountLine('alice', () => new Promise<void>((r) => (release = r)));
     const hashed = vi.spyOn(usersSvc, 'preparePassword');
     try {
       const reset = recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
-      await new Promise((r) => setTimeout(r, 300));
+      // 재설정이 줄에 섰다 — 시간이 아니라 줄에 선 것을 기다린다(좁은 재점검 4). 줄 밖에서 만들었다면 이미 불렸다
+      await vi.waitFor(() => expect(entered).toHaveBeenCalledTimes(2));
       expect(hashed).not.toHaveBeenCalled();
       release();
       await held;
@@ -255,6 +257,7 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
       // 실패해도 줄을 푼다 — 안 풀면 'alice'의 줄이 막혀 뒤 시험들이 시간 초과로 묻힌다(병합 전 코드 리뷰 추가 9)
       release();
       hashed.mockRestore();
+      entered.mockRestore();
     }
   });
 
@@ -265,14 +268,17 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
       settings.invalidate();
       const { alice, token } = await issued();
       let release!: () => void;
+      const entered = vi.spyOn(auth, 'inAccountLine');
       const held = auth.inAccountLine('alice', () => new Promise<void>((r) => (release = r)));
       const reset = recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
       try {
-        await new Promise((r) => setTimeout(r, 100));
+        // 줄 앞의 판정을 지나 줄에 선 뒤에 바꾼다 — 줄 안의 판정만 그것을 본다(좁은 재점검 4)
+        await vi.waitFor(() => expect(entered).toHaveBeenCalledTimes(2));
         if (change === 'reset') await usersSvc.resetPassword(alice.id, ROOT);
         else await db.update(users).set({ role: 'root' }).where(eq(users.id, alice.id));
       } finally {
         release();
+        entered.mockRestore();
       }
       await held;
       await expect(reset).rejects.toThrow(new BadRequestException(RESET_LINK_INVALID));
@@ -282,6 +288,61 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
       await expect(auth.login({ username: 'alice', password: 'New-pw-2026x' })).rejects.toThrow();
     }
     expect(reasons).toEqual(['changed', 'ineligible']);
+  });
+
+  it('**줄 안에서는 사용자 행을 잠그고 판정한다** — 판정과 쓰기 사이에 정지·root 승격이 끼지 못한다(좁은 재점검 3)', async () => {
+    const { alice, token } = await issued();
+    const lock = vi.spyOn(usersSvc, 'lockForUpdate');
+    try {
+      await recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
+      expect(lock).toHaveBeenCalledWith({ id: alice.id }, expect.anything());
+      // 넘겨받은 것은 트랜잭션이다 — 풀(db)이 아니다
+      expect(lock.mock.calls[0][1]).not.toBe(db);
+    } finally {
+      lock.mockRestore();
+    }
+  });
+
+  it('**줄에서 기다리는 사이 기한이 지나면 `expired`** — 줄 안의 판정은 지금 시각을 본다(좁은 재점검 5)', async () => {
+    const { token } = await issued();
+    let release!: () => void;
+    const entered = vi.spyOn(auth, 'inAccountLine');
+    const held = auth.inAccountLine('alice', () => new Promise<void>((r) => (release = r)));
+    const reset = recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
+    try {
+      await vi.waitFor(() => expect(entered).toHaveBeenCalledTimes(2));
+      // 시계만 앞으로 — 타이머는 그대로 돈다
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(Date.now() + (PASSWORD_RESET.linkMinutes + 1) * min));
+    } finally {
+      release();
+      entered.mockRestore();
+    }
+    try {
+      await held;
+      await expect(reset).rejects.toThrow(new BadRequestException(RESET_LINK_INVALID));
+    } finally {
+      vi.useRealTimers();
+    }
+    const [f] = (await auditOf('auth.password.reset')).filter((x) => !(x.detail as { ok: boolean }).ok);
+    expect((f.detail as { reason: string }).reason).toBe('expired');
+  });
+
+  it('**줄 안의 거절은 같은 트랜잭션에 남긴다** — 기록을 남기지 못하면 링크도 지우지 않는다(FR-236, 좁은 재점검 6)', async () => {
+    const { alice, token } = await issued();
+    await db.update(users).set({ role: 'root' }).where(eq(users.id, alice.id));
+    // 줄 앞의 판정은 지나게 — 줄 안에서 root를 본다
+    const findById = vi.spyOn(usersSvc, 'findById').mockResolvedValueOnce({ ...alice });
+    const record = vi.spyOn(audit, 'record').mockImplementation(async (input) => {
+      if (input.action === 'auth.password.reset') throw new Error('감사를 쓰지 못했다');
+    });
+    try {
+      await expect(recovery.resetPassword({ token, newPassword: 'New-pw-2026x' })).rejects.toThrow('감사를 쓰지 못했다');
+    } finally {
+      record.mockRestore();
+      findById.mockRestore();
+    }
+    expect((await db.select().from(passwordResetTokens)).map((r) => r.tokenHash)).toEqual([sha(token)]);
   });
 
   it('**정지하면 링크도 지운다** — 풀어도 옛 링크는 살아나지 않는다(병합 전 자체 점검 13)', async () => {
