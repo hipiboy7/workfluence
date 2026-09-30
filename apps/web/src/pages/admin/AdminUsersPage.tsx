@@ -250,7 +250,7 @@ export function AdminUsersPage() {
             <thead>
               <tr>
                 <th scope="col">아이디</th>
-                <th scope="col">이름</th>
+                <th scope="col">이름 · email</th>
                 <th scope="col">역할</th>
                 <th scope="col">상태</th>
                 <th scope="col">위임</th>
@@ -272,7 +272,11 @@ export function AdminUsersPage() {
                 return (
                   <tr key={u.id}>
                     <td className="break-any">{u.username}</td>
-                    <td>{u.displayName}</td>
+                    {/* email은 이름 아래 — 시스템 관리자가 "이메일이 기억이 안나시나요?" 요청을 받고 본인에게 알려 주는 값이다(P19 FR-2009). 찾기 칸도 email로 찾는다 */}
+                    <td>
+                      {u.displayName}
+                      {u.email && <div className="muted small break-any">{u.email}</div>}
+                    </td>
                     <td>
                       <select
                         className="w-m"

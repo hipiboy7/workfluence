@@ -89,10 +89,12 @@ test('로그인하지 않으면 보호된 화면에서 로그인으로 보낸다
 
 test('계정 찾기는 없는 정보에도 같은 모양으로 답한다 (FR-208)', async ({ page }) => {
   await page.goto('/find-account');
-  await page.getByLabel('email').first().fill('nobody@example.internal');
-  await page.getByLabel('이름').fill('없는사람');
-  await page.getByRole('button', { name: '찾기' }).click();
-  await expect(page.getByText('일치하는 정보로 찾을 수 없다')).toBeVisible();
+  // 비밀번호 찾기도 이름·email 칸이다(P19 FR-2000) — 아이디 찾기 카드 안에서 찾는다
+  const form = page.locator('form').filter({ has: page.getByRole('heading', { name: '아이디 찾기' }) });
+  await form.getByLabel('email').fill('nobody@example.internal');
+  await form.getByLabel('이름').fill('없는사람');
+  await form.getByRole('button', { name: '찾기' }).click();
+  await expect(form.getByText('일치하는 정보로 찾을 수 없다')).toBeVisible();
 });
 
 /**
