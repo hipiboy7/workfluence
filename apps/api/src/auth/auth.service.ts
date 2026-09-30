@@ -228,7 +228,7 @@ export class AuthService {
    *
    * - **거절**은 401 — 우리가 판정한 것(`HttpException` — 토큰 교환 실패·nonce 불일치 등)은 그대로, id_token을 받아들이지 않은 것(jose의
    *   서명·iss·aud·exp — `idpFailureKind`)은 401로. 다시 해도 같으니 "잠시 뒤 다시"라고 하지 않는다 (종료 루틴 자체 점검 1)
-   * - **닿지 않음**은 502 — 망·TLS·Discovery. 사내 CA를 믿지 못하는 것(반입 가이드 10절 ②)이 여기서 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`로 보인다
+   * - **닿지 않음**은 502 — 망·TLS·Discovery. 사내 CA를 믿지 못하는 것(설치및실행가이드 10절 ②)이 여기서 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`로 보인다
    * - **콜백의 실패는 로그인 실패다** — 감사 `auth.login.failure`(6절 "인증 성공·실패"). 시작의 실패는 IdP에 가 보지도 못한 것이라 남기지 않는다
    */
   private async idp<T>(step: 'start' | 'callback', run: () => Promise<T>, ip?: string): Promise<T> {

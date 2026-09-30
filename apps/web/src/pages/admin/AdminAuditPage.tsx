@@ -60,7 +60,7 @@ function Detail({ detail }: { detail: Record<string, unknown> | null }) {
  * **요청 번호로 거른다** (P11 FR-1212) — 로그 한 줄(`requestId`)에서 그 요청의 감사 행으로 간다. 번호는 입력할 때가 아니라 **거르기를
  * 누를 때** 보낸다(치는 도중의 반쪽 번호로 요청하지 않는다). 모양은 서버와 같은 판정(`REQUEST_ID_PATTERN`)으로 먼저 본다.
  *
- * 행위는 "한글 (코드)"로 보인다(J.9-9) — 고르기 칸의 값과 표의 `code`는 코드 그대로라 장애대응 가이드의 코드로 찾는다
+ * 행위는 "한글 (코드)"로 보인다(J.9-9) — 고르기 칸의 값과 표의 `code`는 코드 그대로라 장애대응가이드의 코드로 찾는다
  */
 export function AdminAuditPage() {
   const { me } = useAuth();

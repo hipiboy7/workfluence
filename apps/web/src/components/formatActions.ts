@@ -197,7 +197,7 @@ export function currentBlock(e: Editor): BlockType {
 
 /**
  * 그 블록으로 바꾼다. **목록 항목 안에서 제목을 고르면 그 줄이 목록 밖으로 나온다** — 편집기가 막는 것이 아니라 꺼낸다(`setHeading`이 `clearNodes`로 목록을
- * 푼다). 목록 항목의 첫 줄은 문단이어야 해서다(P12 `FIRST_CHILD`, 사용자 가이드 4.1절). `focus: false`면 초점을 본문으로 옮기지 않는다(키보드로 고르는 칸)
+ * 푼다). 목록 항목의 첫 줄은 문단이어야 해서다(P12 `FIRST_CHILD`, 사용자가이드 4.1절). `focus: false`면 초점을 본문으로 옮기지 않는다(키보드로 고르는 칸)
  */
 export function setBlock(e: Editor, value: BlockType, { focus = true }: { focus?: boolean } = {}): boolean {
   if (value === 'other') return false;

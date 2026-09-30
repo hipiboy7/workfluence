@@ -13,7 +13,7 @@ const DESCRIPTION = '감사 기록 단계는 감사로그 화면에서 시스템
  * 운영 정책값 (P4_설계서_Admin C절). 판정은 서버와 **같은 함수**를 쓴다 — 갈라지면 화면만 받아 준다.
  *
  * 모양 (P17 J.6 관리 다섯 · J.5.4): 구획 폼 묶음 넷(세션·계정 / 업로드·첨부 / 보존 기간 / LLM 대화 — `fieldset`·`legend`), 한 줄에 값 하나.
- * 라벨은 "휴지통 보존 기간 (trashRetentionDays)" 꼴이다(J.9-9) — 한글 이름이 뜻을, 키가 장애대응 가이드·감사로그·시험과의 연결을 맡는다
+ * 라벨은 "휴지통 보존 기간 (trashRetentionDays)" 꼴이다(J.9-9) — 한글 이름이 뜻을, 키가 장애대응가이드·감사로그·시험과의 연결을 맡는다
  * (`components/policyNames.ts`). 단위는 칸 뒤의 글이고 라벨에 넣지 않는다. 저장은 폼 끝의 주 단추 하나다
  */
 export function AdminPolicyPage() {

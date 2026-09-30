@@ -200,7 +200,7 @@ describe('verifyChecksums가 이상한 파일 이름에 터지지 않는다 (코
 
 /**
  * Docker 설치 묶음 (P20_설계서_Install D절, FR-2101) — 대상 RHEL 9 서버에 Docker가 없을 때만 들고 간다.
- * 현장에는 Node가 없어 반입 가이드 0.3절 ②는 같은 판정을 셸 한 줄씩으로 한다 — 여기는 묶음을 **만드는 쪽**의 판정이다.
+ * 현장에는 Node가 없어 설치및실행가이드 0.3절 ②는 같은 판정을 셸 한 줄씩으로 한다 — 여기는 묶음을 **만드는 쪽**의 판정이다.
  */
 describe('Docker 묶음에 싣는 RPM (FR-2101)', () => {
   it('맨 위는 Docker의 넷과 Docker가 늘 요구하는 container-selinux다', () => {
@@ -301,7 +301,7 @@ describe('formatPackages — 묶음의 부품 목록 PACKAGES.txt (FR-2101)', ()
     { file: 'deps/nftables-1.0.9-3.el9.x86_64.rpm', license: 'GPLv2', vendor: 'Red Hat, Inc.' },
   ];
 
-  it('**첫 줄은 묶음을 만든 서버의 RHEL 판 그대로다** — 현장이 `cat /etc/redhat-release`와 견준다(반입 가이드 0.3절 ④)', () => {
+  it('**첫 줄은 묶음을 만든 서버의 RHEL 판 그대로다** — 현장이 `cat /etc/redhat-release`와 견준다(설치및실행가이드 0.3절 ④)', () => {
     expect(formatPackages(release, rows).split('\n')[0]).toBe(release);
   });
 

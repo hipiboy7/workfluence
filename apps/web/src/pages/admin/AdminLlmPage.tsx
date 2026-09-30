@@ -117,7 +117,7 @@ export function AdminLlmPage() {
     if (!r.ok)
       return (
         <>
-          {/* 배지는 짧게, 까닭은 옆의 글이다(J.5.8). 줄의 글은 예전 그대로 "연결 안 됨 — 까닭"이다 — 반입 가이드의 확인 표가 그 글로 찾는다 */}
+          {/* 배지는 짧게, 까닭은 옆의 글이다(J.5.8). 줄의 글은 예전 그대로 "연결 안 됨 — 까닭"이다 — 설치및실행가이드의 확인 표가 그 글로 찾는다 */}
           <StatusBadge kind="bad">연결 안 됨</StatusBadge> <span>— {r.message}</span>
         </>
       );

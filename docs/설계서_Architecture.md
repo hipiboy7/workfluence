@@ -2,7 +2,7 @@
 
 - 상위 문서: [`docs/scope-definition.md`](scope-definition.md) — 무엇을·왜
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
-- 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
+- 요청 기록: [`docs/prompts/`](prompts) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
 - 상태: **Phase 20까지 구현 완료** (2026-09-30). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
@@ -291,8 +291,8 @@ shared  ←  api(config → db → common → 기능 모듈)
 - 이미지 3종: `app`(Nest + SPA), `nginx`, `postgres`.
 - 빌드 스테이지에서 의존성 설치·빌드, 런타임 스테이지에는 산출물과 production 의존성만. 베이스는 `node:24-bookworm-slim` (alpine은 네이티브 모듈 호환 위험).
 - 컨테이너는 non-root, 헬스체크, `restart: unless-stopped`.
-- 반입 묶음 구성의 단일 출처는 **코드**다 (`packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`). 반입 당일의 절차는 [`docs/운영가이드_반입.md`](운영가이드_반입.md)다.
-- 대상은 RHEL 9다(Phase 20). 들고 갈 것은 반입 묶음 하나 — 서버에 Docker가 없으면 **Docker 묶음**(빌드 서버에 깔린 판의 Docker CE RPM과 그것이 늘 쓰는 RHEL 부품 + firewalld가 없는 서버에 모자란 RHEL 부품 + 판·라이선스 목록 + Docker 공개키 — `pnpm release:docker`, 리눅스빌드 가이드 12-1절)도. 앱의 코드·구성은 대상에 따라 바뀌지 않는다.
+- 반입 묶음 구성의 단일 출처는 **코드**다 (`packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`). 반입 당일의 절차는 [`docs/guide/설치및실행가이드.md`](guide/설치및실행가이드.md)다.
+- 대상은 RHEL 9다(Phase 20). 들고 갈 것은 반입 묶음 하나 — 서버에 Docker가 없으면 **Docker 묶음**(빌드 서버에 깔린 판의 Docker CE RPM과 그것이 늘 쓰는 RHEL 부품 + firewalld가 없는 서버에 모자란 RHEL 부품 + 판·라이선스 목록 + Docker 공개키 — `pnpm release:docker`, linux서버배포가이드 12-1절)도. 앱의 코드·구성은 대상에 따라 바뀌지 않는다.
 
 ## 10. Phase별 추가 지점
 
@@ -308,7 +308,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 8 | 멘션 귀속 — `pages/domain/makers.ts`(멘션을 만든 사람의 장부: 새로 생긴 멘션 자리 · 어느 연결이 어느 글자를 들여왔나 · 옮김을 가리는 사라진 이름), `page_realtime.authors`, `notifications.actor_id` null 허용 (`0008`) |
 | 9 | 실시간 편집의 관문 — `pages/domain/gate.ts`(되풀이 검사·완결·구조·주인 규칙), `pages/domain/presence.ts`(사람 표시 거르기), 허용 목록의 자식·노드별 마크·값 규칙, 편집기 확장 목록 하나(`apps/web/src/components/extensions.ts`)와 대조 테스트, 감사 종류 `page.collab.reject`, 서버만 보내는 저장 상태 알림 `COLLAB_MSG.status`(P9 D.9), 화면의 연결 상태 기계 `apps/web/src/components/collabLink.ts`. 화면의 동기화 라이브러리는 `@tiptap/y-tiptap`이다(P9 B.1). 마이그레이션 없음 |
 | 10 | 사내 LLM 질문 — `llm/` 모듈(등록 root만·키 암호화·NDJSON 중계·보관 규칙·한 시간마다 만료 정리), 표 넷(`0009_llm`), 정책값 셋(`llmRetentionDays`·`llmConversationMax`·`llmPinnedMax`), 환경변수 둘(`WF_LLM_MASTER_KEY`·`WF_LLM_TIMEOUT_MS`), 감사 종류 넷, 공유 계약 `llm.ts`·`markdown.ts`, 교체 축 `LLM_CLIENT`, 화면 셋과 페이지 복사 버튼, web 컴포넌트 시험 틀(`happy-dom`, 보류 28) |
-| 11 | 운영 로그·위임·반입 설정 — 요청 번호(nginx `$request_id` → `X-Request-Id`)·요청 문맥(`AsyncLocalStorage`)·앱 접근 로그·event 코드(`LOG_EVENTS`, 장애대응 가이드와 대조)·감사 `request_id`, `users.grants`와 `can()`의 위임(`llm.manage`), compose 로그 순환·nginx JSON 로그·사내 CA 시작 스크립트(`0010_ops`) |
+| 11 | 운영 로그·위임·반입 설정 — 요청 번호(nginx `$request_id` → `X-Request-Id`)·요청 문맥(`AsyncLocalStorage`)·앱 접근 로그·event 코드(`LOG_EVENTS`, 장애대응가이드와 대조)·감사 `request_id`, `users.grants`와 `can()`의 위임(`llm.manage`), compose 로그 순환·nginx JSON 로그·사내 CA 시작 스크립트(`0010_ops`) |
 | 12 | 답을 기다리는 표시·문서 모양의 한계 — LLM 질문 화면의 기다린 초와 "답변이 늦어지고 있습니다."(흐름 상태 기계 `waitingSince`), 편집기 스키마의 순서·개수 규칙(`NON_EMPTY_NODES`·`FIRST_CHILD` — 정본 검증과 실시간 상태의 변환, 대조 시험이 증명. 목록 항목의 첫 자식은 관문 `gate.ts`가 적용한 뒤로 본다), 실시간 편집 프레임 16MiB(`COLLAB_LIMITS`, 넘으면 1009와 감사)·표 칸 값의 범위(`TABLE_LIMITS`, 편집기가 붙여 넣은 값을 줄이고 범위를 넘는 표 명령은 하지 않는다) |
 | 13 | 반입 준비 — 로그인 경로(한 계정씩 줄 `KeyedSerial`, 비밀번호 확인·해시는 트랜잭션 밖 · 프로세스의 argon2 동시 실행 상한 `ConcurrencyGate`, 실패 횟수는 한 문장으로), 계정 정지(`users.status` = `suspended`, 정지하면 세션·편집 연결을 끊는다), 사용자 목록의 찾기·거르기·나누기, DB 계정 둘(앱 `workfluence_app` — 마이그레이션이 만들고 권한을 준다 `apps/api/src/db/app-role.ts`), compose `tools`(마이그레이션·시드·월간 작업 `apps/api/src/cli`), 반입 묶음의 운영 문서와 이미지의 커밋 라벨 |
 | 14 | 페이지 트리와 스페이스를 화면에서(F-007·F-008) — 옮기기의 자리를 형제 가운데 몇 번째로 굳히고 서버가 새 자리 값을 정한다(`placeAt` — 자리에 틈 `PAGE_POSITION_GAP`을 두어 보통 한 줄만, 틈이 없을 때만 한 문장으로 다시 매긴다), 트리를 바꾸는 네 길(옮기기·만들기·지우기·휴지통 되살리기)이 스페이스마다 잠금(`page-tree:<스페이스>`, 대기 2초 뒤 409 — `tree-lock.ts`)을 쓰고 잠근 뒤 대상을 다시 읽는다, 식별자는 경계에서 소문자로(`idSchema`·`parseId`), 모든 스페이스 목록을 DB가 찾고 거른다(`q`·`status`, `SPACE_LIST_MAX`, 보기는 질의 넷), 화면 넷(트리 펼치기 · 옮기기 칸 · 관리 칸 · 관리 콘솔의 스페이스). 마이그레이션 없음 |
@@ -317,7 +317,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 17 | PC 화면과 한 체계의 UI(F-010) — 한 틀(`AppLayout`: 위 막대·왼쪽 칸·본문, 화면이 `SideSlot`으로 왼쪽 칸을 채운다 — 스페이스 안은 페이지 트리, LLM은 대화 목록)과 카드 틀(`AuthLayout`)을 중첩 경로가 씌운다, 토큰·요소 기본값·부품은 `styles.css` 한 파일(화면별 CSS 없음), 공통 부품(`ui.tsx` — 머리·알림띠·Field·구획 폼·거르기 줄·빈 상태·배지)과 확인 대화(`<dialog>`), 역할·운영 설정·감사 행위의 한글 이름. 비밀번호 초기화 요청을 관리자의 알림으로(`password.reset.request` — 받는 사람은 `canManageUser`), 모든 화면의 알림 영역, 감사 기록 단계(운영 설정 `auditLevel`, `AUDIT_MIN_LEVEL` — 필수 기록은 늘). 새 의존성·마이그레이션 없음 |
 | 18 | 사내 메일 API 설정(F-012) — 요청 모양을 사용자가 준 사내 API 설명(`subject`·`content`·`receivers`·`sender_name`)으로 한 곳(`apps/api/src/mail/domain/request.ts`)에 두고, 주소·형식(평문·마크다운)·보내는 이름·인증 헤더를 `WF_MAIL_*` 설정으로(기동 검사는 공유 `mail.ts`·`env.ts`). 메일 글은 `domain/compose.ts`(평문·마크다운 — 마크다운은 공유 `markdownText`로 이스케이프), 제목은 보내는 경계에서 한 줄로. 시험 명령 `apps/api/src/cli/mail-test.ts`(compose `tools`) |
 | 19 | 비밀번호를 잊었을 때 두 길·서식 단추 줄(F-011·F-013) — 두 길의 조건을 표시 이름+email로, 메일 재설정 링크(`auth/recovery.service.ts` · `domain/reset-link.ts` — 32바이트 값의 해시만·30분·한 번·5분에 한 통, 받는 계정은 공유 `canResetPasswordByMail`, 쓰기는 로그인 줄 안에서 세션·링크를 지운다), email 확인 요청(`email.confirm.request` — 받는 사람은 root), 운영 설정 `passwordResetMail`, 표 `password_reset_tokens`(`0013_recovery`). 편집기와 댓글 칸의 서식 단추 줄(`formatActions.ts` — 허용 목록·편집기 스키마는 그대로). 새 `WF_` 키·의존성 없음 |
-| 20 | RHEL 9에 반입(F-014) — 들고 갈 것의 목록(반입 가이드 0.1절 — 반입 묶음, 서버에 Docker가 없으면 Docker 묶음), Docker 묶음(`pnpm release:docker` — `scripts/docker-bundle.ts`, 빌드 서버에 깔린 판의 RPM·`PACKAGES.txt`·Docker 공개키·지문. 판정은 공유 `release.ts`의 `DOCKER_BUNDLE_RPMS`·`dockerKeyProblem`·`rpmSignatureProblems`·`formatPackages`), RHEL 9 준비(반입 가이드 0.3·0.4절 — 서명은 임시 RPM DB로 판정하고 dnf도 보게 한다·부딪히는 패키지·망 대역·SELinux를 끄지 않는다·firewalld는 Docker가 연 포트를 거르지 않는다). 앱의 동작·구성·설정 키·의존성 변경 없음 |
+| 20 | RHEL 9에 반입(F-014) — 들고 갈 것의 목록(설치및실행가이드 0.1절 — 반입 묶음, 서버에 Docker가 없으면 Docker 묶음), Docker 묶음(`pnpm release:docker` — `scripts/docker-bundle.ts`, 빌드 서버에 깔린 판의 RPM·`PACKAGES.txt`·Docker 공개키·지문. 판정은 공유 `release.ts`의 `DOCKER_BUNDLE_RPMS`·`dockerKeyProblem`·`rpmSignatureProblems`·`formatPackages`), RHEL 9 준비(설치및실행가이드 0.3·0.4절 — 서명은 임시 RPM DB로 판정하고 dnf도 보게 한다·부딪히는 패키지·망 대역·SELinux를 끄지 않는다·firewalld는 Docker가 연 포트를 거르지 않는다). 앱의 동작·구성·설정 키·의존성 변경 없음 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 
@@ -355,7 +355,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 사내 LLM의 형식이 다르다 (다른 게이트웨이) | 6절 축 | M | `LLM_CLIENT` 뒤의 어댑터(`apps/api/src/llm/openai.client.ts`)와 형식 읽기(`domain/openai.ts`)만 바꾼다 |
 | 사내 메일 API의 형식이 다르다 (현장의 API가 다른 필드·성공 판정) | 6절 축 | S | 요청 모양(`apps/api/src/mail/domain/request.ts`)과 그 시험만 바꾼다. 주소·형식·보내는 이름·인증 헤더는 이미 설정이다(P18) |
 | 사람에게 **다른 행위도** 맡긴다 | 권한 판정 | L | `DELEGABLE_ACTIONS`와 규칙표 `DELEGATION`(`packages/shared/src/permissions.ts` — 받는 역할과 주는 사람)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`·`users_grants_holder_chk`를 고친다 — 잊으면 `apps/api/src/db/constraints.integration.spec.ts`가 둘이 다르다고 막는다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다. 받은 사람은 행위자가 할 수 없는 위임을 가진 셈이 되므로 관리의 우열(`canManageUser`)이 저절로 따라간다 |
-| 새 로그 줄을 더한다 | 로그 | S | `LOG_EVENTS`(`packages/shared/src/constants.ts`)에 코드를 더하고 `logLine()`으로 남긴다. 장애대응 가이드 7.28절 표에 한 줄 — 빠뜨리면 `verify:docs`가 막는다 |
+| 새 로그 줄을 더한다 | 로그 | S | `LOG_EVENTS`(`packages/shared/src/constants.ts`)에 코드를 더하고 `logLine()`으로 남긴다. 장애대응가이드 7.28절 표에 한 줄 — 빠뜨리면 `verify:docs`가 막는다 |
 
 ### 11.3 값을 추가할 때 함께 고쳐야 하는 짝
 
@@ -395,6 +395,6 @@ shared  ←  api(config → db → common → 기능 모듈)
 | [`docs/scope-definition.md`](scope-definition.md) | 상위 — 무엇을·왜 |
 | [`CLAUDE.md`](../CLAUDE.md) | 규칙 |
 | [`docs/P0_설계서_Foundation.md`](P0_설계서_Foundation.md) | Phase 0 요구사항과 상세 설계 |
-| [`docs/학습가이드_시스템이해.md`](학습가이드_시스템이해.md) | 개발 용어 없이 읽는 설명 |
-| [`docs/운영가이드_장애대응.md`](운영가이드_장애대응.md) | 증상에서 조치로 |
+| [`docs/learnSystem/학습가이드_시스템이해.md`](learnSystem/학습가이드_시스템이해.md) | 개발 용어 없이 읽는 설명 |
+| [`docs/guide/장애대응가이드.md`](guide/장애대응가이드.md) | 증상에서 조치로 |
 | [`docs/기능백로그.md`](기능백로그.md) | 기능 요청 접수 상태 |

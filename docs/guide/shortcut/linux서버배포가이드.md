@@ -1,9 +1,11 @@
-# 운영가이드 — 리눅스 서버에서 이미지를 만들고 반입 묶음을 싼다
+# linux서버배포가이드 — 리눅스 서버에서 이미지를 만들고 반입 묶음을 싼다
+
+- 자리: `docs/guide/shortcut/` — 바로가기다. 들고 갈 것을 만드는 쪽의 절차이고, 폐쇄망에서 하는 일은 [설치및실행가이드](../설치및실행가이드.md)다 (2026-09-30 옮김 — 옛 이름 운영가이드_리눅스빌드.md)
 
 - 읽는 사람: **개발·빌드 서버(사내 Linux)에서 앱 이미지를 만들고, 띄워 확인하고, 폐쇄망 반입 묶음을 만드는 사람**
 - 이 서버는 개발과 빌드를 **같이 한다** (`CLAUDE.md` 0.3절). 다른 프로젝트와 함께 쓰는 공유 서버다 — 저장소와 Node·pnpm이 있다
 - 목적: `main`의 지금 코드로 앱 이미지를 만들고(빌드한 커밋을 라벨로 단다) → 이 서버에서 띄워 살아 있는지 보고 → 반입 묶음을 만들어
-  검사한 뒤 → tar 하나로 싸서 반입 매체에 담는다(대상 서버에 Docker가 없으면 Docker 묶음도 — 12-1절). 폐쇄망에서 하는 일은 [`docs/운영가이드_반입.md`](운영가이드_반입.md)다
+  검사한 뒤 → tar 하나로 싸서 반입 매체에 담는다(대상 서버에 Docker가 없으면 Docker 묶음도 — 12-1절). 폐쇄망에서 하는 일은 [`docs/guide/설치및실행가이드.md`](../설치및실행가이드.md)다
 - 작성일: 2026-09-17 / 개정: 2026-09-21 (첫 실행에서 드러난 것 반영), 2026-09-27 (Phase 13 — Phase 0 기준이던 것을 지금 코드로 다시
   썼다: `main`을 받는다, `deploy/.env`의 필수 키 셋과 첫 root 비밀번호, 커밋 라벨을 단 빌드, 앱 계정이 있어 표 만들기가 앱보다 먼저, 반입 묶음 12절)
   , 2026-09-30 (Phase 20 — 대상 서버에 Docker가 없을 때 들고 갈 Docker 묶음 12-1절) / 작성 LLM: Claude Opus 5, 개정 Claude Opus 5.5
@@ -300,7 +302,7 @@ docker exec workfluence-api node -e "fetch('http://127.0.0.1:3000/api/health').t
 | 아무 응답 없음 | 앱이 죽었다. 9절 로그를 본다 |
 
 **데이터베이스 계정이 나뉘었는지도 본다** — 앱이 앱 계정으로 붙는지, 감사기록에 앱 계정이 `INSERT`·`SELECT`만 갖는지.
-명령은 [반입 가이드](운영가이드_반입.md) 7.2절 ①·②다(`docker exec`라 이 서버에서도 그대로 된다).
+명령은 [설치및실행가이드](../설치및실행가이드.md) 7.2절 ①·②다(`docker exec`라 이 서버에서도 그대로 된다).
 
 > **`curl`을 쓰지 않는 이유.** 이미지에 `curl`을 넣지 않았다. 넣으면 크기와 공격 표면이 늘고, 어차피 이미지 안에 있는 Node로 물어볼 수 있다. 헬스체크도 같은 방식이다.
 >
@@ -322,14 +324,14 @@ docker compose -f deploy/compose.yml --env-file deploy/.env logs postgres --tail
 | `WF_PG_PASSWORD를 .env에 설정` (또는 `WF_PG_APP_PASSWORD`·`WF_SESSION_SECRET`) | 환경 파일이 없거나 그 키가 비었다 | 4절을 다시 한다. `--env-file deploy/.env`를 빼먹지 않았는지, 루트 `.env`를 가리키고 있지 않은지 확인한다 |
 | 빌드가 의존성 설치에서 멈춘다 (`ETIMEDOUT`) | 프록시가 빌드 컨테이너에 전달되지 않는다 | 셸에 `HTTP_PROXY`가 있는지 본다 (1.1절). `deploy/compose.yml`의 `build.args`가 그 값을 넘기므로, 셸에 값이 있으면 그대로 다시 빌드하면 된다. 값이 없으면 서버 담당자에게 프록시 주소를 받아 셸에 넣고 빌드한다 |
 | 빌드 중 `no space left` | 디스크 부족 | 3.1절 순서로 좁게 비운 뒤 다시. `docker system prune`은 쓰지 않는다 |
-| `db":"unreachable"` | 데이터베이스가 안 떴거나 앱 계정으로 붙지 못한다 | `docker compose ps`로 postgres가 healthy인지, 로그에 디스크 오류가 없는지 본다. 앱 로그에 `28P01 … "workfluence_app"`이면 6절의 표 만들기를 앱보다 먼저 하지 않았거나 `WF_PG_APP_PASSWORD`를 바꾸고 표 만들기를 다시 치지 않았다 — 6절의 `migrate.js`를 치고 `up -d api` ([장애대응](운영가이드_장애대응.md) 7.31절) |
-| 화면이 500이고 앱 로그에 `permission denied` | 앱 계정에 권한이 없다 | 6절의 `migrate.js`를 다시 친다 ([장애대응](운영가이드_장애대응.md) 7.30절) |
+| `db":"unreachable"` | 데이터베이스가 안 떴거나 앱 계정으로 붙지 못한다 | `docker compose ps`로 postgres가 healthy인지, 로그에 디스크 오류가 없는지 본다. 앱 로그에 `28P01 … "workfluence_app"`이면 6절의 표 만들기를 앱보다 먼저 하지 않았거나 `WF_PG_APP_PASSWORD`를 바꾸고 표 만들기를 다시 치지 않았다 — 6절의 `migrate.js`를 치고 `up -d api` ([장애대응](../장애대응가이드.md) 7.31절) |
+| 화면이 500이고 앱 로그에 `permission denied` | 앱 계정에 권한이 없다 | 6절의 `migrate.js`를 다시 친다 ([장애대응](../장애대응가이드.md) 7.30절) |
 | 기동하다 바로 죽는다 | 설정 항목 오류 | 로그 첫 줄을 본다. 값의 모양이 틀리면(짧은 `WF_SESSION_SECRET` 등) **일부러 기동을 멈춘다** |
-| 화면은 404인데 헬스체크는 정상 | SPA 경로 설정 | 지금은 이 상태면 기동이 멈춘다. 그래도 나오면 `docs/운영가이드_장애대응.md` 3절 |
-| `pnpm release:bundle`이 `앱 이미지(…)는 커밋 …로 빌드됐다`로 멈춘다 | 빌드한 뒤 커밋이 바뀌었거나 `GIT_SHA` 없이 빌드했다 | 5절대로 다시 빌드하고 12절을 다시 한다 ([장애대응](운영가이드_장애대응.md) 7.33절) |
+| 화면은 404인데 헬스체크는 정상 | SPA 경로 설정 | 지금은 이 상태면 기동이 멈춘다. 그래도 나오면 `docs/guide/장애대응가이드.md` 3절 |
+| `pnpm release:bundle`이 `앱 이미지(…)는 커밋 …로 빌드됐다`로 멈춘다 | 빌드한 뒤 커밋이 바뀌었거나 `GIT_SHA` 없이 빌드했다 | 5절대로 다시 빌드하고 12절을 다시 한다 ([장애대응](../장애대응가이드.md) 7.33절) |
 | `pnpm release:bundle`이 이미지 저장(`docker save`)에서 이미지를 찾지 못한다며 멈춘다 | postgres·nginx 이미지를 받지 않았다 | 6절의 첫 명령(`pull postgres nginx`) |
 
-더 자세한 것은 [`docs/운영가이드_장애대응.md`](운영가이드_장애대응.md)에 있다.
+더 자세한 것은 [`docs/guide/장애대응가이드.md`](../장애대응가이드.md)에 있다.
 
 ## 11. 재부팅 후 자동 기동 — 값 6
 
@@ -362,7 +364,7 @@ docker ps --filter name=workfluence
 docker exec workfluence-api node -e "fetch('http://127.0.0.1:3000/api/health').then(async r=>console.log(r.status, await r.text()))"
 ```
 
-폐쇄망 운영 서버는 우리만 쓰므로 거기서는 반드시 실제 재부팅으로 확인한다 (`CLAUDE.md` 8.3절, 반입 가이드 7.1절). 이 빌드 서버에서는 **정책이 붙어 있는지**와 **정책이 실제로 되살리는지**까지 확인할 수 있다. 실제 재부팅은 공유 서버라 할 수 없다 (방법은 `P5_설계서_Release` C절).
+폐쇄망 운영 서버는 우리만 쓰므로 거기서는 반드시 실제 재부팅으로 확인한다 (`CLAUDE.md` 8.3절, 설치및실행가이드 7.1절). 이 빌드 서버에서는 **정책이 붙어 있는지**와 **정책이 실제로 되살리는지**까지 확인할 수 있다. 실제 재부팅은 공유 서버라 할 수 없다 (방법은 `P5_설계서_Release` C절).
 
 ## 12. 반입 묶음을 만든다 — 값 7
 
@@ -383,8 +385,8 @@ pnpm release:verify .local/release/$V
   지금 커밋(HEAD)과 같은지 보고, 다르면 묶지 않는다** — `앱 이미지(workfluence-app:latest)는 커밋 …로 빌드됐다 — 지금은 …다`라며 다시
   빌드하는 명령을 알려 준다. 5절대로 다시 빌드하고 이 절을 처음부터 다시 한다. 같은 자리에서 **작업 폴더에 커밋하지 않은 변경이 없는지**,
   **앱 이미지 이름이 폐쇄망의 compose가 찾는 이름(`workfluence-app:latest`)인지**도 보고 다르면 멈춘다(장애대응 7.33절).
-- `compose.yml`·`nginx.conf`, 반입 가이드(`반입절차.md`), **운영 문서 다섯**(`docs/` 아래에 원래 이름으로 — 반입·운영이관·장애대응·사용자
-  가이드·학습가이드), 사내 CA 자리(`ca/README.md`), 값이 없는 `env.template`, 부품 목록(`sbom.cdx.json`·`LICENSES.txt`),
+- `compose.yml`·`nginx.conf`, 설치및실행가이드(`반입절차.md`), **운영 문서 다섯**(저장소와 같은 자리 — `docs/guide/`의 설치및실행가이드·운영가이드·장애대응가이드·
+  사용자가이드와 `docs/learnSystem/`의 학습가이드), 사내 CA 자리(`ca/README.md`), 값이 없는 `env.template`, 부품 목록(`sbom.cdx.json`·`LICENSES.txt`),
   `MANIFEST.txt`(버전·커밋)를 넣고, 마지막에 모든 파일의 지문(`SHA256SUMS`)을 적는다. 묶음이 갖춰야 할 목록은 코드
   (`packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`)가 들고 있다 — 빠지면 스스로 멈춘다.
 
@@ -400,27 +402,27 @@ tar -tf .local/release/$V.tar | head -3
 ls -lh .local/release/
 ```
 
-`tar -tf`의 첫 줄이 `workfluence-<날짜>/`여야 한다. 반입 가이드 1절이 `--strip-components=1`로 그 한 겹을 벗겨 `deploy/`에 푼다 —
+`tar -tf`의 첫 줄이 `workfluence-<날짜>/`여야 한다. 설치및실행가이드 1절이 `--strip-components=1`로 그 한 겹을 벗겨 `deploy/`에 푼다 —
 파일을 맨 위에 흩어 싸면 그 명령이 파일 이름의 첫 조각을 떼어 버린다.
 
 반입 매체에는 **`workfluence-<날짜>.tar`와 `workfluence-<날짜>.tar.sha256` 둘을** 담는다. 받는 쪽은 `.sha256`으로 옮기다 상하지 않았는지
-먼저 본다(반입 가이드 1절 — 새 버전은 11절 ①). **그 지문 값(`.tar.sha256`의 앞 64자)은 반입 신청서처럼 매체와 따로 가는 기록에도 적는다** — 지문 파일은
-매체에 같이 가므로, 현장은 매체째 바뀌지 않았는지를 그 기록과 견주어 가린다(반입 가이드 0.1절).
+먼저 본다(설치및실행가이드 1절 — 새 버전은 11절 ①). **그 지문 값(`.tar.sha256`의 앞 64자)은 반입 신청서처럼 매체와 따로 가는 기록에도 적는다** — 지문 파일은
+매체에 같이 가므로, 현장은 매체째 바뀌지 않았는지를 그 기록과 견주어 가린다(설치및실행가이드 0.1절).
 
 **여기서 값 7을 적는다** — `cat .local/release/$V/MANIFEST.txt`, `release:verify`의 두 줄, tar 크기.
 
 ## 12-1. Docker 설치 묶음을 만든다 — 대상 서버에 Docker가 없을 때만
 
-폐쇄망의 RHEL 9 서버에 Docker가 없으면 반입 묶음과 함께 **Docker 묶음**을 들고 간다(반입 가이드 0.1·0.3절). 이 서버(RHEL 9)에 **깔린 판 그대로**의 RPM을
+폐쇄망의 RHEL 9 서버에 Docker가 없으면 반입 묶음과 함께 **Docker 묶음**을 들고 간다(설치및실행가이드 0.1·0.3절). 이 서버(RHEL 9)에 **깔린 판 그대로**의 RPM을
 받아 싼다 — 반입 묶음의 이미지를 이 판으로 만들고 띄워 봤기 때문이다. **아무것도 설치하지 않는다**(`dnf download`는 파일만 받는다). 인터넷이 필요하다(1.1절의 프록시).
 반입 묶음(12절)과 같은 날 만든다.
 
 | 자리 | 싣는 것 | 왜 |
 |---|---|---|
 | 맨 위 | `docker-ce`·`docker-ce-cli`·`containerd.io`·`docker-compose-plugin`(Docker — Apache-2.0) · `container-selinux`(Red Hat — GPLv2) | Docker와, Docker가 늘 요구하는 RHEL 부품 — 컨테이너를 쓴 적 없는 서버에는 `container-selinux`가 없다 |
-| `deps/` | `iptables-nft`·`nftables`·`libnftnl`(Red Hat — GPL 계열) · `jansson`(Red Hat — MIT) | **firewalld가 없는 RHEL 9에 모자란 것** — firewalld가 없는 RHEL 9에 Docker와 한 거래로 들어오는 부품과, `nftables`가 쓰는 `jansson`. firewalld가 있는 표준 설치에는 이미 있다. 판이 이 서버의 부 버전에 묶여 있어 대상이 같은 부 버전일 때만 쓴다(반입 가이드 0.3절 ④) |
+| `deps/` | `iptables-nft`·`nftables`·`libnftnl`(Red Hat — GPL 계열) · `jansson`(Red Hat — MIT) | **firewalld가 없는 RHEL 9에 모자란 것** — firewalld가 없는 RHEL 9에 Docker와 한 거래로 들어오는 부품과, `nftables`가 쓰는 `jansson`. firewalld가 있는 표준 설치에는 이미 있다. 판이 이 서버의 부 버전에 묶여 있어 대상이 같은 부 버전일 때만 쓴다(설치및실행가이드 0.3절 ④) |
 | `PACKAGES.txt` | 첫 줄은 이 서버의 `/etc/redhat-release`, 다음 줄부터 RPM마다 파일·라이선스·만든 곳 | 판의 기록이자 라이선스 목록(`CLAUDE.md` 7절). 현장은 첫 줄을 자기 서버의 판과 견주어 `deps/`를 쓸지 정한다 |
-| `docker-ce.gpg` · `SHA256SUMS` | Docker의 공개키 · 모든 파일의 지문 | 현장이 같은 키로 서명을 보고(반입 가이드 0.3절 ②), 지문으로 상했는지 본다 |
+| `docker-ce.gpg` · `SHA256SUMS` | Docker의 공개키 · 모든 파일의 지문 | 현장이 같은 키로 서명을 보고(설치및실행가이드 0.3절 ②), 지문으로 상했는지 본다 |
 
 **Red Hat의 부품(GPL 계열)은 고치지 않고 싣는다** — 사용자 승인 2026-09-30(`CLAUDE.md` 7절). 대상 서버의 RHEL과 같은 배포판의 부품이고, 현장은 그 서버 자신의
 Red Hat 키로 서명을 본다. 앱 이미지와 반입 묶음에는 들어가지 않는다.
@@ -441,10 +443,10 @@ ls -lh .local/release/
    (T-097). 이 서버의 RPM DB는 건드리지 않는다.
 5. `PACKAGES.txt`와 `SHA256SUMS`를 쓰고, 맨 위 디렉토리 하나(`docker-rhel9-<날짜>/`)로 싸고(파일 주인은 숫자 0 — 만든 계정의 이름이 묶음에 남지 않게) 지문 파일을 쓴다.
 
-판정은 공유 코드(`packages/shared/src/release.ts`의 `dockerKeyProblem`·`rpmSignatureProblems`)가 하고, 현장의 반입 가이드 0.3절 ②가 같은 판정을 셸 한 줄씩으로 한다.
+판정은 공유 코드(`packages/shared/src/release.ts`의 `dockerKeyProblem`·`rpmSignatureProblems`)가 하고, 현장의 설치및실행가이드 0.3절 ②가 같은 판정을 셸 한 줄씩으로 한다.
 
 마지막 두 줄이 `[docker] 완료 — …`와 `[docker] 지문 — <64자>  docker-rhel9-<날짜>.tar …`여야 한다. 반입 매체에는 **`docker-rhel9-<날짜>.tar`와 `.tar.sha256` 둘을** 반입
-묶음의 둘 옆에 담는다 — 대상 서버에 Docker가 이미 있으면 담지 않는다. **두 묶음의 지문 값은 반입 신청서처럼 매체와 따로 가는 기록에도 적는다**(반입 가이드 0.1절).
+묶음의 둘 옆에 담는다 — 대상 서버에 Docker가 이미 있으면 담지 않는다. **두 묶음의 지문 값은 반입 신청서처럼 매체와 따로 가는 기록에도 적는다**(설치및실행가이드 0.1절).
 
 ## 13. 정리
 

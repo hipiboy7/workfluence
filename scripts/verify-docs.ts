@@ -15,7 +15,7 @@
  * 4. 마크다운 링크            상대 링크가 실제 파일을 가리키는가
  * 5. 표 열 수                 헤더와 각 행의 열 수가 같은가
  * 6. 셸 스크립트 실행 권한     deploy/*.sh가 존재하고 실행 가능한가
- * 7. 로그 event 코드           `LOG_EVENTS`의 모든 코드가 장애대응 가이드에 있는가 (P11 FR-1218) — 코드를 더하고 가이드를 잊지 않게
+ * 7. 로그 event 코드           `LOG_EVENTS`의 모든 코드가 장애대응가이드에 있는가 (P11 FR-1218) — 코드를 더하고 가이드를 잊지 않게
  *
  * 사용법
  * -----
@@ -302,15 +302,15 @@ function checkCaseCollisions(findings: Finding[]): void {
 }
 
 /**
- * 7. 로그 event 코드 (P11_설계서_Ops D.4, FR-1218). 코드 목록(`LOG_EVENTS`)이 정본이고 운영자가 읽는 표는 장애대응 가이드 한 곳이다 —
+ * 7. 로그 event 코드 (P11_설계서_Ops D.4, FR-1218). 코드 목록(`LOG_EVENTS`)이 정본이고 운영자가 읽는 표는 장애대응가이드 한 곳이다 —
  * 코드를 더하고 가이드를 잊으면 운영자가 그 줄을 만났을 때 찾을 곳이 없다. 백틱으로 적힌 코드를 찾는다
  */
 function checkLogEvents(findings: Finding[]): void {
-  const guide = 'docs/운영가이드_장애대응.md';
+  const guide = 'docs/guide/장애대응가이드.md';
   const text = readFileSync(resolve(ROOT, guide), 'utf8');
   for (const event of LOG_EVENTS) {
     if (!text.includes(`\`${event}\``)) {
-      findings.push({ file: guide, line: 0, kind: 'event 코드가 가이드에 없음', detail: `${event} — LOG_EVENTS에 있는데 장애대응 가이드가 모른다` });
+      findings.push({ file: guide, line: 0, kind: 'event 코드가 가이드에 없음', detail: `${event} — LOG_EVENTS에 있는데 장애대응가이드가 모른다` });
     }
   }
 }

@@ -1,7 +1,7 @@
 name: Windows 체험
 
 # 인터넷이 되는 Windows에서 이 앱을 띄워 써 볼 수 있는지 **실제 Windows Server VM**(GitHub이 주는 windows-latest)에서 확인한다.
-# 확인하는 길은 "Node로 직접 띄우기" 하나다 — docs/운영가이드_윈도우체험.md 2~6절. 이 러너는 Linux 컨테이너를 돌리지 못해
+# 확인하는 길은 "Node로 직접 띄우기" 하나다 — docs/guide/shortcut/windows시연가이드.md 2~6절. 이 러너는 Linux 컨테이너를 돌리지 못해
 # compose 길(같은 문서 7절)은 여기서 볼 수 없다. 운영(폐쇄망 Linux compose)을 대신하지 않고, 기존 CI(ci.yml, Linux)는 그대로다.
 # 결과는 같은 문서 9.2절에 적는다.
 #

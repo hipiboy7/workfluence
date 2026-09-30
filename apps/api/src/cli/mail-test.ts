@@ -39,7 +39,7 @@ export async function mailTest(
   const to = parsed.data;
   const cfg = mailConfigOf(env);
   if (!cfg.url) {
-    out.error('[mail-test] WF_MAIL_API_URL이 비었다 — 사내 메일 API의 보내는 주소 전체를 적는다(반입 가이드 "사내 메일 연결하기")');
+    out.error('[mail-test] WF_MAIL_API_URL이 비었다 — 사내 메일 API의 보내는 주소 전체를 적는다(설치및실행가이드 "사내 메일 연결하기")');
     return 1;
   }
   out.log(`[mail-test] 주소: ${cfg.url}`);

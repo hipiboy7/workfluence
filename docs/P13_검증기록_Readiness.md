@@ -15,8 +15,8 @@
 | 사내 IdP·메일·LLM 없이 기동·운영 | **된다** — 셋 다 기본 꺼짐이거나 선택(`WF_OIDC_ENABLED`·`WF_MAIL_ENABLED` 기본 false, LLM은 관리 화면의 등록) | 코드 |
 | 설치 가이드대로 설치 | **막혔다** — 첫 root 계정을 만드는 단계(시드)가 없었다. root는 시드만 만든다 → 아무도 로그인하지 못한다 | 코드(`seed.ts` 밖에 root를 만드는 곳이 없다) |
 | 첫 백업(첨부) | **폐쇄망에서 실패** — 묶음에 없는 `alpine` 이미지를 썼다 | 코드(묶음의 이미지는 compose가 쓰는 셋) |
-| 묶음의 운영 문서 | **반입 가이드뿐** — 운영이관·장애대응이 없었다 | 코드(`RELEASE_REQUIRED_FILES`) |
-| 빌드 가이드 | **Phase 0 기준** — `impl-phase0`을 받고, 묶음 절차가 없었다 | 문서 |
+| 묶음의 운영 문서 | **설치및실행가이드뿐** — 운영가이드·장애대응이 없었다 | 코드(`RELEASE_REQUIRED_FILES`) |
+| linux서버배포가이드 | **Phase 0 기준** — `impl-phase0`을 받고, 묶음 절차가 없었다 | 문서 |
 | 월간 작업 | **폐쇄망에서 돌릴 길이 없었다** — Node와 저장소가 필요했다 | 코드 |
 | 가이드의 자잘한 오류 | 접속 주소에 포트(`8443`)가 없다 · 폐쇄망에 없는 `pnpm` 명령을 치라고 한다 · 호스트에서 닿지 않는 health 명령(앱 포트는 밖에 열려 있지 않다) | 문서·compose |
 | 앱의 DB 계정 | **슈퍼유저**(보류 12) | compose |
@@ -164,9 +164,9 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 칸으로 그 사람을 찾고(**전체 1명**) **정지** → 확인 → 상태 칸이 **정지** · 그 사람이 맞는 비밀번호로 로그인하면 다른 실패와 같은 문구로
 거절됨 → **정지 해제** → 로그인됨. 상태 칸의 한글(승인 대기·활성)은 기존 흐름(가입 요청 → 승인)이 함께 본다.
 
-## 6. 설치 리허설 — 반입 가이드를 적힌 그대로 (NFR-132)
+## 6. 설치 리허설 — 설치및실행가이드를 적힌 그대로 (NFR-132)
 
-2026-09-27 07:05~07:16 UTC, HEAD `ef9a1b9`. 빌드 가이드로 이미지와 묶음을 만들고, 그 묶음을 반입 가이드대로 **빈 볼륨**에 설치했다.
+2026-09-27 07:05~07:16 UTC, HEAD `ef9a1b9`. linux서버배포가이드로 이미지와 묶음을 만들고, 그 묶음을 설치및실행가이드대로 **빈 볼륨**에 설치했다.
 명령과 출력 원문은 이 서버의 `.local/tmp/rehearsal/`에 있다(커밋하지 않는다 — 12.2절).
 
 **가이드와 다르게 한 것** — 이것뿐이다.
@@ -174,13 +174,13 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 | 무엇 | 왜 |
 |---|---|
 | 셸에 `COMPOSE_PROJECT_NAME=wfrh` | 이 서버에 같은 이름(`deploy`)의 개발 스택이 있다. 가이드대로 `deploy`로 풀면 그 볼륨을 그대로 쓴다. 개발 스택은 **볼륨을 남기고** 내렸다가(`down`, `-v` 없이) 끝나고 다시 띄웠다 — 고정된 컨테이너 이름과 8443 포트가 겹친다 |
-| 묶음 tar의 자리 | `/media/반입` 대신 빌드 가이드 12절이 만든 `.local/release/` |
+| 묶음 tar의 자리 | `/media/반입` 대신 linux서버배포가이드 12절이 만든 `.local/release/` |
 | 7절 `curl -sk` → `curl --cacert certs/cert.pem` | TLS 검증을 끄지 않는다(`CLAUDE.md` 7절). 인증서 SAN에 `127.0.0.1`이 있다 |
 | 7절 브라우저 확인 → 같은 API를 Node로 | 로그인·비밀번호 변경·문서·첨부·감사를 화면이 부르는 API 그대로, TLS 검증을 켠 채(`NODE_EXTRA_CA_CERTS`). 같이 고치기는 **WebSocket 둘**로 |
-| 7.1절 재부팅 | 하지 않았다 — 공유 서버다(가이드 7.1절·빌드 가이드 11절). 재시작 정책만 봤다 |
-| 빌드 가이드 6절 첫 줄(`pull postgres nginx`) | 건너뛰었다 — 가이드의 조건("처음 올리는 것이면")에 들지 않고, 받으면 개발 스택의 postgres 판이 바뀔 수 있다 |
+| 7.1절 재부팅 | 하지 않았다 — 공유 서버다(가이드 7.1절·linux서버배포가이드 11절). 재시작 정책만 봤다 |
+| linux서버배포가이드 6절 첫 줄(`pull postgres nginx`) | 건너뛰었다 — 가이드의 조건("처음 올리는 것이면")에 들지 않고, 받으면 개발 스택의 postgres 판이 바뀔 수 있다 |
 
-**빌드 가이드** (저장소, 개발 스택)
+**linux서버배포가이드** (저장소, 개발 스택)
 
 | 절 | 결과 |
 |---|---|
@@ -192,7 +192,7 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 | 11.1 | 셋 다 `restart=unless-stopped` · 도커 `enabled`. 실제 재부팅은 미실시 |
 | 12 | `release:bundle` — 앱 이미지 = 커밋 `ef9a1b9`(새 검사 FR-1407 통과), 15개 파일 · 263MB, `env.template` 키 34개(값 0개 — `tools`가 쓰는 `WF_ROOT_PASSWORD`·`WF_ROOT_USERNAME`도 있다). `release:verify` — `통과 — 필수 15개 · 체크섬 14개 일치` · `git ef9a1b9 · 이미지 3개`. tar 264MB, 첫 줄 `workfluence-2026-09-27/` |
 
-**반입 가이드** (`~/workfluence/deploy`, 빈 볼륨 `wfrh_postgres_data`·`wfrh_attachments`)
+**설치및실행가이드** (`~/workfluence/deploy`, 빈 볼륨 `wfrh_postgres_data`·`wfrh_attachments`)
 
 | 절 | 결과 |
 |---|---|
@@ -209,7 +209,7 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 | 7 나머지 | `X-Request-Id` 1개 · nginx 로그 JSON 한 줄 · 셋 다 `max-file:5 max-size:20m` · `WF_ROOT_PASSWORD` 비움 |
 | 8 | `db.dump` 58KB · 첨부 백업 `tar -tzf … \| wc -l` → `3`(맨 위·폴더·파일) — compose의 진행 줄은 표준 오류로 가 tar.gz를 망치지 않는다 |
 
-**운영이관 가이드** (같은 설치에서)
+**운영가이드** (같은 설치에서)
 
 | 절 | 결과 |
 |---|---|
@@ -235,7 +235,7 @@ NODE_EXTRA_CA_CERTS=$PWD/deploy/certs/cert.pem LOAD_BASE=https://127.0.0.1:8443 
 
 | 확인 | 결과 |
 |---|---|
-| 빌드(빌드 가이드 5절) | 34초 · 라벨 `3aa6ce53…` = HEAD · 380MB. **빌드 전 여유가 4.8GB였다 — 규칙(8.2절, 5GB 미만이면 빌드하지 않는다)을 어기고 빌드했다.** 뒤에 쓰지 않는 이 프로젝트의 옛 이미지 태그 둘과 24시간 넘게 안 쓴 빌드 캐시를 비워 4.9GB |
+| 빌드(linux서버배포가이드 5절) | 34초 · 라벨 `3aa6ce53…` = HEAD · 380MB. **빌드 전 여유가 4.8GB였다 — 규칙(8.2절, 5GB 미만이면 빌드하지 않는다)을 어기고 빌드했다.** 뒤에 쓰지 않는 이 프로젝트의 옛 이미지 태그 둘과 24시간 넘게 안 쓴 빌드 캐시를 비워 4.9GB |
 | 표 만들기(`tools`) → api 다시 | `앱 계정 workfluence_app: 권한 적용` · 저장된 비밀번호가 `SCRAM-SHA-256$4096…`(앱이 만든 확인값 — 평문을 보내지 않았다) · 새로 띄운 api가 그 계정으로 붙어 헬스 200 |
 | nginx를 거친 API (합성 계정 — 끝나고 지웠다) | 형식이 틀린 id로 정지 → **400** · 실시간 편집 제목 → `applied: true`, 감사 `page.collab.title`(바꾼 사람), 유휴 저장이 그 제목을 버전으로 남김 · 자동 저장 뒤 저장하고 보기로 → `saved: true, unchanged: true` · 서버가 받지 못한 상태 벡터로 저장하고 보기로 → 1,546ms 뒤 `saved: false`, `이 화면의 입력이 아직 서버에 닿지 않았다 …` |
 | 시드 — 남이 가입한 아이디(`WF_ROOT_USERNAME=rootx`, member·pending) | `아이디 rootx인 계정이 이미 있는데 root가 아니다(역할 member, 상태 pending) …` · 종료 1 · 그 행은 member·pending 그대로 |

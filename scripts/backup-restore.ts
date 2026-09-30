@@ -21,7 +21,7 @@ import { join, resolve } from 'node:path';
  * 근거가 아니다.
  */
 const COMPOSE = ['compose', '-f', 'deploy/compose.yml', '--env-file', 'deploy/.env'];
-/** 표 만들기 — 앱 계정과 권한도 만든다(`apps/api/src/db/app-role.ts`). 반입 가이드 5절과 같은 명령이다 */
+/** 표 만들기 — 앱 계정과 권한도 만든다(`apps/api/src/db/app-role.ts`). 설치및실행가이드 5절과 같은 명령이다 */
 const MIGRATE = [...COMPOSE, 'run', '--rm', 'tools', 'node', 'dist/db/migrate.js'];
 
 function dc(args: string[], input?: Buffer, capture = false): string {
@@ -40,7 +40,7 @@ const psql = (sql: string) =>
  * 첨부 볼륨을 만지는 명령. **`exec api`를 쓰지 않는다.**
  *
  * 복원 절차의 첫 단계는 "사람들이 계속 쓰지 못하게 api를 멈추는 것"이다
- * (`운영가이드_장애대응.md` 7.18절). 그런데 `docker compose exec`는 **떠 있는 컨테이너에만**
+ * (`장애대응가이드.md` 7.18절). 그런데 `docker compose exec`는 **떠 있는 컨테이너에만**
  * 붙는다 — 멈춘 뒤에 부르면 실패한다. 그러면 `pg_restore`는 이미 끝나 있고 첨부만 빠진
  * **절반 복원**으로 끝난다. 다시 돌리려 해도 "비어 있지 않다"로 거부되어 되돌릴 길이 없다.
  *

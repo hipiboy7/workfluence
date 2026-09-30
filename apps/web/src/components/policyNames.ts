@@ -15,7 +15,7 @@ export const POLICY_GROUPS: readonly { id: PolicyGroup; title: string }[] = [
 
 /**
  * 운영 설정의 **화면 이름** (P17 설계서 J.9-9) — 키는 개발 용어라 한글 이름을 앞에 두고 키는 괄호 안에 남긴다("휴지통 보존 기간
- * (trashRetentionDays)"). 키는 장애대응 가이드·감사로그의 `settings.update`·시험이 찾는 이름이다.
+ * (trashRetentionDays)"). 키는 장애대응가이드·감사로그의 `settings.update`·시험이 찾는 이름이다.
  *
  * - `unit`은 칸 뒤의 글이다 — 라벨 밖에 둔다(J.5.3 "라벨 글은 이름만")
  * - `group`이 없는 키는 이 화면에 보이지 않는다 — 감사 기록 단계는 감사로그 화면에서 시스템 관리자가 고른다(P17 FR-1842)

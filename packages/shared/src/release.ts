@@ -24,15 +24,15 @@ export const RELEASE_REQUIRED_FILES = [
   'sbom.cdx.json',
   'LICENSES.txt',
   '반입절차.md',
-  // **운영 문서** (P13 FR-1402). 폐쇄망에서는 저장소를 열 수 없다 — 반입 가이드가 운영 가이드의 절을 가리킨다. 원래 이름으로 `docs/`에
-  // 두어 문서끼리의 상대 링크가 묶음 안에서도 이어진다
-  'docs/운영가이드_반입.md',
-  'docs/운영가이드_운영이관.md',
-  'docs/운영가이드_장애대응.md',
-  'docs/사용자가이드_사용법.md',
-  'docs/학습가이드_시스템이해.md',
+  // **운영 문서** (P13 FR-1402). 폐쇄망에서는 저장소를 열 수 없다 — 설치및실행가이드가 다른 가이드의 절을 가리킨다. 저장소와 같은 자리
+  // (`docs/guide/`·`docs/learnSystem/` — 2026-09-30 옮김)에 두어 문서끼리의 상대 링크가 묶음 안에서도 이어진다
+  'docs/guide/설치및실행가이드.md',
+  'docs/guide/운영가이드.md',
+  'docs/guide/장애대응가이드.md',
+  'docs/guide/사용자가이드.md',
+  'docs/learnSystem/학습가이드_시스템이해.md',
   // **사내 CA 자리** (P11 D.7). compose가 `./ca`를 붙이므로, 묶음에 없으면 첫 기동에서 도커가 `ca/`를 **root 소유로** 만든다 —
-  // 현장에서 인증서를 넣을 때(반입 가이드 10절) 일반 계정은 `Permission denied`다. 안내 파일을 넣어 디렉토리째 풀리게 한다 (P11 검토)
+  // 현장에서 인증서를 넣을 때(설치및실행가이드 10절) 일반 계정은 `Permission denied`다. 안내 파일을 넣어 디렉토리째 풀리게 한다 (P11 검토)
   'ca/README.md',
 ] as const;
 
@@ -198,7 +198,7 @@ export function parseManifest(text: string): Manifest {
 
 /**
  * **Docker 설치 묶음** (P20_설계서_Install D절, FR-2101) — 대상 RHEL 9 서버에 Docker가 없을 때만 들고 간다. 묶음을 만드는 서버에 **깔린 판**의
- * RPM을 받아 싼다(`pnpm release:docker`, 리눅스빌드 가이드 12-1절). 현장에는 Node가 없어 반입 가이드 0.3절 ②가 같은 판정을 셸 한 줄씩으로 한다.
+ * RPM을 받아 싼다(`pnpm release:docker`, linux서버배포가이드 12-1절). 현장에는 Node가 없어 설치및실행가이드 0.3절 ②가 같은 판정을 셸 한 줄씩으로 한다.
  *
  * - `top` — Docker의 넷(Apache-2.0)과 Docker가 늘 요구하는 `container-selinux`(Red Hat) — 컨테이너를 쓴 적 없는 서버에는 없다
  * - `deps` — **firewalld가 없는 RHEL 9에 모자란 것**(Red Hat): Docker가 요구하는 방화벽 부품과 그것이 쓰는 라이브러리. firewalld가 있는 표준 설치에는
@@ -278,7 +278,7 @@ export type PackageRow = { file: string; license: string; vendor: string };
 
 /**
  * 묶음의 부품 목록(`PACKAGES.txt`). **첫 줄은 묶음을 만든 서버의 RHEL 판 그대로**다 — 현장이 `cat /etc/redhat-release`와 견주어 `deps/`를
- * 쓸지 정한다(반입 가이드 0.3절 ④). 다음 줄부터 RPM마다 파일·라이선스·만든 곳을 탭으로 가른다 — 라이선스 목록이자 판의 기록이다
+ * 쓸지 정한다(설치및실행가이드 0.3절 ④). 다음 줄부터 RPM마다 파일·라이선스·만든 곳을 탭으로 가른다 — 라이선스 목록이자 판의 기록이다
  * (`CLAUDE.md` 7절 — 반입 산출물에 라이선스 목록)
  */
 export function formatPackages(release: string, rows: readonly PackageRow[]): string {

@@ -167,7 +167,7 @@ describe('AdminLlmPage', () => {
     checkResult = { ok: false, message: 'LLM 서버에 닿지 않는다 (ECONNREFUSED)' };
     fireEvent.click(screen.getByRole('button', { name: '사내 Qwen 연결 확인' }));
     // 배지는 짧게(연결 안 됨), 까닭은 그 옆의 글이다 — 긴 문장을 배지에 담지 않는다 (J.5.8)
-    // 줄의 글은 예전 그대로다 — 반입 가이드가 그 글로 찾는다
+    // 줄의 글은 예전 그대로다 — 설치및실행가이드가 그 글로 찾는다
     const why = await screen.findByText('— LLM 서버에 닿지 않는다 (ECONNREFUSED)');
     const detail = why.closest('tr')!;
     expect(detail.textContent).toBe('연결 안 됨 — LLM 서버에 닿지 않는다 (ECONNREFUSED)');

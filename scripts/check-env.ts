@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   // 도커와 같은 디스크를 나눠 쓴다는 점이고, 그것은 아래 여유 공간 검사가 본다.
   // **경고로 낮췄다 (2026-09-27, `exp/windows`).** 그 규칙은 C:가 좁던 옛 Windows 개발 서버의 것이다. 체험용 Windows는 대개
   // C: 하나뿐이고(GitHub의 windows-latest도 그렇다), Azure VM의 D:는 VM을 멈추면 지워질 수 있는 임시 디스크다 — 막으면
-  // 데이터를 잃는 쪽으로 보낸다 (`docs/운영가이드_윈도우체험.md` 6절). 실제로 막아야 하는 것(여유 공간)은 아래가 본다
+  // 데이터를 잃는 쪽으로 보낸다 (`docs/guide/shortcut/windows시연가이드.md` 6절). 실제로 막아야 하는 것(여유 공간)은 아래가 본다
   if (process.platform === 'win32') {
     const systemDrive = (process.env.SystemDrive ?? 'C:').toLowerCase();
     const projectDrive = parse(root).root.replace(/[\\/]+$/, '').toLowerCase();

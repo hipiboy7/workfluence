@@ -1,7 +1,7 @@
 # 요청 기록 — 방법론·산출물 구조 개정
 
 - 일자: 2026-09-16 ~ 2026-09-17
-- 대응 산출물: `CLAUDE.md`(v2), `docs/P0_설계서_Foundation.md`(병합), `docs/P0_검증기록_Foundation.md`(축소), `docs/학습가이드_시스템이해.md`, `docs/운영가이드_장애대응.md`, `docs/기능백로그.md`, `docs/설계서_Architecture.md` 11절
+- 대응 산출물: `CLAUDE.md`(v2), `docs/P0_설계서_Foundation.md`(병합), `docs/P0_검증기록_Foundation.md`(축소), `docs/learnSystem/학습가이드_시스템이해.md`, `docs/guide/장애대응가이드.md`, `docs/기능백로그.md`, `docs/설계서_Architecture.md` 11절
 - 판단 근거: [`docs/internal/검토서_방법론개정.md`](../internal/검토서_방법론개정.md). **이 문서는 요청 원문만 담는다** (`CLAUDE.md` 11절)
 
 > **개정 이력 (2026-09-17).** 원래 이 문서에는 요청 원문 외에 검토 결과 요약과 판단 근거가 함께 있었다. 요청 기록에는 사용자 말 원문만 둔다는 규칙에 따라 그 부분을 `docs/internal/검토서_방법론개정.md`로 옮겼다.
