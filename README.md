@@ -84,7 +84,7 @@ pnpm start           # http://127.0.0.1:3000
 ```bash
 pnpm check           # lint + typecheck + test + verify:docs (CI와 같은 검사)
 pnpm test:cov        # 커버리지
-pnpm test:e2e        # Playwright (api가 떠 있어야 한다)
+pnpm test:e2e        # Playwright (api가 떠 있어야 한다 — 메일을 켠 채: scripts/e2e.ts 머리의 사전 조건)
 ```
 
 ## 배포
