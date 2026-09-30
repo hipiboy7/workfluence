@@ -25,6 +25,8 @@ import {
   parseId,
   updateTemplateDto,
   recoverPasswordDto,
+  emailHelpDto,
+  resetPasswordDto,
   searchQueryDto,
   signupDto,
   spaceListQueryDto,
@@ -62,8 +64,33 @@ describe('인증·계정 DTO', () => {
     expect(findIdDto.safeParse({ email: 'a@b.co', displayName: '홍길동' }).success).toBe(true);
   });
 
-  it('recoverPasswordDto / changePasswordDto', () => {
-    expect(recoverPasswordDto.safeParse({ username: 'hong', email: 'a@b.co' }).success).toBe(true);
+  it('**비밀번호 찾기는 표시 이름 + email** (P19 FR-2000 — 사용자 원문 3번 "이름과 처음에 입력한 이메일") — 아이디는 받지 않는다', () => {
+    expect(recoverPasswordDto.safeParse({ displayName: '홍길동', email: 'A@B.co' })).toEqual({ success: true, data: { displayName: '홍길동', email: 'a@b.co' } });
+    expect(recoverPasswordDto.safeParse({ displayName: '  홍길동 ', email: 'a@b.co' }).data?.displayName).toBe('홍길동');
+    expect(recoverPasswordDto.safeParse({ username: 'hong', email: 'a@b.co' }).success).toBe(false);
+    expect(recoverPasswordDto.safeParse({ displayName: '홍길동' }).success).toBe(false);
+    expect(recoverPasswordDto.safeParse({ displayName: '', email: 'a@b.co' }).success).toBe(false);
+  });
+
+  it('**email 확인 요청은 아이디 + 표시 이름** (P19 FR-2009 — 착수 쟁점 2)', () => {
+    expect(emailHelpDto.safeParse({ username: 'hong', displayName: '홍길동' }).success).toBe(true);
+    expect(emailHelpDto.safeParse({ username: 'hong' }).success).toBe(false);
+    expect(emailHelpDto.safeParse({ displayName: '홍길동' }).success).toBe(false);
+    expect(emailHelpDto.safeParse({ username: 'Hong Gil', displayName: '홍길동' }).success).toBe(false);
+  });
+
+  it('**재설정 링크의 값은 43자 base64url** (P19 C.3 — 32바이트) — 다른 모양은 DB에 가 보지도 않는다', () => {
+    const token = 'A'.repeat(21) + '-_' + 'z9'.repeat(10);
+    expect(token).toHaveLength(43);
+    expect(resetPasswordDto.safeParse({ token, newPassword: 'new-pass1' }).success).toBe(true);
+    for (const bad of ['', 'A'.repeat(42), 'A'.repeat(44), 'A'.repeat(42) + '=', 'A'.repeat(42) + '/', 'A'.repeat(42) + ' ']) {
+      expect(resetPasswordDto.safeParse({ token: bad, newPassword: 'new-pass1' }).success, JSON.stringify(bad)).toBe(false);
+    }
+    // 새 비밀번호의 바닥은 계약이 본다 — 그 위의 세기는 살아 있는 정책으로 서비스가 본다(FR-521)
+    expect(resetPasswordDto.safeParse({ token, newPassword: 'short' }).success).toBe(false);
+  });
+
+  it('changePasswordDto', () => {
     expect(changePasswordDto.safeParse({ currentPassword: 'old-pass1', newPassword: 'new-pass1' }).success).toBe(true);
     expect(changePasswordDto.safeParse({ currentPassword: 'same-pass1', newPassword: 'same-pass1' }).success).toBe(false);
     expect(changePasswordDto.safeParse({ currentPassword: 'old', newPassword: 'short' }).success).toBe(false);

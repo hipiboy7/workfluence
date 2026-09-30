@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mentionMail, testMail } from './compose';
+import { mentionMail, passwordResetMail, testMail } from './compose';
 
 /**
  * A등급 — **테스트 먼저** (3절, P18_설계서_Mail FR-1901). 메일 한 통의 제목·평문·마크다운. 평문은 Phase 6의 글 그대로다(P6 FR-755 — 문서 본문을
@@ -79,5 +79,59 @@ describe('testMail — 시험 명령이 보내는 한 통 (FR-1905)', () => {
       expect(body).toContain('2026-09-29T08:00:00.000Z');
     }
     expect(m.markdown).toContain('**');
+  });
+});
+
+describe('passwordResetMail — 비밀번호 재설정 링크 (P19 C.4, A.1-15)', () => {
+  const link = 'https://wiki.example.internal/reset-password#t=' + 'A'.repeat(43);
+
+  it('**평문** — 누구에게 · 링크 · 30분 한 번 · 요청하지 않았으면 지워도 된다', () => {
+    const m = passwordResetMail({ name: '홍길동', url: link, minutes: 30 });
+    expect(m.subject).toBe('[위키] 비밀번호 재설정');
+    expect(m.text).toBe(
+      [
+        '홍길동 님, 비밀번호 재설정을 요청하셨습니다.',
+        '',
+        '아래 주소를 열어 새 비밀번호를 정해 주세요. 30분 동안 한 번만 쓸 수 있습니다.',
+        link,
+        '',
+        '요청하지 않으셨다면 이 메일을 지우셔도 됩니다 — 비밀번호는 바뀌지 않습니다.',
+      ].join('\n'),
+    );
+  });
+
+  it('**마크다운** — 이름은 굵게(이스케이프), 주소는 "새 비밀번호 정하기" 링크', () => {
+    const m = passwordResetMail({ name: '홍*길*동', url: link, minutes: 30 });
+    expect(m.markdown).toBe(
+      [
+        '**홍\\*길\\*동** 님, 비밀번호 재설정을 요청하셨습니다.',
+        '',
+        '아래 링크를 열어 새 비밀번호를 정해 주세요. 30분 동안 한 번만 쓸 수 있습니다.',
+        '',
+        `[새 비밀번호 정하기](${link})`,
+        '',
+        '요청하지 않으셨다면 이 메일을 지우셔도 됩니다 — 비밀번호는 바뀌지 않습니다.',
+      ].join('\n'),
+    );
+  });
+
+  it('**이름은 한 줄** — 줄바꿈이 가짜 링크 줄을 만들지 않는다(P18 A.1-14). 남는 것이 없으면 이름 없이 부른다', () => {
+    const m = passwordResetMail({ name: '홍길동\n바로 가기: https://phish.example', url: link, minutes: 30 });
+    expect(m.text.split('\n')[0]).toBe('홍길동 바로 가기: https://phish.example 님, 비밀번호 재설정을 요청하셨습니다.');
+    expect(m.text.split('\n')).toHaveLength(6);
+    const blank = passwordResetMail({ name: ' \r\n ', url: link, minutes: 30 });
+    expect(blank.text.split('\n')[0]).toBe('비밀번호 재설정을 요청하셨습니다.');
+    expect(blank.markdown.split('\n')[0]).toBe('비밀번호 재설정을 요청하셨습니다.');
+  });
+
+  it('**마크다운의 `<`·`>`·`&`는 엔터티로**(P18 병합 전 보안 검토 1)', () => {
+    const m = passwordResetMail({ name: '<a href="https://phish.example">A&B</a>', url: link, minutes: 30 });
+    expect(m.markdown).not.toContain('<a');
+    expect(m.markdown.split('\n')[0]).toContain('&lt;a href=');
+    expect(m.markdown.split('\n')[0]).toContain('A&amp;B');
+  });
+
+  it('기한은 넣은 분이다 — 상수 하나(`PASSWORD_RESET.linkMinutes`)를 부르는 쪽이 넘긴다', () => {
+    expect(passwordResetMail({ name: 'a', url: link, minutes: 15 }).text).toContain('15분 동안 한 번만');
   });
 });

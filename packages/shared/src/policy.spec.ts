@@ -172,3 +172,24 @@ describe('감사 기록 단계 (P17 F-010 10번, FR-1840) — 필수는 늘, 양
     expect(mergePolicy({ auditLevel: 9 }).auditLevel).toBe(3);
   });
 });
+
+describe('메일 재설정 켜기·끄기 — passwordResetMail (P19 FR-2008, A.1-9)', () => {
+  it('**기본은 켬(1)** — 사용자가 원한 기능이다. 끄는 것은 보안 검토가 막을 때다', () => {
+    expect(POLICY_DEFAULTS.passwordResetMail).toBe(1);
+    expect(applyPolicy({}).passwordResetMail).toBe(1);
+  });
+
+  it('0(끔)과 1(켬)만 받는다', () => {
+    expect(validatePolicyPatch({ passwordResetMail: 0 })).toEqual([]);
+    expect(validatePolicyPatch({ passwordResetMail: 1 })).toEqual([]);
+    for (const bad of [2, -1, 0.5, true, '1']) expect(validatePolicyPatch({ passwordResetMail: bad }), String(bad)).not.toEqual([]);
+  });
+
+  it('DB에 든 끔은 그대로 읽는다', () => {
+    expect(applyPolicy({ passwordResetMail: 0 }).passwordResetMail).toBe(0);
+  });
+
+  it('**감사 기록 단계가 빼지 않는다** — 재설정 요청·링크 쓰기·email 확인 요청은 필수 기록이다(FR-2010)', () => {
+    for (const a of ['auth.password.reset.request', 'auth.password.reset', 'auth.email.help'] as const) expect(auditRecorded(a, 1), a).toBe(true);
+  });
+});
