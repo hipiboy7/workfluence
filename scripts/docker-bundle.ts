@@ -25,7 +25,21 @@ const NEVRA = '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n';
 /** 자식 명령의 출력(`is not installed`·`digests signatures OK`)을 글자 그대로 판정하려고 영어로 돌린다 — 이 서버가 한국어 로캘이어도 같다 */
 const ENV = { ...process.env, LC_ALL: 'C.UTF-8' };
 
+/** 만든 임시 자리 — 멈출 때도 지운다(`process.exit`는 `finally`를 건너뛴다 — 반영분의 좁은 자체 점검 4) */
+const temps: string[] = [];
+
+function tempDir(prefix: string): string {
+  const d = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(d);
+  return d;
+}
+
+function cleanTemps(): void {
+  for (const d of temps.splice(0)) rmSync(d, { recursive: true, force: true });
+}
+
 function fail(msg: string): never {
+  cleanTemps();
   console.error(`[docker] 멈춘다 — ${msg}`);
   process.exit(1);
 }
@@ -74,7 +88,9 @@ function main(): void {
   console.log(`[docker] 판 — ${top.join(' · ')}`);
   console.log(`[docker] deps/ — ${deps.join(' · ')}`);
 
-  rmSync(out, { recursive: true, force: true });
+  // 앞 실행의 것을 모두 치운다 — 디렉토리만 지우면 옛 tar와 지문이 서로 맞는 채 남아, 이번 실행이 멈춰도 옛 묶음을 들고 가게 된다(좁은 자체 점검 4)
+  const tar = join(root, `${name}.tar`);
+  for (const f of [out, tar, `${tar}.sha256`]) rmSync(f, { recursive: true, force: true });
   const topFiles = download(out, top);
   const depFiles = download(join(out, 'deps'), deps).map((f) => `deps/${f}`);
   const rpms = [...topFiles, ...depFiles];
@@ -82,19 +98,18 @@ function main(): void {
   // 키 — **키가 하나이고 그 지문이 Docker의 것**(첫 키만 보면 키를 더 붙인 파일이 지나간다 — 보안 검토 S1)
   const key = join(out, 'docker-ce.gpg');
   run('curl', ['-fsS', '-o', key, DOCKER_KEY_URL]);
-  const home = mkdtempSync(join(tmpdir(), 'wf-gpg-'));
+  const home = tempDir('wf-gpg-');
   const colons = run('gpg', ['--homedir', home, '--quiet', '--batch', '--show-keys', '--with-colons', key]);
-  rmSync(home, { recursive: true, force: true });
   const keyProblem = dockerKeyProblem(colons);
   if (keyProblem) fail(keyProblem);
   console.log(`[docker] 키 — 하나, 지문 ${DOCKER_KEY_FINGERPRINT}`);
 
   // 서명 — **임시 RPM DB**로 본다(이 서버의 설정에 아무것도 남기지 않는다). 서명이 없는 RPM(`digests OK`)도 거절한다(보안 검토 S1)
-  const db = mkdtempSync(join(tmpdir(), 'wf-rpmdb-'));
+  const db = tempDir('wf-rpmdb-');
   run('rpm', ['--dbpath', db, '--import', key, RED_HAT_KEY]);
   const paths = rpms.map((f) => join(out, f));
   const problems = rpmSignatureProblems(run('rpm', ['--dbpath', db, '-K', ...paths], true), paths);
-  rmSync(db, { recursive: true, force: true });
+  cleanTemps();
   if (problems.length) fail(`서명이 맞지 않는다\n  ${problems.join('\n  ')}`);
   console.log(`[docker] 서명 — ${paths.length}/${paths.length} digests signatures OK (임시 RPM DB)`);
 
@@ -109,7 +124,6 @@ function main(): void {
   writeFileSync(join(out, 'SHA256SUMS'), formatChecksums(sums));
 
   // 반입 묶음과 같은 모양 — 맨 위 디렉토리 하나(반입 가이드 0.3절 ①이 그 한 겹을 벗겨 푼다). 파일 주인은 숫자 0으로 — 만든 계정의 이름이 묶음에 남지 않게
-  const tar = join(root, `${name}.tar`);
   run('tar', ['--owner=0', '--group=0', '--numeric-owner', '-cf', tar, '-C', root, name]);
   const first = run('tar', ['-tf', tar]).split('\n')[0];
   if (first !== `${name}/`) fail(`tar의 첫 줄이 ${name}/가 아니다 — ${first}`);
