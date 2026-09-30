@@ -160,7 +160,8 @@ describe('링크 (D.2, FR-2023)', () => {
   it('**링크가 되지 않는 주소는 하지 않고 까닭** — `mailto:`·`javascript:`·스킴 없는 주소(P9 B.2 — 저장이 멈췄던 길)', () => {
     const e = open();
     select(e, 1, 3);
-    for (const bad of ['mailto:a@example.internal', 'javascript:alert(1)', 'www.example.internal', '//evil.example', '']) {
+    // `/\\…`·`/<탭>/…`는 브라우저에서 `//…` — 바깥 주소를 위키 안 주소로 꾸민 것이다(P19 보안 검토 3)
+    for (const bad of ['mailto:a@example.internal', 'javascript:alert(1)', 'www.example.internal', '//evil.example', '/\\evil.example', '/\t/evil.example', '']) {
       expect(applyLink(e, bad), bad).toBe(LINK_NOT_ALLOWED);
     }
     expect(json(e).content![0].content![0].marks).toBeUndefined();

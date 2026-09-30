@@ -112,7 +112,7 @@ describe('링크 규칙 — 7절: http(s)·내부 경로·앵커만 (FR-1008)', 
     expect(linkAllowed(url)).toBe(true);
   });
 
-  it.each(['mailto:user@example.internal', 'tel:0200000000', 'javascript:alert(1)', 'data:text/html,x', '//evil.example/'])('%s → 링크가 되지 않는다', (url) => {
+  it.each(['mailto:user@example.internal', 'tel:0200000000', 'javascript:alert(1)', 'data:text/html,x', '//evil.example/', '/\\evil.example/', '/\n/evil.example/'])('%s → 링크가 되지 않는다', (url) => {
     expect(linkAllowed(url)).toBe(false);
   });
 });
