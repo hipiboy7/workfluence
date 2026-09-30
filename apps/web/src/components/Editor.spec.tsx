@@ -36,7 +36,7 @@ describe('Editor', () => {
   it('**편집 화면의 여백을 편집기가 쓴다** — 이름이 바뀌어 속성을 다시 넣어도 빠지지 않는다 (병합 전 검토 17)', async () => {
     const { rerender } = render(<Editor value={emptyDocument()} ariaLabel="본문" scrollMargin={EDIT_SCROLL_MARGIN} />);
     const box = (await screen.findByRole('textbox', { name: '본문' })) as TiptapBox;
-    expect(box.editor.view.someProp('scrollMargin')).toEqual({ top: 112, right: 0, bottom: 16, left: 0 });
+    expect(box.editor.view.someProp('scrollMargin')).toEqual({ top: 156, right: 0, bottom: 16, left: 0 });
     expect(box.editor.view.someProp('scrollThreshold')).toEqual(EDIT_SCROLL_MARGIN);
     rerender(<Editor value={emptyDocument()} ariaLabel="다른 이름" scrollMargin={EDIT_SCROLL_MARGIN} />);
     const again = (await screen.findByRole('textbox', { name: '다른 이름' })) as TiptapBox;

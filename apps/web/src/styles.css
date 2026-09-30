@@ -417,6 +417,27 @@ dl.meta dt { color: var(--muted); font-size: 12px; }
 .editor:not(.readonly) .ProseMirror:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 94, 255, 0.2); }
 .comment-editor .editor:not(.readonly) .ProseMirror { min-height: 5rem; font-size: 14px; line-height: 22px; }
 
+/* 서식 단추 줄 (P19 D.1, FR-2020~2022) — 본문 칸 바로 위. 편집 화면의 줄은 편집 줄 아래에 붙는다(A.1-17 — 높이 44px, `EDIT_SCROLL_MARGIN`) */
+.format-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 44px; padding: 4px 6px; margin: 0 0 -1px; background: var(--sunken); border: 1px solid var(--border-strong); border-radius: 4px 4px 0 0; }
+.format-bar + .editor:not(.readonly) .ProseMirror { border-top-left-radius: 0; border-top-right-radius: 0; }
+.format-bar.full { position: sticky; top: calc(var(--topbar-h) + 48px); z-index: 10; }
+.format-bar.compact { min-height: 36px; padding: 2px 4px; }
+.fmt-group { display: inline-flex; align-items: center; gap: 2px; }
+.fmt-sep { width: 1px; height: 22px; margin: 0 4px; background: var(--line); }
+.format-bar .fmt-btn { height: 32px; min-width: 32px; padding: 0 8px; border-color: transparent; background: transparent; color: var(--text); }
+.format-bar.compact .fmt-btn { height: 28px; min-width: 28px; }
+.format-bar .fmt-btn.icon { padding: 0 6px; }
+.format-bar .fmt-btn:hover:not(:disabled) { background: var(--surface); border-color: var(--line); }
+.format-bar .fmt-btn[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.format-bar .fmt-btn:disabled { opacity: 0.4; }
+.format-bar .fmt-group.table .fmt-btn { font-size: 13px; }
+.fmt-select { height: 32px; min-width: 96px; }
+.fmt-glyph { display: inline-block; width: 1em; font-size: 16px; line-height: 1; text-align: center; font-family: inherit; }
+.fmt-bold { font-weight: 700; }
+.fmt-italic { font-style: italic; font-family: Georgia, 'Times New Roman', serif; }
+.fmt-underline { text-decoration: underline; }
+.fmt-strike { text-decoration: line-through; }
+
 /* 편집 화면 — 회색 바탕 위 흰 종이 (FR-1860) */
 /* 본문(.app-main)의 안쪽 여백을 되돌려 회색 바탕이 본문 전체를 채운다 */
 .edit-canvas { margin: -20px calc(-1 * var(--pad-x)) -48px; padding: 0 var(--pad-x) 48px; background: var(--canvas); min-height: calc(100vh - var(--topbar-h)); }

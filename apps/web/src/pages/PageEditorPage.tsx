@@ -365,7 +365,7 @@ function PageEditorScreen() {
             <label id={BODY_LABEL_ID} onClick={() => bodyRef.current?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus()}>
               본문
             </label>
-            {/* 서식 단추 줄의 자리 — 본문 칸 바로 위에 온다(F-013, 이번에는 두지 않는다 — 착수 쟁점 7) */}
+            {/* 서식 단추 줄은 본문 칸 바로 위 — 편집기 부품이 그린다(P19 F-013, `toolbar="full"`). 편집 줄 아래에 붙는다(A.1-17) */}
             <div ref={bodyRef}>
               {collab && me ? (
                 <CollabEditor
@@ -377,9 +377,17 @@ function PageEditorScreen() {
                   onDoc={onDoc}
                   labelledBy={BODY_LABEL_ID}
                   scrollMargin={EDIT_SCROLL_MARGIN}
+                  toolbar="full"
                 />
               ) : (
-                <Editor value={page.content} onChange={setDoc} onEdit={() => setBodyEdited(true)} labelledBy={BODY_LABEL_ID} scrollMargin={EDIT_SCROLL_MARGIN} />
+                <Editor
+                  value={page.content}
+                  onChange={setDoc}
+                  onEdit={() => setBodyEdited(true)}
+                  labelledBy={BODY_LABEL_ID}
+                  scrollMargin={EDIT_SCROLL_MARGIN}
+                  toolbar="full"
+                />
               )}
             </div>
           </div>

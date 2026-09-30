@@ -129,7 +129,7 @@ export function Comments({ pageId, canWrite }: { pageId: string; canWrite: boole
             </p>
           )}
           <div className="comment-editor">
-            <Editor value={draft} onChange={setDraft} ariaLabel={writeLabel} />
+            <Editor value={draft} onChange={setDraft} ariaLabel={writeLabel} toolbar="compact" />
           </div>
           <FormActions>
             <button type="submit" className="primary">

@@ -2,6 +2,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import { useEffect } from 'react';
 import { emptyDocument, type DocNode } from '@workfluence/shared';
 import { editorExtensions } from './extensions';
+import { FormatToolbar } from './FormatToolbar';
 
 /**
  * 본문 편집기 (FR-342).
@@ -20,10 +21,11 @@ import { editorExtensions } from './extensions';
 export type ScrollMargin = { top: number; right: number; bottom: number; left: number };
 
 /**
- * 편집 화면의 여백 (P17 병합 전 검토 17) — 창 위를 붙어 있는 두 막대(위 막대 48px `--topbar-h` + 편집 줄 48px `.edit-bar`, `styles.css`)가
- * 가린다. 편집기는 기본으로 창 맨 위에서 5px만 띄워 판정해, 막대 뒤에 숨은 커서를 "보인다"고 보고 스크롤하지 않았다. 막대 둘에 16px을 더한다
+ * 편집 화면의 여백 (P17 병합 전 검토 17) — 창 위를 붙어 있는 막대들(위 막대 48px `--topbar-h` + 편집 줄 48px `.edit-bar` + 서식 단추 줄 44px
+ * `.format-bar` — P19 A.1-17, `styles.css`)이 가린다. 편집기는 기본으로 창 맨 위에서 5px만 띄워 판정해, 막대 뒤에 숨은 커서를 "보인다"고 보고
+ * 스크롤하지 않았다. 막대 셋에 16px을 더한다
  */
-export const EDIT_SCROLL_MARGIN: ScrollMargin = { top: 112, right: 0, bottom: 16, left: 0 };
+export const EDIT_SCROLL_MARGIN: ScrollMargin = { top: 156, right: 0, bottom: 16, left: 0 };
 
 /** 쓰는 칸이면 이름이 있는 여러 줄 입력란 — 읽기만 하는 본문에는 붙이지 않는다 */
 const textboxAttributes = (editable: boolean, ariaLabel?: string, labelledBy?: string): Record<string, string> =>
@@ -52,6 +54,7 @@ export function Editor({
   labelledBy,
   scrollMargin,
   onEdit,
+  toolbar,
 }: {
   value: DocNode;
   onChange?: (doc: DocNode) => void;
@@ -67,6 +70,8 @@ export function Editor({
   labelledBy?: string;
   /** 창 위·아래를 가리는 막대가 있으면 그만큼 띄워 커서를 보이게 한다 — 편집 화면의 `EDIT_SCROLL_MARGIN` */
   scrollMargin?: ScrollMargin;
+  /** 서식 단추 줄 — 편집 화면은 전체 줄, 댓글 칸은 짧은 줄(P19 FR-2020·2021). 쓰는 칸일 때만 그린다(FR-2027) */
+  toolbar?: 'full' | 'compact';
 }) {
   const editor = useEditor({
     editorProps: propsOf(editable, ariaLabel, labelledBy, scrollMargin),
@@ -92,7 +97,12 @@ export function Editor({
     editor?.setOptions({ editorProps: propsOf(editable, ariaLabel, labelledBy, scrollMargin) });
   }, [editor, editable, ariaLabel, labelledBy, scrollMargin]);
 
-  return <EditorContent className={editable ? 'editor' : 'editor readonly'} editor={editor} />;
+  return (
+    <>
+      {editable && toolbar && <FormatToolbar editor={editor} variant={toolbar} />}
+      <EditorContent className={editable ? 'editor' : 'editor readonly'} editor={editor} />
+    </>
+  );
 }
 
 /**
