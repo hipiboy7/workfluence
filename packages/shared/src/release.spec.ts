@@ -92,8 +92,8 @@ describe('필수 파일 목록 (FR-601)', () => {
     expect(RELEASE_REQUIRED_FILES.length).toBeGreaterThan(5);
   });
 
-  it('**운영 문서가 묶음에 있다** — 폐쇄망에서는 저장소를 열 수 없고, 반입 가이드가 운영 가이드의 절을 가리킨다 (P13 FR-1402)', () => {
-    for (const doc of ['docs/운영가이드_반입.md', 'docs/운영가이드_운영이관.md', 'docs/운영가이드_장애대응.md', 'docs/사용자가이드_사용법.md', 'docs/학습가이드_시스템이해.md']) {
+  it('**운영 문서가 묶음에 있다** — 폐쇄망에서는 저장소를 열 수 없고, 설치및실행가이드가 다른 가이드의 절을 가리킨다 (P13 FR-1402). 저장소와 같은 자리(`docs/guide/`·`docs/learnSystem/`)라 상대 링크가 이어진다', () => {
+    for (const doc of ['docs/guide/설치및실행가이드.md', 'docs/guide/운영가이드.md', 'docs/guide/장애대응가이드.md', 'docs/guide/사용자가이드.md', 'docs/learnSystem/학습가이드_시스템이해.md']) {
       expect(RELEASE_REQUIRED_FILES, doc).toContain(doc);
     }
     // 맨 위의 반입 절차는 그대로 — 받는 사람이 처음 여는 파일이다

@@ -84,9 +84,9 @@ describe('mail:test — 시험 메일 한 통 (FR-1905)', () => {
     expect(got).toHaveLength(0);
   });
 
-  it('주소(WF_MAIL_API_URL)가 비면 1 — 반입 가이드를 가리킨다', async () => {
+  it('주소(WF_MAIL_API_URL)가 비면 1 — 설치및실행가이드를 가리킨다', async () => {
     expect(await run(['a@example.internal'], { WF_MAIL_API_URL: '' })).toBe(1);
-    expect(lines.error.join('\n')).toMatch(/WF_MAIL_API_URL.*사내 메일 연결하기/);
+    expect(lines.error.join('\n')).toMatch(/WF_MAIL_API_URL.*설치및실행가이드 "사내 메일 연결하기"/);
   });
 
   it('**보내면 0** — 설정을 말하고, 사용자가 준 모양으로 한 통, **켜져 있지 않아도 보낸다**(A.1-8), 감사에 mail.send(kind test)', async () => {
