@@ -92,8 +92,8 @@ describe('필수 파일 목록 (FR-601)', () => {
     expect(RELEASE_REQUIRED_FILES.length).toBeGreaterThan(5);
   });
 
-  it('**운영 문서가 묶음에 있다** — 폐쇄망에서는 저장소를 열 수 없고, 반입 가이드가 운영 가이드의 절을 가리킨다 (P13 FR-1402)', () => {
-    for (const doc of ['docs/운영가이드_반입.md', 'docs/운영가이드_운영이관.md', 'docs/운영가이드_장애대응.md', 'docs/사용자가이드_사용법.md', 'docs/학습가이드_시스템이해.md']) {
+  it('**운영 문서가 묶음에 있다** — 폐쇄망에서는 저장소를 열 수 없고, 설치및실행가이드가 다른 가이드의 절을 가리킨다 (P13 FR-1402). 저장소와 같은 자리(`docs/guide/`·`docs/learnSystem/`)라 상대 링크가 이어진다', () => {
+    for (const doc of ['docs/guide/설치및실행가이드.md', 'docs/guide/운영가이드.md', 'docs/guide/장애대응가이드.md', 'docs/guide/사용자가이드.md', 'docs/learnSystem/학습가이드_시스템이해.md']) {
       expect(RELEASE_REQUIRED_FILES, doc).toContain(doc);
     }
     // 맨 위의 반입 절차는 그대로 — 받는 사람이 처음 여는 파일이다
@@ -200,7 +200,7 @@ describe('verifyChecksums가 이상한 파일 이름에 터지지 않는다 (코
 
 /**
  * Docker 설치 묶음 (P20_설계서_Install D절, FR-2101) — 대상 RHEL 9 서버에 Docker가 없을 때만 들고 간다.
- * 현장에는 Node가 없어 반입 가이드 0.3절 ②는 같은 판정을 셸 한 줄씩으로 한다 — 여기는 묶음을 **만드는 쪽**의 판정이다.
+ * 현장에는 Node가 없어 설치및실행가이드 0.3절 ②는 같은 판정을 셸 한 줄씩으로 한다 — 여기는 묶음을 **만드는 쪽**의 판정이다.
  */
 describe('Docker 묶음에 싣는 RPM (FR-2101)', () => {
   it('맨 위는 Docker의 넷과 Docker가 늘 요구하는 container-selinux다', () => {
@@ -301,7 +301,7 @@ describe('formatPackages — 묶음의 부품 목록 PACKAGES.txt (FR-2101)', ()
     { file: 'deps/nftables-1.0.9-3.el9.x86_64.rpm', license: 'GPLv2', vendor: 'Red Hat, Inc.' },
   ];
 
-  it('**첫 줄은 묶음을 만든 서버의 RHEL 판 그대로다** — 현장이 `cat /etc/redhat-release`와 견준다(반입 가이드 0.3절 ④)', () => {
+  it('**첫 줄은 묶음을 만든 서버의 RHEL 판 그대로다** — 현장이 `cat /etc/redhat-release`와 견준다(설치및실행가이드 0.3절 ④)', () => {
     expect(formatPackages(release, rows).split('\n')[0]).toBe(release);
   });
 

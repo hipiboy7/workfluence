@@ -337,7 +337,7 @@ function aclFacts() {
  * data\ 의 상속을 끊고 셋에게만 주고, 다른 계정에 따로 준 항목을 지우고, settings.env에 따로 준 항목을 지우고(폴더에서 물려받는 것만 남긴다), 주인이 다른
  * 계정이면(다른 계정의 폴더를 옮겨 왔다) 안의 것까지 지금 사용자로 바꾼다. **고친 뒤 다시 보고**, 아직 넓으면 무엇이 넓은지 말한다(체험은 계속된다).
  * 탐색기로 폴더를 복사하면 data\ 가 새 자리의 상속을 받는다 — 처음 한 번만 좁히면 복사한 뒤에는 넓은 채로 남는다(T-088).
- * 이 폴더(실행 파일) 자체는 좁히지 않는다 — 다른 계정이 고칠 수 있는 자리면 그렇다고 말한다(읽어보기·체험 가이드 10.2절)
+ * 이 폴더(실행 파일) 자체는 좁히지 않는다 — 다른 계정이 고칠 수 있는 자리면 그렇다고 말한다(읽어보기·windows시연가이드 10.2절)
  */
 function restrictData() {
   const facts = aclFacts();
@@ -377,7 +377,7 @@ function restrictData() {
 function createSettings() {
   const s = parseEnv(readFileSync(join(APP, 'env.example'), 'utf8'));
   Object.assign(s, {
-    // production이면 쿠키에 Secure가 붙어 http로 로그인하지 못한다(체험 가이드 4.2절)
+    // production이면 쿠키에 Secure가 붙어 http로 로그인하지 못한다(windows시연가이드 4.2절)
     WF_ENV: 'development',
     WF_PORT: String(DEFAULT_APP_PORT),
     WF_LOG_LEVEL: 'warn',

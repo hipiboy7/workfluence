@@ -1,6 +1,6 @@
 # 단일 호스트 compose (개발 Linux 서버·폐쇄망 운영 공용). CLAUDE.md 8.3절.
 # 아래 명령은 저장소의 맨 위에서 친다 — 환경 파일은 deploy/.env다(맨 위의 .env는 개발용). 폐쇄망에서는 묶음을 푼 디렉토리에서
-# `-f compose.yml --env-file .env`로 친다(docs/운영가이드_반입.md).
+# `-f compose.yml --env-file .env`로 친다(docs/guide/설치및실행가이드.md).
 # 기동 순서: docker compose -f deploy/compose.yml --env-file deploy/.env up -d
 # 마이그레이션(명시적 단계): docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/migrate.js
 # 시드(최초 1회):            docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/seed.js
@@ -94,7 +94,7 @@ services:
       WF_COLLAB_RECHECK_MS: ${WF_COLLAB_RECHECK_MS:-300000}
       WF_MAIL_ENABLED: ${WF_MAIL_ENABLED:-false}
       WF_MAIL_MOCK: ${WF_MAIL_MOCK:-true}
-      # 사내 메일 API (P18_설계서_Mail E절) — 현장 절차는 반입 가이드 "사내 메일 연결하기". 인증 값은 deploy/.env에만
+      # 사내 메일 API (P18_설계서_Mail E절) — 현장 절차는 설치및실행가이드 "사내 메일 연결하기". 인증 값은 deploy/.env에만
       WF_MAIL_API_URL: ${WF_MAIL_API_URL:-}
       WF_MAIL_FORMAT: ${WF_MAIL_FORMAT:-text}
       WF_MAIL_SENDER_NAME: ${WF_MAIL_SENDER_NAME:-}

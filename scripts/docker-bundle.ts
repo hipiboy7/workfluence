@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * Docker 설치 묶음 (P20_설계서_Install D절, FR-2101 — 리눅스빌드 가이드 12-1절). 대상 RHEL 9 서버에 Docker가 없을 때만 들고 간다.
+ * Docker 설치 묶음 (P20_설계서_Install D절, FR-2101 — linux서버배포가이드 12-1절). 대상 RHEL 9 서버에 Docker가 없을 때만 들고 간다.
  *
  * 이 서버에 **깔린 판**의 RPM을 받는다 — 반입 묶음의 이미지를 이 판으로 만들고 띄워 봤기 때문이다. **아무것도 설치하지 않는다**(`dnf download`는
  * 파일만 받는다). 판정은 공유 `release.ts`가 한다 — 키 파일은 키 하나와 그 지문, 서명은 RPM마다 `digests signatures OK`.
@@ -16,7 +16,7 @@ import { join } from 'node:path';
  * 그대로 `dnf download`에 넘기고, 파일이 빠져도 부분 지문 목록으로 쌌다 — 현장의 `sha256sum -c`는 그것을 `OK`라고 한다(병합 전 자체 점검 8).
  */
 
-/** Docker의 RHEL 저장소가 내놓는 공개키 — 묶음에 넣어 현장이 같은 키로 서명을 본다(반입 가이드 0.3절 ②) */
+/** Docker의 RHEL 저장소가 내놓는 공개키 — 묶음에 넣어 현장이 같은 키로 서명을 본다(설치및실행가이드 0.3절 ②) */
 const DOCKER_KEY_URL = 'https://download.docker.com/linux/rhel/gpg';
 /** 이 서버의 Red Hat 키 — Red Hat 부품의 서명을 본다. RHEL의 `redhat-release` 패키지가 둔다 */
 const RED_HAT_KEY = '/etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release';
@@ -59,7 +59,7 @@ function installed(names: readonly string[]): string[] {
     .map((l) => l.trim())
     .filter(Boolean);
   const missing = lines.filter((l) => l.endsWith(' is not installed'));
-  if (missing.length) fail(`이 서버에 깔려 있지 않다 — ${missing.join(' · ')} (Docker CE를 Docker의 RHEL 저장소로 깐 서버에서 만든다, 리눅스빌드 가이드 1절)`);
+  if (missing.length) fail(`이 서버에 깔려 있지 않다 — ${missing.join(' · ')} (Docker CE를 Docker의 RHEL 저장소로 깐 서버에서 만든다, linux서버배포가이드 1절)`);
   if (lines.length !== names.length) fail(`rpm -q가 ${names.length}줄 대신 ${lines.length}줄을 냈다 — ${lines.join(' · ')}`);
   return lines;
 }
@@ -123,7 +123,7 @@ function main(): void {
   const sums: ChecksumEntry[] = [...rpms, 'docker-ce.gpg', 'PACKAGES.txt'].map((f) => ({ file: f, sha256: sha256(join(out, f)) }));
   writeFileSync(join(out, 'SHA256SUMS'), formatChecksums(sums));
 
-  // 반입 묶음과 같은 모양 — 맨 위 디렉토리 하나(반입 가이드 0.3절 ①이 그 한 겹을 벗겨 푼다). 파일 주인은 숫자 0으로 — 만든 계정의 이름이 묶음에 남지 않게
+  // 반입 묶음과 같은 모양 — 맨 위 디렉토리 하나(설치및실행가이드 0.3절 ①이 그 한 겹을 벗겨 푼다). 파일 주인은 숫자 0으로 — 만든 계정의 이름이 묶음에 남지 않게
   run('tar', ['--owner=0', '--group=0', '--numeric-owner', '-cf', tar, '-C', root, name]);
   const first = run('tar', ['-tf', tar]).split('\n')[0];
   if (first !== `${name}/`) fail(`tar의 첫 줄이 ${name}/가 아니다 — ${first}`);
@@ -131,7 +131,7 @@ function main(): void {
   writeFileSync(`${tar}.sha256`, `${digest}  ${name}.tar\n`);
 
   console.log(`[docker] 완료 — ${tar} · ${(statSync(tar).size / 1024 / 1024).toFixed(0)}MB · RPM ${topFiles.length} + deps/ ${depFiles.length}`);
-  console.log(`[docker] 지문 — ${digest}  ${name}.tar (반입 신청서처럼 매체와 따로 가는 기록에도 적는다 — 반입 가이드 0.1절)`);
+  console.log(`[docker] 지문 — ${digest}  ${name}.tar (반입 신청서처럼 매체와 따로 가는 기록에도 적는다 — 설치및실행가이드 0.1절)`);
 }
 
 main();

@@ -103,7 +103,7 @@ export function failureHint(e: unknown): string {
   if (code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID') return `메일 API의 인증서가 만료됐거나 아직 유효하지 않다 (${code}) — 메일 API 담당에게 알린다`;
   if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') return `인증서의 호스트 이름이 주소와 다르다 (${code}) — 주소의 호스트를 인증서에 적힌 이름으로 적는다`;
   if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER/.test(code))
-    return `인증서를 믿지 못했다 (${code}) — 사내 인증 기관이면 compose 옆 ca/ca.pem에 두고 다시 친다(반입 가이드 10절 ②)`;
+    return `인증서를 믿지 못했다 (${code}) — 사내 인증 기관이면 compose 옆 ca/ca.pem에 두고 다시 친다(설치및실행가이드 10절 ②)`;
   if (code) return `메일 API에 닿지 않는다 (${code}) — 주소·포트와 망을 본다`;
   if (/redirect/i.test(message)) return '메일 API가 다른 주소로 넘겼다 — 넘겨주기는 따르지 않는다(인증 값이 다른 곳으로 가지 않게). 넘겨 준 곳의 주소를 WF_MAIL_API_URL에 적는다';
   // fetch는 메일·원격 제어 등에 쓰는 포트(25·465·587·993·995 등)로는 아예 보내지 않는다 — 연결을 시도하지도 않는다(코드 리뷰 5)

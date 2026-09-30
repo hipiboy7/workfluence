@@ -1,5 +1,5 @@
 /**
- * F-009 — Docker 없이 Windows에서 받아서 풀고 바로 띄워 보는 묶음을 만든다 (백로그 F-009, 체험 가이드 10절).
+ * F-009 — Docker 없이 Windows에서 받아서 풀고 바로 띄워 보는 묶음을 만든다 (백로그 F-009, windows시연가이드 10절).
  *
  * **Windows에서** `pnpm build` 뒤에 돈다 — GitHub의 windows-latest 러너(`.github/workflows/windows-local.yml`). 묶음에 담는 네이티브 파일
  * (argon2, PostgreSQL, node.exe)이 이 스크립트를 돌리는 Windows의 것이어야 해서 Linux에서는 멈춘다.
@@ -19,12 +19,12 @@
  *   `THIRD_PARTY_NOTICES.txt`(구성 요소마다 판·라이선스·소스 위치와 원문 — 원문은 `scripts/win-notices/`). 아래 `PG_COMPONENTS`에 없는 파일이
  *   `pgsql/bin`에 있거나 판이 다르면 멈춘다 — 고지 없이 새 라이브러리가 들어가지 않게 한다
  *
- * **어떤 실행 파일도 쓰지 않는 구성 요소는 넣지 않는다**(사용자 결정 2026-09-29 — 체험 가이드 10.3절). embedded-postgres가 싣고 나온 EDB 배포판에는 다른
+ * **어떤 실행 파일도 쓰지 않는 구성 요소는 넣지 않는다**(사용자 결정 2026-09-29 — windows시연가이드 10.3절). embedded-postgres가 싣고 나온 EDB 배포판에는 다른
  * 도구(pgAdmin·StackBuilder·ecpg 등)의 라이브러리와 EDB의 확장이 함께 있다 — 아래 `PG_DROPPED`가 그것을 빼고, 남은 파일의 가져오기 목록(PE import)을
  * 읽어 뺀 파일을 가져오는 것이 없는지 본다(`checkImports`). 뺀 목록은 묶음 밖의 `.local/win-bundle/dropped-files.json`에 적는다 — 워크플로가 받은 묶음에
  * 그 파일이 없는지 본다
  *
- * **LGPL 구성 요소(GNU libiconv·libintl)의 소스는 같은 실행의 별도 결과물이다**(사용자 결정 2026-09-29 (가′) — 체험 가이드 10.3절). 묶음 밖의
+ * **LGPL 구성 요소(GNU libiconv·libintl)의 소스는 같은 실행의 별도 결과물이다**(사용자 결정 2026-09-29 (가′) — windows시연가이드 10.3절). 묶음 밖의
  * `.local/win-bundle/lgpl-sources.json`에 받을 tarball(주소·SHA-256)을 적고 `.local/win-bundle/lgpl-sources/`에 읽어보기를 둔다 — 워크플로가 tarball을
  * 받아 SHA-256을 맞추고 그 폴더를 결과물 `LGPL_SOURCES_ARTIFACT`로 올린다. 판·주소·SHA-256은 아래 `PG_COMPONENTS` 한 곳이다
  */
@@ -84,7 +84,7 @@ const sourceText = (a: SourceArchive): string => `${a.url} (SHA-256 ${a.sha256})
 /**
  * `pgsql/`에 든 것 — `@embedded-postgres/windows-x64@17.10.0-beta.17`을 열어 가져오기 목록(PE import)과 판 정보로 확인했다(2026-09-29).
  * PostgreSQL 실행 파일(postgres·initdb·pg_ctl)은 libintl-9.dll을 **직접 가져온다** — 그 DLL(과 그것이 가져오는 libiconv-2·libwinpthread-1)이
- * 없으면 Windows가 실행 파일을 띄우지 않는다. 라이선스의 판정은 체험 가이드 10.3절 — PostgreSQL License·Zlib·ICU License는 허용적 라이선스로 본다
+ * 없으면 Windows가 실행 파일을 띄우지 않는다. 라이선스의 판정은 windows시연가이드 10.3절 — PostgreSQL License·Zlib·ICU License는 허용적 라이선스로 본다
  * (사용자 결정 2026-09-29), LGPL 둘(libiconv·libintl)은 승인했고 소스를 같은 실행의 별도 결과물로 내준다(사용자 결정 2026-09-29 (가′))
  */
 const PG_COMPONENTS: Component[] = [
@@ -177,7 +177,7 @@ const PG_COMPONENTS: Component[] = [
 ];
 
 /**
- * 묶음에서 빼는 것 — **어떤 실행 파일(postgres·initdb·pg_ctl)도 가져오지 않는 구성 요소**(사용자 결정 2026-09-29 "2·3·4번 추천대로" — 체험 가이드 10.3절).
+ * 묶음에서 빼는 것 — **어떤 실행 파일(postgres·initdb·pg_ctl)도 가져오지 않는 구성 요소**(사용자 결정 2026-09-29 "2·3·4번 추천대로" — windows시연가이드 10.3절).
  * 같은 패키지를 열어 가져오기 목록으로 확인했다(2026-09-29): 아래 DLL을 가져오는 것은 서로(wxWidgets끼리·ecpg끼리)와 `pgxml.dll`뿐이다 — 그래서
  * libxslt를 빼면 불러올 수 없는 xml2 확장(`pgxml.dll`·`xml2*`)도 뺀다(앱이 쓰는 확장은 pg_trgm뿐이다). 뺀 뒤에 남은 파일이 뺀 파일을 가져오면 묶기가
  * 멈춘다(`checkImports`). 한 줄이라도 아무 파일에 맞지 않으면 멈춘다 — 패키지의 구성이 바뀌었다(이 목록과 고지를 다시 본다)

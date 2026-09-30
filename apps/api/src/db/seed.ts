@@ -85,7 +85,7 @@ export async function seedRoot(env: AppEnv = loadEnv(), url: string = databaseUr
   }
 }
 
-/** 명령으로 부를 때만 돈다 — `pnpm db:seed`, 컨테이너에서는 `tools`로 `node dist/db/seed.js` (반입 가이드 5-1절) */
+/** 명령으로 부를 때만 돈다 — `pnpm db:seed`, 컨테이너에서는 `tools`로 `node dist/db/seed.js` (설치및실행가이드 5-1절) */
 if (require.main === module) {
   seedRoot()
     .then((line) => console.log(`[seed] ${line}`))

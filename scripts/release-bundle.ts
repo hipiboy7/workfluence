@@ -2,7 +2,7 @@ import { RELEASE_REQUIRED_FILES, formatChecksums, formatManifest } from '@workfl
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { bundleFiles } from './release-files';
 
 /**
@@ -87,11 +87,14 @@ function main(): void {
 
   copyFileSync('deploy/compose.yml', join(out, 'compose.yml'));
   copyFileSync('deploy/nginx.conf', join(out, 'nginx.conf'));
-  copyFileSync('docs/운영가이드_반입.md', join(out, '반입절차.md'));
-  // **운영 문서** (P13 FR-1402). 폐쇄망에서는 저장소를 열 수 없다 — 반입 가이드가 운영 가이드의 절을 가리킨다. 원래 이름으로 `docs/`에 둔다:
-  // 문서끼리의 상대 링크가 묶음 안에서도 이어진다. 목록은 `RELEASE_REQUIRED_FILES`에서 읽는다 — 한 곳에만 적는다
-  mkdirSync(join(out, 'docs'), { recursive: true });
-  for (const f of RELEASE_REQUIRED_FILES.filter((x) => x.startsWith('docs/'))) copyFileSync(f, join(out, f));
+  copyFileSync('docs/guide/설치및실행가이드.md', join(out, '반입절차.md'));
+  // **운영 문서** (P13 FR-1402). 폐쇄망에서는 저장소를 열 수 없다 — 설치및실행가이드가 다른 가이드의 절을 가리킨다. 저장소와 같은 자리
+  // (`docs/guide/`·`docs/learnSystem/`)에 두어 문서끼리의 상대 링크가 묶음 안에서도 이어진다. 목록은 `RELEASE_REQUIRED_FILES`에서 읽는다 — 한 곳에만 적는다.
+  // 자리가 한 겹 깊어 파일마다 그 디렉토리를 만든다
+  for (const f of RELEASE_REQUIRED_FILES.filter((x) => x.startsWith('docs/'))) {
+    mkdirSync(dirname(join(out, f)), { recursive: true });
+    copyFileSync(f, join(out, f));
+  }
   // **사내 CA 자리** (P11 D.7) — 안내 파일만 넣어 `ca/`가 풀린 사람의 것으로 생기게 한다. 묶음에 없으면 첫 기동에서 도커가 root 소유로
   // 만들어, 현장에서 인증서를 넣을 때 일반 계정은 `Permission denied`다. **인증서는 넣지 않는다** — 현장의 것이다(`certs`와 같다)
   mkdirSync(join(out, 'ca'), { recursive: true });
@@ -185,8 +188,8 @@ function main(): void {
 
   const bytes = present.reduce((n, f) => n + statSync(join(out, f)).size, 0);
   console.log(`[release] 완료 — ${present.length}개 파일 · ${(bytes / 1024 / 1024).toFixed(0)}MB`);
-  // 폐쇄망에는 pnpm이 없다 — 받는 쪽은 묶음 안의 지문을 `sha256sum -c`로 본다(반입 가이드 1절). 이 검사는 싸기 직전에 한다
-  console.log(`[release] 싸기 전에 'pnpm release:verify ${out}'를 돌린다. 폐쇄망에서는 묶음 안의 SHA256SUMS를 sha256sum -c로 본다(반입 가이드 1절)`);
+  // 폐쇄망에는 pnpm이 없다 — 받는 쪽은 묶음 안의 지문을 `sha256sum -c`로 본다(설치및실행가이드 1절). 이 검사는 싸기 직전에 한다
+  console.log(`[release] 싸기 전에 'pnpm release:verify ${out}'를 돌린다. 폐쇄망에서는 묶음 안의 SHA256SUMS를 sha256sum -c로 본다(설치및실행가이드 1절)`);
 }
 
 main();

@@ -100,6 +100,8 @@ describe('시험 명령의 까닭 (FR-1905)', () => {
     expect(failureHint(err('ENOTFOUND'))).toMatch(/ENOTFOUND.*호스트|호스트.*ENOTFOUND/);
     expect(failureHint(err('UNABLE_TO_VERIFY_LEAF_SIGNATURE'))).toMatch(/ca\/ca\.pem/);
     expect(failureHint(err('SELF_SIGNED_CERT_IN_CHAIN'))).toMatch(/ca\/ca\.pem/);
+    // 가리키는 가이드는 지금의 이름이다 — 문서가 `docs/guide/`로 옮겨 이름이 바뀌었다(설치및실행가이드 — 옛 이름은 운영가이드_반입)
+    expect(failureHint(err('UNABLE_TO_VERIFY_LEAF_SIGNATURE'))).toMatch(/설치및실행가이드 10절 ②/);
     expect(failureHint(Object.assign(new TypeError('fetch failed'), { cause: new Error('unexpected redirect') }))).toMatch(/넘겨주기/);
     expect(failureHint(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))).toMatch(/10초/);
     expect(failureHint(new Error('무언가'))).toMatch(/닿지 않/);

@@ -144,7 +144,7 @@ export type CollabStatus = { saveBlocked: string | null };
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /**
- * 앱 로그 줄의 **event 코드** (P11_설계서_Ops D.4, FR-1214). 문장(`msg`)을 고쳐도 이 코드는 그대로다 — 장애대응 가이드가 이것으로
+ * 앱 로그 줄의 **event 코드** (P11_설계서_Ops D.4, FR-1214). 문장(`msg`)을 고쳐도 이 코드는 그대로다 — 장애대응가이드가 이것으로
  * 찾고, `pnpm verify:docs`가 이 목록의 코드가 가이드에 모두 있는지 대조한다. 모양은 `영역.일`(소문자·밑줄)
  */
 export const LOG_EVENTS = [

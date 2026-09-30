@@ -153,7 +153,7 @@
 | 2 | **모의 OIDC**로 로그인하면 `groups`가 역할로 매핑된다 | 통합 테스트 + E2E |
 | 3 | 두 경로 모두 감사로그에 남는다 | 통합 테스트 |
 | 4 | `pnpm check` 통과, A등급 ≥90% / api ≥70% | CI |
-| 5 | Linux 서버에서 이미지 빌드 → 기동 → 로그인 | `docs/운영가이드_리눅스빌드.md` |
+| 5 | Linux 서버에서 이미지 빌드 → 기동 → 로그인 | `docs/guide/shortcut/linux서버배포가이드.md` |
 | 6 | `/security-review` 지적 처리 완료 | 자체 점검 검토서 docs/internal/P1_검토서_SelfReview.md (이 Phase에서 만든다) |
 
 **완료 기준이 아닌 것: 실 IdP 연동.** 접근할 수 없다 (쟁점 1). 보류 표에 남기고 접근이 열리면 확인한다. **모의 서버 통과를 연동 완료로 적지 않는다** (`CLAUDE.md` 9.1절).

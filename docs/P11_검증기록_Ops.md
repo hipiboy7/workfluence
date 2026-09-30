@@ -81,7 +81,7 @@ $ docker inspect -f '{{.Name}} {{json .HostConfig.LogConfig}}' workfluence-postg
 
 도커 데몬의 기본값은 건드리지 않았다(공유 서버). 실제로 20MB가 차서 넘어가는 것은 보지 않았다(9절).
 
-### 2.5 사내 CA 파일 — 반입 가이드 10절의 명령 그대로 (FR-1221·1222, 보류 29)
+### 2.5 사내 CA 파일 — 설치및실행가이드 10절의 명령 그대로 (FR-1221·1222, 보류 29)
 
 위임받은 관리자(`p11-admin`)가 `https://wf-mock-llm:8443/v1`을 등록하고 연결 확인을 눌렀다. compose는 한 줄도 고치지 않았다.
 **처음 확인은 `docker compose restart api`로 했다 — 가이드에 적은 명령(`up -d api`)과 달랐다**(T-049). 검토 반영 뒤 가이드의 ②·③을
@@ -184,8 +184,8 @@ $ pnpm release:verify .local/release/p11-check
 | web 테스트 | **98건** (Phase 10 종료 91) | 사용자 관리의 위임 체크·관리할 수 없는 행(컴포넌트 시험 4), 감사로그의 요청 번호 거르기(3) |
 | E2E | **30건 전부 통과** (1.9분) | +2 (`e2e/ops.spec.ts`). **간헐 실패 둘을 고쳤다** — ① `admin.spec.ts`의 감사로그 거르기가 거른 응답을 기다리지 않고 첫 목록을 읽었다(`554a3f8`) ② `llm.spec.ts`의 마지막 시험이 답이 흐르는 중에 끝나, 서버가 받은 데까지 저장한 새 대화가 뒤의 정리와 겹쳤다(T-050, `91e0e6a`) — 실패한 실행마다 개발 DB에 그 사용자가 남아 있었다. 고친 뒤 그 파일만 네 번 되풀이해 20건, 전체 30건 |
 | skip | **0건** | |
-| `pnpm check` | 종료 코드 0 (158초) | lint + typecheck + test + `verify:docs`(문서 58개, 위반 없음 — 7번 검사: `LOG_EVENTS` 33개가 장애대응 가이드에 모두 있다) |
-| CI (GitHub Actions) | **`check`·`gitleaks` 통과** — `91e0e6a`(코드의 마지막 커밋, push·pull_request 두 실행) | `check`는 `test:cov`·`verify:docs`·취약점·라이선스·빌드·외부 URL 검사까지. 실패한 것은 **Red 셋**(`4c18ad3`·`015ddce`·`043f72e` — 의도)과, event 코드를 더하고 가이드를 고치기 전의 둘(`fec440a`·`554a3f8` — `verify:docs`만: `auth.oidc_failed — LOG_EVENTS에 있는데 장애대응 가이드가 모른다`). 이 문서를 담은 마지막 커밋의 결과는 PR에 적는다 |
+| `pnpm check` | 종료 코드 0 (158초) | lint + typecheck + test + `verify:docs`(문서 58개, 위반 없음 — 7번 검사: `LOG_EVENTS` 33개가 장애대응가이드에 모두 있다) |
+| CI (GitHub Actions) | **`check`·`gitleaks` 통과** — `91e0e6a`(코드의 마지막 커밋, push·pull_request 두 실행) | `check`는 `test:cov`·`verify:docs`·취약점·라이선스·빌드·외부 URL 검사까지. 실패한 것은 **Red 셋**(`4c18ad3`·`015ddce`·`043f72e` — 의도)과, event 코드를 더하고 가이드를 고치기 전의 둘(`fec440a`·`554a3f8` — `verify:docs`만: `auth.oidc_failed — LOG_EVENTS에 있는데 장애대응가이드가 모른다`). 이 문서를 담은 마지막 커밋의 결과는 PR에 적는다 |
 
 ### 커버리지 (`pnpm test:cov`, 관문 통과 — 종료 코드 0)
 
@@ -275,7 +275,7 @@ workfluence-app:91e0e6a-p11  380MB     # 최종
 
 | # | 처리 |
 |---|---|
-| 29 | **트리거를 "폐쇄망 반입 뒤 현장에서"로 바꿨다**(사용자 결정). 현장 절차는 반입 가이드 10절, https의 사내 CA는 파일 하나(2.5·2.9) |
+| 29 | **트리거를 "폐쇄망 반입 뒤 현장에서"로 바꿨다**(사용자 결정). 현장 절차는 설치및실행가이드 10절, https의 사내 CA는 파일 하나(2.5·2.9) |
 | 30 | 그대로 — 사용자가 뜻을 물었고 정하지 않았다 |
 | 확인 필요 F | **닫았다** — root가 메인, 관리자 한 사람씩 위임(2.6·4절). 위임받은 관리자의 계정 일은 root와 같은 위임을 가진 관리자만(2.10 — 위임 없는 관리자는 403, 같은 것을 가진 관리자·root는 통합 시험) |
 | 8 | 닫힌 그대로 — 수집기를 붙일 모양(JSON 한 줄·`requestId`·`event`)을 갖췄다 |

@@ -87,7 +87,7 @@ async function ensureDatabases(port: number, password: string, names: string[]):
 }
 
 /**
- * Windows는 서버를 `pg_ctl`로 띄우고 끈다 (`docs/운영가이드_윈도우체험.md` 6절).
+ * Windows는 서버를 `pg_ctl`로 띄우고 끈다 (`docs/guide/shortcut/windows시연가이드.md` 6절).
  *
  * `embedded-postgres`는 `postgres.exe`를 직접 띄우는데, PostgreSQL은 관리자 그룹이 살아 있는 권한으로 직접 뜨기를 거부한다
  * ("Execution of PostgreSQL by a user with administrative permissions is not permitted"). **클라우드 VM의 내장
@@ -182,7 +182,7 @@ main().catch((e: unknown) => {
   // 종료 코드를 부호 없는 수(3221225781)로 찍는지 부호 있는 수(-1073741515)로 찍는지는 부른 쪽에 달려 있어 둘 다 본다
   const dllMissing = [WINDOWS_DLL_NOT_FOUND, WINDOWS_DLL_NOT_FOUND - 2 ** 32].some((code) => String(message).includes(String(code)));
   if (isWindows && dllMissing) {
-    console.error('[dev-db] PostgreSQL 실행 파일이 쓰는 DLL이 없다 — Microsoft Visual C++ 재배포 가능 패키지(x64)를 깐다. docs/운영가이드_윈도우체험.md 6절');
+    console.error('[dev-db] PostgreSQL 실행 파일이 쓰는 DLL이 없다 — Microsoft Visual C++ 재배포 가능 패키지(x64)를 깐다. docs/guide/shortcut/windows시연가이드.md 6절');
   }
   process.exit(1);
 });
