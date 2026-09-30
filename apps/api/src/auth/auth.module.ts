@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Inject, Module, Post, Query, Redirect, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Module, NotFoundException, Post, Query, Redirect, Req, UseGuards } from '@nestjs/common';
 import {
   RATE_LIMITS,
   changePasswordDto,
+  emailHelpDto,
   findIdDto,
   loginDto,
   recoverPasswordDto,
+  resetPasswordDto,
   signupDto,
   type MeView,
   type PasswordRulesView,
@@ -22,6 +24,10 @@ import { AuthService, toMeView } from './auth.service';
 import { HttpOidcProvider } from './oidc/http.provider';
 import { MockOidcProvider } from './oidc/mock.provider';
 import { OIDC_PROVIDER } from './oidc/oidc.provider';
+import { RecoveryService } from './recovery.service';
+
+/** 메일 재설정을 쓰지 않을 때 (P19 FR-2008) — 화면은 단추를 보이지 않는다. 이미 보낸 링크도 여기로 온다(A.1-9) */
+const RESET_MAIL_OFF = '메일로 비밀번호를 바꾸는 길을 쓰지 않는다 — 관리자에게 초기화를 요청한다';
 
 /** 세션을 **새로 받는다** — 옛 행은 지우고 새 ID로 (`express-session`의 `regenerate`) */
 function regenerate(req: Request): Promise<void> {
@@ -54,6 +60,7 @@ export class AuthController {
     private readonly rateLimit: RateLimitStore,
     private readonly revocation: RevocationBus,
     private readonly settings: SettingsService,
+    private readonly recovery: RecoveryService,
   ) {}
 
   @Post('login')
@@ -91,10 +98,11 @@ export class AuthController {
   /** 화면이 OIDC 버튼을 보일지 정하는 데 쓴다 (FR-219) */
   @Get('config')
   @Public()
-  config(): { oidcEnabled: boolean; collabEnabled: boolean } {
+  async config(): Promise<{ oidcEnabled: boolean; collabEnabled: boolean; resetMailEnabled: boolean }> {
     // 실시간 편집 여부를 화면이 알아야 한다 (FR-711). 꺼져 있으면 단독 편집기를 띄운다 —
-    // 화면이 모르면 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다
-    return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED };
+    // 화면이 모르면 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다.
+    // 메일 재설정을 쓸 수 있는지도 준다(P19 FR-2008) — 아니면 비밀번호 찾기가 그 단추를 보이지 않는다
+    return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED, resetMailEnabled: await this.recovery.available() };
   }
 
   /**
@@ -131,6 +139,40 @@ export class AuthController {
     @Req() req: Request,
   ): Promise<{ ok: true }> {
     return this.auth.recoverPassword(dto, req.ip);
+  }
+
+  /**
+   * **내 email로 재설정 링크** (P19 FR-2002). 응답은 곧바로, 늘 같다 — 맞는지·보냈는지는 응답 뒤에 가린다(NFR-191). 쓰지 않으면 404(FR-2008)
+   */
+  @Post('reset-mail')
+  @Public()
+  @RateLimit(RATE_LIMITS.resetMail)
+  async resetMail(@Body(new ZodPipe(recoverPasswordDto)) dto: ReturnType<typeof recoverPasswordDto.parse>, @Req() req: Request): Promise<{ ok: true }> {
+    if (!(await this.recovery.available())) throw new NotFoundException(RESET_MAIL_OFF);
+    this.recovery.startResetMail(dto, req.ip);
+    return { ok: true };
+  }
+
+  /**
+   * **링크로 새 비밀번호** (P19 FR-2006). 로그인은 따로 한다 — 링크를 누른 브라우저가 그 사람의 것이라는 근거가 메일함뿐이다(A.1-10). 쓰지 않으면 404 —
+   * 이미 보낸 링크도 막는다(A.1-9)
+   */
+  @Post('reset-password')
+  @Public()
+  @RateLimit(RATE_LIMITS.resetPassword)
+  async resetPassword(@Body(new ZodPipe(resetPasswordDto)) dto: ReturnType<typeof resetPasswordDto.parse>, @Req() req: Request): Promise<{ ok: true }> {
+    if (!(await this.recovery.available())) throw new NotFoundException(RESET_MAIL_OFF);
+    await this.recovery.resetPassword(dto, req.ip);
+    return { ok: true };
+  }
+
+  /** **"이메일이 기억이 안나시나요?"** (P19 FR-2009) — 아이디 + 표시 이름. 응답은 곧바로, 늘 같다 */
+  @Post('email-help')
+  @Public()
+  @RateLimit(RATE_LIMITS.emailHelp)
+  emailHelp(@Body(new ZodPipe(emailHelpDto)) dto: ReturnType<typeof emailHelpDto.parse>, @Req() req: Request): { ok: true } {
+    this.recovery.startEmailHelp(dto, req.ip);
+    return { ok: true };
   }
 
   /**
@@ -197,6 +239,7 @@ export class AuthController {
   controllers: [AuthController],
   providers: [
     AuthService,
+    RecoveryService,
     // 센 것을 담는 저장소는 **provider 하나**다. 가드가 몇 개로 만들어지든 예산은 하나다 (T-027)
     RateLimitStore,
     RateLimitGuard,

@@ -134,7 +134,7 @@ export class UsersController {
       const { user, temporaryPassword } = await this.users.resetPassword(id, actor, tx, prepared);
       await this.audit.record({ action: 'user.password.reset', actorId: actor.id, targetType: 'user', targetId: id, ip: req.ip }, tx);
       // 그 사람이 비밀번호 찾기로 남긴 요청은 처리됐다 — 받은 관리자 모두의 알림함에서 읽음이 된다 (P17 FR-1803)
-      await this.notifications.resolvePasswordResetRequests(id, tx);
+      await this.notifications.resolveRecoveryRequests(id, tx);
       return { user: toUserView(user), temporaryPassword };
     });
     // 끊는 알림은 커밋한 뒤에 — 정지와 같다 (좁은 자체 점검 5)

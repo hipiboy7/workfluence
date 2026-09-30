@@ -106,6 +106,23 @@ describe('AdminPolicyPage', () => {
     expect(patches()).toEqual([]);
   });
 
+  it('**email로 비밀번호 재설정은 켬·끔을 고르는 칸** (P19 FR-2008) — "세션·계정" 묶음에 있고, 끄면 숫자 0을 보낸다', async () => {
+    renderPage();
+    const choose = (await screen.findByLabelText('email로 비밀번호 재설정 (passwordResetMail)')) as HTMLSelectElement;
+    expect(choose.tagName).toBe('SELECT');
+    expect(within(screen.getByRole('group', { name: '세션·계정' })).getByRole('combobox')).toBe(choose);
+    expect([...choose.options].map((o) => [o.value, o.textContent])).toEqual([
+      ['1', '켬'],
+      ['0', '끔'],
+    ]);
+    expect(choose.value).toBe('1');
+    expect(document.getElementById(choose.getAttribute('aria-describedby')!)!.textContent).toContain('이미 보낸 링크도 막힌다');
+    fireEvent.change(choose, { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await screen.findByRole('status');
+    expect(patches().map((c) => c.body)).toEqual([{ passwordResetMail: 0 }]);
+  });
+
   it('**짝 규칙은 바꾼 뒤의 전체로 본다** — 고정 수가 대화 수보다 작지 않으면 보내지 않는다 (P10 FR-1134)', async () => {
     renderPage();
     await screen.findByLabelText('사람마다 고정 수 (llmPinnedMax)');

@@ -5,6 +5,7 @@ import { AuthLayout } from './layout/AuthLayout';
 import { NotFoundPage } from './components/RequireUuidParam';
 import { RequireUuidParam } from './components/RequireUuidParam';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
+import { EmailHelpPage } from './pages/EmailHelpPage';
 import { FindAccountPage } from './pages/FindAccountPage';
 import { PageEditorPage } from './pages/PageEditorPage';
 import { PageHistoryPage } from './pages/PageHistoryPage';
@@ -18,6 +19,7 @@ import { TrashPage } from './pages/TrashPage';
 import { SpacePage } from './pages/SpacePage';
 import { SpacesPage } from './pages/SpacesPage';
 import { LoginPage } from './pages/LoginPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { RootIdHelpPage } from './pages/RootIdHelpPage';
 import { SignupPage } from './pages/SignupPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
@@ -58,6 +60,8 @@ export function App() {
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/find-account" element={<FindAccountPage />} />
             <Route path="/find-account/root" element={<RootIdHelpPage />} />
+            <Route path="/find-account/email" element={<EmailHelpPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
           </Route>
           <Route path="/change-password" element={<RequireAuth><ChangePasswordRoute /></RequireAuth>} />
           <Route element={<RequireAuth><AppLayout /></RequireAuth>}>

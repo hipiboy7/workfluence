@@ -41,7 +41,7 @@ function fakeReq(initial: Record<string, unknown> = {}) {
 const USER = { id: 'u1', username: 'alice', displayName: '앨리스', role: 'member', mustChangePassword: false, grants: [], passwordHash: 'x' };
 
 function controller(auth: Partial<AuthService>, store = new RateLimitStore()) {
-  return new AuthController(auth as AuthService, {} as never, store, new RevocationBus(), {} as never);
+  return new AuthController(auth as AuthService, {} as never, store, new RevocationBus(), {} as never, {} as never);
 }
 
 describe('AuthController — 배선', () => {

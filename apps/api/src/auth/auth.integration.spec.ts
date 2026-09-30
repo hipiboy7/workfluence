@@ -1,7 +1,7 @@
 import { inspect } from 'node:util';
 import { BadGatewayException, BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PASSWORD_POLICY, type Principal } from '@workfluence/shared';
+import { PASSWORD_POLICY, maskEmail, type Principal } from '@workfluence/shared';
 import { eq, sql } from 'drizzle-orm';
 import { errors as jose } from 'jose';
 import { AuditService } from '../audit/audit.service';
@@ -351,14 +351,14 @@ describe('비밀번호 변경 (FR-207)', () => {
   });
 });
 
-describe('계정 복구 — 미인증 경로는 비밀번호를 발급하지 않는다 (FR-209a)', () => {
+describe('계정 복구 — 미인증 경로는 비밀번호를 발급하지 않는다 (FR-209a) — 표시 이름 + email (P19 FR-2000)', () => {
   it('요청은 항상 같은 응답이고 비밀번호가 바뀌지 않는다', async () => {
     const alice = await approvedAlice();
     const before = (await usersSvc.findById(alice.id))!.passwordHash;
 
-    expect(await auth.recoverPassword({ username: 'alice', email: SIGNUP.email })).toEqual({ ok: true });
-    expect(await auth.recoverPassword({ username: 'alice', email: 'wrong@example.internal' })).toEqual({ ok: true });
-    expect(await auth.recoverPassword({ username: 'nobody', email: SIGNUP.email })).toEqual({ ok: true });
+    expect(await auth.recoverPassword({ displayName: '앨리스', email: SIGNUP.email })).toEqual({ ok: true });
+    expect(await auth.recoverPassword({ displayName: '앨리스', email: 'wrong@example.internal' })).toEqual({ ok: true });
+    expect(await auth.recoverPassword({ displayName: '다른사람', email: SIGNUP.email })).toEqual({ ok: true });
 
     // 가장 중요한 단정: 남의 비밀번호가 바뀌지 않았다
     expect((await usersSvc.findById(alice.id))!.passwordHash).toBe(before);
@@ -366,10 +366,12 @@ describe('계정 복구 — 미인증 경로는 비밀번호를 발급하지 않
   });
 
   it('요청은 감사로그에 남아 관리자가 판단할 수 있다', async () => {
-    await approvedAlice();
-    await auth.recoverPassword({ username: 'alice', email: SIGNUP.email });
+    const alice = await approvedAlice();
+    await auth.recoverPassword({ displayName: '앨리스', email: SIGNUP.email });
     const e = (await audit.list({ limit: 10 })).find((x) => x.action === 'auth.password.recover');
     expect(e?.detail).toMatchObject({ found: true, requested: true });
+    // 대상은 **가린 email**이다 — 아이디 찾기와 같다(FR-238). 맞으면 누구의 요청인지(actor)가 남는다
+    expect(e).toMatchObject({ actorId: alice.id, targetType: 'email', targetId: maskEmail(SIGNUP.email) });
   });
 });
 
@@ -385,12 +387,12 @@ describe('비밀번호 초기화 요청은 관리자의 알림함에 간다 (P17
     await addUser('bob', 'member');
     await addUser('admin-off', 'admin', 'suspended');
 
-    await auth.recoverPassword({ username: 'alice', email: 'wrong@example.internal' });
-    await auth.recoverPassword({ username: 'nobody', email: SIGNUP.email });
+    await auth.recoverPassword({ displayName: '앨리스', email: 'wrong@example.internal' });
+    await auth.recoverPassword({ displayName: 'alice', email: SIGNUP.email });
     expect(await resetRows()).toEqual([]);
 
     // 응답은 알림을 기다리지 않는다 — 알림은 따로 돌아 곧 생긴다
-    expect(await auth.recoverPassword({ username: 'alice', email: SIGNUP.email })).toEqual({ ok: true });
+    expect(await auth.recoverPassword({ displayName: '앨리스', email: SIGNUP.email })).toEqual({ ok: true });
     await vi.waitFor(async () => expect(await resetRows()).toHaveLength(2), { timeout: 5000 });
     expect(new Set((await resetRows()).map((r) => r.userId))).toEqual(new Set([root.id, admin.id]));
 
@@ -402,15 +404,15 @@ describe('비밀번호 초기화 요청은 관리자의 알림함에 간다 (P17
   it('**사내 계정(비밀번호가 없다)의 요청은 알리지 않는다** — 관리자가 초기화할 수 없어 알림이 영영 처리되지 않는다. 응답과 감사 기록은 같다 (병합 전 검토)', async () => {
     await addUser('root1', 'root');
     await db.insert(users).values({ username: 'idp-user', displayName: 'idp', email: 'idp-user@example.internal', passwordHash: null, role: 'member', status: 'active', oidcSub: 'sub-idp-user' });
-    expect(await auth.recoverPassword({ username: 'idp-user', email: 'idp-user@example.internal' })).toEqual({ ok: true });
+    expect(await auth.recoverPassword({ displayName: 'idp', email: 'idp-user@example.internal' })).toEqual({ ok: true });
     // 로컬 계정의 요청은 곧 알림이 된다 — 그 알림이 온 뒤에 보면 앞선 사내 계정의 요청이 알림을 만들지 않았음이 드러난다(알림은 요청 순서대로 돈다)
     const alice = await approvedAlice();
-    await auth.recoverPassword({ username: 'alice', email: SIGNUP.email });
+    await auth.recoverPassword({ displayName: '앨리스', email: SIGNUP.email });
     await vi.waitFor(async () => expect((await resetRows()).map((r) => r.actorId)).toContain(alice.id), { timeout: 5000 });
     await new Promise((ok) => setTimeout(ok, 200));
     expect((await resetRows()).map((r) => r.actorId)).toEqual([alice.id]);
     // 감사 기록은 사내 계정의 요청도 남긴다 — 관리자가 무엇이 왔는지 본다
-    const rec = await db.select().from(auditEvents).where(eq(auditEvents.targetId, 'idp-user'));
+    const rec = await db.select().from(auditEvents).where(eq(auditEvents.targetId, maskEmail('idp-user@example.internal')));
     expect(rec.map((r) => r.action)).toContain('auth.password.recover');
   });
 

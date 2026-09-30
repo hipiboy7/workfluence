@@ -449,17 +449,14 @@ export class UsersService {
   }
 
   /**
-   * 비밀번호 찾기 요청의 대상을 **조회만** 한다. 비밀번호를 바꾸지 않는다.
+   * 비밀번호 찾기 요청의 대상을 **조회만** 한다. 비밀번호를 바꾸지 않는다 — **표시 이름 + email**이 맞는 **활성** 계정 (P19 FR-2000, 예전에는 아이디+email).
    *
-   * **미인증 경로에서 비밀번호를 발급하지 않는다.** 아이디와 사내 email은 위키에서 사실상
-   * 공개 정보라 "둘을 아는 사람 = 본인"이 성립하지 않는다. 메일 같은 대역 외 전달 수단이
-   * 없는 폐쇄망에서는 자가 재설정을 안전하게 만들 방법이 없으므로 **기능을 두지 않고**
-   * 관리자 초기화(인증·권한 검사가 있는 경로)로 보낸다.
+   * **미인증 경로에서 비밀번호를 발급하지 않는다**(FR-209a). 이름과 사내 email은 위키에서 사실상 공개 정보라 "둘을 아는 사람 = 본인"이 성립하지 않는다 —
+   * 관리자 초기화(인증·권한 검사가 있는 경로)로 보내거나, 그 계정의 email로 링크를 보낸다(메일함을 가진 것이 본인 확인 — `RecoveryService`)
    */
-  async findRecoveryTarget(username: string, email: string, tx: Db = this.db): Promise<UserRow | null> {
-    const user = await this.findByUsername(username, tx);
-    if (!user || !user.email || user.email !== email.toLowerCase() || user.status !== 'active') return null;
-    return user;
+  async findRecoveryTarget(displayName: string, email: string, tx: Db = this.db): Promise<UserRow | null> {
+    const user = await this.findByEmailAndName(email, displayName, tx);
+    return user && user.status === 'active' ? user : null;
   }
 
   /**

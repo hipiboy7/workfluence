@@ -263,6 +263,8 @@ button.subtle:disabled { background: transparent; border-color: transparent; }
 .field-head { display: flex; align-items: baseline; gap: 6px; }
 .field-head label { margin-bottom: 4px; }
 .field-head .req { margin-left: 0; }
+/* 라벨 줄 오른쪽 끝의 조치 — 비밀번호 찾기의 "이메일이 기억이 안나시나요?" (P19 FR-2009) */
+.field-head .field-aside { margin-left: auto; font-size: 13px; }
 .form-stack input:not([type='checkbox']):not([type='radio']):not([type='file']), .form-stack select { width: 100%; }
 
 /* 칸 + 단추 한 줄 */

@@ -147,6 +147,7 @@ export function Field({
   required,
   help,
   error,
+  aside,
   children,
 }: {
   id: string;
@@ -154,6 +155,8 @@ export function Field({
   required?: boolean;
   help?: ReactNode;
   error?: ReactNode;
+  /** 라벨 줄 오른쪽 끝의 조치 — 비밀번호 찾기의 "이메일이 기억이 안나시나요?"(P19 FR-2009). 라벨 이름에 섞이지 않게 label 밖이다 */
+  aside?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -163,6 +166,7 @@ export function Field({
         <div className="field-head">
           <label htmlFor={id}>{label}</label>
           {required && <Required />}
+          {aside && <span className="field-aside">{aside}</span>}
         </div>
       )}
       {wire(children, id, help, error, required)}

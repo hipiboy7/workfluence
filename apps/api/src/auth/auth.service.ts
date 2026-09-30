@@ -136,11 +136,10 @@ export class AuthService {
   }
 
   /**
-   * 비밀번호 찾기 요청 (FR-209a). **비밀번호를 발급하지 않는다.**
+   * 비밀번호 찾기 — **관리자에게 초기화 요청** (FR-209a · P19 FR-2001). **비밀번호를 발급하지 않는다.**
    *
-   * 미인증 경로에서 비밀번호를 바꿔 주면 "아이디와 사내 email을 아는 사람"이 곧 계정
-   * 소유자가 된다. 둘 다 위키에서 사실상 공개 정보다. 메일 같은 대역 외 전달 수단이 없는
-   * 폐쇄망에서는 자가 재설정을 안전하게 만들 수 없으므로 **요청만 기록하고 관리자에게 보낸다.**
+   * 미인증 경로에서 비밀번호를 바꿔 주면 "이름과 사내 email을 아는 사람"이 곧 계정 소유자가 된다. 둘 다 위키에서 사실상 공개 정보다 — **요청만 기록하고
+   * 관리자에게 보낸다.** 스스로 바꾸는 길은 그 계정의 email로 가는 링크다(`RecoveryService` — 메일함을 가진 것이 본인 확인, P19 A.1-2).
    *
    * 응답은 일치 여부와 무관하게 항상 같다 — 여기서 갈라지면 계정 열거가 된다.
    *
@@ -148,12 +147,13 @@ export class AuthService {
    * 알림은 **기다리지 않는다**: 응답이 알림을 만드는 동안 늦어지면 걸린 시간이 "그런 계정이 있다"를 말한다
    */
   async recoverPassword(dto: RecoverPasswordDto, ip?: string): Promise<{ ok: true }> {
-    const user = await this.users.findRecoveryTarget(dto.username, dto.email);
+    // **표시 이름 + email** (P19 FR-2000 — 예전에는 아이디+email). 대상의 기록은 가린 email이다 — 아이디 찾기와 같다(FR-238)
+    const user = await this.users.findRecoveryTarget(dto.displayName, dto.email);
     await this.audit.record({
       action: 'auth.password.recover',
       actorId: user?.id ?? null,
-      targetType: 'username',
-      targetId: dto.username,
+      targetType: 'email',
+      targetId: maskEmail(dto.email),
       // 관리자가 "이 요청이 실제 계정에 대한 것이었나"를 볼 수 있어야 초기화를 판단한다
       detail: { found: !!user, requested: true },
       ip,
@@ -171,6 +171,14 @@ export class AuthService {
     void this.notifications.notifyPasswordResetRequest({ id: user.id, role: user.role as Role, grants: user.grants }).catch((e: unknown) => {
       this.log.error(logLine('auth.recover_notify_failed', '비밀번호 초기화 요청을 관리자에게 알리지 못했다', { userId: user.id }, e));
     });
+  }
+
+  /**
+   * **그 계정의 줄에서** 돌린다 — 로그인·비밀번호 변경과 같은 줄이다(P13 FR-1431). 메일 링크로 새 비밀번호를 정하는 것(`RecoveryService`)이 쓴다:
+   * 줄 밖에서 바꾸면 옛 비밀번호로 확인 중이던 로그인이 세션을 모두 지운 뒤에 세션을 만든다(P13 병합 전 검토). 줄은 프로세스에 하나다
+   */
+  inAccountLine<T>(username: string, run: () => Promise<T>): Promise<T> {
+    return this.loginSerial.run(username, run);
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto, ip?: string): Promise<void> {

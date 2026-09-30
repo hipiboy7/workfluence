@@ -12,7 +12,7 @@ import {
   type SpaceLike,
   type SpaceMemberRole,
 } from '@workfluence/shared';
-import { and, count, desc, eq, inArray, isNull, ne, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, ne, notInArray, type SQL } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { comments, notifications, pages, spaceMembers, spaces, users, type SpaceRow } from '../db/schema';
 import { callerFor, extractMentions } from './domain/mention';
@@ -35,6 +35,10 @@ export type NotificationDraft = {
 
 /** 비밀번호 초기화 요청 (P17 F-010 8번) */
 const RESET_REQUEST: NotificationKind = 'password.reset.request';
+/** email 확인 요청 — "이메일이 기억이 안나시나요?" (P19 FR-2009). 시스템 관리자만 받는다 */
+const EMAIL_HELP: NotificationKind = 'email.confirm.request';
+/** 요청한 사람이 `actor_id`인 계정 찾기 알림 — 둘 다 "로그인하지 못한다"는 같은 문제의 요청이다 (P19 C.5) */
+const RECOVERY_KINDS: NotificationKind[] = [RESET_REQUEST, EMAIL_HELP];
 
 export interface NotificationChannel {
   send(drafts: NotificationDraft[], tx: Db): Promise<void>;
@@ -202,24 +206,58 @@ export class NotificationsService {
   }
 
   /**
-   * 그 사람의 비밀번호를 누가 초기화하면 **남은 초기화 요청 알림을 모두 읽음으로** 한다 (P17 FR-1803) — 받은 관리자 모두의 것이다. 둘이 같은 요청을
-   * 받고 둘 다 초기화하면 먼저 알려 준 임시 비밀번호가 쓸모없어진다. 초기화와 같은 트랜잭션에서 부른다. 바꾼 수를 돌려준다
+   * email 확인 요청을 **시스템 관리자에게** 알린다 (P19 FR-2009, A.1-12) — 활성 root 가운데 요청한 사람이 아닌 모두. **같은 사람의 요청을 아직 읽지
+   * 않았으면 또 만들지 않는다** — 로그인하지 않은 경로라 아이디와 이름을 아는 누구나 되풀이할 수 있다(P17 FR-1802와 같은 모양). 만든 수를 돌려준다
    */
-  async resolvePasswordResetRequests(requesterId: string, tx: Db = this.db): Promise<number> {
+  async notifyEmailHelpRequest(requester: { id: string }, tx: Db = this.db): Promise<number> {
+    const roots = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.role, 'root'), eq(users.status, 'active'), ne(users.id, requester.id)));
+    if (roots.length === 0) return 0;
+    const pending = await tx
+      .select({ userId: notifications.userId })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.kind, EMAIL_HELP),
+          eq(notifications.actorId, requester.id),
+          isNull(notifications.readAt),
+          inArray(
+            notifications.userId,
+            roots.map((r) => r.id),
+          ),
+        ),
+      );
+    const waiting = new Set(pending.map((p) => p.userId));
+    const drafts: NotificationDraft[] = roots
+      .filter((r) => !waiting.has(r.id))
+      .map((r) => ({ userId: r.id, kind: EMAIL_HELP, pageId: null, commentId: null, actorId: requester.id }));
+    await this.channel.send(drafts, tx);
+    return drafts.length;
+  }
+
+  /**
+   * 그 사람의 비밀번호가 바뀌면(관리자 초기화 — P17 FR-1803, 메일 링크 재설정 — P19 FR-2006) **남은 계정 찾기 알림을 모두 읽음으로** 한다 — 초기화 요청과
+   * email 확인 요청, 받은 사람 모두의 것이다. 관리자가 뒤늦게 처리하면 방금 정한 비밀번호가 임시 비밀번호로 덮인다. 비밀번호를 바꾼 트랜잭션에서 부른다.
+   * 바꾼 수를 돌려준다
+   */
+  async resolveRecoveryRequests(requesterId: string, tx: Db = this.db): Promise<number> {
     const done = await tx
       .update(notifications)
       .set({ readAt: new Date() })
-      .where(and(eq(notifications.kind, RESET_REQUEST), eq(notifications.actorId, requesterId), isNull(notifications.readAt)))
+      .where(and(inArray(notifications.kind, RECOVERY_KINDS), eq(notifications.actorId, requesterId), isNull(notifications.readAt)))
       .returning({ id: notifications.id });
     return done.length;
   }
 
   /**
-   * 지금 볼 수 있는 종류만 (P17 FR-1804). 비밀번호 초기화 요청은 **지금 관리자·시스템 관리자일 때만** 보이고 세어진다 — 관리자에서 내려가면
-   * 누가 초기화를 요청했는지는 더 알 일이 아니다. 목록과 안 읽은 수가 같은 조건을 쓴다
+   * 지금 볼 수 있는 종류만 (P17 FR-1804). 비밀번호 초기화 요청은 **지금 관리자·시스템 관리자일 때만**, email 확인 요청은 **지금 시스템 관리자일 때만**
+   * (P19 A.1-12) 보이고 세어진다 — 역할에서 내려가면 누가 요청했는지는 더 알 일이 아니다. 목록과 안 읽은 수가 같은 조건을 쓴다
    */
   private visibleKinds(principal: Principal): SQL | undefined {
-    return isAdminRole(principal.role) ? undefined : ne(notifications.kind, RESET_REQUEST);
+    if (principal.role === 'root') return undefined;
+    return isAdminRole(principal.role) ? ne(notifications.kind, EMAIL_HELP) : notInArray(notifications.kind, RECOVERY_KINDS);
   }
 
   /**
@@ -270,8 +308,8 @@ export class NotificationsService {
       pageId: r.pageId,
       commentId: r.commentId,
       actorName: r.actorName,
-      // 관리자가 사용자 관리에서 그 사람을 찾는 데만 쓴다 — 멘션에는 싣지 않는다 (P17)
-      actorUsername: r.kind === RESET_REQUEST ? r.actorUsername : null,
+      // 관리자가 사용자 관리에서 그 사람을 찾는 데만 쓴다 — 멘션에는 싣지 않는다 (P17 · P19 email 확인 요청)
+      actorUsername: RECOVERY_KINDS.includes(r.kind as NotificationKind) ? r.actorUsername : null,
       // 대상이 지워졌거나 **지금 볼 수 없으면** 제목 대신 그 사실을 준다 (FR-506)
       pageTitle: this.visibleTitle(r, principal, isAdmin),
       readAt: r.readAt?.toISOString() ?? null,

@@ -24,7 +24,17 @@ export const POLICY_GROUPS: readonly { id: PolicyGroup; title: string }[] = [
  *
  * `Record`라 `Policy`에 숫자 키가 늘면 여기 이름이 없을 때 타입 검사가 잡는다. 묶음 안의 순서는 여기 적은 순서다
  */
-export const POLICY_NAMES: Record<PolicyNumberKey, { name: string; unit: string; group: PolicyGroup | null; help?: string }> = {
+export const POLICY_NAMES: Record<
+  PolicyNumberKey,
+  {
+    name: string;
+    unit: string;
+    group: PolicyGroup | null;
+    help?: string;
+    /** 값이 몇 가지뿐이면 고르는 칸으로 — 메일 재설정 켜기·끄기(P19 FR-2008) */
+    choices?: readonly { value: number; label: string }[];
+  }
+> = {
   sessionIdleMinutes: { name: '세션 유휴 시간', unit: '분', group: 'session', help: '이만큼 아무것도 하지 않으면 로그아웃된다.' },
   sessionAbsoluteHours: { name: '세션 최대 시간', unit: '시간', group: 'session', help: '로그인한 뒤 이만큼 지나면 쓰고 있어도 다시 로그인한다.' },
   passwordMinLength: {
@@ -41,6 +51,16 @@ export const POLICY_NAMES: Record<PolicyNumberKey, { name: string; unit: string;
   },
   lockoutThreshold: { name: '잠금까지 실패 횟수', unit: '회', group: 'session', help: '비밀번호를 이만큼 잇달아 틀리면 계정을 잠근다.' },
   lockoutMinutes: { name: '잠금 시간', unit: '분', group: 'session' },
+  passwordResetMail: {
+    name: 'email로 비밀번호 재설정',
+    unit: '',
+    group: 'session',
+    help: '켜면 비밀번호 찾기에서 가입할 때 넣은 email로 재설정 링크를 받는다(root는 빠진다). 사내 메일이 켜져 있고 공개 주소(WF_PUBLIC_URL)가 있어야 쓰인다. 끄면 이미 보낸 링크도 막힌다.',
+    choices: [
+      { value: 1, label: '켬' },
+      { value: 0, label: '끔' },
+    ],
+  },
   uploadMaxMb: { name: '업로드 최대 크기', unit: 'MB', group: 'upload' },
   trashRetentionDays: { name: '휴지통 보존 기간', unit: '일', group: 'retention', help: '지난 것은 달마다 하는 정리 작업이 되살릴 수 없게 지운다.' },
   auditRetentionDays: {
