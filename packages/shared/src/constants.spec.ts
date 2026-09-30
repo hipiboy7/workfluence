@@ -122,6 +122,10 @@ describe('NOTIFICATION_KINDS (P19 FR-2009)', () => {
     expect(LOG_EVENTS).toContain('auth.reset_mail_failed');
     expect(LOG_EVENTS).toContain('auth.email_help_failed');
   });
+
+  it('화면 설정(`/api/auth/config`)이 운영 설정을 읽지 못하면 메일 재설정만 끄고 줄을 남긴다 — 우리 쪽 결함이라 error (병합 전 코드 리뷰 5)', () => {
+    expect(LOG_EVENTS).toContain('auth.config_failed');
+  });
 });
 
 describe('스페이스 목록의 상한 (P14 FR-1514)', () => {

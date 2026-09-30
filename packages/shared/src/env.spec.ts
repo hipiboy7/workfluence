@@ -246,6 +246,13 @@ describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
     expect(() => mail({ WF_MAIL_FORMAT: 'html' })).toThrow(/WF_MAIL_FORMAT/);
   });
 
+  it('**공개 주소(WF_PUBLIC_URL)가 틀리면 기동 실패** — 비우면 링크 없는 메일, 스킴이 없으면 열리지 않는 링크가 나간다(P19 병합 전 자체 점검 5)', () => {
+    expect(mail({}).WF_PUBLIC_URL).toBe('');
+    expect(mail({ WF_PUBLIC_URL: 'https://wiki.example.internal:8443' }).WF_PUBLIC_URL).toBe('https://wiki.example.internal:8443');
+    for (const bad of ['wiki.example.internal', 'ftp://wiki.example.internal', 'https://wiki.example.internal/?a=1'])
+      expect(() => mail({ WF_PUBLIC_URL: bad }), bad).toThrow(/WF_PUBLIC_URL/);
+  });
+
   it('**주소가 틀리면 기동 실패** — http(s)가 아니거나 사용자 정보·질의가 섞였다', () => {
     expect(mail({ WF_MAIL_API_URL: 'https://mail.example.internal/api/v1/email/send' }).WF_MAIL_API_URL).toBe('https://mail.example.internal/api/v1/email/send');
     for (const bad of ['mail.example.internal/send', 'https://u:p@mail.example.internal/send', 'https://mail.example.internal/send?key=1'])
