@@ -249,7 +249,9 @@ describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
   it('**공개 주소(WF_PUBLIC_URL)가 틀리면 기동 실패** — 비우면 링크 없는 메일, 스킴이 없으면 열리지 않는 링크가 나간다(P19 병합 전 자체 점검 5)', () => {
     expect(mail({}).WF_PUBLIC_URL).toBe('');
     expect(mail({ WF_PUBLIC_URL: 'https://wiki.example.internal:8443' }).WF_PUBLIC_URL).toBe('https://wiki.example.internal:8443');
-    for (const bad of ['wiki.example.internal', 'ftp://wiki.example.internal', 'https://wiki.example.internal/?a=1'])
+    // **끝의 `/`는 떼어 둔다** — 링크를 만드는 두 곳(부르기 메일·재설정 메일)이 같은 값을 쓴다(좁은 재점검 1 — 부르기 메일은 떼지 않아 `//pages/…`가 됐다)
+    expect(mail({ WF_PUBLIC_URL: ' https://wiki.example.internal:8443/ ' }).WF_PUBLIC_URL).toBe('https://wiki.example.internal:8443');
+    for (const bad of ['wiki.example.internal', 'ftp://wiki.example.internal', 'https://wiki.example.internal/?a=1', 'https://wiki.example.internal/wiki'])
       expect(() => mail({ WF_PUBLIC_URL: bad }), bad).toThrow(/WF_PUBLIC_URL/);
   });
 
