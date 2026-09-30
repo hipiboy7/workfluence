@@ -274,10 +274,10 @@ shared  ←  api(config → db → common → 기능 모듈)
 개발 PC ──git push──▶ GitHub ──git pull──▶ Linux 서버
                                               │ docker build (멀티스테이지)
                                               │ docker save → tar + sha256
-                                              │ (대상에 Docker가 없으면) dnf download → Docker 묶음 tar + sha256
+                                              │ (대상에 Docker가 없으면) pnpm release:docker → Docker 묶음 tar + sha256
                                               ▼
                                       [반입 절차] ──▶ 폐쇄망 (RHEL 9)
-                                                        │ (Docker가 없으면) 서명 확인 → dnf install → docker 켜기
+                                                        │ (Docker가 없으면) 서명 판정 → dnf install(서명 검사 켬) → docker 켜기
                                                         │ docker load
                                                         │ .env 작성
                                                         │ up -d postgres
@@ -292,7 +292,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 - 빌드 스테이지에서 의존성 설치·빌드, 런타임 스테이지에는 산출물과 production 의존성만. 베이스는 `node:24-bookworm-slim` (alpine은 네이티브 모듈 호환 위험).
 - 컨테이너는 non-root, 헬스체크, `restart: unless-stopped`.
 - 반입 묶음 구성의 단일 출처는 **코드**다 (`packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`). 반입 당일의 절차는 [`docs/운영가이드_반입.md`](운영가이드_반입.md)다.
-- 대상은 RHEL 9다(Phase 20). 들고 갈 것은 반입 묶음 하나 — 서버에 Docker가 없으면 **Docker 묶음**(빌드 서버에 깔린 판의 Docker CE RPM + 없을 수 있는 RHEL 부품 + Docker 공개키, 리눅스빌드 가이드 12-1절)도. 앱의 코드·구성은 대상에 따라 바뀌지 않는다.
+- 대상은 RHEL 9다(Phase 20). 들고 갈 것은 반입 묶음 하나 — 서버에 Docker가 없으면 **Docker 묶음**(빌드 서버에 깔린 판의 Docker CE RPM과 그것이 늘 쓰는 RHEL 부품 + firewalld가 없는 서버에 모자란 RHEL 부품 + 판·라이선스 목록 + Docker 공개키 — `pnpm release:docker`, 리눅스빌드 가이드 12-1절)도. 앱의 코드·구성은 대상에 따라 바뀌지 않는다.
 
 ## 10. Phase별 추가 지점
 
@@ -317,6 +317,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 17 | PC 화면과 한 체계의 UI(F-010) — 한 틀(`AppLayout`: 위 막대·왼쪽 칸·본문, 화면이 `SideSlot`으로 왼쪽 칸을 채운다 — 스페이스 안은 페이지 트리, LLM은 대화 목록)과 카드 틀(`AuthLayout`)을 중첩 경로가 씌운다, 토큰·요소 기본값·부품은 `styles.css` 한 파일(화면별 CSS 없음), 공통 부품(`ui.tsx` — 머리·알림띠·Field·구획 폼·거르기 줄·빈 상태·배지)과 확인 대화(`<dialog>`), 역할·운영 설정·감사 행위의 한글 이름. 비밀번호 초기화 요청을 관리자의 알림으로(`password.reset.request` — 받는 사람은 `canManageUser`), 모든 화면의 알림 영역, 감사 기록 단계(운영 설정 `auditLevel`, `AUDIT_MIN_LEVEL` — 필수 기록은 늘). 새 의존성·마이그레이션 없음 |
 | 18 | 사내 메일 API 설정(F-012) — 요청 모양을 사용자가 준 사내 API 설명(`subject`·`content`·`receivers`·`sender_name`)으로 한 곳(`apps/api/src/mail/domain/request.ts`)에 두고, 주소·형식(평문·마크다운)·보내는 이름·인증 헤더를 `WF_MAIL_*` 설정으로(기동 검사는 공유 `mail.ts`·`env.ts`). 메일 글은 `domain/compose.ts`(평문·마크다운 — 마크다운은 공유 `markdownText`로 이스케이프), 제목은 보내는 경계에서 한 줄로. 시험 명령 `apps/api/src/cli/mail-test.ts`(compose `tools`) |
 | 19 | 비밀번호를 잊었을 때 두 길·서식 단추 줄(F-011·F-013) — 두 길의 조건을 표시 이름+email로, 메일 재설정 링크(`auth/recovery.service.ts` · `domain/reset-link.ts` — 32바이트 값의 해시만·30분·한 번·5분에 한 통, 받는 계정은 공유 `canResetPasswordByMail`, 쓰기는 로그인 줄 안에서 세션·링크를 지운다), email 확인 요청(`email.confirm.request` — 받는 사람은 root), 운영 설정 `passwordResetMail`, 표 `password_reset_tokens`(`0013_recovery`). 편집기와 댓글 칸의 서식 단추 줄(`formatActions.ts` — 허용 목록·편집기 스키마는 그대로). 새 `WF_` 키·의존성 없음 |
+| 20 | RHEL 9에 반입(F-014) — 들고 갈 것의 목록(반입 가이드 0.1절 — 반입 묶음, 서버에 Docker가 없으면 Docker 묶음), Docker 묶음(`pnpm release:docker` — `scripts/docker-bundle.ts`, 빌드 서버에 깔린 판의 RPM·`PACKAGES.txt`·Docker 공개키·지문. 판정은 공유 `release.ts`의 `DOCKER_BUNDLE_RPMS`·`dockerKeyProblem`·`rpmSignatureProblems`·`formatPackages`), RHEL 9 준비(반입 가이드 0.3·0.4절 — 서명은 임시 RPM DB로 판정하고 dnf도 보게 한다·부딪히는 패키지·망 대역·SELinux를 끄지 않는다·firewalld는 Docker가 연 포트를 거르지 않는다). 앱의 동작·구성·설정 키·의존성 변경 없음 |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

@@ -8,3 +8,12 @@
 > 이대로 진행하자.
 > 이거 리눅스 서버(RHEL 9)에서 반입해서 실행하는 방법 잘 정리해줘. 필요한 파일만 반입할 수 있게.
 > 최종 완료까지 이어서 진행해.
+
+## 2026-09-30 — 병합 전 검토 뒤, 라이선스 결정
+
+Claude가 물은 것(선택지 둘): "Docker 묶음에 Red Hat의 RHEL 부품(GPL 계열 넷 — container-selinux·iptables-nft·nftables·libnftnl, MIT 하나 — jansson)을
+실어도 될까요? 규칙(CLAUDE.md 7절)은 GPL을 승인 없이 금지합니다."
+
+사용자가 고른 것:
+
+> 승인 — 싣는다 (추천)
