@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts/) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 19까지 구현 완료** (2026-09-30). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 20까지 구현 완료** (2026-09-30). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -274,8 +274,10 @@ shared  ←  api(config → db → common → 기능 모듈)
 개발 PC ──git push──▶ GitHub ──git pull──▶ Linux 서버
                                               │ docker build (멀티스테이지)
                                               │ docker save → tar + sha256
+                                              │ (대상에 Docker가 없으면) dnf download → Docker 묶음 tar + sha256
                                               ▼
-                                      [반입 절차] ──▶ 폐쇄망
+                                      [반입 절차] ──▶ 폐쇄망 (RHEL 9)
+                                                        │ (Docker가 없으면) 서명 확인 → dnf install → docker 켜기
                                                         │ docker load
                                                         │ .env 작성
                                                         │ up -d postgres
@@ -290,6 +292,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 - 빌드 스테이지에서 의존성 설치·빌드, 런타임 스테이지에는 산출물과 production 의존성만. 베이스는 `node:24-bookworm-slim` (alpine은 네이티브 모듈 호환 위험).
 - 컨테이너는 non-root, 헬스체크, `restart: unless-stopped`.
 - 반입 묶음 구성의 단일 출처는 **코드**다 (`packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`). 반입 당일의 절차는 [`docs/운영가이드_반입.md`](운영가이드_반입.md)다.
+- 대상은 RHEL 9다(Phase 20). 들고 갈 것은 반입 묶음 하나 — 서버에 Docker가 없으면 **Docker 묶음**(빌드 서버에 깔린 판의 Docker CE RPM + 없을 수 있는 RHEL 부품 + Docker 공개키, 리눅스빌드 가이드 12-1절)도. 앱의 코드·구성은 대상에 따라 바뀌지 않는다.
 
 ## 10. Phase별 추가 지점
 
