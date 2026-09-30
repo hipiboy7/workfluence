@@ -420,7 +420,8 @@ dl.meta dt { color: var(--muted); font-size: 12px; }
 /* 서식 단추 줄 (P19 D.1, FR-2020~2022) — 본문 칸 바로 위. 편집 화면의 줄은 편집 줄 아래에 붙는다(A.1-17 — 높이 44px, `EDIT_SCROLL_MARGIN`) */
 .format-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 44px; padding: 4px 6px; margin: 0 0 -1px; background: var(--sunken); border: 1px solid var(--border-strong); border-radius: 4px 4px 0 0; }
 .format-bar + .editor:not(.readonly) .ProseMirror { border-top-left-radius: 0; border-top-right-radius: 0; }
-.format-bar.full { position: sticky; top: calc(var(--topbar-h) + 48px); z-index: 10; }
+/* 편집 줄 바로 아래에 붙는다 — 편집 줄이 두 줄로 접히면 그 높이만큼 내려온다(`--edit-bar-h`는 화면이 잰다, `components/stickyBars.ts`) */
+.format-bar.full { position: sticky; top: calc(var(--topbar-h) + var(--edit-bar-h, 48px)); z-index: 10; }
 .format-bar.compact { min-height: 36px; padding: 2px 4px; }
 .fmt-group { display: inline-flex; align-items: center; gap: 2px; }
 .fmt-sep { width: 1px; height: 22px; margin: 0 4px; background: var(--line); }
@@ -431,7 +432,8 @@ dl.meta dt { color: var(--muted); font-size: 12px; }
 .format-bar .fmt-btn[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
 .format-bar .fmt-btn:disabled { opacity: 0.4; }
 .format-bar .fmt-group.table .fmt-btn { font-size: 13px; }
-.fmt-select { height: 32px; min-width: 96px; }
+/* 입력란의 기본 폭(320px)을 쓰지 않는다 — 그 폭이면 기본 폭(760px)의 편집 화면에서 줄이 두 줄로 접혔다(병합 전 자체 점검 2) */
+.fmt-select { width: auto; height: 32px; min-width: 96px; }
 .fmt-glyph { display: inline-block; width: 1em; font-size: 16px; line-height: 1; text-align: center; font-family: inherit; }
 .fmt-bold { font-weight: 700; }
 .fmt-italic { font-style: italic; font-family: Georgia, 'Times New Roman', serif; }
@@ -444,7 +446,7 @@ dl.meta dt { color: var(--muted); font-size: 12px; }
 .edit-bar { position: sticky; top: var(--topbar-h); z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 48px; margin: 0 calc(-1 * var(--pad-x)) 16px; padding: 6px var(--pad-x); background: var(--surface); border-bottom: 1px solid var(--line); }
 .edit-bar .grow { flex: 1 1 auto; }
 /* 붙어 있는 두 막대(위 막대 + 편집 줄) 아래로 초점·닻이 숨지 않게 — 편집기 커서는 `EDIT_SCROLL_MARGIN`(Editor.tsx)이 같은 값으로 본다(병합 전 검토 17) */
-html:has(.edit-canvas) { scroll-padding-top: calc(var(--topbar-h) + 48px + 16px); }
+html:has(.edit-canvas) { scroll-padding-top: calc(var(--topbar-h) + var(--edit-bar-h, 48px) + var(--format-bar-h, 44px) + 16px); }
 .paper { max-width: calc(var(--w-read) + 48px); margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 20px 24px 24px; }
 .paper.wide { max-width: calc(var(--w-read-wide) + 48px); }
 .paper h1 { margin: 0 0 16px; }

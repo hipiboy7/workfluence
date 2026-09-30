@@ -6,6 +6,7 @@ import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { CollabEditor, type CollabState } from '../components/CollabEditor';
 import { EDIT_SCROLL_MARGIN, Editor } from '../components/Editor';
+import { useBarHeightVar } from '../components/stickyBars';
 import { Breadcrumbs, Field, Loading, Notice, Page, PageHeader, StatusBadge, useDocumentTitle, useReadWide } from '../components/ui';
 import { SideSlot } from '../layout/AppLayout';
 import { SpaceSideNav } from '../layout/SpaceSideNav';
@@ -62,6 +63,8 @@ function PageEditorScreen() {
   // 실시간 편집이 켜져 있는지는 **서버가 말해 준다** (FR-711). 화면이 짐작하면
   // 꺼진 서버에 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다
   const [collab, setCollab] = useState<boolean | null>(null);
+  // 편집 줄은 같이 보는 사람이 많거나 창이 좁으면 두 줄로 접힌다 — 그 높이를 아래에 붙는 서식 단추 줄과 여백이 쓴다(`stickyBars.ts`)
+  const editBarRef = useBarHeightVar('--edit-bar-h');
   const [peers, setPeers] = useState<string[]>([]);
   const [link, setLink] = useState<CollabState>('connecting');
   // 서버가 알린 **자동 저장이 멈춘 까닭** (P9 FR-1011). 풀리면 `null`
@@ -282,7 +285,7 @@ function PageEditorScreen() {
         <SpaceSideNav spaceId={page.spaceId} currentPageId={id} />
       </SideSlot>
       <div className="edit-canvas">
-        <div className="edit-bar">
+        <div ref={editBarRef} className="edit-bar">
           <Link to={`/pages/${id}`}>← 보기로</Link>
           {collab ? (
             <>

@@ -29,6 +29,7 @@ import {
   UndoIcon,
 } from './icons';
 import { LinkDialog } from './LinkDialog';
+import { useBarHeightVar } from './stickyBars';
 
 /** 단추의 그림 — 표 안의 단추는 글로 보인다(그림으로는 "위에 행"과 "아래에 행"을 가리기 어렵다) */
 const ICONS: Partial<Record<FormatActionId, ReactNode>> = {
@@ -49,20 +50,29 @@ const ICONS: Partial<Record<FormatActionId, ReactNode>> = {
 };
 
 type Snapshot = { active: Partial<Record<FormatActionId, boolean>>; can: Partial<Record<FormatActionId, boolean>>; block: BlockType; inTable: boolean };
+type Variant = 'full' | 'compact';
 
-const ALL_IDS = Object.keys(FORMAT_ACTIONS) as FormatActionId[];
+/** 그 줄에 있는 단추 — 표 무리는 따로(표 안일 때만 본다) */
+const IDS: Record<Variant, readonly FormatActionId[]> = {
+  full: FULL_TOOLBAR.flat().filter((id): id is FormatActionId => id !== 'block-type'),
+  compact: COMPACT_TOOLBAR.flat().filter((id): id is FormatActionId => id !== 'block-type'),
+};
 
-/** 편집기의 지금 상태 — 편집기가 바뀔 때마다 다시 뽑는다(`useEditorState`) */
-function snapshot(e: Editor | null): Snapshot {
+/**
+ * 편집기의 지금 상태 — 편집기가 바뀔 때마다 다시 뽑는다(`useEditorState`). **그 줄에 있는 단추만** 본다 — 실시간 편집에서는 남의 커서가 움직일 때마다
+ * 돈다(병합 전 코드 리뷰 10 — 댓글의 짧은 줄도 스물한 개를 모두 보고 있었다)
+ */
+function snapshot(e: Editor | null, variant: Variant): Snapshot {
   const active: Snapshot['active'] = {};
   const can: Snapshot['can'] = {};
   if (!e) return { active, can, block: 'paragraph', inTable: false };
-  for (const id of ALL_IDS) {
+  const inTable = variant === 'full' && e.isActive('table');
+  for (const id of inTable ? [...IDS[variant], ...TABLE_TOOLBAR] : IDS[variant]) {
     const a = FORMAT_ACTIONS[id];
     active[id] = a.active?.(e) ?? false;
     can[id] = e.isEditable && a.can(e);
   }
-  return { active, can, block: currentBlock(e), inTable: e.isActive('table') };
+  return { active, can, block: variant === 'full' ? currentBlock(e) : 'paragraph', inTable };
 }
 
 /**
@@ -75,11 +85,22 @@ function snapshot(e: Editor | null): Snapshot {
  * - 표 안에 있으면 표 무리(행·열 더하기·지우기, 표 지우기)가 줄 끝에 붙는다
  * - **Ctrl+K** — 본문에서 누르면 링크 대화를 연다(편집기에는 그 단축키가 없다)
  */
-export function FormatToolbar({ editor, variant }: { editor: Editor | null; variant: 'full' | 'compact' }) {
-  const state = useEditorState({ editor, selector: ({ editor: e }) => snapshot(e) }) ?? snapshot(null);
+export function FormatToolbar({ editor, variant }: { editor: Editor | null; variant: Variant }) {
+  const state = useEditorState({ editor, selector: ({ editor: e }) => snapshot(e, variant) }) ?? snapshot(null, variant);
   const [linkOpen, setLinkOpen] = useState(false);
   const [focusAt, setFocusAt] = useState(0);
-  const barRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement | null>(null);
+  // 전체 줄은 창 위에 붙는다 — 그 높이를 편집 화면의 여백이 쓴다(표 안이면 두 줄로 접힌다, `stickyBars.ts`)
+  const measure = useBarHeightVar('--format-bar-h', variant === 'full');
+  const setBar = useCallback(
+    (el: HTMLDivElement | null) => {
+      barRef.current = el;
+      measure(el);
+    },
+    [measure],
+  );
+  // 문단 형식 칸을 **키보드로** 바꾸는 중인가 — 그때는 초점을 본문으로 옮기지 않는다(아래 `blockSelect`)
+  const selectByKey = useRef(false);
   const groups = variant === 'full' ? FULL_TOOLBAR : COMPACT_TOOLBAR;
 
   const openLink = useCallback(() => {
@@ -159,7 +180,11 @@ export function FormatToolbar({ editor, variant }: { editor: Editor | null; vari
         title="문단 형식 (본문 Ctrl+Alt+0 · 제목 Ctrl+Alt+1~3)"
         value={state.block}
         disabled={!editor?.isEditable || state.block === 'other'}
-        onChange={(e) => editor && setBlock(editor, e.target.value as BlockType)}
+        // **키보드로 고를 때는 초점을 옮기지 않는다**(병합 전 자체 점검 10) — Windows의 Chrome·Edge는 닫힌 칸에서 ↑↓가 곧바로 값을 바꾼다. 바뀔 때마다
+        // 본문으로 가면 제목 2·3까지 내려갈 수 없다(WCAG 3.2.2). 마우스로 고르면 본문으로 돌아간다(A.1-18)
+        onKeyDown={() => (selectByKey.current = true)}
+        onPointerDown={() => (selectByKey.current = false)}
+        onChange={(e) => editor && setBlock(editor, e.target.value as BlockType, { focus: !selectByKey.current })}
       >
         {state.block === 'other' && <option value="other">—</option>}
         {choices.map((c) => (
@@ -173,7 +198,7 @@ export function FormatToolbar({ editor, variant }: { editor: Editor | null; vari
 
   return (
     <>
-      <div ref={barRef} className={`format-bar ${variant}`} role="toolbar" aria-label="서식" aria-orientation="horizontal" onKeyDown={onKeyDown}>
+      <div ref={setBar} className={`format-bar ${variant}`} role="toolbar" aria-label="서식" aria-orientation="horizontal" onKeyDown={onKeyDown}>
         {groups.map((g, i) => (
           <Fragment key={i}>
             {i > 0 && <span className="fmt-sep" aria-hidden="true" />}

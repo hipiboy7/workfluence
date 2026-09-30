@@ -49,6 +49,8 @@ test('서식 단추로 제목·굵게·목록·링크·표를 넣으면 동료�
 
   const bar = a.getByRole('toolbar', { name: '서식' });
   await expect(bar).toBeVisible();
+  // 기본 폭(글 칸 760px)에서 줄은 한 줄이다 — 문단 형식 칸이 입력란의 기본 폭(320px)을 쓰면 두 줄로 접혔다(병합 전 자체 점검 2)
+  expect(await bar.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(44);
   const editor = a.locator('.editor .ProseMirror');
   await editor.click();
 
@@ -73,7 +75,7 @@ test('서식 단추로 제목·굵게·목록·링크·표를 넣으면 동료�
   const dialog = a.getByRole('dialog', { name: '링크' });
   await dialog.getByLabel('주소').fill('mailto:user@example.internal');
   await dialog.getByRole('button', { name: '링크 넣기' }).click();
-  await expect(dialog.getByText('http(s)로 시작하는 주소나')).toBeVisible();
+  await expect(dialog.getByText('http(s)로 시작하는 주소,')).toBeVisible();
   await dialog.getByLabel('주소').fill('https://example.internal/서식');
   await dialog.getByRole('button', { name: '링크 넣기' }).click();
   await expect(dialog).toHaveCount(0);
@@ -81,13 +83,22 @@ test('서식 단추로 제목·굵게·목록·링크·표를 넣으면 동료�
   await a.keyboard.press('End');
   await a.keyboard.press('Enter');
 
-  // 되돌리기는 내 편집만 — 쉬었다 쓴 글 한 덩이를 되돌린다(Yjs의 되돌리기)
+  // 되돌리기는 내 편집만 — 쉬었다 쓴 글 한 덩이를 되돌린다(Yjs의 되돌리기). **그 사이 동료가 쓴 글은 남는다**(병합 전 자체 점검 9 — 동료가 아무것도
+  // 쓰지 않으면 "내 편집만"을 가리지 못한다)
   await a.waitForTimeout(800);
   await a.keyboard.type('지울글');
   await expect(editor).toContainText('지울글');
+  const other = b.locator('.editor .ProseMirror');
+  await expect(other).toContainText('지울글', { timeout: 15_000 });
+  await other.click();
+  await b.keyboard.press('Control+End');
+  await b.keyboard.press('Enter');
+  await b.keyboard.type('동료글');
+  await expect(editor).toContainText('동료글', { timeout: 15_000 });
   await a.waitForTimeout(800);
   await bar.getByRole('button', { name: '되돌리기' }).click();
   await expect(editor).not.toContainText('지울글');
+  await expect(editor).toContainText('동료글');
   await expect(editor).toContainText('서식 제목');
 
   // 표 — 3×3(머리 줄), 표 안에서는 표 무리가 붙는다. 아래에 행을 하나 더한다
@@ -99,9 +110,11 @@ test('서식 단추로 제목·굵게·목록·링크·표를 넣으면 동료�
   await a.keyboard.type('머리칸');
   await tableGroup.getByRole('button', { name: '아래에 행' }).click();
   await expect(editor.locator('table tr')).toHaveCount(4);
+  // 표 안에서는 줄이 두 줄로 접힐 수 있다 — 그 높이를 화면이 재어 여백·아래에 붙는 자리가 쓴다(`--format-bar-h`, 병합 전 자체 점검 2)
+  const measured = await bar.evaluate((el) => [Math.round(el.getBoundingClientRect().height), parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--format-bar-h'))]);
+  expect(measured[1]).toBe(measured[0]);
 
   // 동료에게 보인다 — 관문이 받았다
-  const other = b.locator('.editor .ProseMirror');
   await expect(other.locator('h1')).toContainText('서식 제목', { timeout: 15_000 });
   await expect(other.locator('strong')).toContainText('굵은글');
   await expect(other.locator('ul li')).toContainText('첫 항목');
@@ -124,6 +137,7 @@ test('서식 단추로 제목·굵게·목록·링크·표를 넣으면 동료�
   await expect(body.locator('a[href="https://example.internal/서식"]')).toHaveCount(1);
   await expect(body.locator('table tr')).toHaveCount(4);
   await expect(body).not.toContainText('지울글');
+  await expect(body).toContainText('동료글');
 
   // 댓글 칸에는 짧은 줄 — 굵게로 쓴 댓글이 굵게 남는다
   const commentBar = a.getByRole('toolbar', { name: '서식' });
@@ -133,6 +147,25 @@ test('서식 단추로 제목·굵게·목록·링크·표를 넣으면 동료�
   await a.keyboard.type('굵은 댓글');
   await a.getByRole('button', { name: '등록' }).click();
   await expect(a.getByRole('region', { name: '댓글' }).locator('.editor.readonly strong')).toContainText('굵은 댓글');
+
+  // 댓글 칸에서 링크를 넣어도 **댓글이 먼저 등록되거나 페이지가 다시 불리지 않는다**(병합 전 코드 리뷰 1 · 자체 점검 1 — 링크 대화의 폼이 댓글 폼 안에 있었다)
+  const viewUrl = a.url();
+  const comments = a.getByRole('region', { name: '댓글' }).locator('.editor.readonly');
+  await expect(comments).toHaveCount(1);
+  await a.getByRole('textbox', { name: '댓글 쓰기' }).click();
+  await a.keyboard.type('링크 댓글');
+  await a.keyboard.press('Shift+Home');
+  await commentBar.getByRole('button', { name: '링크' }).click();
+  const commentDialog = a.getByRole('dialog', { name: '링크' });
+  await commentDialog.getByLabel('주소').fill('https://example.internal/댓글');
+  await commentDialog.getByLabel('주소').press('Enter');
+  await expect(commentDialog).toHaveCount(0);
+  await expect(a).toHaveURL(viewUrl);
+  await expect(comments).toHaveCount(1);
+  await expect(a.getByRole('textbox', { name: '댓글 쓰기' }).locator('a[href="https://example.internal/댓글"]')).toHaveText('링크 댓글');
+  await a.getByRole('button', { name: '등록' }).click();
+  await expect(comments).toHaveCount(2);
+  await expect(comments.nth(1).locator('a[href="https://example.internal/댓글"]')).toHaveText('링크 댓글');
 
   await ctxA.close();
   await ctxB.close();

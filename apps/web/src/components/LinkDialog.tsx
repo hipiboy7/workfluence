@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Field } from './ui';
 
 /**
@@ -7,6 +8,10 @@ import { Field } from './ui';
  *
  * **넣기**가 까닭을 돌려주면(`onSubmit` — 링크가 되지 않는 주소) 닫지 않고 칸 아래에 보인다. **링크 빼기**는 커서가 링크 위일 때만. **그만두기**·Esc는
  * 아무것도 하지 않는다. 닫힌 뒤 초점을 어디로 보낼지는 부른 쪽(`onClose`)이 정한다 — 본문으로 돌아간다
+ *
+ * **댓글 칸의 폼 안에서 열린다**(병합 전 코드 리뷰 1 · 자체 점검 1) — 그래서 두 가지를 한다. ① `body`에 그린다(`createPortal`): 폼 안의 폼은 HTML이 받지
+ * 않는 모양이라 Chromium은 대화의 제출을 바깥 폼 쪽에서 멈추고 페이지를 다시 불렀다(쓰던 댓글이 사라졌다). ② 제출을 **위로 올려 보내지 않는다**
+ * (`stopPropagation`): React의 이벤트는 포털을 넘어 부모 컴포넌트로 올라가 바깥 폼의 `onSubmit`(댓글 등록)까지 돌았다(링크 없는 옛 글이 등록됐다)
  */
 export function LinkDialog({
   initial,
@@ -49,12 +54,13 @@ export function LinkDialog({
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const problem = onSubmit(href);
     if (problem) setError(problem);
     else onClose();
   };
 
-  return (
+  return createPortal(
     <dialog ref={ref} className="confirm" aria-labelledby="link-title">
       <form onSubmit={submit} noValidate>
         <h2 id="link-title">링크</h2>
@@ -93,6 +99,7 @@ export function LinkDialog({
           </button>
         </div>
       </form>
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }

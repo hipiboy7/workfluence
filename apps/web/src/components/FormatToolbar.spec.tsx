@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { Editor, type Content } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { EMPTY_DOC, Editor as EditorView } from './Editor';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { FormEvent } from 'react';
 import { editorExtensions } from './extensions';
 import { FormatToolbar } from './FormatToolbar';
 import { LINK_NOT_ALLOWED } from './formatActions';
@@ -60,6 +61,26 @@ describe('FormatToolbar', () => {
     expect(undo.disabled).toBe(false);
     // 눌림이 없는 단추에는 aria-pressed가 없다
     expect(within(bar()).getByRole('button', { name: '구분선' }).hasAttribute('aria-pressed')).toBe(false);
+  });
+
+  it('**키보드로 문단 형식을 바꾸면 초점이 칸에 남는다** — ↑↓가 곧바로 값을 바꾸는 브라우저에서 제목 2·3까지 내려간다(병합 전 자체 점검 10). 마우스는 본문으로', async () => {
+    const e = open();
+    render(<FormatToolbar editor={e} variant="full" />);
+    select(e, 2, 2);
+    const choose = within(bar()).getByRole('combobox', { name: '문단 형식' }) as HTMLSelectElement;
+    act(() => choose.focus());
+    act(() => {
+      fireEvent.keyDown(choose, { key: 'ArrowDown' });
+      fireEvent.change(choose, { target: { value: 'h1' } });
+    });
+    expect(e.isActive('heading', { level: 1 })).toBe(true);
+    expect(document.activeElement).toBe(choose);
+    act(() => {
+      fireEvent.pointerDown(choose);
+      fireEvent.change(choose, { target: { value: 'h3' } });
+    });
+    expect(e.isActive('heading', { level: 3 })).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(e.view.dom));
   });
 
   it('**문단 형식을 고르면 제목이 되고, 지금 형식을 보인다**', () => {
@@ -130,6 +151,31 @@ describe('FormatToolbar', () => {
     act(() => fireEvent.click(within(dialog).getByRole('button', { name: '링크 빼기' })));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(e.isActive('link')).toBe(false);
+  });
+
+  it('**폼 안의 편집기(댓글 칸)에서 링크를 넣어도 바깥 폼은 제출되지 않는다** — 대화는 폼 밖(body)에 그리고 제출을 올려 보내지 않는다(병합 전 코드 리뷰 1 · 자체 점검 1)', async () => {
+    const outer = vi.fn((ev: FormEvent) => ev.preventDefault());
+    const hello = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello world' }] }] } as unknown as typeof EMPTY_DOC;
+    render(
+      <form aria-label="댓글 폼" onSubmit={outer}>
+        <EditorView value={hello} ariaLabel="댓글 쓰기" toolbar="compact" />
+      </form>,
+    );
+    const box = (await screen.findByRole('textbox', { name: '댓글 쓰기' })) as HTMLElement & { editor: Editor };
+    const e = box.editor;
+    select(e, 7, 12);
+    for (const how of ['click', 'submit'] as const) {
+      act(() => fireEvent.click(within(bar()).getByRole('button', { name: '링크' })));
+      const dialog = screen.getByRole('dialog', { name: '링크' });
+      // 폼 안의 폼이 아니다
+      expect(screen.getByRole('form', { name: '댓글 폼' }).contains(dialog)).toBe(false);
+      fireEvent.change(within(dialog).getByLabelText('주소'), { target: { value: `https://example.internal/${how}` } });
+      if (how === 'click') act(() => fireEvent.click(within(dialog).getByRole('button', { name: '링크 넣기' })));
+      else act(() => fireEvent.submit(dialog.querySelector('form')!));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(e.getAttributes('link').href).toBe(`https://example.internal/${how}`);
+    }
+    expect(outer).not.toHaveBeenCalled();
   });
 
   it('**그만두기는 아무것도 하지 않는다**', () => {

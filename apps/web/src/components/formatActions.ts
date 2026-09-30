@@ -53,6 +53,12 @@ export type FormatAction = {
 
 const TABLE = { rows: 3, cols: 3, withHeaderRow: true } as const;
 
+/**
+ * 링크를 걸 수 있는 자리인지 물을 때 쓰는 주소 — 판정용이다. 편집기는 이 주소로 링크를 만들지 않고 **그 자리의 스키마**(링크를 받는 노드인가)만 본다.
+ * 허용되는 주소여야 명령이 주소 때문에 거절하지 않는다(병합 전 자체 점검 11 — 이름 없는 주소 글자를 두지 않는다)
+ */
+const LINK_PROBE_HREF = 'https://example.internal';
+
 export const FORMAT_ACTIONS: Readonly<Record<FormatActionId, FormatAction>> = {
   bold: { id: 'bold', label: '굵게', shortcut: 'Ctrl+B', keys: 'Control+B', toggle: true, active: (e) => e.isActive('bold'), can: (e) => e.can().toggleBold(), run: (e) => e.chain().focus().toggleBold().run() },
   italic: {
@@ -135,7 +141,7 @@ export const FORMAT_ACTIONS: Readonly<Record<FormatActionId, FormatAction>> = {
     toggle: true,
     active: (e) => e.isActive('link'),
     // 코드 안(인라인 코드·코드 블록)에는 링크를 걸 수 없다 — 스키마가 막는다(`MARKS_IN`)
-    can: (e) => e.isActive('link') || e.can().setLink({ href: 'https://example.internal' }),
+    can: (e) => e.isActive('link') || e.can().setLink({ href: LINK_PROBE_HREF }),
     run: () => undefined,
   },
   insertTable: { id: 'insertTable', label: '표 넣기', toggle: false, can: (e) => !e.isActive('table') && e.can().insertTable(TABLE), run: (e) => e.chain().focus().insertTable(TABLE).run() },
@@ -189,12 +195,16 @@ export function currentBlock(e: Editor): BlockType {
   return e.isActive('paragraph') ? 'paragraph' : 'other';
 }
 
-/** 그 블록으로 바꾼다 — 목록 항목의 첫 문단처럼 스키마가 받지 않는 자리면 하지 않는다(편집기가 거절한다) */
-export function setBlock(e: Editor, value: BlockType): boolean {
+/**
+ * 그 블록으로 바꾼다. **목록 항목 안에서 제목을 고르면 그 줄이 목록 밖으로 나온다** — 편집기가 막는 것이 아니라 꺼낸다(`setHeading`이 `clearNodes`로 목록을
+ * 푼다). 목록 항목의 첫 줄은 문단이어야 해서다(P12 `FIRST_CHILD`, 사용자 가이드 4.1절). `focus: false`면 초점을 본문으로 옮기지 않는다(키보드로 고르는 칸)
+ */
+export function setBlock(e: Editor, value: BlockType, { focus = true }: { focus?: boolean } = {}): boolean {
   if (value === 'other') return false;
-  if (value === 'paragraph') return e.chain().focus().setParagraph().run();
+  const chain = focus ? e.chain().focus() : e.chain();
+  if (value === 'paragraph') return chain.setParagraph().run();
   const level = Number(value.slice(1)) as 1 | 2 | 3 | 4 | 5 | 6;
-  return e.chain().focus().setHeading({ level }).run();
+  return chain.setHeading({ level }).run();
 }
 
 // ---- 링크 (D.2) ----
@@ -206,8 +216,8 @@ export function linkHrefAt(e: Editor): string | null {
   return typeof href === 'string' ? href : null;
 }
 
-/** 링크가 되지 않는 주소일 때의 까닭 — 서버·편집기와 같은 판정이다(`linkAllowed`, 7절) */
-export const LINK_NOT_ALLOWED = 'http(s)로 시작하는 주소나 /로 시작하는 위키 안 주소만 링크가 된다';
+/** 링크가 되지 않는 주소일 때의 까닭 — 서버·편집기와 같은 판정이다(`linkAllowed`, 7절 — 앵커 `#…`도 받는다, 병합 전 자체 점검 11) */
+export const LINK_NOT_ALLOWED = 'http(s)로 시작하는 주소, /로 시작하는 위키 안 주소, #으로 시작하는 문서 안 자리만 링크가 된다';
 
 /**
  * 링크를 건다 — 주소는 앞뒤 빈칸을 떼고 `linkAllowed`로 본다. 안 되면 까닭(`LINK_NOT_ALLOWED`)을 돌려주고 아무것도 하지 않는다.
