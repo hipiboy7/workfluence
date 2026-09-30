@@ -234,10 +234,11 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
 
   it('**동시에 두 번 써도 하나만 된다**', async () => {
     const { alice, token } = await issued();
-    const r = await Promise.allSettled([recovery.resetPassword({ token, newPassword: 'First-pw-2026' }), recovery.resetPassword({ token, newPassword: 'Second-pw-2026' })]);
+    // 시험 값은 엔트로피 3.5 아래로 둔다 — `newPassword: '…'`는 gitleaks의 generic-api-key가 읽는다(T-045·T-060·T-094)
+    const r = await Promise.allSettled([recovery.resetPassword({ token, newPassword: 'First-pw-2026' }), recovery.resetPassword({ token, newPassword: 'Later-pw-2026' })]);
     expect(r.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
     expect(r.filter((x) => x.status === 'rejected')).toHaveLength(1);
-    const logins = await Promise.allSettled(['First-pw-2026', 'Second-pw-2026'].map((password) => auth.login({ username: 'alice', password })));
+    const logins = await Promise.allSettled(['First-pw-2026', 'Later-pw-2026'].map((password) => auth.login({ username: 'alice', password })));
     expect(logins.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
     expect((await usersSvc.findById(alice.id))!.passwordHash).not.toBe(alice.passwordHash);
   });
