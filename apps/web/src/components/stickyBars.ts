@@ -24,8 +24,10 @@ export type BarHeightVar = '--edit-bar-h' | '--format-bar-h';
  * 그 막대의 높이를 CSS 변수로 둔다 — 요소가 붙을 때 재기 시작하고(`ResizeObserver`) 떨어지면 변수를 지운다. 요소는 나중에 그려질 수 있어(페이지를 읽은 뒤)
  * 붙는 순간을 받는 콜백 ref로 준다
  */
-export function useBarHeightVar(name: BarHeightVar, enabled = true): (el: HTMLElement | null) => void {
+export function useBarHeightVar(name: BarHeightVar, enabled = true, onResize?: () => void): (el: HTMLElement | null) => void {
   const stop = useRef<(() => void) | null>(null);
+  const resized = useRef(onResize);
+  resized.current = onResize;
   useEffect(() => () => stop.current?.(), []);
   return useCallback(
     (el: HTMLElement | null) => {
@@ -35,7 +37,10 @@ export function useBarHeightVar(name: BarHeightVar, enabled = true): (el: HTMLEl
       const root = document.documentElement;
       const set = () => root.style.setProperty(name, `${el.offsetHeight}px`);
       set();
-      const observer = new ResizeObserver(set);
+      const observer = new ResizeObserver(() => {
+        set();
+        resized.current?.();
+      });
       observer.observe(el);
       stop.current = () => {
         observer.disconnect();

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect, request as apiRequest, test } from '@playwright/test';
+import { CSRF_HEADER, CSRF_HEADER_VALUE } from '@workfluence/shared';
 import { createServer, type Server } from 'node:http';
 import { cleanup, createAdmin, createMember, newAdmin } from './fixtures';
 
@@ -33,6 +34,11 @@ test.beforeAll(async () => {
   await new Promise<void>((ok) => server.listen(MAIL_PORT, '127.0.0.1', ok));
   await createMember(member);
   await createAdmin(ROOT, 'root');
+  // **메일 재설정을 스스로 켠다** — 운영 설정은 사람이 화면에서 끌 수 있는 값이다. 켜져 있다고 믿지 않는다(CLAUDE.md 3절, 병합 전 코드 리뷰 추가 7)
+  const api = await apiRequest.newContext({ baseURL: process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3000', extraHTTPHeaders: { [CSRF_HEADER]: CSRF_HEADER_VALUE } });
+  expect((await api.post('/api/auth/login', { data: { username: ROOT.username, password: ROOT.password } })).ok()).toBe(true);
+  expect((await api.patch('/api/settings/policy', { data: { passwordResetMail: 1 } })).ok()).toBe(true);
+  await api.dispose();
 });
 test.afterAll(async () => {
   await new Promise<void>((ok) => server.close(() => ok()));

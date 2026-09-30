@@ -10,7 +10,7 @@ import { Link, useLocation } from 'react-router';
 
 /** 경로의 구역 이름 — 탭 제목과 주 메뉴가 같이 쓴다 (FR-1854). 로그인 전 화면에는 구역이 없다 */
 export function sectionOf(pathname: string): string {
-  if (pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/find-account')) return '';
+  if (pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/find-account') || pathname.startsWith('/reset-password')) return '';
   if (pathname.startsWith('/admin')) return '관리';
   if (pathname.startsWith('/llm')) return 'LLM 질문';
   if (pathname.startsWith('/search') || pathname.startsWith('/labels')) return '검색';

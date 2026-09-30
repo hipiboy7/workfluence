@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CONFIRM_MISMATCH } from './ChangePasswordPage';
 import { LINK_BROKEN, RESET_DONE, ResetPasswordPage, tokenFromHash } from './ResetPasswordPage';
@@ -33,6 +33,16 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+/** 같은 탭에 새 링크를 붙여 넣은 것 — 주소의 값만 바뀐다 */
+function Paste({ to }: { to: string }) {
+  const nav = useNavigate();
+  return (
+    <button type="button" onClick={() => nav(to)}>
+      새 링크 붙여 넣기
+    </button>
+  );
+}
 
 /** 지금 주소를 그리는 조각 — 값이 주소에서 지워졌는지 본다 */
 function Where() {
@@ -93,6 +103,34 @@ describe('ResetPasswordPage', () => {
     await screen.findByText(RESET_DONE);
     expect(calls.filter((c) => c.url === '/api/auth/reset-password')).toEqual([{ url: '/api/auth/reset-password', body: { token: TOKEN, newPassword: 'New-pw-2026x' } }]);
     expect(screen.getByRole('link', { name: '로그인으로' }).getAttribute('href')).toBe('/login');
+  });
+
+  it('**같은 탭에 새 링크를 붙여 넣으면 새 값을 쓴다** — 새 요청이 옛 값을 지웠다(병합 전 코드 리뷰 추가 6)', async () => {
+    const NEXT = 'B'.repeat(43);
+    render(
+      <MemoryRouter initialEntries={[`/reset-password#t=${TOKEN}`]}>
+        <Routes>
+          <Route
+            path="/reset-password"
+            element={
+              <>
+                <ResetPasswordPage />
+                <Paste to={`/reset-password#t=${NEXT}`} />
+                <Where />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await vi.waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/reset-password'));
+    fireEvent.click(screen.getByRole('button', { name: '새 링크 붙여 넣기' }));
+    await vi.waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/reset-password'));
+    fill('새 비밀번호', 'New-pw-2026x');
+    fill('새 비밀번호 확인', 'New-pw-2026x');
+    fireEvent.click(screen.getByRole('button', { name: '새 비밀번호로 정하기' }));
+    await screen.findByText(RESET_DONE);
+    expect(calls.filter((c) => c.url === '/api/auth/reset-password').map((c) => (c.body as { token: string }).token)).toEqual([NEXT]);
   });
 
   it('**서버가 거절하면 그 문장을 보인다** — 틀린·지난 링크, 약한 비밀번호', async () => {

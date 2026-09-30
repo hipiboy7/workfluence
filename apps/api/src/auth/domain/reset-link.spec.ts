@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { PASSWORD_RESET } from '@workfluence/shared';
-import { linkExpiresAt, mailThrottled, newResetToken, passwordMark, resetLinkProblem, resetLinkUrl, resetMailAvailable, throttleReleasedAt, tokenDigest } from './reset-link';
+import { linkExpiresAt, mailThrottled, newResetToken, passwordMark, resetLinkProblem, resetLinkUrl, resetMailAvailable, tokenDigest } from './reset-link';
 
 /**
  * A등급 — **테스트 먼저** (3절, P19_설계서_Recovery C.3, FR-2003~2005·2008). 메일 재설정 링크의 값·기한·간격·쓸 수 있는가를 순수 함수로 판정한다 —
@@ -67,14 +67,6 @@ describe('linkExpiresAt · mailThrottled — 30분, 한 계정에 5분에 한 �
 
   it('**시계가 뒤로 가 마지막 발급이 미래면 보내지 않는다** — 되풀이를 막는 쪽으로 틀린다', () => {
     expect(mailThrottled(new Date(now.getTime() + 10 * min), now)).toBe(true);
-  });
-
-  it('**보내기가 실패하면 간격만 푼다**(`throttleReleasedAt`) — 발급 시각을 간격만큼 앞당겨 곧바로 다시 받는다. 링크의 기한은 그대로라 늦게 닿은 메일의 링크도 쓴다(병합 전 코드 리뷰 4)', () => {
-    const released = throttleReleasedAt(now);
-    expect(now.getTime() - released.getTime()).toBe(PASSWORD_RESET.mailIntervalMinutes * min);
-    expect(mailThrottled(released, now)).toBe(false);
-    // 표의 CHECK(expires_at > created_at)를 지킨다
-    expect(linkExpiresAt(now).getTime()).toBeGreaterThan(released.getTime());
   });
 });
 

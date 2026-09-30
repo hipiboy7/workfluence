@@ -176,6 +176,18 @@ describe('링크 (D.2, FR-2023)', () => {
     valid(e);
   });
 
+  it('**넣은 링크 뒤에 이어 친 글은 링크가 아니다** — 링크 마크는 끝에서 이어진다(inclusive, 병합 전 코드 리뷰 추가 1)', () => {
+    const e = open();
+    select(e, 6, 6);
+    expect(applyLink(e, 'https://example.internal/doc')).toBeNull();
+    // 사람이 치는 것과 같다 — 지금 자리의 마크를 따른다
+    e.view.dispatch(e.state.tr.insertText(' 를 보라'));
+    const texts = json(e).content![0].content!;
+    expect(texts.find((t) => t.text?.includes('https://example.internal/doc'))).toMatchObject({ marks: [{ type: 'link' }] });
+    expect(texts.at(-1)).toMatchObject({ text: ' 를 보라' });
+    expect(texts.at(-1)!.marks).toBeUndefined();
+  });
+
   it('**링크 위에서는 주소를 바꾸고 뺀다** — 그 링크 전체', () => {
     const e = open({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '위키', marks: [{ type: 'link', attrs: { href: 'https://a.example.internal' } }] }] }] });
     select(e, 2, 2);

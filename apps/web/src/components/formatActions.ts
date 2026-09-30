@@ -229,7 +229,9 @@ export function applyLink(e: Editor, raw: string): string | null {
   if (e.isActive('link')) {
     e.chain().focus().extendMarkRange('link').setLink({ href }).run();
   } else if (e.state.selection.empty) {
-    e.chain().focus().insertContent({ type: 'text', text: href, marks: [{ type: 'link', attrs: { href } }] }).run();
+    // 넣은 뒤 **이어 치는 글은 링크가 아니다** — 링크 마크는 끝에서 이어진다(inclusive). 빼지 않으면 "주소 를 보라"가 한 링크가 되고, 링크 빼기가 주소의
+    // 링크까지 뺐다(병합 전 코드 리뷰 추가 1)
+    e.chain().focus().insertContent({ type: 'text', text: href, marks: [{ type: 'link', attrs: { href } }] }).unsetMark('link').run();
   } else {
     e.chain().focus().setLink({ href }).run();
   }

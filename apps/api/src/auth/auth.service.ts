@@ -191,6 +191,9 @@ export class AuthService {
       const prepared = await this.users.prepareChangePassword(userId, dto.currentPassword, dto.newPassword);
       await this.db.transaction(async (tx) => {
         await this.users.changePassword(userId, dto.currentPassword, dto.newPassword, tx, prepared);
+        // 남은 계정 찾기 알림(초기화 요청·email 확인 요청)을 읽음으로 — 관리자가 뒤늦게 초기화하면 방금 정한 비밀번호를 임시 비밀번호로 덮는다
+        // (P17 FR-1803과 같은 까닭 — 메일 링크 재설정·관리자 초기화는 이미 한다, P19 병합 전 코드 리뷰 추가 3)
+        await this.notifications.resolveRecoveryRequests(userId, tx);
         await this.audit.record({ action: 'auth.password.change', actorId: userId, ip }, tx);
       });
       // **편집 연결에 알리는 것은 커밋한 뒤에** (좁은 자체 점검 5 — 정지·강제 종료와 같다, `UsersService.destroyAllSessions`)

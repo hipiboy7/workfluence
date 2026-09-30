@@ -86,12 +86,17 @@ function snapshot(e: Editor | null, variant: Variant): Snapshot {
  * - **Ctrl+K** — 본문에서 누르면 링크 대화를 연다(편집기에는 그 단축키가 없다)
  */
 export function FormatToolbar({ editor, variant }: { editor: Editor | null; variant: Variant }) {
-  const state = useEditorState({ editor, selector: ({ editor: e }) => snapshot(e, variant) }) ?? snapshot(null, variant);
+  // 고르는 함수를 그리는 때마다 새로 만들지 않는다 — 부모가 다시 그릴 때마다 판정이 다시 돈다(병합 전 코드 리뷰 추가 14)
+  const selector = useCallback(({ editor: e }: { editor: Editor | null }) => snapshot(e, variant), [variant]);
+  const state = useEditorState({ editor, selector }) ?? snapshot(null, variant);
   const [linkOpen, setLinkOpen] = useState(false);
   const [focusAt, setFocusAt] = useState(0);
   const barRef = useRef<HTMLDivElement | null>(null);
   // 전체 줄은 창 위에 붙는다 — 그 높이를 편집 화면의 여백이 쓴다(표 안이면 두 줄로 접힌다, `stickyBars.ts`)
-  const measure = useBarHeightVar('--format-bar-h', variant === 'full');
+  // 줄이 커지면(표 안 — 두 줄) 커서를 다시 보이게 한다 — 편집기는 줄이 커지기 **전의** 높이로 스크롤했다(병합 전 코드 리뷰 추가 11)
+  const measure = useBarHeightVar('--format-bar-h', variant === 'full', () => {
+    if (editor?.isFocused) editor.commands.scrollIntoView();
+  });
   const setBar = useCallback(
     (el: HTMLDivElement | null) => {
       barRef.current = el;
@@ -112,7 +117,8 @@ export function FormatToolbar({ editor, variant }: { editor: Editor | null; vari
     const dom = editor?.view.dom;
     if (!dom) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+      // 글쇠 자리(`code`)로도 본다 — 한글 입력 상태에서는 글자(`key`)가 'k'가 아닐 수 있다(병합 전 코드 리뷰 추가 13)
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key.toLowerCase() === 'k' || e.code === 'KeyK')) {
         e.preventDefault();
         openLink();
       }

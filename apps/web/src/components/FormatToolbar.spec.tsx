@@ -182,6 +182,16 @@ describe('FormatToolbar', () => {
     expect(outer).not.toHaveBeenCalled();
   });
 
+  it('**한글 입력 상태의 Ctrl+K도 링크 대화를 연다** — 글자가 아니라 글쇠 자리로도 본다(병합 전 코드 리뷰 추가 13)', () => {
+    const e = open();
+    render(<FormatToolbar editor={e} variant="compact" />);
+    select(e, 1, 3);
+    act(() => {
+      fireEvent.keyDown(e.view.dom, { key: 'ㅏ', code: 'KeyK', ctrlKey: true });
+    });
+    expect(screen.getByRole('dialog', { name: '링크' })).toBeTruthy();
+  });
+
   it('**그만두기는 아무것도 하지 않는다**', () => {
     const e = open();
     render(<FormatToolbar editor={e} variant="full" />);

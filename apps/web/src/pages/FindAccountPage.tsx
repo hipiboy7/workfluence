@@ -134,7 +134,14 @@ export function FindAccountPage() {
                 <button type="submit" className="primary">
                   내 email로 재설정 링크 받기
                 </button>
-                <button type="button" onClick={() => void request('admin')}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    // 제출 단추가 아니라 브라우저의 칸 검사(필수·email 모양)를 지나지 않는다 — 빈 칸으로 헛누르면 IP별 제한(10분에 3건)을 쓴다(병합 전 코드 리뷰 추가 8)
+                    if (e.currentTarget.form?.reportValidity() === false) return;
+                    void request('admin');
+                  }}
+                >
                   관리자에게 초기화 요청
                 </button>
               </>

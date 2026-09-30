@@ -23,7 +23,7 @@ import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 import { afterSuccess } from './domain/lockout';
-import { linkExpiresAt, mailThrottled, newResetToken, passwordMark, resetLinkProblem, resetLinkUrl, resetMailAvailable, throttleReleasedAt, tokenDigest, type ResetLinkProblem } from './domain/reset-link';
+import { linkExpiresAt, mailThrottled, newResetToken, passwordMark, resetLinkProblem, resetLinkUrl, resetMailAvailable, tokenDigest, type ResetLinkProblem } from './domain/reset-link';
 
 /** 틀린 링크는 **하나의 문장**이다 (FR-2007) — 없는 값·지난 값·쓴 값·비밀번호가 바뀐 뒤의 값·받을 수 없게 된 계정. 까닭은 감사에만 남는다 */
 export const RESET_LINK_INVALID = '링크가 맞지 않거나 기한이 지났다 — 비밀번호 찾기에서 다시 요청한다';
@@ -82,8 +82,8 @@ export class RecoveryService {
    *
    * 사용자 행을 **잠그고** 다시 본다 — 동시에 두 요청이 와도 한 통이고(간격 판정과 쓰기 사이가 벌어지지 않게), 그 사이 정지됐으면 보내지 않는다. 한 사람에게
    * 살아 있는 링크는 하나다 — 그 사람의 옛 행을 지우고 넣는다(기한이 지난 남의 행도 함께 지운다). 메일은 **커밋한 뒤에** 보낸다 — 되돌릴 수 없다(P6 FR-754).
-   * 보내기가 실패하면 **간격만 푼다**(`throttleReleasedAt`) — 곧바로 다시 요청할 수 있게(A.1-7). 값은 지우지 않는다: 메일 API가 받아 놓고 시간 제한 뒤에
-   * 답하면(또는 앞단이 5xx를 주면) 이미 닿은 링크가 죽는다(병합 전 코드 리뷰 4). 새 요청은 옛 값을 지운다
+   * 보내기가 실패해도 **값과 간격을 그대로 둔다**(A.1-7) — 메일 API가 받아 놓고 시간 제한 뒤에 답하면(또는 앞단이 5xx를 주면) 이미 닿은 링크가 살고(값을
+   * 지우면 죽었다 — 병합 전 코드 리뷰 4), 그런 API로 요청마다 한 통씩 더 가 남의 메일함을 채우지 못한다(간격을 풀면 그랬다 — 코드 리뷰 추가 4). 5분 뒤 다시 받는다
    */
   async requestResetMail(dto: RecoverPasswordDto, ip?: string, now: Date = new Date()): Promise<ResetMailResult> {
     const found = await this.users.findByEmailAndName(dto.email, dto.displayName);
@@ -123,7 +123,6 @@ export class RecoveryService {
     const url = resetLinkUrl(this.env.WF_PUBLIC_URL, token);
     // 공개 주소가 없으면 여기 오지 않는다(`available`) — 그래도 링크 없는 메일은 보내지 않는다
     const ok = url !== null && (await this.sender.send({ to: issued.email, ...passwordResetMail({ name: issued.user.displayName, url, minutes: PASSWORD_RESET.linkMinutes }) }));
-    if (!ok) await this.db.update(passwordResetTokens).set({ createdAt: throttleReleasedAt(now) }).where(eq(passwordResetTokens.id, issued.rowId));
     // 결과를 감사에 — "메일이 안 왔다"에 답한다(P6 FR-756). 주소는 싣지 않는다
     await this.audit.record({
       action: ok ? 'mail.send' : 'mail.fail',

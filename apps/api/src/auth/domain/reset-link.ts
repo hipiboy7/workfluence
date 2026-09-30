@@ -49,14 +49,6 @@ export function mailThrottled(lastIssuedAt: Date | null, now: Date): boolean {
   return now.getTime() - lastIssuedAt.getTime() < PASSWORD_RESET.mailIntervalMinutes * 60_000;
 }
 
-/**
- * **보내기가 실패하면 간격만 푼다** (병합 전 코드 리뷰 4) — 발급 시각을 간격만큼 앞당긴다. 값을 지우면 메일 API가 받아 놓고 늦게(시간 제한 뒤) 답했을 때
- * 이미 닿은 링크가 죽는다. 기한(`expires_at`)은 그대로다 — 곧바로 다시 요청할 수 있고, 새 요청은 옛 값을 지운다
- */
-export function throttleReleasedAt(now: Date): Date {
-  return new Date(now.getTime() - PASSWORD_RESET.mailIntervalMinutes * 60_000);
-}
-
 export type ResetLinkProblem = 'expired' | 'changed' | 'ineligible';
 
 /**

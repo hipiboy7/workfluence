@@ -424,6 +424,16 @@ describe('비밀번호 초기화 요청은 관리자의 알림함에 간다 (P17
     expect((await resetRows()).map((r) => r.userId)).toEqual([root.id]);
   });
 
+  it('**본인이 비밀번호를 바꾸면** 남은 초기화 요청 알림도 읽음이 된다 — 관리자가 뒤늦게 초기화해 방금 정한 비밀번호를 덮지 않게(P19 병합 전 코드 리뷰 추가 3)', async () => {
+    const alice = await approvedAlice();
+    const root = await addUser('root1', 'root');
+    const asRoot = { id: root.id, role: 'root' as const };
+    expect(await notifySvc.notifyPasswordResetRequest({ id: alice.id, role: 'member', grants: [] })).toBe(1);
+    expect(await notifySvc.unreadCount(asRoot)).toBe(1);
+    await auth.changePassword(alice.id, { currentPassword: SIGNUP.password, newPassword: 'New-pw-2026' });
+    expect(await notifySvc.unreadCount(asRoot)).toBe(0);
+  });
+
   it('읽지 않은 같은 요청은 또 만들지 않고, 관리자에서 내려가면 보이지 않으며, 누가 초기화하면 **모두의 알림함에서** 읽음이 된다 (FR-1802~1804)', async () => {
     const alice = await approvedAlice();
     const root = await addUser('root1', 'root');
@@ -916,8 +926,10 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
 
   it('정지된 사람은 비밀번호 찾기의 대상이 아니다 — 활성만 본다 (FR-1446)', async () => {
     const alice = await approvedAlice();
+    // 첫 인자는 **표시 이름**이다(P19 FR-2000) — 예전 시험은 아이디를 넘겨 활성이어도 null이라 있으나 마나였다(병합 전 코드 리뷰 추가 2)
+    expect((await usersSvc.findRecoveryTarget(SIGNUP.displayName, SIGNUP.email))?.id).toBe(alice.id);
     await usersSvc.suspend(alice.id, ADMIN);
-    expect(await usersSvc.findRecoveryTarget('alice', SIGNUP.email)).toBeNull();
+    expect(await usersSvc.findRecoveryTarget(SIGNUP.displayName, SIGNUP.email)).toBeNull();
   });
 });
 

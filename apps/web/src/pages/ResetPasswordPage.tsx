@@ -30,8 +30,8 @@ export function tokenFromHash(hash: string): string | null {
 export function ResetPasswordPage() {
   const loc = useLocation();
   const nav = useNavigate();
-  // 처음 그릴 때 한 번 읽는다 — 아래 효과가 주소에서 지운 뒤에도 값은 여기 남는다
-  const [token] = useState(() => tokenFromHash(loc.hash));
+  // 처음 그릴 때 읽는다 — 아래 효과가 주소에서 지운 뒤에도 값은 여기 남는다
+  const [token, setToken] = useState(() => tokenFromHash(loc.hash));
   const [newPassword, setNew] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,13 @@ export function ResetPasswordPage() {
   useDocumentTitle(TITLE);
 
   useEffect(() => {
-    if (loc.hash) nav({ pathname: loc.pathname, search: loc.search }, { replace: true });
+    if (!loc.hash) return;
+    // **같은 탭에 새 링크를 붙여 넣으면 그 값을 쓴다**(병합 전 코드 리뷰 추가 6) — 한 번만 읽으면 새로 받은 링크를 열어도 옛 값(새 요청이 지웠다)으로 보냈다
+    const next = tokenFromHash(loc.hash);
+    setToken(next);
+    setDone(false);
+    setError(null);
+    nav({ pathname: loc.pathname, search: loc.search }, { replace: true });
   }, [loc.hash, loc.pathname, loc.search, nav]);
 
   const mismatch = confirm !== '' && confirm !== newPassword;

@@ -173,16 +173,18 @@ describe('내 email로 재설정 링크 — 보낸다 (FR-2002·2005)', () => {
     await expect(recovery.resetPassword({ token: first, newPassword: 'New-pw-2026x' }, undefined, t5)).rejects.toThrow(RESET_LINK_INVALID);
   });
 
-  it('**보내기가 실패하면 링크는 두고 간격만 푼다** — 곧바로 다시 받는다(새 요청이 옛 값을 지운다). 감사에 `mail.fail`(병합 전 코드 리뷰 4)', async () => {
+  it('**보내기가 실패해도 링크와 간격은 그대로** — 5분 안의 다시 요청은 보내지 않는다(받아 놓고 실패를 알리는 메일 API로 메일함을 채우지 못한다). 감사에 `mail.fail`(병합 전 코드 리뷰 4 · 추가 4)', async () => {
     await addLocal();
     const now = new Date();
     sender.ok = false;
     expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL }, undefined, now)).toBe('issued');
-    const [row] = await db.select().from(passwordResetTokens);
-    expect(now.getTime() - row.createdAt.getTime()).toBe(PASSWORD_RESET.mailIntervalMinutes * min);
+    expect((await db.select().from(passwordResetTokens)).map((r) => r.tokenHash)).toEqual([sha(tokenOf(sender.sent[0]))]);
     expect(await auditOf('mail.fail')).toHaveLength(1);
     sender.ok = true;
-    expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL }, undefined, new Date(now.getTime() + 1000))).toBe('issued');
+    expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL }, undefined, new Date(now.getTime() + 1000))).toBe('throttled');
+    expect(sender.sent).toHaveLength(1);
+    const later = new Date(now.getTime() + PASSWORD_RESET.mailIntervalMinutes * min);
+    expect(await recovery.requestResetMail({ displayName: '앨리스', email: EMAIL }, undefined, later)).toBe('issued');
     expect((await db.select().from(passwordResetTokens)).map((r) => r.tokenHash)).toEqual([sha(tokenOf(sender.sent[1]))]);
   });
 
@@ -250,6 +252,8 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
       await reset;
       expect(hashed).toHaveBeenCalledTimes(1);
     } finally {
+      // 실패해도 줄을 푼다 — 안 풀면 'alice'의 줄이 막혀 뒤 시험들이 시간 초과로 묻힌다(병합 전 코드 리뷰 추가 9)
+      release();
       hashed.mockRestore();
     }
   });
@@ -263,10 +267,13 @@ describe('링크로 새 비밀번호 (FR-2006·2007)', () => {
       let release!: () => void;
       const held = auth.inAccountLine('alice', () => new Promise<void>((r) => (release = r)));
       const reset = recovery.resetPassword({ token, newPassword: 'New-pw-2026x' });
-      await new Promise((r) => setTimeout(r, 100));
-      if (change === 'reset') await usersSvc.resetPassword(alice.id, ROOT);
-      else await db.update(users).set({ role: 'root' }).where(eq(users.id, alice.id));
-      release();
+      try {
+        await new Promise((r) => setTimeout(r, 100));
+        if (change === 'reset') await usersSvc.resetPassword(alice.id, ROOT);
+        else await db.update(users).set({ role: 'root' }).where(eq(users.id, alice.id));
+      } finally {
+        release();
+      }
       await held;
       await expect(reset).rejects.toThrow(new BadRequestException(RESET_LINK_INVALID));
       const [f] = (await auditOf('auth.password.reset')).filter((x) => !(x.detail as { ok: boolean }).ok);

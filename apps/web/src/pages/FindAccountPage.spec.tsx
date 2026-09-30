@@ -105,6 +105,21 @@ describe('FindAccountPage', () => {
     expect(within(pw).queryByText(SENT_MAIL)).toBeNull();
   });
 
+  it('**칸이 비었으면 관리자에게 초기화 요청을 보내지 않는다** — 제출 단추가 아니어도 칸 검사를 지난다(IP별 제한을 헛쓰지 않게, 병합 전 코드 리뷰 추가 8)', async () => {
+    mailOn = true;
+    renderPage();
+    const pw = card('비밀번호 찾기');
+    await within(pw).findByRole('button', { name: '내 email로 재설정 링크 받기' });
+    fireEvent.click(within(pw).getByRole('button', { name: '관리자에게 초기화 요청' }));
+    type(pw, '이름', '앨리스');
+    type(pw, 'email', 'not-an-address');
+    fireEvent.click(within(pw).getByRole('button', { name: '관리자에게 초기화 요청' }));
+    expect(calls.some((c) => c.url === '/api/auth/recover-password')).toBe(false);
+    type(pw, 'email', 'alice@example.internal');
+    fireEvent.click(within(pw).getByRole('button', { name: '관리자에게 초기화 요청' }));
+    await within(pw).findByText(SENT_ADMIN);
+  });
+
   it('**아이디 찾기의 결과는 그 카드 안에** — 맞는 것이 없어도 같은 모양으로 답한다', async () => {
     renderPage();
     const id = card('아이디 찾기');
