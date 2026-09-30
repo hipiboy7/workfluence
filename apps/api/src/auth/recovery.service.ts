@@ -61,7 +61,7 @@ export class RecoveryService {
   /** 메일 재설정을 쓸 수 있는가 (FR-2008) — 메일 켜짐 · 공개 주소 · 운영 설정. 화면의 단추와 두 경로의 404가 이것 하나를 본다 */
   async available(): Promise<boolean> {
     const policy = await this.settings.get();
-    return resetMailAvailable({ mailEnabled: this.env.WF_MAIL_ENABLED, publicUrl: this.env.WF_PUBLIC_URL, policy: policy.passwordResetMail });
+    return resetMailAvailable({ mailEnabled: this.env.WF_MAIL_ENABLED, mailMock: this.env.WF_MAIL_MOCK, publicUrl: this.env.WF_PUBLIC_URL, policy: policy.passwordResetMail });
   }
 
   /** 요청을 받고 곧바로 돌아간다 — 일은 응답 뒤에 (NFR-191). 실패는 우리 쪽 결함이라 error 한 줄(FR-2012) */

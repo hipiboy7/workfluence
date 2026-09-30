@@ -49,6 +49,14 @@ export function mailThrottled(lastIssuedAt: Date | null, now: Date): boolean {
   return now.getTime() - lastIssuedAt.getTime() < PASSWORD_RESET.mailIntervalMinutes * 60_000;
 }
 
+/**
+ * **보내기가 실패하면 간격만 푼다** (병합 전 코드 리뷰 4) — 발급 시각을 간격만큼 앞당긴다. 값을 지우면 메일 API가 받아 놓고 늦게(시간 제한 뒤) 답했을 때
+ * 이미 닿은 링크가 죽는다. 기한(`expires_at`)은 그대로다 — 곧바로 다시 요청할 수 있고, 새 요청은 옛 값을 지운다
+ */
+export function throttleReleasedAt(now: Date): Date {
+  return new Date(now.getTime() - PASSWORD_RESET.mailIntervalMinutes * 60_000);
+}
+
 export type ResetLinkProblem = 'expired' | 'changed' | 'ineligible';
 
 /**
@@ -66,9 +74,10 @@ export function resetLinkProblem(
 }
 
 /**
- * 메일 재설정을 **쓸 수 있는가** (FR-2008, A.1-9) — 메일이 켜져 있고(`WF_MAIL_ENABLED`), 공개 주소가 있고(`WF_PUBLIC_URL`), 운영 설정이 켬
- * (`passwordResetMail`). 하나라도 아니면 화면이 단추를 보이지 않고 요청·링크 쓰기가 404다
+ * 메일 재설정을 **쓸 수 있는가** (FR-2008, A.1-9) — 메일이 켜져 있고(`WF_MAIL_ENABLED`) 모의가 아니고(`WF_MAIL_MOCK` — 보내는 척만 하면 링크가
+ * 아무에게도 가지 않는다, 병합 전 보안 검토 2), 공개 주소가 있고(`WF_PUBLIC_URL`), 운영 설정이 켬(`passwordResetMail`). 하나라도 아니면 화면이 단추를
+ * 보이지 않고 요청·링크 쓰기가 404다
  */
-export function resetMailAvailable(c: { mailEnabled: boolean; publicUrl: string; policy: number }): boolean {
-  return c.mailEnabled && c.publicUrl.trim() !== '' && c.policy === 1;
+export function resetMailAvailable(c: { mailEnabled: boolean; mailMock: boolean; publicUrl: string; policy: number }): boolean {
+  return c.mailEnabled && !c.mailMock && c.publicUrl.trim() !== '' && c.policy === 1;
 }

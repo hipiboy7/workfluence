@@ -35,6 +35,25 @@ export function mailApiUrlProblem(raw: string): string | null {
   return null;
 }
 
+/**
+ * **메일 속 링크의 주소**(`WF_PUBLIC_URL`)가 틀렸으면 까닭, 맞으면 `null` (빈 값은 부르는 쪽이 본다 — 링크 없는 메일이다, P19 병합 전 자체 점검 5).
+ * `http(s)`만, 사용자 정보·질의·조각 없이 — 뒤에 경로와 조각(`/reset-password#t=…`)을 붙인다. 스킴이 없는 값은 메일에서 열리지 않는 링크가 된다
+ */
+export function publicUrlProblem(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return '주소 형식이 아니다 — https://호스트:포트 모양으로 적는다(사람들이 브라우저에 치는 주소)';
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return '주소는 http 또는 https여야 한다';
+  if (!u.hostname) return '주소 형식이 아니다 — 호스트가 없다';
+  if (u.username || u.password) return '주소에 사용자 정보(아이디·비밀번호)를 넣지 않는다';
+  if (u.search) return '주소에 질의(?…)를 넣지 않는다';
+  if (u.hash) return '주소에 조각(#…)을 넣지 않는다';
+  return null;
+}
+
 /** HTTP 헤더 이름(토큰 글자 — RFC 9110 5.6.2)인가 */
 export function isHttpHeaderName(name: string): boolean {
   return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name);

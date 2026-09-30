@@ -164,6 +164,9 @@ export const LOG_EVENTS = [
   // 요청은 감사 기록에 남는다. 메일 API의 거절·연결 실패는 메일 줄(`mail.rejected`·`mail.failed`)이다
   'auth.reset_mail_failed',
   'auth.email_help_failed',
+  // 화면 설정(`GET /api/auth/config`)이 운영 설정을 읽지 못했다 — 메일 재설정만 끄고 답한다(실시간 편집·사내 로그인은 .env 값 그대로). 우리 쪽이라 error
+  // (병합 전 코드 리뷰 5 — 이 경로가 통째로 실패하면 편집 화면이 조용히 혼자 편집으로 떨어진다)
+  'auth.config_failed',
   // 세션 파기 버스
   'session.revoke_failed',
   // 메일

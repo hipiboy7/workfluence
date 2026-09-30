@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ROLES, type Role } from './constants';
-import { MAIL_FORMATS, MAIL_LIMITS, mailApiUrlProblem, mailAuthHeaderProblem, mailHeaderValueProblem } from './mail';
+import { MAIL_FORMATS, MAIL_LIMITS, mailApiUrlProblem, mailAuthHeaderProblem, mailHeaderValueProblem, publicUrlProblem } from './mail';
 
 /**
  * 환경변수 스키마 (P0_설계서_Foundation 1절, FR-010~FR-017).
@@ -173,7 +173,14 @@ export const envSchema = z
      * 사람이 눌러서 들어올 주소. **메일에 링크를 넣으려면 서버가 자기 주소를 알아야 한다** —
      * 요청 헤더로 조립하지 않는다 (9.1절 `redirect_uri`와 같은 판단: 헤더는 위조된다)
      */
-    WF_PUBLIC_URL: z.string().default(''),
+    WF_PUBLIC_URL: z
+      .string()
+      .default('')
+      .superRefine((v, ctx) => {
+        // 스킴이 없으면 메일 속 링크가 열리지 않는다 — 재설정 메일은 링크가 전부다 (P19 병합 전 자체 점검 5, `publicUrlProblem`)
+        const problem = v.trim() === '' ? null : publicUrlProblem(v);
+        if (problem) ctx.addIssue({ code: 'custom', message: problem });
+      }),
 
     // --- Phase 10: 사내 LLM (P10_설계서_Llm I절) ---
     /**
