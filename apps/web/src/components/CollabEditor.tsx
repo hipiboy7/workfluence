@@ -23,7 +23,7 @@ type Props = {
   onDoc?: (doc: Y.Doc | null) => void;
   /** 쓰는 칸의 이름이 되는 **보이는 라벨**의 id (P17 J.7) — 없으면 이름은 "본문"이다 */
   labelledBy?: string;
-  /** 창 위를 가리는 막대만큼 띄워 커서를 보이게 한다 — 편집 화면의 `EDIT_SCROLL_MARGIN` (P17 병합 전 검토 17) */
+  /** 창 위를 가리는 막대만큼 띄워 커서를 보이게 한다 — 편집 화면의 `EDIT_SCROLL_MARGIN` (P17 병합 전 코드 리뷰 18) */
   scrollMargin?: ScrollMargin;
   /** 서식 단추 줄 (P19 FR-2020·2025) — 되돌리기·다시는 Yjs의 것이다(내 편집만) */
   toolbar?: 'full' | 'compact';

@@ -21,7 +21,7 @@ import { FormatToolbar } from './FormatToolbar';
 export type ScrollMargin = { top: number; right: number; bottom: number; left: number };
 
 /**
- * 편집 화면의 여백 (P17 병합 전 검토 17) — 창 위를 붙어 있는 막대들(위 막대 48px `--topbar-h` + 편집 줄 48px `.edit-bar` + 서식 단추 줄 44px
+ * 편집 화면의 여백 (P17 병합 전 코드 리뷰 18) — 창 위를 붙어 있는 막대들(위 막대 48px `--topbar-h` + 편집 줄 48px `.edit-bar` + 서식 단추 줄 44px
  * `.format-bar` — P19 A.1-17, `styles.css`)이 가린다. 편집기는 기본으로 창 맨 위에서 5px만 띄워 판정해, 막대 뒤에 숨은 커서를 "보인다"고 보고
  * 스크롤하지 않았다. 막대 셋에 16px을 더한다
  */
@@ -59,7 +59,7 @@ export function Editor({
   value: DocNode;
   onChange?: (doc: DocNode) => void;
   /**
-   * **사람이 본문을 고쳤을 때만** 부른다 (P17 병합 전 검토 18). `onChange`는 처음 그릴 때와 바깥 값을 따라갈 때도 불린다(편집기가 다듬은 값을
+   * **사람이 본문을 고쳤을 때만** 부른다 (P17 병합 전 코드 리뷰 19). `onChange`는 처음 그릴 때와 바깥 값을 따라갈 때도 불린다(편집기가 다듬은 값을
    * 알린다) — 그것으로는 저장하지 않은 편집이 있는지 가릴 수 없다
    */
   onEdit?: () => void;

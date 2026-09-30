@@ -170,7 +170,7 @@ function PageEditorScreen() {
   const onState = useCallback((s: CollabState) => setLink(s), []);
   const onSaveBlocked = useCallback((r: string | null) => setSaveBlocked(r), []);
 
-  // **실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫거나 새로 고치기 전에 묻는다** (P17 병합 전 검토 18). 실시간 편집은 서버가 쓰는 대로
+  // **실시간 편집을 끈 화면은 저장하지 않은 편집이 있으면 창을 닫거나 새로 고치기 전에 묻는다** (P17 병합 전 코드 리뷰 19). 실시간 편집은 서버가 쓰는 대로
   // 저장하므로 묻지 않는다. 본문은 편집기가 사람이 고쳤다고 알릴 때만 친다(`onEdit` — 처음 그릴 때 편집기가 다듬어 알리는 값은 고친 것이 아니다).
   // 앱 안의 링크(왼쪽 칸의 트리·위 막대)로 떠나는 것은 막지 못한다 — 그것을 막는 `useBlocker`는 데이터 라우터(`createBrowserRouter`)에서만 되고
   // 이 앱은 `BrowserRouter`다(`App.tsx`). 라우터를 바꾸는 것은 모든 경로를 다시 짜는 일이라 이번에 하지 않는다

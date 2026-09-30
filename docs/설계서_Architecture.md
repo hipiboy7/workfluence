@@ -31,7 +31,7 @@
     │ SQL                               │ OIDC · 메일 발송 · LLM 질문 (HTTP)
     ▼                                   ▼
 [postgres]  문서·사용자·감사로그       [사내 IdP]  외부. Discovery·JWKS
-                                       [사내 메일 API]  외부. 멘션 알림 — 요청 모양은 사용자가 준 설명대로(P18), 실연동은 현장에서 (보류 18)
+                                       [사내 메일 API]  외부. 멘션 알림·비밀번호 재설정 링크(P19) — 요청 모양은 사용자가 준 설명대로(P18), 실연동은 현장에서 (보류 18)
                                        [사내 LLM (vLLM)]  외부. OpenAI 호환. 관리자가 등록한 주소 (보류 29)
     │
     ▼
@@ -78,7 +78,8 @@ workfluence/
 │   │   │   ├── search/           [P3] 검색
 │   │   │   ├── attachments/      [P3] 첨부 (domain 판정 · storage 경계)
 │   │   │   ├── comments/         [P3] 댓글
-│   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계) / [P8] scanMentions·callerFor
+│   │   │   ├── notifications/    [P4] 멘션 알림 (domain 추출 · 채널 경계) / [P8] scanMentions·callerFor /
+│   │   │   │                     [P17] 비밀번호 초기화 요청 알림 / [P19] email 확인 요청 알림 · 계정 찾기 알림 읽음(resolveRecoveryRequests)
 │   │   │   ├── trash/            [P4] 휴지통·되살리기
 │   │   │   ├── labels/           [P4] 라벨
 │   │   │   ├── templates/        [P6] 페이지 템플릿
@@ -129,7 +130,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `env.ts` | `WF_*` 환경 스키마(strict), 파싱, `.env.example` 키 추출 | 서버가 쓰고, 테스트가 `.env.example`과 대조한다 |
 | `constants.ts` | 역할·상태·Crew 역할·감사 이벤트·문서 스키마 버전·정책 기본값·CSRF 헤더 | 화면 문구와 서버 판정이 같은 목록을 봐야 한다 |
 | `document.ts` | 문서 JSON 허용 목록(노드·속성·마크·자식·노드별 마크), 검증, 속성·마크 판정 함수, 텍스트 추출 | **서버 검증 · 실시간 편집의 관문 · 편집기가 같은 목록을 본다.** 편집기 쪽은 대조 테스트(`apps/web/src/components/extensions.spec.ts`)가 강제한다 — 어긋나면 편집기가 만든 문서를 서버가 받지 않는다 (P9 D.7) |
-| `permissions.ts` | `can()`·`spaceAccess()`·`categoryAccess()`·위임 규칙표(`DELEGATION` — 받는 역할과 주는 사람, `canGrant`)·역할과 위임의 우열(`canManageUser` — Phase 11부터 위임도 본다)·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
+| `permissions.ts` | `can()`·`spaceAccess()`·`categoryAccess()`·위임 규칙표(`DELEGATION` — 받는 역할과 주는 사람, `canGrant`)·역할과 위임의 우열(`canManageUser` — Phase 11부터 위임도 본다)·메일 재설정을 받는 계정(`canResetPasswordByMail`, P19)·비밀번호 정책 판정 | 화면의 버튼 노출과 서버의 403이 같은 규칙이어야 한다 |
 | `security.ts` | ID·email 마스킹, 임시 비밀번호·식별자 생성 (난수 소스 주입) | 난수를 주입받아 순수 함수로 두면 테스트가 결정적이다 |
 | `schemas.ts` | API 요청 DTO(zod) + 응답 뷰 타입 | 서버 검증과 클라이언트 타입이 한 정의에서 나온다 |
 | `release.ts` | 반입 묶음의 필수 구성 목록 | 문서가 아니라 코드가 단일 출처다 (`CLAUDE.md` 8.3절) |
