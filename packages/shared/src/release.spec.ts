@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   BACKUP_COUNTED_TABLES,
   BACKUP_REQUIRED_FILES,
+  DOCKER_BUNDLE_RPMS,
+  DOCKER_KEY_FINGERPRINT,
   RELEASE_REQUIRED_FILES,
   backupCounts,
+  dockerKeyProblem,
   formatChecksums,
   formatManifest,
+  formatPackages,
   parseChecksums,
   parseManifest,
+  rpmSignatureProblems,
   unlistedRequired,
   verifyChecksums,
 } from './release';
@@ -190,5 +195,130 @@ describe('verifyChecksums가 이상한 파일 이름에 터지지 않는다 (코
       const out = verifyChecksums([{ file: name, sha256: 'a'.repeat(64) }], {});
       expect(out).toEqual([`${name}: 묶음에 없다`]);
     }
+  });
+});
+
+/**
+ * Docker 설치 묶음 (P20_설계서_Install D절, FR-2101) — 대상 RHEL 9 서버에 Docker가 없을 때만 들고 간다.
+ * 현장에는 Node가 없어 반입 가이드 0.3절 ②는 같은 판정을 셸 한 줄씩으로 한다 — 여기는 묶음을 **만드는 쪽**의 판정이다.
+ */
+describe('Docker 묶음에 싣는 RPM (FR-2101)', () => {
+  it('맨 위는 Docker의 넷과 Docker가 늘 요구하는 container-selinux다', () => {
+    expect([...DOCKER_BUNDLE_RPMS.top].sort()).toEqual(
+      ['container-selinux', 'containerd.io', 'docker-ce', 'docker-ce-cli', 'docker-compose-plugin'].sort(),
+    );
+  });
+
+  it('**`deps/`는 firewalld가 없는 서버에 모자란 넷이다** — 처음 판은 모든 서버에 이미 있는 셋을 골랐다(병합 전 자체 점검 1)', () => {
+    expect([...DOCKER_BUNDLE_RPMS.deps].sort()).toEqual(['iptables-nft', 'jansson', 'libnftnl', 'nftables'].sort());
+    for (const gone of ['iptables-libs', 'libnetfilter_conntrack', 'libnfnetlink']) {
+      expect(DOCKER_BUNDLE_RPMS.deps as readonly string[]).not.toContain(gone);
+    }
+  });
+
+  it('두 자리에 같은 이름이 없다', () => {
+    const top = new Set<string>(DOCKER_BUNDLE_RPMS.top);
+    expect(DOCKER_BUNDLE_RPMS.deps.filter((n) => top.has(n))).toEqual([]);
+  });
+});
+
+describe('dockerKeyProblem — 묶음의 키 파일 (병합 전 보안 검토 S1)', () => {
+  const fpr = DOCKER_KEY_FINGERPRINT.replace(/\s+/g, '');
+  const pub = 'pub:-:4096:1:C52FEB6B621E9F35:1487791233:::-:::escaESCA::::::23::0:';
+  const uid = 'uid:-::::1487792760::0000::Docker Release (CE rpm) <docker@docker.com>::::::::::0:';
+  const one = [pub, `fpr:::::::::${fpr}:`, uid, ''].join('\n');
+
+  it('키가 하나이고 그 지문이 Docker의 것이면 통과(null)', () => {
+    expect(dockerKeyProblem(one)).toBeNull();
+  });
+
+  it('지문은 gpg가 사람에게 보이는 모양(네 자리씩 띄어 쓴 것) 그대로 적혀 있다 — 공백을 빼면 40자다', () => {
+    expect(fpr).toMatch(/^[0-9A-F]{40}$/);
+  });
+
+  it('**키를 하나 더 붙인 파일은 거절한다** — 첫 키의 지문만 보면 통과하는데 `rpm --import`는 키를 전부 들인다', () => {
+    const two = one + [pub.replace('C52FEB6B621E9F35', 'A'.repeat(16)), `fpr:::::::::${'A'.repeat(40)}:`, ''].join('\n');
+    expect(dockerKeyProblem(two)).toMatch(/2개/);
+  });
+
+  it('지문이 다르면 거절한다', () => {
+    const other = [pub, `fpr:::::::::${'B'.repeat(40)}:`, uid, ''].join('\n');
+    expect(dockerKeyProblem(other)).toMatch(/지문/);
+  });
+
+  it('부속 키의 지문(`sub` 뒤의 `fpr`)은 보지 않는다 — 주 키의 지문이 판정한다', () => {
+    const withSub = [pub, `fpr:::::::::${fpr}:`, uid, 'sub:-:4096:1:1111222233334444:1487791233::::::e::::::23:', `fpr:::::::::${'C'.repeat(40)}:`, ''].join('\n');
+    expect(dockerKeyProblem(withSub)).toBeNull();
+  });
+
+  it('키가 없으면(빈 출력·키 파일이 아니다) 거절한다 — 판정할 것이 없는 것은 통과가 아니다', () => {
+    expect(dockerKeyProblem('')).toMatch(/없다/);
+    expect(dockerKeyProblem('garbage\n')).toMatch(/없다/);
+  });
+
+  it('소문자로 적힌 지문도 같은 키로 본다', () => {
+    expect(dockerKeyProblem(one.replace(fpr, fpr.toLowerCase()))).toBeNull();
+  });
+});
+
+describe('rpmSignatureProblems — `rpm -K`의 판정 (병합 전 보안 검토 S1)', () => {
+  const files = ['a.rpm', 'deps/b.rpm'];
+  const ok = (f: string) => `${f}: digests signatures OK`;
+
+  it('RPM마다 `digests signatures OK` 한 줄이면 통과(빈 목록)', () => {
+    expect(rpmSignatureProblems([ok('a.rpm'), ok('deps/b.rpm'), ''].join('\n'), files)).toEqual([]);
+  });
+
+  it('**서명이 없는 RPM(`digests OK`)을 거절한다** — 종료 코드 0이고 `NOT OK`도 없어, `NOT OK`를 찾는 판정은 통과시킨다', () => {
+    const out = rpmSignatureProblems([ok('a.rpm'), 'deps/b.rpm: digests OK', ''].join('\n'), files);
+    expect(out).toEqual(['deps/b.rpm: 서명이 맞지 않는다 (digests OK)']);
+  });
+
+  it('서명이 틀리거나 키가 없으면(`SIGNATURES NOT OK`) 거절한다', () => {
+    const out = rpmSignatureProblems(['a.rpm: digests SIGNATURES NOT OK', ok('deps/b.rpm'), ''].join('\n'), files);
+    expect(out).toEqual(['a.rpm: 서명이 맞지 않는다 (digests SIGNATURES NOT OK)']);
+  });
+
+  it('**결과가 없는 RPM도 거절한다** — 보지 않은 것은 통과가 아니다', () => {
+    expect(rpmSignatureProblems(ok('a.rpm') + '\n', files)).toEqual(['deps/b.rpm: 서명 결과가 없다']);
+    expect(rpmSignatureProblems('', files)).toEqual(['a.rpm: 서명 결과가 없다', 'deps/b.rpm: 서명 결과가 없다']);
+  });
+
+  it('목록 밖의 줄(오류 문장 등)도 문제로 올린다', () => {
+    const out = rpmSignatureProblems([ok('a.rpm'), ok('deps/b.rpm'), 'error: c.rpm: not an rpm package', ''].join('\n'), files);
+    expect(out).toEqual(['error: c.rpm: not an rpm package']);
+  });
+
+  it('줄 끝의 공백·CR은 판정에 끼지 않는다', () => {
+    expect(rpmSignatureProblems(`${ok('a.rpm')}  \r\n${ok('deps/b.rpm')}\r\n`, files)).toEqual([]);
+  });
+});
+
+describe('formatPackages — 묶음의 부품 목록 PACKAGES.txt (FR-2101)', () => {
+  const release = 'Red Hat Enterprise Linux release 9.6 (Plow)';
+  const rows = [
+    { file: 'docker-ce-29.6.1-1.el9.x86_64.rpm', license: 'Apache-2.0', vendor: 'Docker' },
+    { file: 'deps/nftables-1.0.9-3.el9.x86_64.rpm', license: 'GPLv2', vendor: 'Red Hat, Inc.' },
+  ];
+
+  it('**첫 줄은 묶음을 만든 서버의 RHEL 판 그대로다** — 현장이 `cat /etc/redhat-release`와 견준다(반입 가이드 0.3절 ④)', () => {
+    expect(formatPackages(release, rows).split('\n')[0]).toBe(release);
+  });
+
+  it('RPM마다 파일·라이선스·만든 곳을 탭으로 가른 한 줄이고, 끝은 줄바꿈이다', () => {
+    expect(formatPackages(release, rows)).toBe(
+      `${release}\ndocker-ce-29.6.1-1.el9.x86_64.rpm\tApache-2.0\tDocker\ndeps/nftables-1.0.9-3.el9.x86_64.rpm\tGPLv2\tRed Hat, Inc.\n`,
+    );
+  });
+
+  it('판이 한 줄이 아니거나 비었으면, 또는 RPM이 없으면 거절한다', () => {
+    expect(() => formatPackages('a\nb', rows)).toThrow(/판/);
+    expect(() => formatPackages('  ', rows)).toThrow(/판/);
+    expect(() => formatPackages(release, [])).toThrow(/RPM/);
+  });
+
+  it('칸에 탭·줄바꿈이 들어 있으면 거절한다 — 한 줄에 한 RPM이라는 모양이 깨진다', () => {
+    expect(() => formatPackages(release, [{ ...rows[0], license: 'GPL\tv2' }])).toThrow(/칸/);
+    expect(() => formatPackages(release, [{ ...rows[0], vendor: 'Red\nHat' }])).toThrow(/칸/);
   });
 });
