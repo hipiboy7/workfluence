@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import 'express-session';
 import { setRequestUser } from '../common/request-context';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
+import type { UserRow } from '../db/schema';
 import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
 
@@ -47,6 +48,20 @@ declare module 'express-session' {
     oidcNonce?: string;
     oidcVerifier?: string;
   }
+}
+
+/** 사용자 행 → 요청의 사용자. 세션 가드와 공개 API 토큰 가드가 같은 규칙으로 만든다 (docs/spinoff/public-api 계획서 4.1절) */
+export function toSessionUser(user: UserRow): SessionUser {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role as Role,
+    mustChangePassword: user.mustChangePassword,
+    // **요청마다 사용자 행에서 읽는다** — 위임을 거두면 다음 요청부터 먹는다 (P11 A.1-5)
+    grants: grantsForRole(user.role as Role, user.grants),
+    hasPassword: user.passwordHash !== null,
+  };
 }
 
 const ACTION_KEY = 'wf:action';
@@ -99,16 +114,7 @@ export class AuthGuard implements CanActivate {
       await new Promise<void>((resolve) => session.destroy(() => resolve()));
       throw new UnauthorizedException('사용 가능한 계정이 아니다');
     }
-    req.user = {
-      id: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      role: user.role as Role,
-      mustChangePassword: user.mustChangePassword,
-      // **요청마다 사용자 행에서 읽는다** — 위임을 거두면 다음 요청부터 먹는다 (P11 A.1-5)
-      grants: grantsForRole(user.role as Role, user.grants),
-      hasPassword: user.passwordHash !== null,
-    };
+    req.user = toSessionUser(user);
     // 그 뒤의 로그 줄에 사용자가 실린다 (P11 FR-1211)
     setRequestUser(user.id);
 

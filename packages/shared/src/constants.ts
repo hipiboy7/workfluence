@@ -109,6 +109,9 @@ export const AUDIT_ACTIONS = [
   'auth.password.reset.request',
   'auth.password.reset',
   'auth.email.help',
+  // 공개 API (docs/spinoff/public-api 계획서 4.2절) — 토큰 발급·폐기. 값은 싣지 않는다. 폐기의 까닭은 `user`(본인)·`sessions_revoked`(세션을 모두 끊을 때 함께)
+  'api_token.create',
+  'api_token.revoke',
 ] as const;
 
 /**
@@ -461,6 +464,8 @@ export const API_TOKEN_LIMITS = {
   defaultDays: 90,
   maxDays: 365,
   nameMaxChars: 100,
+  /** 마지막 사용 시각은 이 초만큼 묶어 쓴다 — 요청마다 행을 고쳐 쓰지 않게. 목록이 "언제 마지막으로 썼나"를 알기엔 충분하다 */
+  lastUsedResolutionSec: 60,
 } as const;
 
 /** 토큰의 scope (계획서 Q3·Q4). `write`는 `read`를 포함하고, `admin`은 관리 경로에 **더해서** 요구한다 — 읽기·쓰기를 대신하지 않는다 */

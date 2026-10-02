@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   API_TOKEN_LIMITS,
   API_TOKEN_SCOPES,
+  type ApiTokenScope,
   ASSIGNABLE_MEMBER_ROLES,
   CATEGORY_NAME_MAX,
   COLLAB_LIMITS,
@@ -703,3 +704,15 @@ export const createApiTokenDto = z.object({
   expiresInDays: z.number().int().min(1).max(API_TOKEN_LIMITS.maxDays).optional(),
 });
 export type CreateApiTokenDto = z.infer<typeof createApiTokenDto>;
+
+/** API 토큰 목록·발급 응답. **값은 싣지 않는다** — 발급 응답의 `token` 하나만 값이고 다시 보이지 않는다 */
+export type ApiTokenView = {
+  id: string;
+  name: string;
+  scopes: ApiTokenScope[];
+  status: 'active' | 'revoked' | 'expired';
+  createdAt: string;
+  expiresAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+};

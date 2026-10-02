@@ -15,6 +15,7 @@ import { RevocationModule } from './common/revocation.bus';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { LabelsModule } from './labels/labels.module';
+import { ApiTokensModule } from './api-tokens/api-tokens.module';
 import { LlmModule } from './llm/llm.module';
 import { TemplatesModule } from './templates/templates.module';
 import { PagesModule } from './pages/pages.module';
@@ -73,6 +74,8 @@ function resolveWebDist(): string {
     TemplatesModule,
     // Phase 10 — 사내 LLM 질문 (P10_설계서_Llm)
     LlmModule,
+    // 공개 API 토큰 (docs/spinoff/public-api)
+    ApiTokensModule,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

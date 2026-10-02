@@ -455,6 +455,28 @@ export const llmMessages = pgTable(
   (t) => [index('llm_messages_conversation_idx').on(t.conversationId, t.seq)],
 );
 
+/**
+ * 공개 API 토큰 (docs/spinoff/public-api 계획서 4.1절 · `0014_api_tokens`). `id`가 JWT의 `jti`다. **토큰 값은 두지 않는다** — 서명으로 검증하고 이 행으로
+ * 폐기·만료를 본다. 폐기는 행을 지우지 않고 `revokedAt`·`revokedReason`을 채운다
+ */
+export const apiTokens = pgTable(
+  'api_tokens',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    scopes: text('scopes').array().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedReason: text('revoked_reason'),
+  },
+  (t) => [index('api_tokens_user_idx').on(t.userId, t.createdAt)],
+);
+
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type CommentRow = typeof comments.$inferSelect;
 export type SpaceRow = typeof spaces.$inferSelect;
@@ -468,6 +490,7 @@ export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type SettingRow = typeof settings.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
 export type PasswordResetTokenRow = typeof passwordResetTokens.$inferSelect;
+export type ApiTokenRowDb = typeof apiTokens.$inferSelect;
 export type PageRealtimeRow = typeof pageRealtime.$inferSelect;
 export type PageTemplateRow = typeof pageTemplates.$inferSelect;
 export type LlmProviderRow = typeof llmProviders.$inferSelect;

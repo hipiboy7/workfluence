@@ -88,16 +88,18 @@ describe('발급', () => {
   it(`살아 있는 토큰이 ${API_TOKEN_LIMITS.maxPerUser}개면 409 TOKEN_LIMIT — 폐기·만료된 것은 세지 않는다`, async () => {
     const u = await addUser();
     const made = [];
-    for (let i = 0; i < API_TOKEN_LIMITS.maxPerUser; i++) made.push(await create(u.id, { name: `봇 ${i}` }));
+    // 하나는 하루짜리 — 이틀 뒤에는 만료로 빠진다
+    made.push(await create(u.id, { name: '하루', expiresInDays: 1 }));
+    for (let i = 1; i < API_TOKEN_LIMITS.maxPerUser; i++) made.push(await create(u.id, { name: `봇 ${i}` }));
     const err = await create(u.id).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ConflictException);
     expect((err as ConflictException).getResponse()).toMatchObject({ code: 'TOKEN_LIMIT' });
 
-    await svc.revoke(u.id, made[0]!.view.id, null, NOW);
-    await db.update(apiTokens).set({ expiresAt: new Date(NOW.getTime() - 1) }).where(eq(apiTokens.id, made[1]!.view.id));
-    await expect(create(u.id)).resolves.toBeDefined();
-    await expect(create(u.id)).resolves.toBeDefined();
-    await expect(create(u.id)).rejects.toBeInstanceOf(ConflictException);
+    await svc.revoke(u.id, made[1]!.view.id, null, NOW);
+    const later = new Date(NOW.getTime() + 2 * DAY);
+    await expect(create(u.id, {}, later)).resolves.toBeDefined();
+    await expect(create(u.id, {}, later)).resolves.toBeDefined();
+    await expect(create(u.id, {}, later)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('서명 키가 없으면 503 API_DISABLED — 공개 API가 꺼져 있다', async () => {

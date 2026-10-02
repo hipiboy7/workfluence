@@ -74,6 +74,8 @@ export const AUDIT_ACTION_NAMES: Record<AuditAction, string> = {
   'llm.provider.delete': 'LLM 연결 삭제',
   'llm.ask': 'LLM 질문',
   'llm.conversation.purge': 'LLM 대화 정리',
+  'api_token.create': 'API 토큰 발급',
+  'api_token.revoke': 'API 토큰 폐기',
 };
 
 /**
@@ -103,6 +105,7 @@ export const AUDIT_TARGET_NAMES: Readonly<Record<string, string>> = {
   system: '시스템',
   'llm.provider': 'LLM 연결',
   'llm.conversation': 'LLM 대화',
+  api_token: 'API 토큰',
 };
 
 /**
@@ -113,6 +116,7 @@ export const AUDIT_TARGET_NAME_KEY: Readonly<Record<string, string>> = {
   user: 'username',
   page: 'title',
   space: 'name',
+  api_token: 'name',
   category: 'name',
   template: 'name',
   attachment: 'filename',
