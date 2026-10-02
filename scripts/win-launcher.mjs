@@ -389,6 +389,7 @@ function createSettings() {
     WF_SESSION_SECRET: randomBytes(32).toString('hex'),
     WF_ROOT_PASSWORD: `Wf-${randomBytes(9).toString('base64url')}`,
     WF_LLM_MASTER_KEY: randomBytes(32).toString('base64'),
+    WF_API_JWT_SECRET: randomBytes(32).toString('hex'),
   });
   Object.assign(s, placeKeys(s));
   const lines = ['# workfluence 체험 설정 — 처음 실행에서 만들었다. 비밀 값이 들어 있다(이 폴더 밖으로 보내지 않는다)'];

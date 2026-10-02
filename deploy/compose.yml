@@ -104,6 +104,8 @@ services:
       # Phase 10 — 사내 LLM (P10_설계서_Llm I절). 마스터 키는 **deploy/.env에만** 둔다 (비면 키 없는 LLM만 등록된다)
       WF_LLM_MASTER_KEY: ${WF_LLM_MASTER_KEY:-}
       WF_LLM_TIMEOUT_MS: ${WF_LLM_TIMEOUT_MS:-600000}
+      # 공개 API (docs/spinoff/public-api) — 토큰 서명 키는 **deploy/.env에만** 둔다. 비면 공개 API가 꺼진다
+      WF_API_JWT_SECRET: ${WF_API_JWT_SECRET:-}
     volumes:
       # 첨부는 컨테이너 밖에 남아야 한다. 백업 대상이기도 하다 (CLAUDE.md 8.3절)
       - attachments:/data/attachments

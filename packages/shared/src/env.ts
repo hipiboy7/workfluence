@@ -195,6 +195,13 @@ export const envSchema = z
       .default(''),
     /** 답 하나의 시간 상한 (FR-1115). 끝없이 매달리지 않는다 */
     WF_LLM_TIMEOUT_MS: intString(10_000, 3_600_000, 600_000),
+
+    // --- 공개 API (docs/spinoff/public-api 계획서 4.1절) ---
+    /**
+     * 공개 API 토큰(JWT, HS256)의 서명 키 — `openssl rand -hex 32`. **비면 공개 API가 꺼진다**(발급도 `/api/v1`도). 32자 미만이면 기동 실패다 —
+     * 서명할 때야 알면 발급이 모두 실패한다. **바꾸면 이미 낸 토큰이 모두 죽는다**(새로 발급받는다)
+     */
+    WF_API_JWT_SECRET: z.union([z.literal(''), z.string().min(32, '32자 이상 (openssl rand -hex 32)')]).default(''),
   })
   .strict();
 
@@ -227,6 +234,10 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
   }
   const env = result.data;
   const problems: string[] = [];
+  // 한 값을 두 곳에 쓰면 한쪽이 새는 순간 둘 다 샌다 — 세션 쿠키 서명과 API 토큰 서명은 따로 둔다
+  if (env.WF_API_JWT_SECRET && env.WF_API_JWT_SECRET === env.WF_SESSION_SECRET) {
+    problems.push('WF_API_JWT_SECRET: WF_SESSION_SECRET과 다른 값이어야 한다');
+  }
   if (env.WF_ENV === 'production' && env.WF_DB_AUTO_MIGRATE) {
     problems.push('WF_DB_AUTO_MIGRATE: 운영(production)에서는 true를 허용하지 않는다');
   }
