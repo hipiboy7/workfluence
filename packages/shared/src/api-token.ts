@@ -93,3 +93,13 @@ export function resolveTokenExpiry(now: Date, days: number | undefined, maxDays:
   if (d > maxDays) return { ok: false, code: 'EXPIRY_TOO_LONG', maxDays };
   return { ok: true, expiresAt: new Date(now.getTime() + d * DAY_MS) };
 }
+
+/**
+ * 공개 API(`/api/v1/…`)의 경로인가. 그 경로는 세션을 보지 않고 Bearer만 받으므로 CSRF 헤더가 필요 없다 — **그래서 판정이 느슨하면 CSRF 방어에 구멍이
+ * 난다.** `.`·`..` 조각, 인코딩된 점·빗금(`%2e`·`%2f`)이 든 경로는 공개 API로 치지 않는다(어느 처리기에 닿을지 경로 문자열로 말할 수 없다)
+ */
+export function isPublicApiPath(path: string): boolean {
+  if (!path.startsWith('/api/v1/')) return false;
+  if (/%2e|%2f|%5c|\\/i.test(path)) return false;
+  return !path.split('/').some((seg) => seg === '.' || seg === '..');
+}

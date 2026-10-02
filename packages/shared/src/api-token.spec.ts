@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   apiTokenClaims,
+  isPublicApiPath,
   normalizeScopes,
   requiredScopes,
   resolveTokenExpiry,
@@ -204,5 +205,28 @@ describe('createApiTokenDto', () => {
 
   it('scope는 정규화된다', () => {
     expect(createApiTokenDto.parse({ ...ok, scopes: ['write', 'read', 'write'] }).scopes).toEqual(['read', 'write']);
+  });
+});
+
+describe('isPublicApiPath — CSRF 헤더를 빼 주는 경로', () => {
+  it.each(['/api/v1/pages', '/api/v1/pages/abc/comments', '/api/v1/me'])('%s는 공개 API', (p) => {
+    expect(isPublicApiPath(p)).toBe(true);
+  });
+
+  it.each([
+    '/api/pages',
+    '/api/v1',
+    '/api/v10/pages',
+    '/api/v1pages',
+    '/api/v1/../pages',
+    '/api/v1/./pages',
+    '/api/v1/a/../../auth/logout',
+    '/api/v1/%2e%2e/pages',
+    '/api/v1/%2E%2E/pages',
+    '/api/v1/a%2fb',
+    '/api/v1/a%5c..%5cb',
+    '/api/v1/a\\b',
+  ])('%s는 아니다', (p) => {
+    expect(isPublicApiPath(p)).toBe(false);
   });
 });

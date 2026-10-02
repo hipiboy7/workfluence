@@ -4,7 +4,7 @@ import { CSRF_HEADER, type ApiTokenScope } from '@workfluence/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { CsrfGuard, type SessionUser } from '../auth/auth.guard';
 import { ApiTokenGuard } from './api-token.guard';
-import type { ApiAuthResult, ApiTokensService } from './api-tokens.service';
+import { ApiTokensService, type ApiAuthResult } from './api-tokens.service';
 
 /**
  * 공개 API 가드 (docs/spinoff/public-api 계획서 4.1·4.2절). 토큰 인증은 대역이다 — 볼 것은 "어떤 조건에서 막는가"다.

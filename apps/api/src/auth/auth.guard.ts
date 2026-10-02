@@ -9,7 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { CSRF_HEADER, can, grantsForRole, type Action, type DelegableAction, type Role } from '@workfluence/shared';
+import { CSRF_HEADER, can, isPublicApiPath, grantsForRole, type Action, type DelegableAction, type Role } from '@workfluence/shared';
 import type { Request } from 'express';
 // 타입 확장(declare module)을 하려면 그 모듈이 먼저 로드돼야 한다. Request.session도 여기서 붙는다
 import 'express-session';
@@ -64,9 +64,9 @@ export function toSessionUser(user: UserRow): SessionUser {
   };
 }
 
-const ACTION_KEY = 'wf:action';
+export const ACTION_KEY = 'wf:action';
 const ALLOW_PENDING_PW_KEY = 'wf:allow-pending-password';
-const PUBLIC_KEY = 'wf:public';
+export const PUBLIC_KEY = 'wf:public';
 
 /** 핸들러가 요구하는 행위. 선언하지 않으면 로그인만 확인한다 */
 export const RequireAction = (action: Action) => SetMetadata(ACTION_KEY, action);
@@ -142,6 +142,8 @@ export class CsrfGuard implements CanActivate {
   canActivate(ctx: ExecutionContext): boolean {
     const req = ctx.switchToHttp().getRequest<Request>();
     if (!MUTATING.has(req.method)) return true;
+    // 공개 API는 세션을 보지 않고 Bearer만 받는다 — 교차 출처 페이지는 Authorization 헤더를 붙이지 못한다 (docs/spinoff/public-api 계획서 4.2절)
+    if (typeof req.path === 'string' && isPublicApiPath(req.path)) return true;
     if (!req.headers[CSRF_HEADER]) throw new ForbiddenException(`${CSRF_HEADER} 헤더가 필요하다`);
     return true;
   }

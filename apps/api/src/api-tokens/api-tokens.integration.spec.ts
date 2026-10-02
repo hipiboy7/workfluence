@@ -249,6 +249,25 @@ describe('세션을 끊으면 토큰도 끊는다 (분석서 G3)', () => {
     expect(rows.every((r) => (r.detail as { reason?: string }).reason === 'sessions_revoked')).toBe(true);
   });
 
+  const ROOT = { id: '00000000-0000-0000-0000-000000000000', role: 'root' as const };
+  const liveOf = (userId: string) => db.select().from(apiTokens).where(and(eq(apiTokens.userId, userId), sql`${apiTokens.revokedAt} IS NULL`));
+
+  it('실제 흐름 — 관리자가 정지하면 토큰이 폐기된다 (세션이 없는 사람도)', async () => {
+    const u = await addUser();
+    const { token } = await create(u.id);
+    await usersSvc.suspend(u.id, ROOT);
+    await vi.waitFor(async () => expect(await liveOf(u.id)).toHaveLength(0));
+    await usersSvc.unsuspend(u.id, ROOT);
+    expect(await svc.authenticate(token, NOW)).toEqual({ ok: false, code: 'TOKEN_REVOKED' });
+  });
+
+  it('실제 흐름 — 관리자가 세션을 강제 종료하면 토큰도 끊긴다', async () => {
+    const u = await addUser();
+    await create(u.id);
+    await usersSvc.terminateSessions(u.id, ROOT);
+    await vi.waitFor(async () => expect(await liveOf(u.id)).toHaveLength(0));
+  });
+
   it('로그아웃(그 브라우저의 세션 하나)은 토큰을 건드리지 않는다', async () => {
     const u = await addUser();
     const { token } = await create(u.id);
