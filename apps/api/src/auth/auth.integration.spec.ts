@@ -10,7 +10,7 @@ import { SpacesService } from '../spaces/spaces.service';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { loadEnv } from '../config/config.module';
 import { SettingsService } from '../settings/settings.service';
-import { UsersController } from '../users/users.module';
+import { UserUseCases } from '../users/users.usecases';
 import { UsersService, toUserView } from '../users/users.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { AuthService, toMeView } from './auth.service';
@@ -456,8 +456,8 @@ describe('비밀번호 초기화 요청은 관리자의 알림함에 간다 (P17
     expect(await notifySvc.unreadCount(asAdmin)).toBe(1);
 
     // 관리 화면의 초기화 — 받은 관리자 모두의 것이 읽음이 된다
-    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
-    await ctrl.resetPassword(alice.id, asRoot as never, { ip: '127.0.0.1' } as never);
+    const ctrl = new UserUseCases(usersSvc, audit, spacesSvc, notifySvc, bus, db);
+    await ctrl.resetPassword(alice.id, asRoot as never, { ip: '127.0.0.1' });
     expect(await notifySvc.unreadCount(asRoot)).toBe(0);
     expect(await notifySvc.unreadCount(asAdmin)).toBe(0);
     expect((await resetRows()).every((r) => r.readAt !== null)).toBe(true);
@@ -719,8 +719,8 @@ describe('비밀번호를 확인하는 동안 DB 연결을 쥐지 않는다 (P13
   });
 
   it('관리자 생성·비밀번호 초기화 — 컨트롤러가 해시를 트랜잭션을 열기 전에 만든다', async () => {
-    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
-    const req = { ip: '127.0.0.1' } as never;
+    const ctrl = new UserUseCases(usersSvc, audit, spacesSvc, notifySvc, bus, db);
+    const req = { ip: '127.0.0.1' };
     const dto = { username: 'made-by-admin', displayName: '관리자가 만듦', email: 'made@example.internal', password: 'Made-pw-2026', role: 'member' as const };
     expect(await borrowedWhileHashing(() => ctrl.create(dto, ROOT as never, req))).toBe(0);
     const target = (await usersSvc.findByUsername('made-by-admin'))!;
@@ -822,7 +822,7 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
 
   it('**컨트롤러는 커밋한 뒤에 알린다** — 정지와 세션 강제 종료. 먼저 울리면 커밋 전 틈에 다시 붙은 연결이 옛 상태로 살아남는다', async () => {
     const alice = await approvedAlice();
-    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
+    const ctrl = new UserUseCases(usersSvc, audit, spacesSvc, notifySvc, bus, db);
     let committed = false;
     const realTx = db.transaction.bind(db);
     const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
@@ -833,9 +833,9 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
     const seen: boolean[] = [];
     const off = bus.onRevoke(() => seen.push(committed));
     try {
-      await ctrl.suspend(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+      await ctrl.suspend(alice.id, ADMIN as never, { ip: '127.0.0.1' });
       committed = false;
-      await ctrl.terminateSessions(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+      await ctrl.terminateSessions(alice.id, ADMIN as never, { ip: '127.0.0.1' });
     } finally {
       off();
       txSpy.mockRestore();
@@ -856,7 +856,7 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
     }
     expect(revoked).toEqual([]);
 
-    const ctrl = new UsersController(usersSvc, audit, spacesSvc, db, bus, notifySvc);
+    const ctrl = new UserUseCases(usersSvc, audit, spacesSvc, notifySvc, bus, db);
     let committed = false;
     const realTx = db.transaction.bind(db);
     const txSpy = vi.spyOn(db, 'transaction').mockImplementation((async (...args: Parameters<typeof db.transaction>) => {
@@ -867,7 +867,7 @@ describe('계정 정지 (P13 FR-1440~1446)', () => {
     const seen: boolean[] = [];
     const off = bus.onRevoke(() => seen.push(committed));
     try {
-      const { temporaryPassword } = await ctrl.resetPassword(alice.id, ADMIN as never, { ip: '127.0.0.1' } as never);
+      const { temporaryPassword } = await ctrl.resetPassword(alice.id, ADMIN as never, { ip: '127.0.0.1' });
       committed = false;
       await auth.changePassword(alice.id, { currentPassword: temporaryPassword, newPassword: 'Alice-new-2026' });
     } finally {

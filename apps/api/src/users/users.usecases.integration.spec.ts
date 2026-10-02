@@ -103,7 +103,7 @@ describe('비밀번호 초기화 (FR-209·238)', () => {
     const [r] = await rows('user.password.reset');
     expect(r).toMatchObject({ actorId: admin.id, targetId: alice.id, ip: META.ip });
     expect(JSON.stringify(r)).not.toContain(temporaryPassword);
-    expect(spy).toHaveBeenCalledWith(alice.id);
+    expect(spy).toHaveBeenCalledWith(alice.id, undefined);
   });
 });
 
