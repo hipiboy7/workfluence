@@ -3,8 +3,6 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { auditEvents, settings, users } from '../db/schema';
 import { AuditService } from '../audit/audit.service';
-import { PolicyController } from './settings.module';
-import { ForbiddenException } from '@nestjs/common';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { UsersService } from '../users/users.service';
 import { SettingsService } from './settings.service';
@@ -277,23 +275,5 @@ describe('감사 기록 단계 (P17 FR-1840·1841) — 필수는 늘, 양이 많
     await applyPatch(svc, { auditLevel: 3 }, me);
     await audit.record({ action: 'page.collab.save' });
     expect(await actions()).toContain('page.collab.save');
-  });
-
-  it('**시스템 관리자만 바꾼다** — 관리자는 403이고 값이 그대로다. 바꾼 것은 필수 기록(settings.update)으로 남는다', async () => {
-    const svc = svcWith();
-    const audit = new AuditService(db, svc);
-    const ctrl = new PolicyController(svc, audit, db);
-    const me = await admin();
-    const req = { ip: '127.0.0.1' } as never;
-    await expect(ctrl.update({ auditLevel: 1 }, { ...me } as never, req)).rejects.toThrow(ForbiddenException);
-    expect((await svc.get()).auditLevel).toBe(3);
-    // 다른 값은 관리자도 그대로 바꾼다
-    await ctrl.update({ trashRetentionDays: 40 }, { ...me } as never, req);
-
-    const [r] = await db.insert(users).values({ username: 'sys', displayName: 'sys', passwordHash: 'x', role: 'root', status: 'active' }).returning();
-    await ctrl.update({ auditLevel: 1 }, { id: r.id, role: 'root' } as never, req);
-    expect((await svc.get()).auditLevel).toBe(1);
-    const changes = await db.select({ detail: auditEvents.detail }).from(auditEvents).where(eq(auditEvents.action, 'settings.update'));
-    expect(changes.map((c) => c.detail)).toContainEqual({ before: { auditLevel: 3 }, after: { auditLevel: 1 } });
   });
 });

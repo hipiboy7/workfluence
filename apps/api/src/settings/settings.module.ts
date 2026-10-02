@@ -1,61 +1,31 @@
-import { Body, Controller, ForbiddenException, Get, Global, Inject, Module, Patch, Req, UseGuards } from '@nestjs/common';
-import { can, policyPatchDto, type Policy, type PolicyPatchDto } from '@workfluence/shared';
+import { Body, Controller, Get, Global, Module, Patch, Req, UseGuards } from '@nestjs/common';
+import { policyPatchDto, type PolicyPatchDto } from '@workfluence/shared';
 import type { Request } from 'express';
-import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
+import { metaOf } from '../common/request-meta';
 import { ZodPipe } from '../common/zod.pipe';
-import { DB, type Db } from '../db/db.module';
+import { PolicyUseCases, type PolicyRead } from './policy.usecases';
 import { SettingsService } from './settings.service';
 
-/** 운영 정책값 API (P4_설계서_Admin C절). 변경은 `settings.manage` 권한자만 (FR-526) */
+/** 운영 정책값 API (P4_설계서_Admin C절). 변경은 `settings.manage` 권한자만 (FR-526). 규칙은 `PolicyUseCases`에 있다 */
 @Controller('api/settings/policy')
 @UseGuards(AuthGuard)
 export class PolicyController {
-  constructor(
-    private readonly svc: SettingsService,
-    private readonly audit: AuditService,
-    @Inject(DB) private readonly db: Db,
-  ) {}
+  constructor(private readonly uc: PolicyUseCases) {}
 
-  /**
-   * 읽기.
-   *
-   * **일반 사용자에게는 자기가 지켜야 할 것만 준다** — 업로드 상한·확장자·비밀번호 규칙.
-   * 잠금 임계·잠금 시간·세션 시간은 주지 않는다. 잠금 회피 간격을 계산할 수 있는 값이라,
-   * 화면이 쓰지도 않는데 모두에게 흘릴 이유가 없다 (자체 점검 11).
-   */
   @Get()
-  async get(@CurrentUser() me: SessionUser): Promise<Partial<Policy> & { uploadCeilingMb: number }> {
-    const p = await this.svc.get();
-    const ceiling = { uploadCeilingMb: this.svc.uploadCeilingMb };
-    if (can(me, 'settings.manage')) return { ...p, ...ceiling };
-    return {
-      uploadMaxMb: p.uploadMaxMb,
-      allowedExtensions: p.allowedExtensions,
-      passwordMinLength: p.passwordMinLength,
-      passwordMinCharClasses: p.passwordMinCharClasses,
-      ...ceiling,
-    };
+  get(@CurrentUser() me: SessionUser): Promise<PolicyRead> {
+    return this.uc.read(me);
   }
 
   @Patch()
   @RequireAction('settings.manage')
   async update(@Body(new ZodPipe(policyPatchDto)) patch: PolicyPatchDto, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
-    // 감사 기록 단계는 **시스템 관리자만** 바꾼다 (P17 FR-1841 — 사용자 원문 "시스템 관리자가 감사로그 화면에서 … 지정"). 판정은 `can` — root 전용 행위다
-    if (patch.auditLevel !== undefined && !can(me, 'system.manage')) throw new ForbiddenException('감사 기록 단계는 시스템 관리자만 바꾼다');
-    await this.db.transaction(async (tx) => {
-      const { before, after } = await this.svc.update(patch, me, tx);
-      // **바뀐 키의 이전·이후를 남긴다** (FR-525). "누가 바꿨다"만으로는 되돌릴 수 없다
-      await this.audit.record({ action: 'settings.update', actorId: me.id, targetType: 'settings', targetId: 'policy', detail: { before, after }, ip: req.ip }, tx);
-    });
-    // **커밋된 뒤에 캐시를 버린다** (코드 리뷰 2). 트랜잭션 안에서 버리면 그 사이 들어온
-    // 요청이 커밋 전 값을 읽어 굳혀 버린다 — `AuthGuard`가 요청마다 `get()`을 부르므로
-    // 그 틈은 실제로 밟힌다
-    this.svc.invalidate();
+    await this.uc.update(patch, me, metaOf(req));
     return { ok: true };
   }
 }
 
 @Global()
-@Module({ providers: [SettingsService], controllers: [PolicyController], exports: [SettingsService] })
+@Module({ providers: [SettingsService, PolicyUseCases], controllers: [PolicyController], exports: [SettingsService, PolicyUseCases] })
 export class SettingsModule {}
