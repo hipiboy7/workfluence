@@ -451,3 +451,25 @@ export const TABLE_LIMITS = {
   maxSpan: 1000,
   maxColWidthPx: 10_000,
 } as const;
+
+/**
+ * 공개 API 토큰 (docs/spinoff/public-api 계획서 Q2·Q5). 만료 상한(`maxDays`)은 운영이 더 줄일 수 있고 늘릴 수는 없다 — 기본이 상한보다 길면
+ * 기본은 상한이 된다(`resolveTokenExpiry`). 한 사람 10개는 에이전트·스크립트마다 하나씩 나눠 주고도 남는 수다
+ */
+export const API_TOKEN_LIMITS = {
+  maxPerUser: 10,
+  defaultDays: 90,
+  maxDays: 365,
+  nameMaxChars: 100,
+} as const;
+
+/** 토큰의 scope (계획서 Q3·Q4). `write`는 `read`를 포함하고, `admin`은 관리 경로에 **더해서** 요구한다 — 읽기·쓰기를 대신하지 않는다 */
+export const API_TOKEN_SCOPES = ['read', 'write', 'admin'] as const;
+export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
+
+/** JWT의 고정값. 검증은 이 발급자·대상·알고리즘만 받는다 — `alg`를 토큰이 고르게 두면 `none`·다른 키 종류로 바꿔 치는 길이 열린다 */
+export const API_JWT = {
+  issuer: 'workfluence',
+  audience: 'workfluence-api',
+  algorithm: 'HS256',
+} as const;

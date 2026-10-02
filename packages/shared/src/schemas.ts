@@ -1,6 +1,8 @@
 import type { DocDiff } from './diff';
 import { z } from 'zod';
 import {
+  API_TOKEN_LIMITS,
+  API_TOKEN_SCOPES,
   ASSIGNABLE_MEMBER_ROLES,
   CATEGORY_NAME_MAX,
   COLLAB_LIMITS,
@@ -18,6 +20,7 @@ import {
   USER_STATUSES,
   type NotificationKind,
 } from './constants';
+import { normalizeScopes } from './api-token';
 import { validateDocument, type DocNode } from './document';
 import { normalizeLlmBaseUrl, type LlmStreamStatus } from './llm';
 import { DELEGABLE_ACTIONS, type CategoryAccess, type DelegableAction, type SpaceAccess } from './permissions';
@@ -689,3 +692,14 @@ export type LlmConversationList = {
   items: LlmConversationSummary[];
   limits: { retentionDays: number; conversationMax: number; pinnedMax: number };
 };
+
+/** API 토큰 발급 (docs/spinoff/public-api 계획서 4.1절). 날 수의 운영 상한은 서버가 `resolveTokenExpiry`로 다시 본다 — 여기는 설계 상한까지 */
+export const createApiTokenDto = z.object({
+  name: z.string().trim().min(1).max(API_TOKEN_LIMITS.nameMaxChars),
+  scopes: z
+    .array(z.enum(API_TOKEN_SCOPES))
+    .min(1)
+    .transform((s) => normalizeScopes(s)),
+  expiresInDays: z.number().int().min(1).max(API_TOKEN_LIMITS.maxDays).optional(),
+});
+export type CreateApiTokenDto = z.infer<typeof createApiTokenDto>;
