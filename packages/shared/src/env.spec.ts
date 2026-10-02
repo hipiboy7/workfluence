@@ -137,6 +137,28 @@ describe('Phase 10 — LLM (P10_설계서_Llm I절)', () => {
   });
 });
 
+describe('공개 API — JWT 서명 키 (docs/spinoff/public-api 계획서 4.1절)', () => {
+  it('없어도 기동한다 — 비면 공개 API가 꺼진다', () => {
+    expect(parseEnv(valid).WF_API_JWT_SECRET).toBe('');
+  });
+
+  it('32자 이상이면 받는다 — `openssl rand -hex 32`의 출력(64자)도', () => {
+    const hex64 = 'a'.repeat(64);
+    expect(parseEnv({ ...valid, WF_API_JWT_SECRET: hex64 }).WF_API_JWT_SECRET).toBe(hex64);
+    expect(parseEnv({ ...valid, WF_API_JWT_SECRET: 'b'.repeat(32) }).WF_API_JWT_SECRET).toBe('b'.repeat(32));
+  });
+
+  it('**짧으면 기동 실패** — HS256의 키는 32바이트 이상이어야 한다. 서명할 때야 알면 발급이 모두 실패한다', () => {
+    expect(() => parseEnv({ ...valid, WF_API_JWT_SECRET: 'short' })).toThrow(/WF_API_JWT_SECRET/);
+    expect(() => parseEnv({ ...valid, WF_API_JWT_SECRET: 'c'.repeat(31) })).toThrow(/WF_API_JWT_SECRET/);
+  });
+
+  it('세션 비밀과 같은 값이면 기동 실패 — 한쪽이 새면 다른 쪽도 샌다', () => {
+    const same = 'd'.repeat(40);
+    expect(() => parseEnv({ ...valid, WF_SESSION_SECRET: same, WF_API_JWT_SECRET: same })).toThrow(/WF_API_JWT_SECRET/);
+  });
+});
+
 describe('.env.example ↔ 스키마 키 집합 (FR-015)', () => {
   it('키 집합이 정확히 같다', () => {
     const content = readFileSync(resolve(__dirname, '../../../.env.example'), 'utf8');
