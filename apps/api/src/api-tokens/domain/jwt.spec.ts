@@ -21,7 +21,7 @@ describe('signApiToken → verifyApiToken', () => {
 
   it('헤더는 HS256·JWT, 클레임은 iss·aud·sub·jti·scope·iat·exp', async () => {
     const jwt = await sign();
-    const [h, p] = jwt.split('.').map((part) => JSON.parse(Buffer.from(part, 'base64url').toString()));
+    const [h, p] = jwt.split('.').slice(0, 2).map((part) => JSON.parse(Buffer.from(part, 'base64url').toString()));
     expect(h).toEqual({ alg: 'HS256', typ: 'JWT' });
     expect(p).toEqual({
       iss: API_JWT.issuer,
@@ -69,15 +69,15 @@ describe('signApiToken → verifyApiToken', () => {
   });
 
   it.each([
-    ['발급자', { iss: 'someone-else' }],
-    ['대상', { aud: 'workfluence-web' }],
+    ['발급자', { iss: 'someone-else', aud: API_JWT.audience }],
+    ['대상', { iss: API_JWT.issuer, aud: 'workfluence-web' }],
   ])('%s가 다르면 TOKEN_INVALID', async (_name, override) => {
     const jwt = await new SignJWT({ scope: 'read' })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setSubject(USER)
       .setJti(TOKEN)
-      .setIssuer(override.iss ?? API_JWT.issuer)
-      .setAudience(override.aud ?? API_JWT.audience)
+      .setIssuer(override.iss)
+      .setAudience(override.aud)
       .setIssuedAt(NOW)
       .setExpirationTime(LATER)
       .sign(key(SECRET));
