@@ -1,12 +1,12 @@
-import { Controller, Get, Inject, Module, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Module, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { listLimitDto, type TrashPageView, type TrashSpaceView } from '@workfluence/shared';
 import type { Request } from 'express';
-import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
 import { UuidPipe } from '../common/uuid.pipe';
+import { metaOf } from '../common/request-meta';
 import { ZodPipe } from '../common/zod.pipe';
-import { DB, type Db } from '../db/db.module';
 import { TrashService } from './trash.service';
+import { TrashUseCases } from './trash.usecases';
 
 /** 휴지통 API (P4_설계서_Admin C절). 되살리기는 감사로그에 남는다 (FR-514) */
 @Controller('api/trash')
@@ -14,8 +14,7 @@ import { TrashService } from './trash.service';
 export class TrashController {
   constructor(
     private readonly svc: TrashService,
-    private readonly audit: AuditService,
-    @Inject(DB) private readonly db: Db,
+    private readonly uc: TrashUseCases,
   ) {}
 
   @Get('pages')
@@ -28,14 +27,7 @@ export class TrashController {
 
   @Post('pages/:id/restore')
   restorePage(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true; movedToRoot: boolean }> {
-    return this.db.transaction(async (tx) => {
-      const { page, movedToRoot } = await this.svc.restorePage(id, me, tx);
-      await this.audit.record(
-        { action: 'page.restore.trash', actorId: me.id, targetType: 'page', targetId: id, detail: { title: page.title, movedToRoot }, ip: req.ip },
-        tx,
-      );
-      return { ok: true as const, movedToRoot };
-    });
+    return this.uc.restorePage(id, me, metaOf(req));
   }
 
   @Get('spaces')
@@ -48,13 +40,10 @@ export class TrashController {
 
   @Post('spaces/:id/restore')
   async restoreSpace(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
-    await this.db.transaction(async (tx) => {
-      const space = await this.svc.restoreSpace(id, me, tx);
-      await this.audit.record({ action: 'space.restore', actorId: me.id, targetType: 'space', targetId: id, detail: { name: space.name }, ip: req.ip }, tx);
-    });
+    await this.uc.restoreSpace(id, me, metaOf(req));
     return { ok: true };
   }
 }
 
-@Module({ providers: [TrashService], controllers: [TrashController], exports: [TrashService] })
+@Module({ providers: [TrashService, TrashUseCases], controllers: [TrashController], exports: [TrashService, TrashUseCases] })
 export class TrashModule {}

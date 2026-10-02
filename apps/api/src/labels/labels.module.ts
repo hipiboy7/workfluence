@@ -1,11 +1,11 @@
-import { Body, Controller, Delete, Get, Inject, Module, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Module, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { attachLabelDto, listLimitDto, type AttachLabelDto, type LabelView, type SearchHit } from '@workfluence/shared';
 import type { Request } from 'express';
-import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
 import { UuidPipe } from '../common/uuid.pipe';
+import { metaOf } from '../common/request-meta';
 import { ZodPipe } from '../common/zod.pipe';
-import { DB, type Db } from '../db/db.module';
+import { LabelUseCases } from './labels.usecases';
 import { LabelsService } from './labels.service';
 
 /** 라벨 API (P4_설계서_Admin C절). 권한은 그 페이지의 스페이스 판정을 따른다 (FR-535) */
@@ -14,8 +14,7 @@ import { LabelsService } from './labels.service';
 export class LabelsController {
   constructor(
     private readonly svc: LabelsService,
-    private readonly audit: AuditService,
-    @Inject(DB) private readonly db: Db,
+    private readonly uc: LabelUseCases,
   ) {}
 
   @Get('labels')
@@ -44,11 +43,7 @@ export class LabelsController {
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<LabelView> {
-    return this.db.transaction(async (tx) => {
-      const label = await this.svc.attach(pageId, dto.name, me, tx);
-      await this.audit.record({ action: 'label.attach', actorId: me.id, targetType: 'page', targetId: pageId, detail: { label: label.name }, ip: req.ip }, tx);
-      return label;
-    });
+    return this.uc.attach(pageId, dto.name, me, metaOf(req));
   }
 
   @Delete('pages/:pageId/labels/:labelId')
@@ -58,13 +53,10 @@ export class LabelsController {
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<{ ok: true }> {
-    await this.db.transaction(async (tx) => {
-      await this.svc.detach(pageId, labelId, me, tx);
-      await this.audit.record({ action: 'label.detach', actorId: me.id, targetType: 'page', targetId: pageId, detail: { labelId }, ip: req.ip }, tx);
-    });
+    await this.uc.detach(pageId, labelId, me, metaOf(req));
     return { ok: true };
   }
 }
 
-@Module({ providers: [LabelsService], controllers: [LabelsController], exports: [LabelsService] })
+@Module({ providers: [LabelsService, LabelUseCases], controllers: [LabelsController], exports: [LabelsService, LabelUseCases] })
 export class LabelsModule {}
