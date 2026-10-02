@@ -1,13 +1,13 @@
-import { BadRequestException, Controller, Delete, Get, Inject, Module, Param, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Controller, Delete, Get, Module, Param, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor, MulterModule } from '@nestjs/platform-express';
 import type { AttachmentView } from '@workfluence/shared';
 import type { Request, Response } from 'express';
-import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
+import { metaOf } from '../common/request-meta';
 import { UuidPipe } from '../common/uuid.pipe';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
-import { DB, type Db } from '../db/db.module';
 import { AttachmentsService, contentDisposition, type UploadedFileLike } from './attachments.service';
+import { AttachmentUseCases } from './attachments.usecases';
 import { mbToBytes } from './domain/upload';
 import { LocalDiskStorage } from './storage/local.storage';
 import { PassThroughScanner, SCANNER, STORAGE } from './storage/storage.provider';
@@ -17,8 +17,7 @@ import { PassThroughScanner, SCANNER, STORAGE } from './storage/storage.provider
 export class AttachmentsController {
   constructor(
     private readonly svc: AttachmentsService,
-    private readonly audit: AuditService,
-    @Inject(DB) private readonly db: Db,
+    private readonly uc: AttachmentUseCases,
   ) {}
 
   @Get('pages/:pageId/attachments')
@@ -35,27 +34,13 @@ export class AttachmentsController {
     @Req() req: Request,
   ): Promise<AttachmentView> {
     if (!file) throw new BadRequestException('파일이 없다 (필드 이름은 file)');
-    return this.db.transaction(async (tx) => {
-      const view = await this.svc.upload(pageId, file, me, tx);
-      await this.audit.record(
-        { action: 'attachment.upload', actorId: me.id, targetType: 'attachment', targetId: view.id, detail: { pageId, filename: view.filename, size: view.size }, ip: req.ip },
-        tx,
-      );
-      return view;
-    });
+    return this.uc.upload(pageId, file, me, metaOf(req));
   }
 
-  /** 다운로드를 감사로그에 남긴다 (FR-419). 읽기지만 **무엇을 가져갔는지**는 남아야 한다 */
+  /** 다운로드 — 감사는 유스케이스가 남긴다 (FR-419) */
   @Get('attachments/:id')
   async download(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request, @Res() res: Response): Promise<void> {
-    const { row, data } = await this.db.transaction(async (tx) => {
-      const got = await this.svc.download(id, me, tx);
-      await this.audit.record(
-        { action: 'attachment.download', actorId: me.id, targetType: 'attachment', targetId: id, detail: { pageId: got.row.pageId, filename: got.row.filename }, ip: req.ip },
-        tx,
-      );
-      return got;
-    });
+    const { row, data } = await this.uc.download(id, me, metaOf(req));
     res.setHeader('Content-Type', row.mime);
     res.setHeader('Content-Length', String(data.length));
     res.setHeader('Content-Disposition', contentDisposition(row.filename));
@@ -67,13 +52,7 @@ export class AttachmentsController {
 
   @Delete('attachments/:id')
   async remove(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
-    await this.db.transaction(async (tx) => {
-      const row = await this.svc.remove(id, me, tx);
-      await this.audit.record(
-        { action: 'attachment.delete', actorId: me.id, targetType: 'attachment', targetId: id, detail: { pageId: row.pageId, filename: row.filename }, ip: req.ip },
-        tx,
-      );
-    });
+    await this.uc.remove(id, me, metaOf(req));
     return { ok: true };
   }
 }
@@ -94,10 +73,11 @@ export class AttachmentsController {
   ],
   providers: [
     AttachmentsService,
+    AttachmentUseCases,
     { provide: STORAGE, useClass: LocalDiskStorage },
     { provide: SCANNER, useClass: PassThroughScanner },
   ],
   controllers: [AttachmentsController],
-  exports: [AttachmentsService],
+  exports: [AttachmentsService, AttachmentUseCases],
 })
 export class AttachmentsModule {}

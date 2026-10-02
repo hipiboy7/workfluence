@@ -36,17 +36,17 @@ import {
   type UpdateLlmPromptDto,
 } from '@workfluence/shared';
 import type { Request, Response } from 'express';
-import { AuditService } from '../audit/audit.service';
 import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
+import { metaOf } from '../common/request-meta';
 import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { APP_ENV, type AppEnvToken } from '../config/config.module';
-import { DB, type Db } from '../db/db.module';
 import { LlmAskService } from './ask.service';
 import { LlmConversationsService } from './conversations.service';
 import { LLM_CLIENT } from './llm.provider';
 import { OpenAiCompatClient } from './openai.client';
 import { LlmPromptsService } from './prompts.service';
+import { LlmProviderUseCases } from './providers.usecases';
 import { LlmProvidersService } from './providers.service';
 import { logLine } from '../common/log-line';
 import { NdjsonSink } from './stream.sink';
@@ -157,8 +157,7 @@ export class LlmController {
 export class LlmAdminController {
   constructor(
     private readonly providers: LlmProvidersService,
-    private readonly audit: AuditService,
-    @Inject(DB) private readonly db: Db,
+    private readonly uc: LlmProviderUseCases,
   ) {}
 
   @Get()
@@ -174,31 +173,13 @@ export class LlmAdminController {
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<LlmProviderAdminView> {
-    return this.db.transaction(async (tx) => {
-      const view = await this.providers.create(dto, me, tx);
-      // **키는 싣지 않는다** — 있다는 사실만 (FR-1102·1106)
-      await this.audit.record(
-        {
-          action: 'llm.provider.create',
-          actorId: me.id,
-          targetType: 'llm.provider',
-          targetId: view.id,
-          detail: { name: view.name, baseUrl: view.baseUrl, model: view.model, hasKey: view.hasKey },
-          ip: req.ip,
-        },
-        tx,
-      );
-      return view;
-    });
+    return this.uc.create(dto, me, metaOf(req));
   }
 
   @Delete(':id')
   @RequireAction('llm.manage')
   async remove(@Param('id', UuidPipe) id: string, @CurrentUser() me: SessionUser, @Req() req: Request): Promise<{ ok: true }> {
-    await this.db.transaction(async (tx) => {
-      const gone = await this.providers.remove(id, me, tx);
-      await this.audit.record({ action: 'llm.provider.delete', actorId: me.id, targetType: 'llm.provider', targetId: id, detail: gone, ip: req.ip }, tx);
-    });
+    await this.uc.remove(id, me, metaOf(req));
     return { ok: true };
   }
 
@@ -251,6 +232,7 @@ export class LlmSweeper implements OnApplicationBootstrap, OnModuleDestroy {
   providers: [
     { provide: LLM_CLIENT, useClass: OpenAiCompatClient },
     LlmProvidersService,
+    LlmProviderUseCases,
     LlmPromptsService,
     LlmConversationsService,
     LlmAskService,

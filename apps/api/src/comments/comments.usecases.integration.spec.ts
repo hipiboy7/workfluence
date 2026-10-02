@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../audit/audit.service';
 import { auditEvents } from '../db/schema';
-import type { MentionMailService } from '../mail/mention-mail.service';
+import { MentionMailService } from '../mail/mention-mail.service';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
