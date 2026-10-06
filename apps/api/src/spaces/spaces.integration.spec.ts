@@ -11,7 +11,9 @@ import { PagesService } from '../pages/pages.service';
 import { lockTree } from '../pages/tree-lock';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { TEST_POOL_MAX, closeTestDb, openTestDb, resetTables, waitForLockWaiters, type TestDb } from '../test/db';
-import { CategoriesController, SpacesController } from './spaces.module';
+import { CategoryUseCases } from './categories.usecases';
+import { SpacesController } from './spaces.module';
+import { SpaceUseCases } from './spaces.usecases';
 import { ADMIN_SUSPENDED_MESSAGE, SpacesService } from './spaces.service';
 
 /** B등급 통합 테스트 (P2_설계서_Page 6절). **실제 PostgreSQL**을 쓴다. */
@@ -694,7 +696,7 @@ describe('스페이스 목록의 찾기·상태 (P14 FR-1514)', () => {
     const owner = await user('owner');
     await spacesSvc.create({ name: '운영팀', kind: 'team', categoryId: null, description: '' }, owner);
     await spacesSvc.create({ name: '개발팀', kind: 'team', categoryId: null, description: '' }, owner);
-    const ctrl = new SpacesController(spacesSvc, new AuditService(db), db);
+    const ctrl = new SpacesController(spacesSvc, {} as never);
     const views = await ctrl.list(spaceListQueryDto.parse({ scope: 'all', q: '운영', status: 'active' }), admin as never);
     expect(views.map((v) => v.name)).toEqual(['운영팀']);
   });
@@ -712,7 +714,7 @@ describe('스페이스 목록의 찾기·상태 (P14 FR-1514)', () => {
   it('**모든 스페이스는 관리자만** — 일반 사용자가 부르면 403 (자체 점검 5 — 관리 콘솔 전체의 방어선이다)', async () => {
     const owner = await user('owner');
     await expect(spacesSvc.list(owner, 'all', 500)).rejects.toThrow(ForbiddenException);
-    const ctrl = new SpacesController(spacesSvc, new AuditService(db), db);
+    const ctrl = new SpacesController(spacesSvc, {} as never);
     await expect(ctrl.list(spaceListQueryDto.parse({ scope: 'all' }), owner as never)).rejects.toThrow(ForbiddenException);
   });
 
@@ -755,7 +757,7 @@ describe('스페이스 목록의 찾기·상태 (P14 FR-1514)', () => {
 describe('분류 관리 (FR-532)', () => {
   it('**같은 새 이름을 동시에 만들어도 하나다** — 앞사람이 넣고 커밋하기 전에 만들면 그 분류를 돌려받는다. 먼저 찾고 넣으면 뒤의 것이 유일 제약에 걸려 500이었다 (FR-308, 반영분 점검 11)', { timeout: 30_000 }, async () => {
     const admin = await user('catadm', 'admin');
-    const ctrl = new CategoriesController(new AuditService(db), db);
+    const ctrl = new CategoryUseCases(new AuditService(db), db);
     // 앞사람의 만들기 — 넣었지만 아직 커밋하지 않았다(두 번 누른 앞의 요청)
     const first = await holdOpen((tx) => tx.insert(spaceCategories).values({ name: '새 분류', createdBy: admin.id }));
     // 값이나 오류를 그대로 받는다 — 옛 코드는 유일 제약 위반을 던졌다
@@ -824,7 +826,7 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
     // 권한을 거두면 다시 못 푼다 — 바꿔 두었다면 풀렸다
     await expect(spacesSvc.changeStatus(s.id, 'active', owner)).rejects.toThrow(ADMIN_SUSPENDED_MESSAGE);
 
-    const ctrl = new SpacesController(spacesSvc, new AuditService(db), db);
+    const ctrl = new SpaceUseCases(spacesSvc, new AuditService(db), db);
     await ctrl.changeStatus(s.id, { status: 'suspended' }, admin as never, REQ);
     await ctrl.changeStatus(s.id, { status: 'active' }, admin as never, REQ);
     await ctrl.changeStatus(s.id, { status: 'suspended' }, owner as never, REQ);
@@ -848,7 +850,7 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
   it('**주인이 제 중지를 다시 걸면 아무것도 바뀌지 않는다** — 넘겨받기는 주인이 아닐 때만. 두 번 누른 주인이 제 중지를 "관리자가 건 것"으로 만들지 않는다 (좁은 재검토 3)', async () => {
     const owner = await user('owner');
     const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
-    const ctrlS = new SpacesController(spacesSvc, new AuditService(db), db);
+    const ctrlS = new SpaceUseCases(spacesSvc, new AuditService(db), db);
     await ctrlS.changeStatus(s.id, { status: 'suspended' }, owner as never, REQ);
     await expect(spacesSvc.changeStatus(s.id, 'suspended', owner)).resolves.toMatchObject({ changed: false, takeover: false });
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
@@ -868,7 +870,7 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
     await spacesSvc.changeStatus(s.id, 'suspended', owner);
     // 관리자가 "주인이 걸었다"를 본 뒤 주인이 풀었다
     await spacesSvc.changeStatus(s.id, 'active', owner);
-    const ctrlS = new SpacesController(spacesSvc, new AuditService(db), db);
+    const ctrlS = new SpaceUseCases(spacesSvc, new AuditService(db), db);
     await expect(ctrlS.changeStatus(s.id, { status: 'suspended', takeover: true }, admin as never, REQ)).rejects.toThrow('주인이 건 중지가 아니다');
     expect((await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) }))?.status).toBe('active');
     // 주인이 건 중지면 넘겨받는다 — 화면이 보내는 모양 그대로
@@ -903,7 +905,7 @@ describe('관리자가 건 중지 (P15 C.2, 보류 32)', () => {
     const admin = await user('boss', 'admin');
     const s = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, owner);
     const { row: first } = await spacesSvc.changeStatus(s.id, 'suspended', owner);
-    const ctrlS = new SpacesController(spacesSvc, new AuditService(db), db);
+    const ctrlS = new SpaceUseCases(spacesSvc, new AuditService(db), db);
     const view = await ctrlS.changeStatus(s.id, { status: 'suspended' }, admin as never, REQ);
     expect([view.status, view.suspendedByOwner]).toEqual(['suspended', false]);
     const row = await db.query.spaces.findFirst({ where: eq(spaces.id, s.id) });
@@ -948,7 +950,7 @@ describe('스페이스 관리 전체 (P15 C.4, A.1-1)', () => {
     await expect(spacesSvc.context(s.id, overseer)).rejects.toThrow(NotFoundException);
     await expect(spacesSvc.get(s.id, overseer)).rejects.toThrow(NotFoundException);
 
-    const ctrl = new SpacesController(spacesSvc, new AuditService(db), db);
+    const ctrl = new SpaceUseCases(spacesSvc, new AuditService(db), db);
     const view = await ctrl.changeStatus(s.id, { status: 'suspended' }, overseer as never, REQ);
     expect([view.status, view.suspendedByOwner, view.description, view.access.canRead]).toEqual(['suspended', false, '', false]);
     // 주인은 이제 권한이 있어야 푼다 — 관리자가 건 것과 같다
@@ -1194,7 +1196,7 @@ describe('지우기도 판정한 상태에서만 (P15 병합 전 검토)', () =>
 });
 
 describe('분류 — 누구나 만들고, 이름 바꾸기·지우기는 만든 사람과 관리자 (P15 C.3, 보류 33)', () => {
-  const ctrl = () => new CategoriesController(new AuditService(db), db);
+  const ctrl = () => new CategoryUseCases(new AuditService(db), db);
   const viewOf = async (me: Principal, id: string) => (await ctrl().list(me as never)).find((c) => c.id === id)!;
 
   it('**목록이 할 수 있는 일과 쓰임을 싣는다** — 휴지통의 공간도, Crew의 owner로 있는 공간은 자기 것으로 센다 (FR-1623)', async () => {
