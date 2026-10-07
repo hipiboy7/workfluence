@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { MARKDOWN_LIMITS } from './constants';
+import { ASSIGNABLE_MEMBER_ROLES, CATEGORY_NAME_MAX, LIST_SEARCH_MAX, MARKDOWN_LIMITS, SPACE_STATUSES } from './constants';
 import { extractText, validateDocument, type DocNode } from './document';
 import { renderDocMarkdown } from './markdown';
 import { parseMarkdown } from './markdown-parse';
-import { idSchema } from './schemas';
+import { idSchema, usernameSchema, type CategoryView, type SpaceMemberView, type SpaceStatusDto, type SpaceView } from './schemas';
 
 /**
  * 공개 API v1의 계약 중 순수한 부분 (A등급, docs/spinoff/public-api 설계서 3.3·3.5절 · FR-2211·2215·2223~2225).
@@ -21,6 +21,10 @@ export const V1_DEFAULTS = {
   listLimit: 200,
   /** 목록 상한으로 줄 수 있는 가장 큰 값 */
   listLimitMax: 1000,
+  /** 에이전트가 만드는 스페이스의 종류 — 팀뿐이다. 개인 스페이스는 계정과 함께 생긴다 */
+  spaceKind: 'team',
+  /** Crew에 넣을 때 역할을 안 주면 — 에이전트가 사람을 넣는 까닭은 같이 쓰기 위해서다 */
+  memberRole: 'editor',
   /** 옮길 때 위치를 안 주면 — 형제 수보다 큰 값은 맨 끝이다(`movePageDto`) */
   moveToEnd: 1_000_000,
 } as const;
@@ -122,6 +126,104 @@ export type V1PageView = {
   ancestors: V1Ancestor[];
 };
 export type V1VersionView = { versionNo: number; title: string; createdByName: string; createdAt: string; format: V1ReadFormat; body: string | DocNode };
+
+// ---- 스페이스·Crew·분류 ----
+
+const spaceName = z.string().trim().min(1).max(200);
+const spaceDescription = z.string().trim().max(2000);
+/** 분류는 **이름으로** 고른다 — id를 외우지 않게 */
+const categoryRef = z.string().trim().min(1).max(CATEGORY_NAME_MAX);
+
+/** 스페이스 만들기 — 필수는 이름뿐이다. 종류는 팀, 설명은 빈 글, 분류는 없음 */
+export const v1CreateSpaceDto = z.strictObject({
+  name: spaceName,
+  description: spaceDescription.default(''),
+  category: categoryRef.nullable().default(null),
+});
+export type V1CreateSpaceDto = z.infer<typeof v1CreateSpaceDto>;
+
+/** 스페이스 고치기 — 고칠 것만. 분류는 `null`이면 지우고, 없으면 그대로 */
+export const v1UpdateSpaceDto = z
+  .strictObject({ name: spaceName.optional(), description: spaceDescription.optional(), category: categoryRef.nullable().optional() })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: '고칠 것이 없다 — name·description·category 중 하나는 있어야 한다' });
+export type V1UpdateSpaceDto = z.infer<typeof v1UpdateSpaceDto>;
+
+/** 중지·다시 쓰기. `takeover`는 주인이 건 중지를 관리자가 넘겨받을 때만(중지에만) */
+export const v1SpaceStatusDto = z
+  .strictObject({ status: z.enum(SPACE_STATUSES), takeover: z.boolean().optional() })
+  .transform((v, ctx): SpaceStatusDto => {
+    if (v.takeover === true) {
+      if (v.status !== 'suspended') {
+        ctx.addIssue({ code: 'custom', message: 'takeover는 status가 suspended일 때만 쓴다', path: ['takeover'] });
+        return z.NEVER;
+      }
+      return { status: 'suspended', takeover: true };
+    }
+    return { status: v.status };
+  });
+export type V1SpaceStatusDto = z.infer<typeof v1SpaceStatusDto>;
+
+/** Crew에 넣기 — 사용자 이름만 있으면 된다. 역할은 editor(owner 자리는 줄 수 없다) */
+export const v1AddMemberDto = z.strictObject({ username: usernameSchema, role: z.enum(ASSIGNABLE_MEMBER_ROLES).default(V1_DEFAULTS.memberRole) });
+export type V1AddMemberDto = z.infer<typeof v1AddMemberDto>;
+
+export const v1MemberRoleDto = z.strictObject({ role: z.enum(ASSIGNABLE_MEMBER_ROLES) });
+export type V1MemberRoleDto = z.infer<typeof v1MemberRoleDto>;
+
+export const v1CategoryDto = z.strictObject({ name: categoryRef });
+export type V1CategoryDto = z.infer<typeof v1CategoryDto>;
+
+/** 스페이스 목록 — 찾기와 상한은 선택이다 */
+export const v1SpaceListQuery = z.object({
+  q: z
+    .string()
+    .trim()
+    .max(LIST_SEARCH_MAX)
+    .optional()
+    .transform((v) => (v ? v : undefined)),
+  limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.listLimitMax).optional(),
+});
+export type V1SpaceListQuery = z.infer<typeof v1SpaceListQuery>;
+
+/** Crew를 사용자 이름이나 id로 고른다 — 사용자 이름을 아는 에이전트가 id를 찾지 않게 */
+export function matchMember<T extends { userId: string; username: string }>(ref: string, members: readonly T[]): T | null {
+  const wanted = ref.trim().toLowerCase();
+  if (!wanted) return null;
+  return members.find((m) => m.userId.toLowerCase() === wanted || m.username.toLowerCase() === wanted) ?? null;
+}
+
+export type V1SpaceView = {
+  id: string;
+  name: string;
+  description: string;
+  kind: SpaceView['kind'];
+  status: SpaceView['status'];
+  category: string | null;
+  categoryId: string | null;
+  memberCount: number;
+  myRole: SpaceView['myRole'];
+  canWrite: boolean;
+  canManageMembers: boolean;
+};
+export type V1MemberView = { userId: string; username: string; displayName: string; role: SpaceMemberView['role'] };
+export type V1CategoryView = { id: string; name: string; canRename: boolean; canDelete: boolean };
+
+/** 에이전트가 쓸 것만 — 열쇠·만든 사람·세부 권한은 뺀다 (설계서 3.5절) */
+export const toV1Space = (v: SpaceView): V1SpaceView => ({
+  id: v.id,
+  name: v.name,
+  description: v.description,
+  kind: v.kind,
+  status: v.status,
+  category: v.categoryName,
+  categoryId: v.categoryId,
+  memberCount: v.memberCount,
+  myRole: v.myRole,
+  canWrite: v.access.canWrite,
+  canManageMembers: v.access.canManageMembers,
+});
+export const toV1Member = (m: SpaceMemberView): V1MemberView => ({ userId: m.userId, username: m.username, displayName: m.displayName, role: m.role });
+export const toV1Category = (c: CategoryView): V1CategoryView => ({ id: c.id, name: c.name, canRename: c.access.canRename, canDelete: c.access.canDelete });
 
 // ---- 스페이스 고르기 ----
 

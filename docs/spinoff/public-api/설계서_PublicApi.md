@@ -143,6 +143,24 @@
 - 기본값이 **권한을 넓히지 않는다** — 채우는 값은 사람이 화면에서 같은 일을 할 때의 기본값과 같다(FR-2208은 그대로 먼저 본다).
 - 필수 입력만으로 부른 요청이 성공하는 시험을 경로마다 둔다(FR-2223).
 
+**스페이스·Crew·분류 (끝 2026-10-07 — 4단계 둘째 조각, `apps/api/src/v1/v1-spaces.controller.ts`)**
+
+| 경로 | 에이전트가 정하는 것 | 서버가 채우는 것·화면용과 다른 점 |
+|---|---|---|
+| `POST /api/v1/spaces` | `name` | 종류는 **팀**(개인 스페이스는 계정과 함께 생긴다 — `kind`를 보내면 400), 설명 빈 글, 분류 없음. 분류는 **이름**으로 고른다(`category`) — 없으면 404 `CATEGORY_NOT_FOUND`에 고를 수 있는 이름(`details.available`) |
+| `GET /api/v1/spaces?q=&limit=` | (없음) | 내가 읽을 수 있는 팀·개인 스페이스를 한 목록으로. 이름·키로 찾기 |
+| `GET /api/v1/spaces/:id` | — | 응답은 에이전트가 쓸 것만: `id·name·description·kind·status·category·categoryId·memberCount·myRole·canWrite·canManageMembers`(열쇠·만든 사람·세부 권한은 뺀다) |
+| `PATCH /api/v1/spaces/:id` | 고칠 `name`·`description`·`category` | 분류는 `null`이면 지우고 없으면 그대로 |
+| `PATCH …/status` | `status`(`active`·`suspended`), 필요하면 `takeover` | `takeover`는 중지에만 |
+| `DELETE /api/v1/spaces/:id` | — | 휴지통으로 |
+| `GET·POST …/members` | `username` | 역할 기본 **editor**(owner 자리는 줄 수 없다). 응답은 `userId·username·displayName·role` |
+| `PATCH·DELETE …/members/:ref` | `role` | `:ref`는 **사용자 이름이나 id** — Crew에 없으면 404 `MEMBER_NOT_FOUND` |
+| `GET·POST /api/v1/categories`, `PATCH·DELETE …/:id` | `name` | 만들기는 같은 이름이면 있던 것(멱등). 남의 공간이 쓰는 분류는 만든 사람도 못 지운다(화면용과 같은 규칙) |
+
+- 컨트롤러는 화면용과 같은 `SpaceUseCases`·`CategoryUseCases`를 부른다(FR-2210). 판정(주인·관리자·위임)과 감사도 같다 — 에이전트가 사람보다 더 할 수 없다.
+- 스페이스를 **이름으로 고르는 규칙**(`resolveSpaceRef` — 겹치면 409 `SPACE_AMBIGUOUS`, 볼 수 없으면 404)은 페이지와 이 모듈이 한 곳(`v1/space-ref.ts`)을 쓴다.
+- 실제 호출 확인(2026-10-07, 개발 서버): 이름만으로 만들기, 분류 이름으로 고르기·없는 분류 404, `kind` 400, Crew를 사용자 이름으로 넣기(기본 editor)·자리 바꾸기·빼기, 없는 사람 404, 목록 찾기, 분류를 지우면 스페이스가 분류 없음으로.
+
 ### 3.4 마크다운 변환의 경계 (3-1단계)
 
 - **읽기**는 이미 공유 함수 `pageMarkdown`이 있다(화면의 복사 단추가 쓴다). v1은 그 함수와 텍스트 변환을 그대로 쓴다.
@@ -173,7 +191,7 @@
 | v1 오류 모양·기본값·본문 형식·스페이스 이름 찾기 | `packages/shared/src/v1.ts` | A | **끝** |
 | 토큰 서비스·가드·컨트롤러 | `apps/api/src/api-tokens/` | B | 끝 |
 | 유스케이스 | `apps/api/src/*/*.usecases.ts` | B | **끝**(설정·라벨·휴지통·템플릿·첨부·댓글·LLM·사용자·스페이스·분류·페이지) |
-| v1 컨트롤러 | `apps/api/src/v1/` | B | **페이지 끝**(4단계 첫 조각), 나머지 모듈은 같은 틀로 |
+| v1 컨트롤러 | `apps/api/src/v1/` | B | **페이지·스페이스·분류 끝**, 나머지 모듈은 같은 틀로 |
 | OpenAPI 생성·계약 시험 | 예정 | B | 5 |
 | 토큰 화면 | `apps/web` | B(측정만) · C E2E | 6 |
 
@@ -182,7 +200,7 @@
 | 단계 | 일 | 비고 |
 |---|---|---|
 | ~~3-1~~ | ~~마크다운 → 문서 변환 (A, 시험 먼저)~~ → **끝 2026-10-07**(`96034fb` Red → Green) | 3.4절 |
-| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)와 빈도 제한은 끝(2026-10-07)** — 3.3절. 남은 모듈(스페이스·분류·댓글·라벨·첨부·검색·템플릿·휴지통·알림·LLM·관리), 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209), 첨부 `src`(FR-2218) |
+| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·빈도 제한은 끝(2026-10-07)** — 3.3절. 남은 모듈(댓글·라벨·첨부·검색·템플릿·휴지통·알림·LLM·관리), 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209), 첨부 `src`(FR-2218) |
 | 5 | OpenAPI 생성 + 계약 시험 | |
 | 6 | 토큰 화면 + E2E | |
 | 7 | API 사용가이드(curl·에이전트 도구 정의 예), 가이드에 가리키는 줄(장애대응 401/403/429, 사용자가이드, 학습가이드, 설계서_Architecture 11절) | `pnpm verify:docs` |

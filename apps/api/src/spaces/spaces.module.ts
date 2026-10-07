@@ -154,6 +154,7 @@ export class CategoriesController {
 @Module({
   providers: [SpacesService, SpaceUseCases, CategoryUseCases],
   controllers: [SpacesController, CategoriesController],
-  exports: [SpacesService],
+  // 공개 API(v1)도 화면용과 같은 유스케이스를 부른다 (docs/spinoff/public-api 설계서 FR-2210)
+  exports: [SpacesService, SpaceUseCases, CategoryUseCases],
 })
 export class SpacesModule {}

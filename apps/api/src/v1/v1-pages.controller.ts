@@ -1,7 +1,6 @@
 import { ConflictException, Controller, Delete, Get, Inject, NotFoundException, Param, ParseIntPipe, Patch, Post, Query, Req, Res, Body, BadRequestException } from '@nestjs/common';
 import {
   docToBody,
-  matchSpaces,
   v1CreatePageDto,
   v1MovePageDto,
   v1PageQuery,
@@ -13,7 +12,6 @@ import {
   type V1PageView,
   type V1VersionView,
   type PageVersionView,
-  idSchema,
 } from '@workfluence/shared';
 import type { Request, Response } from 'express';
 import { CurrentUser, type SessionUser } from '../auth/auth.guard';
@@ -24,15 +22,13 @@ import { PagesService } from '../pages/pages.service';
 import { PageUseCases } from '../pages/pages.usecases';
 import { CollabGateway } from '../pages/collab/collab.gateway';
 import { SpacesService } from '../spaces/spaces.service';
+import { resolveSpaceRef } from './space-ref';
 import { UseV1 } from './use-v1';
 
 /** 실시간 편집 중인지 — 게이트웨이의 좁은 면 (2절 ISP). 시험은 대역을 넣는다 */
 export interface LiveEditing {
   hasLiveEditors(pageId: string): boolean;
 }
-
-/** 스페이스 목록에서 이름으로 찾을 때 훑는 상한 — 볼 수 있는 스페이스 수보다 넉넉하다 */
-const SPACE_LOOKUP_LIMIT = 500;
 
 /**
  * 공개 API v1 — 페이지 (docs/spinoff/public-api 설계서 3.3·3.5절).
@@ -50,31 +46,6 @@ export class V1PagesController {
     private readonly spaces: SpacesService,
     @Inject(CollabGateway) private readonly live: LiveEditing,
   ) {}
-
-  /** 스페이스를 id나 이름으로 — 이름이 겹치면 고르지 않고 후보를 준다. 볼 수 없는 스페이스는 없는 것과 같다 */
-  private async resolveSpace(ref: string, me: SessionUser): Promise<{ id: string; name: string }> {
-    const notFound = () => new NotFoundException({ code: 'SPACE_NOT_FOUND', message: '스페이스를 찾을 수 없다' });
-    if (idSchema.safeParse(ref.trim()).success) {
-      try {
-        const s = await this.spaces.get(ref.trim().toLowerCase(), me);
-        return { id: s.id, name: s.name };
-      } catch (e) {
-        throw e instanceof NotFoundException ? notFound() : e;
-      }
-    }
-    const [team, personal] = await Promise.all([this.spaces.list(me, 'team', SPACE_LOOKUP_LIMIT), this.spaces.list(me, 'personal', SPACE_LOOKUP_LIMIT)]);
-    const all = [...new Map([...team, ...personal].map((s) => [s.id, s])).values()];
-    const found = matchSpaces(ref, all);
-    if (found.length === 0) throw notFound();
-    if (found.length > 1) {
-      throw new ConflictException({
-        code: 'SPACE_AMBIGUOUS',
-        message: '같은 이름의 스페이스가 여럿이다 — id로 고른다',
-        details: { candidates: found.map((s) => ({ id: s.id, name: s.name, kind: s.kind })) },
-      });
-    }
-    return { id: found[0]!.id, name: found[0]!.name };
-  }
 
   private async view(id: string, me: SessionUser, format: V1PageQuery['format']): Promise<V1PageView> {
     const [page, ancestors] = await Promise.all([this.pages.get(id, me), this.pages.ancestors(id, me)]);
@@ -117,7 +88,7 @@ export class V1PagesController {
     @CurrentUser() me: SessionUser,
   ): Promise<{ space: { id: string; name: string }; items: PageSummary[] }> {
     if (!space?.trim()) throw new NotFoundException({ code: 'SPACE_REQUIRED', message: 'space(스페이스 이름이나 id)가 필요하다' });
-    const target = await this.resolveSpace(space, me);
+    const target = await resolveSpaceRef(this.spaces, space, me);
     const cap = Math.min(Math.max(1, limit ?? V1_DEFAULTS.listLimit), V1_DEFAULTS.listLimitMax);
     return { space: target, items: (await this.pages.tree(target.id, me)).slice(0, cap) };
   }
@@ -135,7 +106,7 @@ export class V1PagesController {
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
   ): Promise<V1PageView> {
-    const target = await this.resolveSpace(dto.space, me);
+    const target = await resolveSpaceRef(this.spaces, dto.space, me);
     const page = await this.uc.create({ spaceId: target.id, parentId: dto.parentId, title: dto.title, content: dto.doc }, me, metaOf(req));
     return this.view(page.id, me, query.format);
   }
