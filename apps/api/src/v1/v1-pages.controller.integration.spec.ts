@@ -313,3 +313,54 @@ describe('이력·되돌리기', () => {
     void ConflictException;
   });
 });
+
+describe('비교·내보내기', () => {
+  it('두 버전의 차이를 화면용과 같은 모양으로 준다', async () => {
+    const { owner, mk } = await setup();
+    const p = await mk('차이');
+    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '바뀐 본문' }), md, owner, req);
+    const d = await ctrl.diff(p.id, 1, 2, owner);
+    expect(d).toMatchObject({ from: { versionNo: 1 }, to: { versionNo: 2 }, titleChanged: false });
+    expect(d.diff).toBeTruthy();
+  });
+
+  it('없는 버전·볼 수 없는 페이지는 404', async () => {
+    const { mk } = await setup();
+    const p = await mk('x');
+    const mallory = await person(db, 'mallory');
+    await expect(ctrl.diff(p.id, 1, 9, (await person(db, 'o2')) as never)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctrl.diff(p.id, 1, 1, mallory)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('HTML 내보내기는 파일로 받게 하고 감사에 남는다 (FR-736)', async () => {
+    const { owner, mk } = await setup();
+    const p = await mk('내보낼 글');
+    const sent: { status?: number; headers: Record<string, string>; body?: string } = { headers: {} };
+    const res = {
+      status(n: number) {
+        sent.status = n;
+        return res;
+      },
+      setHeader(k: string, v: string) {
+        sent.headers[k] = v;
+        return res;
+      },
+      send(b: string) {
+        sent.body = b;
+      },
+    };
+    await ctrl.exportHtml(p.id, undefined, owner, req, res as never);
+    expect(sent.status).toBe(200);
+    expect(sent.headers['Content-Type']).toMatch(/text\/html/);
+    expect(sent.headers['Content-Disposition']).toMatch(/^attachment;/);
+    expect(sent.headers['Cache-Control']).toBe('no-store');
+    expect(sent.body).toContain('내보낼 글');
+    expect((await rows('page.export'))[0]).toMatchObject({ targetId: p.id, ip: '10.0.0.17', detail: { versionNo: 1 } });
+  });
+
+  it('versionNo가 정수가 아니면 400', async () => {
+    const { owner, mk } = await setup();
+    const p = await mk('x');
+    await expect(ctrl.exportHtml(p.id, 'abc', owner, req, {} as never)).rejects.toMatchObject({ status: 400 });
+  });
+});

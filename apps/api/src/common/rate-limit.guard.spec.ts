@@ -186,3 +186,25 @@ describe('창 길이가 다른 제한이 서로를 지우지 않는다', () => {
     vi.useRealTimers();
   });
 });
+
+describe('RateLimitStore.retryAfterSec — 얼마나 기다리면 되나', () => {
+  it('가장 오래된 한 건이 창을 벗어날 때까지의 초(올림)', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-07T00:00:00Z') });
+    const store = new RateLimitStore();
+    const req = {} as never;
+    const spec = { max: 2, windowSec: 60 };
+    expect(store.hit(req, 'k', spec)).toBe(true);
+    vi.advanceTimersByTime(20_000);
+    expect(store.hit(req, 'k', spec)).toBe(true);
+    expect(store.hit(req, 'k', spec)).toBe(false);
+    expect(store.retryAfterSec('k')).toBe(40);
+    vi.advanceTimersByTime(500);
+    expect(store.retryAfterSec('k')).toBe(40);
+    vi.useRealTimers();
+  });
+
+  it('센 것이 없거나 이미 지난 키는 0', () => {
+    const store = new RateLimitStore();
+    expect(store.retryAfterSec('없는 키')).toBe(0);
+  });
+});
