@@ -25,6 +25,9 @@ export const V1_DEFAULTS = {
   spaceKind: 'team',
   /** Crew에 넣을 때 역할을 안 주면 — 에이전트가 사람을 넣는 까닭은 같이 쓰기 위해서다 */
   memberRole: 'editor',
+  /** 검색 결과의 기본 개수와 상한 — 화면용 검색(`searchQueryDto`)과 같다 */
+  searchLimit: 20,
+  searchLimitMax: 50,
   /** 첨부를 JSON으로 올릴 때 내용의 인코딩 — 글이면 utf8, 바이너리면 base64 */
   uploadEncoding: 'utf8',
   /** 첨부를 JSON(`format=json`)으로 받을 수 있는 가장 큰 크기 — 그 위는 바이너리로 받는다. 응답 한 번이 이만큼의 문맥을 먹는다 */
@@ -130,6 +133,16 @@ export type V1PageView = {
   ancestors: V1Ancestor[];
 };
 export type V1VersionView = { versionNo: number; title: string; createdByName: string; createdAt: string; format: V1ReadFormat; body: string | DocNode };
+
+// ---- 검색 ----
+
+/** 검색 — 필수는 검색어뿐이다. 스페이스는 이름이나 id로 좁힌다(없으면 읽을 수 있는 전부). 쿼리의 모르는 칸도 거절한다 */
+export const v1SearchQuery = z.strictObject({
+  q: z.string().trim().min(1).max(200),
+  space: spaceRef.optional(),
+  limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.searchLimitMax).default(V1_DEFAULTS.searchLimit),
+});
+export type V1SearchQuery = z.infer<typeof v1SearchQuery>;
 
 // ---- 댓글·라벨·첨부 ----
 
