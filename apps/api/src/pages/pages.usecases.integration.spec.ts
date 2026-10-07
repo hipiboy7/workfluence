@@ -80,8 +80,8 @@ describe('페이지 만들기·고치기', () => {
 describe('멘션 메일은 커밋 뒤에 보낸다 (FR-754)', () => {
   it('저장에서 불린 사람이 있으면 일으킨 사람·페이지 제목과 함께 메일을 부르고, 없으면 부르지 않는다', async () => {
     const { owner, spaceId, mk } = await setup();
-    const bob = await person(db, 'bob', 'member', { email: 'bob@example.internal' });
-    await spacesSvc.addMember(spaceId, { userId: bob.id, role: 'editor' }, owner);
+    await person(db, 'bob', 'member', { email: 'bob@example.internal' });
+    await spacesSvc.addMember(spaceId, { username: 'bob', role: 'editor' }, owner);
     const p = await mk('조용한 글');
     expect(notify).not.toHaveBeenCalled();
 
@@ -94,8 +94,8 @@ describe('멘션 메일은 커밋 뒤에 보낸다 (FR-754)', () => {
 
   it('새 페이지에서 불러도 메일이 간다 (P8 자체 점검 6)', async () => {
     const { owner, spaceId } = await setup();
-    const bob = await person(db, 'bob', 'member', { email: 'bob@example.internal' });
-    await spacesSvc.addMember(spaceId, { userId: bob.id, role: 'editor' }, owner);
+    await person(db, 'bob', 'member', { email: 'bob@example.internal' });
+    await spacesSvc.addMember(spaceId, { username: 'bob', role: 'editor' }, owner);
     await uc.create({ spaceId, parentId: null, title: '새 글', content: doc('@bob 봐 주세요') }, owner, META);
     expect(notify).toHaveBeenCalledTimes(1);
   });

@@ -16,6 +16,7 @@ import { SpacesService } from '../../spaces/spaces.service';
 import { UsersService } from '../../users/users.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../../test/db';
 import { PagesController } from '../pages.module';
+import { PageUseCases } from '../pages.usecases';
 import { PagesService } from '../pages.service';
 import type { Ledger } from '../domain/makers';
 import { MAX_PRESENCE_BINDS, MAX_UNWRITTEN_PRESENCE_BINDS } from '../domain/presence';
@@ -523,7 +524,10 @@ describe('실시간 편집의 결함 셋 (P13 C.7, FR-1460~1462)', () => {
   /** 화면이 부르는 두 문(제목·저장하고 보기로)을 **컨트롤러로** 본다 — 답의 모양과 감사는 컨트롤러가 만든다 (병합 전 검토) */
   describe('컨트롤러의 답과 감사', () => {
     const ctrl = () =>
-      new PagesController(new PagesService(db, new SpacesService(db), new NotificationsService(db, new InAppChannel())), new AuditService(db), gw, {} as never, new SpacesService(db), db);
+      (() => {
+        const pagesSvc = new PagesService(db, new SpacesService(db), new NotificationsService(db, new InAppChannel()));
+        return new PagesController(pagesSvc, new PageUseCases(pagesSvc, new AuditService(db), gw, {} as never, new SpacesService(db), db));
+      })();
     const me = () => ({ id: otherId, role: 'admin' }) as never;
     const audits = async (action: string) =>
       (await db.execute<{ actor: string; detail: Record<string, unknown> }>(sql`SELECT actor_id AS actor, detail FROM audit_events WHERE action = ${action} ORDER BY created_at`)).rows;

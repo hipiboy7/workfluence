@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { UuidPipe } from '../common/uuid.pipe';
 import { auditEvents, pageVersions, pages, spaceCategories, spaces, users } from '../db/schema';
 import { PagesController } from '../pages/pages.module';
+import { PageUseCases } from '../pages/pages.usecases';
 import { PagesService } from '../pages/pages.service';
 import { lockTree } from '../pages/tree-lock';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
@@ -572,7 +573,7 @@ describe('페이지 트리 (FR-326~330)', () => {
     const { owner, mk } = await setup();
     const a = await mk('A', null);
     const b = await mk('B', null);
-    const ctrl = new PagesController(pagesSvc, new AuditService(db), {} as never, {} as never, spacesSvc, db);
+    const ctrl = new PagesController(pagesSvc, new PageUseCases(pagesSvc, new AuditService(db), {} as never, {} as never, spacesSvc, db));
     await ctrl.move(b.id, { parentId: a.id, position: 99 }, owner as never, { ip: '127.0.0.1' } as never);
     const rows = await db.execute<{ detail: unknown }>(sql`SELECT detail FROM audit_events WHERE action = 'page.move' AND target_id = ${b.id}`);
     expect(rows.rows[0].detail).toEqual({ from: { parentId: null, position: PAGE_POSITION_GAP }, to: { parentId: a.id, position: 0, index: 0 } });
