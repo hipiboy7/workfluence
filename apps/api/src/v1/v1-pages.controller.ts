@@ -1,4 +1,4 @@
-import { ConflictException, Controller, Delete, Get, Inject, NotFoundException, Param, ParseIntPipe, Patch, Post, Query, Req, UseFilters, UseGuards, Body } from '@nestjs/common';
+import { ConflictException, Controller, Delete, Get, Inject, NotFoundException, Param, ParseIntPipe, Patch, Post, Query, Req, Res, Body, BadRequestException } from '@nestjs/common';
 import {
   docToBody,
   matchSpaces,
@@ -7,6 +7,7 @@ import {
   v1PageQuery,
   v1UpdatePageDto,
   V1_DEFAULTS,
+  type PageDiffView,
   type PageSummary,
   type V1PageQuery,
   type V1PageView,
@@ -14,8 +15,7 @@ import {
   type PageVersionView,
   idSchema,
 } from '@workfluence/shared';
-import type { Request } from 'express';
-import { ApiTokenGuard } from '../api-tokens/api-token.guard';
+import type { Request, Response } from 'express';
 import { CurrentUser, type SessionUser } from '../auth/auth.guard';
 import { metaOf } from '../common/request-meta';
 import { UuidPipe } from '../common/uuid.pipe';
@@ -24,7 +24,7 @@ import { PagesService } from '../pages/pages.service';
 import { PageUseCases } from '../pages/pages.usecases';
 import { CollabGateway } from '../pages/collab/collab.gateway';
 import { SpacesService } from '../spaces/spaces.service';
-import { V1ExceptionFilter } from './v1-error.filter';
+import { UseV1 } from './use-v1';
 
 /** 실시간 편집 중인지 — 게이트웨이의 좁은 면 (2절 ISP). 시험은 대역을 넣는다 */
 export interface LiveEditing {
@@ -42,8 +42,7 @@ const SPACE_LOOKUP_LIMIT = 500;
  * 세션은 보지 않는다.
  */
 @Controller('api/v1/pages')
-@UseGuards(ApiTokenGuard)
-@UseFilters(V1ExceptionFilter)
+@UseV1()
 export class V1PagesController {
   constructor(
     private readonly pages: PagesService,
@@ -200,5 +199,36 @@ export class V1PagesController {
     await this.assertWritableNow(id, me);
     await this.uc.restoreVersion(id, no, me, metaOf(req));
     return this.view(id, me, query.format);
+  }
+
+  /** 두 버전의 차이 — 화면용과 같은 모양 */
+  @Get(':id/versions/:a/diff/:b')
+  diff(
+    @Param('id', UuidPipe) id: string,
+    @Param('a', ParseIntPipe) a: number,
+    @Param('b', ParseIntPipe) b: number,
+    @CurrentUser() me: SessionUser,
+  ): Promise<PageDiffView> {
+    return this.pages.diff(id, a, b, me);
+  }
+
+  /** HTML 한 파일로 내보낸다 — **파일로 받게 한다**(열어 버리면 내보낸 문서가 우리 오리진에서 도는 길이 생긴다). 감사는 유스케이스가 남긴다 (FR-736) */
+  @Get(':id/export')
+  async exportHtml(
+    @Param('id', UuidPipe) id: string,
+    @Query('versionNo') versionNo: string | undefined,
+    @CurrentUser() me: SessionUser,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const no = versionNo === undefined ? undefined : Number(versionNo);
+    if (no !== undefined && !Number.isInteger(no)) throw new BadRequestException('versionNo는 정수다');
+    const out = await this.uc.exportHtml(id, no, me, metaOf(req));
+    res
+      .status(200)
+      .setHeader('Content-Type', 'text/html; charset=utf-8')
+      .setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}`)
+      .setHeader('Cache-Control', 'no-store')
+      .send(out.html);
   }
 }

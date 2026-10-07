@@ -5,6 +5,8 @@ import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
 import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { UsersModule } from '../users/users.module';
+import { RateLimitStore } from '../common/rate-limit.guard';
+import { ApiRateLimitGuard } from './api-rate-limit.guard';
 import { ApiTokenGuard } from './api-token.guard';
 import { ApiTokensService } from './api-tokens.service';
 
@@ -55,7 +57,8 @@ export class ApiTokensController {
 @Module({
   imports: [UsersModule],
   controllers: [ApiTokensController],
-  providers: [ApiTokensService, ApiTokenGuard],
-  exports: [ApiTokensService, ApiTokenGuard],
+  // 빈도 제한의 저장소는 이 모듈의 **provider 하나**다 — 로그인 등 IP별 제한(AuthModule)과 예산이 섞이지 않고, 가드가 몇 개로 만들어지든 예산은 하나다 (T-027)
+  providers: [ApiTokensService, ApiTokenGuard, ApiRateLimitGuard, RateLimitStore],
+  exports: [ApiTokensService, ApiTokenGuard, ApiRateLimitGuard, RateLimitStore],
 })
 export class ApiTokensModule {}

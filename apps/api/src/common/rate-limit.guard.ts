@@ -79,6 +79,15 @@ export class RateLimitStore {
     if (i >= 0) e.at.splice(i, 1);
   }
 
+  /** 이 키가 다시 통과하기까지 기다릴 초(올림) — 가장 오래된 한 건이 창을 벗어날 때까지. 센 것이 없거나 이미 지났으면 0 (`Retry-After`) */
+  retryAfterSec(key: string): number {
+    const e = this.hits.get(key);
+    if (!e) return 0;
+    const now = Date.now();
+    const oldest = e.at.filter((t) => now - t < e.windowMs).sort((a, b) => a - b)[0];
+    return oldest === undefined ? 0 : Math.max(0, Math.ceil((oldest + e.windowMs - now) / 1000));
+  }
+
   /** 테스트용 — 남은 건수 */
   countFor(key: string): number {
     return this.hits.get(key)?.at.length ?? 0;
