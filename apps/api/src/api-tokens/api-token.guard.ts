@@ -16,7 +16,7 @@ import { setRequestToken, setRequestUser } from '../common/request-context';
 import { parseBearer } from './domain/jwt';
 import { ApiTokensService } from './api-tokens.service';
 
-const API_ADMIN_KEY = 'wf:api-admin';
+export const API_ADMIN_KEY = 'wf:api-admin';
 
 /** 관리 경로 — 토큰에 `admin` scope가 **더** 있어야 한다 (계획서 Q4) */
 export const ApiAdminRoute = () => SetMetadata(API_ADMIN_KEY, true);
