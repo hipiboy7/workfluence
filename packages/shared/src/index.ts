@@ -8,6 +8,7 @@ export * from './llm';
 export * from './mail';
 export * from './markdown';
 export * from './markdown-parse';
+export * from './v1';
 export * from './permissions';
 export * from './policy';
 export * from './release';
