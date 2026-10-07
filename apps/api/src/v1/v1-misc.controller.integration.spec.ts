@@ -81,7 +81,7 @@ describe('휴지통', () => {
     const sp = await spacesSvc.create({ name: '팀', kind: 'team', categoryId: null, description: '' }, me);
     const [p] = await db
       .insert(pages)
-      .values({ spaceId: sp.id, parentId: null, title, position: 0, currentVersionNo: 1, searchText: '', createdBy: me.id, updatedBy: me.id, deletedAt: new Date(), deletedBy: me.id })
+      .values({ spaceId: sp.id, parentId: null, title, position: 0, currentVersionNo: 1, searchText: '', createdBy: me.id, updatedBy: me.id, deletedAt: new Date() })
       .returning();
     return { space: sp, page: p! };
   };

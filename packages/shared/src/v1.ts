@@ -3,7 +3,7 @@ import { ASSIGNABLE_MEMBER_ROLES, CATEGORY_NAME_MAX, LIST_SEARCH_MAX, MARKDOWN_L
 import { extractText, validateDocument, type DocNode } from './document';
 import { renderDocMarkdown } from './markdown';
 import { parseMarkdown } from './markdown-parse';
-import { attachLabelDto, idSchema, usernameSchema, type AttachmentView, type CategoryView, type CommentView, type LabelView, type SpaceMemberView, type SpaceStatusDto, type SpaceView } from './schemas';
+import { attachLabelDto, idSchema, usernameSchema, type AttachmentView, type CategoryView, type CommentView, type LabelView, type PageTemplateView, type SpaceMemberView, type SpaceStatusDto, type SpaceView } from './schemas';
 
 /**
  * 공개 API v1의 계약 중 순수한 부분 (A등급, docs/spinoff/public-api 설계서 3.3·3.5절 · FR-2211·2215·2223~2225).
@@ -133,6 +133,38 @@ export type V1PageView = {
   ancestors: V1Ancestor[];
 };
 export type V1VersionView = { versionNo: number; title: string; createdByName: string; createdAt: string; format: V1ReadFormat; body: string | DocNode };
+
+// ---- 템플릿 ----
+
+const templateName = z.string().trim().min(1).max(80);
+const templateDescription = z.string().trim().max(200).nullable();
+
+/** 템플릿 만들기 — 필수는 이름과 본문이다(관리자만 — 화면용과 같다). 설명은 선택 */
+export const v1TemplateDto = z
+  .strictObject({ name: templateName, body: bodyField, format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat), description: templateDescription.optional() })
+  .transform((v, ctx) => ({ name: v.name, description: v.description, content: convert(v.format, v.body, ctx) }));
+export type V1TemplateDto = z.infer<typeof v1TemplateDto>;
+
+/** 템플릿 고치기 — 고칠 것만(있는 칸만 결과에 담긴다). 설명은 `null`이면 지운다 */
+export const v1TemplateUpdateDto = z
+  .strictObject({ name: templateName.optional(), body: z.unknown().optional(), format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat), description: templateDescription.optional() })
+  .refine((v) => v.name !== undefined || v.body !== undefined || v.description !== undefined, { message: '고칠 것이 없다 — name·body·description 중 하나는 있어야 한다' })
+  .transform((v, ctx) => ({
+    ...(v.name !== undefined ? { name: v.name } : {}),
+    ...(v.description !== undefined ? { description: v.description } : {}),
+    ...(v.body !== undefined ? { content: convert(v.format, v.body, ctx) } : {}),
+  }));
+export type V1TemplateUpdateDto = z.infer<typeof v1TemplateUpdateDto>;
+
+export type V1TemplateView = { id: string; name: string; description: string | null; updatedAt: string; format: V1ReadFormat; body: string | DocNode };
+export const toV1Template = (t: PageTemplateView, format: V1ReadFormat): V1TemplateView => ({
+  id: t.id,
+  name: t.name,
+  description: t.description,
+  updatedAt: t.updatedAt,
+  format,
+  body: docToBody(format, t.content),
+});
 
 // ---- 검색 ----
 
