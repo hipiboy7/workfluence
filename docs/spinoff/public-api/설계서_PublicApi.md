@@ -170,7 +170,7 @@
 | `GET·POST /api/v1/pages/:pageId/labels` | `name` | |
 | `DELETE …/labels/:ref` | — | `:ref`는 **이름이나 id** — 붙어 있지 않으면 404 `LABEL_NOT_FOUND` |
 | `GET /api/v1/labels` · `GET …/labels/:name/pages` | — | 볼 수 있는 페이지만(`{items}`) |
-| `GET /api/v1/pages/:pageId/attachments` | — | 응답에 **`url`**(이 API로 받는 주소)과 **`href`**(위키 안 주소 — 본문에 `[이름](href)`로 걸면 사람이 눌러 받는다) |
+| `GET /api/v1/pages/:pageId/attachments` | — | 응답에 **`url`**(이 API로 받는 주소)과 **`href`**(위키 안 주소 — 본문에 이 주소로 링크를 걸면 사람이 눌러 받는다) |
 | `POST …/attachments` | **JSON `{filename, content, encoding?}`**(글은 utf8, 바이너리는 base64) 또는 multipart(필드 `file`) | 에이전트는 바이너리를 보낼 수 없어 JSON 길을 둔다. **형식(mime)은 받지 않고** 확장자에서 정한다. 종류·크기·내용(가장한 파일) 검사와 감사는 화면용과 같다. JSON 본문은 앱의 JSON 상한(2MB) 안 |
 | `GET /api/v1/attachments/:id` | — | 바이너리(`nosniff`·`no-store`·`attachment`). **`?format=json`이면 글은 utf8·바이너리는 base64로 JSON에 담는다**(1,000,000바이트까지 — 넘으면 413 `TOO_LARGE_FOR_JSON`) |
 | `DELETE /api/v1/attachments/:id` | — | |
