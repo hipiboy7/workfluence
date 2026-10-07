@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { ApiTokensModule } from '../api-tokens/api-tokens.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { CommentsModule } from '../comments/comments.module';
 import { LabelsModule } from '../labels/labels.module';
 import { PagesModule } from '../pages/pages.module';
+import { V1PathExceptionFilter } from './v1-error.filter';
 import { V1AttachmentsController, V1CommentsController, V1LabelsController } from './v1-content.controller';
 import { V1PagesController } from './v1-pages.controller';
 import { V1CategoriesController, V1SpacesController } from './v1-spaces.controller';
@@ -14,6 +16,8 @@ import { V1CategoriesController, V1SpacesController } from './v1-spaces.controll
  */
 @Module({
   imports: [PagesModule, ApiTokensModule, CommentsModule, LabelsModule, AttachmentsModule],
+  // 라우팅 전의 오류(잘못된 JSON·너무 큰 본문)도 /api/v1에서는 한 모양으로 — 전역 필터 (FR-2211)
+  providers: [{ provide: APP_FILTER, useClass: V1PathExceptionFilter }],
   controllers: [V1PagesController, V1SpacesController, V1CategoriesController, V1CommentsController, V1LabelsController, V1AttachmentsController],
 })
 export class V1Module {}

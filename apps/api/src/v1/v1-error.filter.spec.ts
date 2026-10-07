@@ -123,6 +123,19 @@ describe('V1PathExceptionFilter — 전역: /api/v1 경로만 한 모양, 나머
     expect((sent.body as { error: { code: string; requestId: string } }).error).toMatchObject({ code: 'INVALID_JSON', requestId: 'req-9' });
   });
 
+  it('**Nest는 잘못된 JSON(SyntaxError)을 `BadRequestException(문장)`으로 바꿔 보낸다** — 라우팅 전의 문자열 400은 INVALID_JSON이고 문장(입력 조각이 든다)은 싣지 않는다', () => {
+    const sent = runPath('/api/v1/pages', new BadRequestException(`Unexpected token '비' in {"name": 비밀문장}`));
+    const err = (sent.body as { error: { code: string; message: string } }).error;
+    expect(sent.status).toBe(400);
+    expect(err.code).toBe('INVALID_JSON');
+    expect(JSON.stringify(sent.body)).not.toContain('비밀문장');
+  });
+
+  it('코드나 칸이 있는 400(객체 응답)은 그대로 둔다', () => {
+    const sent = runPath('/api/v1/pages', new BadRequestException({ code: 'SOMETHING', message: '고유한 까닭' }));
+    expect((sent.body as { error: { code: string } }).error.code).toBe('SOMETHING');
+  });
+
   it('화면용 경로는 건드리지 않고 Nest 기본 처리기에 맡긴다', () => {
     const base = vi.spyOn(BaseExceptionFilter.prototype, 'catch').mockImplementation(() => undefined);
     const sent = runPath('/api/pages', httpError(400, 'entity.parse.failed', 'x'));

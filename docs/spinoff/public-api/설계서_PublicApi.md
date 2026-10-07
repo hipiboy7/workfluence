@@ -98,7 +98,7 @@
 | 403 | `FORBIDDEN` | 사람의 권한(`can()`)이 거절했다 |
 | 503 | `API_DISABLED` | `WF_API_JWT_SECRET`이 비어 공개 API가 꺼져 있다 |
 
-> 오류는 모두 한 모양(`V1ExceptionFilter`)으로 나간다 — 가드의 코드는 그대로이고, 코드가 없는 오류는 상태에서 정한다(400 `INVALID_REQUEST`·404 `NOT_FOUND`·409 `CONFLICT`·429 `RATE_LIMITED` 등). 페이지에서 더한 코드: `SPACE_NOT_FOUND`·`SPACE_AMBIGUOUS`·`SPACE_REQUIRED`·`VERSION_CONFLICT`·`PAGE_BEING_EDITED`. 처리되지 않은 오류는 500 `INTERNAL`이고 오류 문장은 응답에 싣지 않는다(로그에 `http.unhandled`로 남는다).
+> 오류는 모두 한 모양(`V1ExceptionFilter`)으로 나간다 — 가드의 코드는 그대로이고, 코드가 없는 오류는 상태에서 정한다(400 `INVALID_REQUEST`·404 `NOT_FOUND`·409 `CONFLICT`·429 `RATE_LIMITED` 등). 더한 코드: `SPACE_NOT_FOUND`·`SPACE_AMBIGUOUS`·`SPACE_REQUIRED`·`VERSION_CONFLICT`·`PAGE_BEING_EDITED`(페이지), `CATEGORY_NOT_FOUND`·`MEMBER_NOT_FOUND`(스페이스), `LABEL_NOT_FOUND`·`TOO_LARGE_FOR_JSON`(라벨·첨부), `INVALID_JSON`·`PAYLOAD_TOO_LARGE`(본문 파싱). **라우팅 전에 나는 오류(잘못된 JSON·너무 큰 본문)도 `/api/v1`에서는 한 모양이다** — 전역 필터 `V1PathExceptionFilter`가 `isPublicApiPath`로 v1 경로만 바꾸고(화면용은 Nest 기본), 문장은 입력 조각을 담을 수 있어 쓰지 않는다. 컨트롤러 필터는 `UseV1`이 건다. 처리되지 않은 오류는 500 `INTERNAL`이고 오류 문장은 응답에 싣지 않는다(로그에 `http.unhandled`로 남는다).
 
 ### 3.3 v1 경로
 
@@ -218,7 +218,7 @@
 | 단계 | 일 | 비고 |
 |---|---|---|
 | ~~3-1~~ | ~~마크다운 → 문서 변환 (A, 시험 먼저)~~ → **끝 2026-10-07**(`96034fb` Red → Green) | 3.4절 |
-| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·댓글·라벨·첨부·빈도 제한은 끝(2026-10-07)** — 3.3절. 남은 모듈(검색·템플릿·휴지통·알림·LLM·관리), 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209), 본문 파싱 오류(잘못된 JSON·너무 큰 본문)의 오류 모양 |
+| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·댓글·라벨·첨부·빈도 제한은 끝(2026-10-07)** — 3.3절. 남은 모듈(검색·템플릿·휴지통·알림·LLM·관리), 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209) |
 | 5 | OpenAPI 생성 + 계약 시험 | |
 | 6 | 토큰 화면 + E2E | |
 | 7 | API 사용가이드(curl·에이전트 도구 정의 예), 가이드에 가리키는 줄(장애대응 401/403/429, 사용자가이드, 학습가이드, 설계서_Architecture 11절) | `pnpm verify:docs` |
