@@ -24,6 +24,7 @@ import { SettingsModule } from './settings/settings.module';
 import { SpacesModule } from './spaces/spaces.module';
 import { TrashModule } from './trash/trash.module';
 import { UsersModule } from './users/users.module';
+import { V1Module } from './v1/v1.module';
 
 // SPA 정적 서빙 여부는 모듈 구성 시점에 알아야 하므로 같은 로더를 한 번 더 호출한다 (순수 함수라 결과가 같다)
 const env = loadEnv();
@@ -76,6 +77,8 @@ function resolveWebDist(): string {
     LlmModule,
     // 공개 API 토큰 (docs/spinoff/public-api)
     ApiTokensModule,
+    // 공개 API v1 — 지금은 페이지 (docs/spinoff/public-api 설계서)
+    V1Module,
     ...(env.WF_SERVE_WEB
       ? [
           ServeStaticModule.forRoot({

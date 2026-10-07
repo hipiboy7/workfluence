@@ -19,6 +19,10 @@ export const V1_DEFAULTS = {
   readFormat: 'markdown',
   /** 목록·트리의 상한 */
   listLimit: 200,
+  /** 목록 상한으로 줄 수 있는 가장 큰 값 */
+  listLimitMax: 1000,
+  /** 옮길 때 위치를 안 주면 — 형제 수보다 큰 값은 맨 끝이다(`movePageDto`) */
+  moveToEnd: 1_000_000,
 } as const;
 
 export const V1_WRITE_FORMATS = ['markdown', 'json'] as const;
@@ -89,9 +93,35 @@ export const v1UpdatePageDto = z
   }));
 export type V1UpdatePageDto = z.infer<typeof v1UpdatePageDto>;
 
+/** 옮기기 — 부모만 있으면 된다(`null`은 맨 위). 위치를 안 주면 맨 끝 */
+export const v1MovePageDto = z.strictObject({
+  parentId: idSchema.nullable(),
+  position: z.number().int().min(0).default(V1_DEFAULTS.moveToEnd),
+});
+export type V1MovePageDto = z.infer<typeof v1MovePageDto>;
+
 /** 읽기의 형식 — 없으면 마크다운 */
 export const v1PageQuery = z.object({ format: z.enum(V1_READ_FORMATS).default(V1_DEFAULTS.readFormat) });
 export type V1PageQuery = z.infer<typeof v1PageQuery>;
+
+// ---- 응답 ----
+
+export type V1Ancestor = { id: string; title: string };
+/** 페이지 하나 — 본문은 `format`대로(기본 마크다운), 서버가 채운 부모·위치·버전과 조상 경로가 함께 온다 (FR-2217·2225) */
+export type V1PageView = {
+  id: string;
+  spaceId: string;
+  parentId: string | null;
+  title: string;
+  position: number;
+  currentVersionNo: number;
+  updatedAt: string;
+  createdAt: string;
+  format: V1ReadFormat;
+  body: string | DocNode;
+  ancestors: V1Ancestor[];
+};
+export type V1VersionView = { versionNo: number; title: string; createdByName: string; createdAt: string; format: V1ReadFormat; body: string | DocNode };
 
 // ---- 스페이스 고르기 ----
 

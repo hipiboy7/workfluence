@@ -96,6 +96,23 @@ export class PagesService {
     };
   }
 
+  /**
+   * 조상 경로 — 뿌리부터 부모까지(자기는 뺀다). 공개 API가 빵부스러기로 쓴다 (분석서 G4). 트리 전체를 받아 계산하지 않고 부모를 따라 올라간다.
+   * 트리 깊이 상한(`PAGE_TREE_MAX_DEPTH`)이 있어 질의 수가 그 안이고, 고리가 있어도 끝난다
+   */
+  async ancestors(id: string, principal: Principal): Promise<{ id: string; title: string }[]> {
+    const page = await this.readable(id, principal);
+    const chain: { id: string; title: string }[] = [];
+    let parentId = page.parentId;
+    for (let n = 0; parentId && n <= PAGE_TREE_MAX_DEPTH; n++) {
+      const parent = await this.db.query.pages.findFirst({ where: and(eq(pages.id, parentId), isNull(pages.deletedAt)) });
+      if (!parent) break;
+      chain.unshift({ id: parent.id, title: parent.title });
+      parentId = parent.parentId;
+    }
+    return chain;
+  }
+
   async create(dto: CreatePageDto, principal: Principal, tx: Db = this.db, onMentions?: (m: MentionOutcome) => void): Promise<PageView> {
     // 권한 없는 사람은 줄에 서지 않는다 — 잠그기 전에 한 번 보고, 잠근 뒤 다시 본다(기다리는 사이 바뀌었을 수 있다 — 반영분 점검 12, 보안 검토 3)
     await this.spaces.assertWrite(dto.spaceId, principal, tx);

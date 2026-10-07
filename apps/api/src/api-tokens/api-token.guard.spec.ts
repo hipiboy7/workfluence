@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { CSRF_HEADER, type ApiTokenScope } from '@workfluence/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { CsrfGuard, type SessionUser } from '../auth/auth.guard';
+import { currentRequest, runInRequestContext } from '../common/request-context';
 import { ApiTokenGuard } from './api-token.guard';
 import { ApiTokensService, type ApiAuthResult } from './api-tokens.service';
 
@@ -79,6 +80,24 @@ describe('ApiTokenGuard — 인증', () => {
     expect(tokens.authenticate).toHaveBeenCalledWith('x.y.z');
     expect(c.req.user).toEqual(MEMBER);
     expect(c.req.apiToken).toEqual({ id: 't1', scopes: ['read'] });
+  });
+
+  it('**통과하면 요청 문맥에 토큰 번호를 건다** — 그 뒤의 감사 행이 `jti`로 남긴다 (FR-2212)', async () => {
+    const c = ctx({ auth: 'Bearer x.y.z' });
+    const seen = await runInRequestContext({ requestId: 'r-1' }, async () => {
+      await new ApiTokenGuard(c.reflector, tokensOf(ok(MEMBER, ['read']))).canActivate(c.exec);
+      return currentRequest();
+    });
+    expect(seen).toMatchObject({ userId: 'u1', tokenId: 't1' });
+  });
+
+  it('막힌 요청은 토큰 번호를 걸지 않는다 — 인증되지 않은 토큰이 감사에 남지 않는다', async () => {
+    const c = ctx({ auth: 'Bearer x.y.z' });
+    const seen = await runInRequestContext({ requestId: 'r-2' }, async () => {
+      await new ApiTokenGuard(c.reflector, tokensOf({ ok: false, code: 'TOKEN_REVOKED' })).canActivate(c.exec).catch(() => undefined);
+      return currentRequest();
+    });
+    expect(seen?.tokenId).toBeUndefined();
   });
 });
 

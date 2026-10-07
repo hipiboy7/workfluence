@@ -248,13 +248,13 @@ describe('고치기 — 고칠 것만 (FR-2223)', () => {
 
 describe('옮기기·지우기', () => {
   it('위치를 안 주면 맨 끝으로 옮긴다', async () => {
-    const { owner, mk } = await setup();
+    const { owner, space, mk } = await setup();
     const a = await mk('A');
     const b = await mk('B');
     const c = await mk('C');
     const moved = await ctrl.move(a.id, v1MovePageDto.parse({ parentId: null }), owner, req);
     expect(moved.id).toBe(a.id);
-    const list = await ctrl.list(a.id, undefined, owner).then((l) => l.items.map((p) => p.title));
+    const list = await ctrl.list(space.id, undefined, owner).then((l) => l.items.map((p) => p.title));
     expect(list).toEqual(['B', 'C', 'A']);
     void b;
     void c;

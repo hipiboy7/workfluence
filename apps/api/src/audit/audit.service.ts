@@ -60,12 +60,15 @@ export class AuditService {
    */
   async record(input: AuditInput, tx: Db = this.db): Promise<void> {
     if (!(await this.recorded(input.action, tx))) return;
+    const tokenId = currentRequest()?.tokenId;
     await tx.insert(auditEvents).values({
       action: input.action,
       actorId: input.actorId ?? null,
       targetType: input.targetType ?? null,
       targetId: input.targetId ?? null,
-      detail: sanitizeDetail(input.detail),
+      // 토큰으로 부른 요청이면 그 토큰의 번호(JWT의 `jti`)를 **요청 문맥에서** 붙인다 — 부르는 쪽이 넘기지 않아도 되고, 같은 이름의 값을 넣어도 문맥의 것이 이긴다
+      // (FR-2212). 키를 `tokenId`가 아니라 `jti`로 둔 것은 `SECRET_KEYS`가 `token`이 든 키를 지우기 때문이다 — 번호는 비밀이 아니다
+      detail: sanitizeDetail(tokenId ? { ...input.detail, jti: tokenId } : input.detail),
       ip: input.ip ?? null,
       // 그 요청의 식별자 — 앱 로그·nginx 로그와 잇는다. 요청 밖(정리·실시간 편집의 자동 저장)이면 비운다 (P11 FR-1212)
       requestId: currentRequest()?.requestId ?? null,

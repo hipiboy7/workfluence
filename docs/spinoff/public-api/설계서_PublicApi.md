@@ -42,7 +42,7 @@
 |---|---|---|
 | FR-2210 | **v1 컨트롤러는 유스케이스를 한 번 부르는 얇은 층**이다. 트랜잭션·감사·멘션 메일을 다시 쓰지 않는다 — 화면용 컨트롤러와 같은 `*UseCases`를 부른다 | B 모듈별 "토큰으로 부르면 화면용과 같은 결과" |
 | FR-2211 | **오류는 한 모양** `{ "error": { "code", "message", "requestId" } }`. 가드의 코드(3.2절)를 포함해 code는 고정 문자열이고 에이전트는 문장이 아니라 code로 분기한다 | A 오류 모양 · B |
-| FR-2212 | **감사** — 토큰으로 한 일도 기존 감사 행위로 남기고 `detail.tokenId`를 싣는다. 발급·폐기는 `api_token.create`·`api_token.revoke` | B |
+| FR-2212 | **감사** — 토큰으로 한 일도 기존 감사 행위로 남기고 `detail.jti`(토큰 번호 — `tokenId`는 감사의 비밀 키 거름이 지운다)를 싣는다. 발급·폐기는 `api_token.create`·`api_token.revoke` | B |
 | FR-2213 | **빈도 제한** — 토큰별(`RATE_LIMITS`에 더한다). 넘으면 429 + `Retry-After`. 값은 4단계에서 실측으로 정한다 | B |
 | FR-2214 | **목록은 `limit`·`cursor` 한 방식**이다 | B |
 | FR-2215 | **본문 형식 `format`**(G1) — 페이지·댓글 읽기는 `markdown`(에이전트 기본 — FR-2223)·`json`·`text`, 쓰기는 `markdown`(기본) 또는 `json`. 마크다운은 **허용 목록 밖의 노드를 만들지 못하고** 어긋나면 400이다 | A 3-1단계 왕복 성질 시험 |
@@ -98,11 +98,30 @@
 | 403 | `FORBIDDEN` | 사람의 권한(`can()`)이 거절했다 |
 | 503 | `API_DISABLED` | `WF_API_JWT_SECRET`이 비어 공개 API가 꺼져 있다 |
 
-> 지금은 가드의 오류가 Nest 기본 모양으로 나간다. FR-2211의 한 모양으로 감싸는 것은 4단계에서 오류 필터와 함께 한다 — 위 code 표는 그때도 같다.
+> 오류는 모두 한 모양(`V1ExceptionFilter`)으로 나간다 — 가드의 코드는 그대로이고, 코드가 없는 오류는 상태에서 정한다(400 `INVALID_REQUEST`·404 `NOT_FOUND`·409 `CONFLICT`·429 `RATE_LIMITED` 등). 페이지에서 더한 코드: `SPACE_NOT_FOUND`·`SPACE_AMBIGUOUS`·`SPACE_REQUIRED`·`VERSION_CONFLICT`·`PAGE_BEING_EDITED`. 처리되지 않은 오류는 500 `INTERNAL`이고 오류 문장은 응답에 싣지 않는다(로그에 `http.unhandled`로 남는다).
 
 ### 3.3 v1 경로
 
 경로 이름·모듈별 scope는 계획서 5-1절의 지도를 따른다 — 화면용과 같은 이름을 쓰고(외워 둘 것이 하나) 접두사만 `/api/v1`이다. **같은 사실을 두 곳에 쓰지 않으려고 표를 옮기지 않는다.** 4단계가 모듈을 하나씩 만들 때마다 이 절에 그 모듈의 **v1에서만 다른 점**(`format`·`ancestors`·`src`·409·제외한 경로)을 더한다.
+
+**페이지 (끝 2026-10-07 — 4단계 첫 조각, `packages/shared/src/v1.ts` · `apps/api/src/v1/`)**
+
+| 경로 | 에이전트가 정하는 것 | 화면용과 다른 점 |
+|---|---|---|
+| `GET /api/v1/pages?space=&limit=` | 스페이스(이름이나 id) | 본문 없는 트리. `limit` 기본 200·최대 1000 |
+| `GET /api/v1/pages/:id?format=` | 페이지 | `format` 기본 `markdown`(`json`·`text`) — 본문은 `body`, 형식은 `format`, **`ancestors`**(뿌리부터)가 함께 온다 |
+| `POST /api/v1/pages` | `space`·`title`·`body` | 스페이스를 **이름으로** 고른다(겹치면 409 `SPACE_AMBIGUOUS`+후보, 없거나 볼 수 없으면 404 `SPACE_NOT_FOUND`). 본문은 마크다운(`format`으로 `json`). 부모 없으면 맨 위, 위치는 맨 끝. 모르는 칸은 400 |
+| `PATCH /api/v1/pages/:id` | 고칠 `title`·`body` 중 하나 이상 | 안 준 것은 그대로, **기준 버전을 안 주면 지금 버전**(주면 지킨다 — 어긋나면 409 `VERSION_CONFLICT`+지금 버전). **사람이 실시간 편집 중이면 409 `PAGE_BEING_EDITED`**(쓰기 권한이 없으면 403이 먼저) |
+| `PATCH /api/v1/pages/:id/move` | `parentId`(`null`=맨 위) | 위치를 안 주면 맨 끝 |
+| `DELETE /api/v1/pages/:id` | — | 휴지통으로 |
+| `GET …/versions` · `GET …/versions/:no?format=` | — | 버전 본문도 `format`대로 |
+| `POST …/versions/:no/restore` | — | 편집 중이면 409 `PAGE_BEING_EDITED` |
+
+- 컨트롤러는 화면용과 같은 `PageUseCases`를 부른다 — 감사(`page.create` 등)와 멘션 메일이 같은 길이다. **감사 행에는 `detail.jti`(토큰 번호)가 요청 문맥에서 자동으로 붙는다**(FR-2212).
+- 응답이 서버가 채운 값(부모·위치·버전)을 말한다(FR-2225).
+- **아직 안 한 것(이 모듈의 나머지)**: 두 버전 비교(`diff`)·HTML 내보내기. 토큰별 빈도 제한(FR-2213)은 모듈 전체에 걸리는 일이라 모듈을 더한 뒤 한 번에 한다.
+- 실제 호출 확인(2026-10-07, 개발 서버·컨테이너 아님): 쿠키·CSRF 헤더 없이 토큰만으로 만들기·고치기·읽기, 토큰 없음 401, HTML 본문 400(입력을 되읊지 않음), 모르는 칸 400, 없는 스페이스 404, 기준 버전 어긋남 409, read 토큰의 쓰기 403, 세션 쿠키만으로는 401, 감사 행의 `jti`. **편집 중 409는 시험의 대역으로만 확인했다**(실제 WebSocket 편집과 겹치는 시험은 5단계 이후 E2E).
+
 
 ### 3.5 에이전트용 단순 계약 — 기본값을 최대한 적용한다 (사용자 지시 2026-10-07)
 
@@ -149,10 +168,10 @@
 | 토큰 판정(클레임·scope·행·계정·만료) | `packages/shared/src/api-token.ts` | A | 끝 |
 | JWT 서명·검증·Bearer 해석 | `apps/api/src/api-tokens/domain/jwt.ts` | A | 끝 |
 | 마크다운 → 문서 | `packages/shared/src/markdown-parse.ts` (읽기 방향은 기존 `markdown.ts`) | A | **끝**(3-1) |
-| v1 오류 모양 | `packages/shared`(예정) | A | 4 |
+| v1 오류 모양·기본값·본문 형식·스페이스 이름 찾기 | `packages/shared/src/v1.ts` | A | **끝** |
 | 토큰 서비스·가드·컨트롤러 | `apps/api/src/api-tokens/` | B | 끝 |
 | 유스케이스 | `apps/api/src/*/*.usecases.ts` | B | **끝**(설정·라벨·휴지통·템플릿·첨부·댓글·LLM·사용자·스페이스·분류·페이지) |
-| v1 컨트롤러 | apps/api/src/v1 (예정 — 아직 없는 경로라 백틱을 쓰지 않는다) | B | 4 |
+| v1 컨트롤러 | `apps/api/src/v1/` | B | **페이지 끝**(4단계 첫 조각), 나머지 모듈은 같은 틀로 |
 | OpenAPI 생성·계약 시험 | 예정 | B | 5 |
 | 토큰 화면 | `apps/web` | B(측정만) · C E2E | 6 |
 
@@ -161,7 +180,7 @@
 | 단계 | 일 | 비고 |
 |---|---|---|
 | ~~3-1~~ | ~~마크다운 → 문서 변환 (A, 시험 먼저)~~ → **끝 2026-10-07**(`96034fb` Red → Green) | 3.4절 |
-| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | v1 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209) |
+| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지는 끝(2026-10-07)** — 3.3절. 남은 모듈(스페이스·분류·댓글·라벨·첨부·검색·템플릿·휴지통·알림·LLM·관리), 빈도 제한, 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209), 첨부 `src`(FR-2218) |
 | 5 | OpenAPI 생성 + 계약 시험 | |
 | 6 | 토큰 화면 + E2E | |
 | 7 | API 사용가이드(curl·에이전트 도구 정의 예), 가이드에 가리키는 줄(장애대응 401/403/429, 사용자가이드, 학습가이드, 설계서_Architecture 11절) | `pnpm verify:docs` |

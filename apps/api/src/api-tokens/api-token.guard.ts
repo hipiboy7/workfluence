@@ -12,7 +12,7 @@ import { Reflector } from '@nestjs/core';
 import { can, requiredScopes, scopeAllows, type Action, type ApiTokenScope } from '@workfluence/shared';
 import type { Request } from 'express';
 import { ACTION_KEY, PUBLIC_KEY, type SessionUser } from '../auth/auth.guard';
-import { setRequestUser } from '../common/request-context';
+import { setRequestToken, setRequestUser } from '../common/request-context';
 import { parseBearer } from './domain/jwt';
 import { ApiTokensService } from './api-tokens.service';
 
@@ -55,6 +55,7 @@ export class ApiTokenGuard implements CanActivate {
     req.user = r.user;
     req.apiToken = { id: r.tokenId, scopes: r.scopes };
     setRequestUser(r.user.id);
+    setRequestToken(r.tokenId);
 
     const admin = this.reflector.getAllAndOverride<boolean>(API_ADMIN_KEY, targets) ?? false;
     const required = requiredScopes(req.method, admin);

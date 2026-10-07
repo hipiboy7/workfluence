@@ -8,7 +8,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * 질의 뒤·오류 처리기까지 문맥이 이어지는 것을 실측했다(설계서 D.2) — 콜백을 쓰는 저장소가 문맥을 잃는다고 알려져 있어 가정하지 않았다.
  * 요청 밖(한 시간마다의 정리·실시간 편집의 WebSocket 메시지)에서는 문맥이 없다 — 읽는 쪽이 비운다.
  */
-export type RequestContext = { readonly requestId: string; userId?: string };
+export type RequestContext = { readonly requestId: string; userId?: string; /** 공개 API 토큰으로 부른 요청이면 그 토큰의 번호 — 감사 행이 남긴다 (docs/spinoff/public-api FR-2212) */ tokenId?: string };
 
 const storage = new AsyncLocalStorage<RequestContext>();
 
@@ -24,4 +24,10 @@ export function currentRequest(): RequestContext | undefined {
 export function setRequestUser(userId: string): void {
   const ctx = storage.getStore();
   if (ctx) ctx.userId = userId;
+}
+
+/** 공개 API 가드가 토큰을 확인했다 — 그 뒤의 감사 행에 `detail.tokenId`가 실린다 */
+export function setRequestToken(tokenId: string): void {
+  const ctx = storage.getStore();
+  if (ctx) ctx.tokenId = tokenId;
 }

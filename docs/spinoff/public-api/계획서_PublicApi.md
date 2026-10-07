@@ -57,7 +57,7 @@
 | 목록 | `limit`·`cursor` 한 방식 |
 | 버전 | v1 안에서는 **더하기만** 한다(필드·경로 추가). 빼거나 뜻을 바꾸면 v2 |
 | 빈도 제한 | 토큰별 제한(`RATE_LIMITS`에 더한다, `apps/api/src/common/rate-limit.guard.ts`), 넘으면 429 + `Retry-After` |
-| 감사 | 토큰으로 한 일도 기존 감사 행위로 남기고 `detail.tokenId`를 싣는다. 토큰 발급·폐기는 새 감사 행위(`AUDIT_ACTIONS`) |
+| 감사 | 토큰으로 한 일도 기존 감사 행위로 남기고 `detail.jti`(토큰 번호 — `tokenId`는 감사의 비밀 키 거름이 지운다)를 싣는다. 토큰 발급·폐기는 새 감사 행위(`AUDIT_ACTIONS`) |
 | LLM 질문 | 화면과 같은 SSE 흐름. 명세에 이벤트 모양을 적는다 |
 | 첨부 | 올리기 multipart, 받기 바이너리 — 업로드 상한·확장자 규칙은 지금 그대로 |
 

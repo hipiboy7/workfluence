@@ -387,6 +387,15 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     return { userId: sess.userId };
   }
 
+  /**
+   * 지금 이 페이지를 **사람이 실시간으로 편집하고 있는가** (공개 API FR-2216). 연결이 붙어 있거나 붙는 중이면 `true`다. 공개 API의 저장·되돌리기는
+   * 이때 409로 물러선다 — 정본을 바꾸면 방이 앞선 정본을 만나 상태를 버리고 연결을 닫아, 사람의 저장 전 입력이 사라진다
+   */
+  hasLiveEditors(pageId: string): boolean {
+    const room = this.rooms.get(pageId);
+    return !!room && (room.members.size > 0 || room.joining > 0);
+  }
+
   /** 방을 얻는다. 없으면 저장된 실시간 상태에서, 그것도 없으면 **정본에서** 만든다 */
   private async room(pageId: string, versionNo: number): Promise<Room> {
     const existing = this.rooms.get(pageId);
