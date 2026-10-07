@@ -24,6 +24,7 @@ import {
   v1MemberRoleDto,
   v1MovePageDto,
   v1PageQuery,
+  v1SearchQuery,
   v1SpaceListQuery,
   v1SpaceStatusDto,
   v1UpdatePageDto,
@@ -542,5 +543,27 @@ describe('응답 변환 — 댓글·첨부', () => {
       url: `/api/v1/attachments/${UUID}`,
       href: `/api/attachments/${UUID}`,
     });
+  });
+});
+
+describe('v1SearchQuery — 검색어만 있으면 된다 (FR-2223)', () => {
+  it('q만 주면 스페이스는 전체, 상한은 기본값이다', () => {
+    expect(V1_DEFAULTS.searchLimit).toBe(20);
+    expect(v1SearchQuery.parse({ q: ' 장애 ' })).toEqual({ q: '장애', limit: 20 });
+  });
+
+  it('스페이스는 이름이나 id로 좁히고, limit는 고른다', () => {
+    expect(v1SearchQuery.parse({ q: '장애', space: ' 장애 보고 ', limit: '5' })).toEqual({ q: '장애', space: '장애 보고', limit: 5 });
+  });
+
+  it.each([
+    ['검색어 없음', {}],
+    ['빈 검색어', { q: '  ' }],
+    ['201자 검색어', { q: 'x'.repeat(201) }],
+    ['limit 0', { q: 'x', limit: '0' }],
+    ['limit 상한 초과', { q: 'x', limit: String(V1_DEFAULTS.searchLimitMax + 1) }],
+    ['모르는 칸', { q: 'x', spaceId: UUID }],
+  ])('거절: %s', (_n, input) => {
+    expect(v1SearchQuery.safeParse(input).success).toBe(false);
   });
 });
