@@ -150,7 +150,7 @@
 | v1 오류 모양 | `packages/shared`(예정) | A | 4 |
 | 토큰 서비스·가드·컨트롤러 | `apps/api/src/api-tokens/` | B | 끝 |
 | 유스케이스 | `apps/api/src/*/*.usecases.ts` | B | **끝**(설정·라벨·휴지통·템플릿·첨부·댓글·LLM·사용자·스페이스·분류·페이지) |
-| v1 컨트롤러 | `apps/api/src/v1/`(예정) | B | 4 |
+| v1 컨트롤러 | apps/api/src/v1 (예정 — 아직 없는 경로라 백틱을 쓰지 않는다) | B | 4 |
 | OpenAPI 생성·계약 시험 | 예정 | B | 5 |
 | 토큰 화면 | `apps/web` | B(측정만) · C E2E | 6 |
 
