@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { v1CommentDto, v1CommentUpdateDto, v1LabelDto, v1PageQuery, v1UploadDto, type AppEnv } from '@workfluence/shared';
+import { v1CommentDto, v1CommentUpdateDto, v1LabelDto, v1PageQuery, type AppEnv } from '@workfluence/shared';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AttachmentUseCases } from '../attachments/attachments.usecases';
 import { LocalDiskStorage } from '../attachments/storage/local.storage';
@@ -175,9 +175,6 @@ describe('라벨 — 이름으로', () => {
 });
 
 describe('첨부 — 텍스트나 base64로 올린다', () => {
-  const upload = (pageId: string, me: Awaited<ReturnType<typeof person>>, body: Record<string, unknown>, file?: never) =>
-    attachments.upload(pageId, file, v1UploadDto.safeParse(body).success ? body : body, me, req);
-
   it('파일 이름과 글만으로 올리면 첨부가 되고, 본문에 넣을 주소(href)와 API 주소(url)를 준다', async () => {
     const { owner, pageId } = await setup();
     const a = await attachments.upload(pageId, undefined, { filename: '회의록.txt', content: '# 회의록\n안건 1' }, owner, req);
@@ -262,6 +259,5 @@ describe('첨부 받기', () => {
     const big = Buffer.alloc(1_000_001, 'a');
     const a = await attachments.upload(pageId, { originalname: 'big.txt', mimetype: 'text/plain', size: big.length, buffer: big }, undefined, owner, req);
     await expect(attachments.download(a.id, { format: 'json' }, owner, req, fakeRes().res)).rejects.toBeInstanceOf(PayloadTooLargeException);
-    void codeOf;
   });
 });

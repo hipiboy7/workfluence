@@ -161,6 +161,24 @@
 - 스페이스를 **이름으로 고르는 규칙**(`resolveSpaceRef` — 겹치면 409 `SPACE_AMBIGUOUS`, 볼 수 없으면 404)은 페이지와 이 모듈이 한 곳(`v1/space-ref.ts`)을 쓴다.
 - 실제 호출 확인(2026-10-07, 개발 서버): 이름만으로 만들기, 분류 이름으로 고르기·없는 분류 404, `kind` 400, Crew를 사용자 이름으로 넣기(기본 editor)·자리 바꾸기·빼기, 없는 사람 404, 목록 찾기, 분류를 지우면 스페이스가 분류 없음으로.
 
+**댓글·라벨·첨부 (끝 2026-10-07 — 4단계 셋째 조각, `apps/api/src/v1/v1-content.controller.ts`)**
+
+| 경로 | 에이전트가 정하는 것 | 서버가 채우는 것·화면용과 다른 점 |
+|---|---|---|
+| `GET·POST /api/v1/pages/:pageId/comments` | `body`(답글이면 `parentId`) | 본문은 마크다운이 기본(`format`으로 `json`), 응답도 `format`대로. 응답은 `id·pageId·parentId·author·createdAt·updatedAt·canDelete·format·body`. 멘션 메일은 화면용과 같은 길 |
+| `PATCH·DELETE /api/v1/comments/:id` | `body` | |
+| `GET·POST /api/v1/pages/:pageId/labels` | `name` | |
+| `DELETE …/labels/:ref` | — | `:ref`는 **이름이나 id** — 붙어 있지 않으면 404 `LABEL_NOT_FOUND` |
+| `GET /api/v1/labels` · `GET …/labels/:name/pages` | — | 볼 수 있는 페이지만(`{items}`) |
+| `GET /api/v1/pages/:pageId/attachments` | — | 응답에 **`url`**(이 API로 받는 주소)과 **`href`**(위키 안 주소 — 본문에 `[이름](href)`로 걸면 사람이 눌러 받는다) |
+| `POST …/attachments` | **JSON `{filename, content, encoding?}`**(글은 utf8, 바이너리는 base64) 또는 multipart(필드 `file`) | 에이전트는 바이너리를 보낼 수 없어 JSON 길을 둔다. **형식(mime)은 받지 않고** 확장자에서 정한다. 종류·크기·내용(가장한 파일) 검사와 감사는 화면용과 같다. JSON 본문은 앱의 JSON 상한(2MB) 안 |
+| `GET /api/v1/attachments/:id` | — | 바이너리(`nosniff`·`no-store`·`attachment`). **`?format=json`이면 글은 utf8·바이너리는 base64로 JSON에 담는다**(1,000,000바이트까지 — 넘으면 413 `TOO_LARGE_FOR_JSON`) |
+| `DELETE /api/v1/attachments/:id` | — | |
+
+- 그림 노드가 문서에 없어(3.4절) 첨부를 본문에 **그림으로** 넣을 수는 없다 — 링크(`href`)로 건다. 분석서 G5의 `src`는 이 `href`로 바꿨다(FR-2218).
+- JSON 받기가 413이어도 **다운로드 감사 행은 남는다**(서버가 파일을 읽었다 — "누가 무엇에 접근했나"가 기준이다).
+- 실제 호출 확인(2026-10-07, 개발 서버): 본문만으로 댓글·답글, 댓글의 HTML 400, 이름만으로 라벨·이름으로 떼기·없는 라벨 404, JSON(utf8)·multipart 업로드, `format=json` 받기·바이너리 머리, 가장한 PDF 400·`.exe` 400.
+
 ### 3.4 마크다운 변환의 경계 (3-1단계)
 
 - **읽기**는 이미 공유 함수 `pageMarkdown`이 있다(화면의 복사 단추가 쓴다). v1은 그 함수와 텍스트 변환을 그대로 쓴다.
@@ -191,7 +209,7 @@
 | v1 오류 모양·기본값·본문 형식·스페이스 이름 찾기 | `packages/shared/src/v1.ts` | A | **끝** |
 | 토큰 서비스·가드·컨트롤러 | `apps/api/src/api-tokens/` | B | 끝 |
 | 유스케이스 | `apps/api/src/*/*.usecases.ts` | B | **끝**(설정·라벨·휴지통·템플릿·첨부·댓글·LLM·사용자·스페이스·분류·페이지) |
-| v1 컨트롤러 | `apps/api/src/v1/` | B | **페이지·스페이스·분류 끝**, 나머지 모듈은 같은 틀로 |
+| v1 컨트롤러 | `apps/api/src/v1/` | B | **페이지·스페이스·분류·댓글·라벨·첨부 끝**, 나머지 모듈은 같은 틀로 |
 | OpenAPI 생성·계약 시험 | 예정 | B | 5 |
 | 토큰 화면 | `apps/web` | B(측정만) · C E2E | 6 |
 
@@ -200,7 +218,7 @@
 | 단계 | 일 | 비고 |
 |---|---|---|
 | ~~3-1~~ | ~~마크다운 → 문서 변환 (A, 시험 먼저)~~ → **끝 2026-10-07**(`96034fb` Red → Green) | 3.4절 |
-| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·빈도 제한은 끝(2026-10-07)** — 3.3절. 남은 모듈(댓글·라벨·첨부·검색·템플릿·휴지통·알림·LLM·관리), 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209), 첨부 `src`(FR-2218) |
+| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·댓글·라벨·첨부·빈도 제한은 끝(2026-10-07)** — 3.3절. 남은 모듈(검색·템플릿·휴지통·알림·LLM·관리), 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209), 본문 파싱 오류(잘못된 JSON·너무 큰 본문)의 오류 모양 |
 | 5 | OpenAPI 생성 + 계약 시험 | |
 | 6 | 토큰 화면 + E2E | |
 | 7 | API 사용가이드(curl·에이전트 도구 정의 예), 가이드에 가리키는 줄(장애대응 401/403/429, 사용자가이드, 학습가이드, 설계서_Architecture 11절) | `pnpm verify:docs` |

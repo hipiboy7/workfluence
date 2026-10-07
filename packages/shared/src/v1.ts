@@ -3,7 +3,7 @@ import { ASSIGNABLE_MEMBER_ROLES, CATEGORY_NAME_MAX, LIST_SEARCH_MAX, MARKDOWN_L
 import { extractText, validateDocument, type DocNode } from './document';
 import { renderDocMarkdown } from './markdown';
 import { parseMarkdown } from './markdown-parse';
-import { idSchema, usernameSchema, type CategoryView, type SpaceMemberView, type SpaceStatusDto, type SpaceView } from './schemas';
+import { attachLabelDto, idSchema, usernameSchema, type AttachmentView, type CategoryView, type CommentView, type LabelView, type SpaceMemberView, type SpaceStatusDto, type SpaceView } from './schemas';
 
 /**
  * 공개 API v1의 계약 중 순수한 부분 (A등급, docs/spinoff/public-api 설계서 3.3·3.5절 · FR-2211·2215·2223~2225).
@@ -25,6 +25,10 @@ export const V1_DEFAULTS = {
   spaceKind: 'team',
   /** Crew에 넣을 때 역할을 안 주면 — 에이전트가 사람을 넣는 까닭은 같이 쓰기 위해서다 */
   memberRole: 'editor',
+  /** 첨부를 JSON으로 올릴 때 내용의 인코딩 — 글이면 utf8, 바이너리면 base64 */
+  uploadEncoding: 'utf8',
+  /** 첨부를 JSON(`format=json`)으로 받을 수 있는 가장 큰 크기 — 그 위는 바이너리로 받는다. 응답 한 번이 이만큼의 문맥을 먹는다 */
+  attachmentJsonMaxBytes: 1_000_000,
   /** 옮길 때 위치를 안 주면 — 형제 수보다 큰 값은 맨 끝이다(`movePageDto`) */
   moveToEnd: 1_000_000,
 } as const;
@@ -126,6 +130,106 @@ export type V1PageView = {
   ancestors: V1Ancestor[];
 };
 export type V1VersionView = { versionNo: number; title: string; createdByName: string; createdAt: string; format: V1ReadFormat; body: string | DocNode };
+
+// ---- 댓글·라벨·첨부 ----
+
+/** 댓글 쓰기 — 필수는 본문뿐이다. 답글이면 `parentId` */
+export const v1CommentDto = z
+  .strictObject({ body: bodyField, format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat), parentId: idSchema.nullable().default(null) })
+  .transform((v, ctx) => ({ parentId: v.parentId, doc: convert(v.format, v.body, ctx) }));
+export type V1CommentDto = z.infer<typeof v1CommentDto>;
+
+export const v1CommentUpdateDto = z
+  .strictObject({ body: bodyField, format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat) })
+  .transform((v, ctx) => ({ doc: convert(v.format, v.body, ctx) }));
+export type V1CommentUpdateDto = z.infer<typeof v1CommentUpdateDto>;
+
+/** 라벨 붙이기 — 이름만 */
+export const v1LabelDto = z.strictObject({ name: attachLabelDto.shape.name });
+export type V1LabelDto = z.infer<typeof v1LabelDto>;
+
+/** 라벨을 이름이나 id로 고른다 — 떼는 쪽이 id를 찾지 않게. 라벨 이름은 소문자로 저장된다 */
+export function matchLabel<T extends { id: string; name: string }>(ref: string, labels: readonly T[]): T | null {
+  const wanted = ref.trim().toLowerCase();
+  if (!wanted) return null;
+  return labels.find((l) => l.id.toLowerCase() === wanted || l.name.toLowerCase() === wanted) ?? null;
+}
+
+const BASE64 = /^[A-Za-z0-9+/\r\n]*={0,2}$/;
+
+/**
+ * 첨부를 JSON으로 올린다 — 에이전트는 바이너리를 보낼 수 없다. 이름과 내용이면 된다(글은 utf8, 바이너리는 base64). **형식(mime)은 받지 않는다** — 올리는
+ * 쪽이 말한 형식을 쓰지 않고 확장자에서 정한다(`canonicalMime`). 종류·크기·내용 검사는 화면용 업로드와 같다
+ */
+export const v1UploadDto = z
+  .strictObject({
+    filename: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .refine((v) => !/[\\/]/.test(v) && v !== '.' && v !== '..', '파일 이름에 경로를 쓸 수 없다'),
+    content: z.string().min(1, '내용이 비어 있다'),
+    encoding: z.enum(['utf8', 'base64']).default(V1_DEFAULTS.uploadEncoding),
+  })
+  .superRefine((v, ctx) => {
+    if (v.encoding === 'base64' && !BASE64.test(v.content)) ctx.addIssue({ code: 'custom', message: 'base64가 아니다', path: ['content'] });
+  });
+export type V1UploadDto = z.infer<typeof v1UploadDto>;
+
+/** 첨부 받기 — `format=json`이면 글은 utf8, 바이너리는 base64로 JSON에 담는다 */
+export const v1DownloadQuery = z.object({ format: z.enum(['json']).optional() });
+export type V1DownloadQuery = z.infer<typeof v1DownloadQuery>;
+
+export type V1CommentView = {
+  id: string;
+  pageId: string;
+  parentId: string | null;
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  canDelete: boolean;
+  format: V1ReadFormat;
+  body: string | DocNode;
+};
+export type V1AttachmentView = {
+  id: string;
+  pageId: string;
+  filename: string;
+  mime: string;
+  size: number;
+  uploadedByName: string;
+  createdAt: string;
+  /** 이 API로 받는 주소 */
+  url: string;
+  /** 위키 안의 주소 — 본문에 `[이름](주소)`로 넣으면 사람이 눌러 받는다. 문서에는 그림 노드가 없어 링크로 건다 */
+  href: string;
+};
+export type V1AttachmentJson = { id: string; filename: string; mime: string; size: number; encoding: 'utf8' | 'base64'; content: string };
+
+export const toV1Comment = (c: CommentView, format: V1ReadFormat): V1CommentView => ({
+  id: c.id,
+  pageId: c.pageId,
+  parentId: c.parentId,
+  author: c.createdByName,
+  createdAt: c.createdAt,
+  updatedAt: c.updatedAt,
+  canDelete: c.canDelete,
+  format,
+  body: docToBody(format, c.body),
+});
+export const toV1Attachment = (a: AttachmentView): V1AttachmentView => ({
+  id: a.id,
+  pageId: a.pageId,
+  filename: a.filename,
+  mime: a.mime,
+  size: a.size,
+  uploadedByName: a.uploadedByName,
+  createdAt: a.createdAt,
+  url: `/api/v1/attachments/${a.id}`,
+  href: `/api/attachments/${a.id}`,
+});
+export type V1LabelView = LabelView;
 
 // ---- 스페이스·Crew·분류 ----
 

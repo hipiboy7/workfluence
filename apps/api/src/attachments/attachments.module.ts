@@ -78,6 +78,7 @@ export class AttachmentsController {
     { provide: SCANNER, useClass: PassThroughScanner },
   ],
   controllers: [AttachmentsController],
-  exports: [AttachmentsService, AttachmentUseCases],
+  // 공개 API(v1)의 업로드도 같은 multer 설정(크기 상한·한글 파일명)을 쓴다 — 설정을 두 번 쓰지 않게 모듈째 내보낸다
+  exports: [AttachmentsService, AttachmentUseCases, MulterModule],
 })
 export class AttachmentsModule {}
