@@ -1,7 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, MARKDOWN_LIMITS } from './constants';
 import type { DocNode } from './document';
-import { bodyToDoc, docToBody, matchSpaces, v1CreatePageDto, v1ErrorBody, v1MovePageDto, v1PageQuery, v1UpdatePageDto, V1_DEFAULTS } from './v1';
+import type { SpaceView } from './schemas';
+import {
+  bodyToDoc,
+  docToBody,
+  matchMember,
+  matchSpaces,
+  toV1Category,
+  toV1Member,
+  toV1Space,
+  v1AddMemberDto,
+  v1CategoryDto,
+  v1CreatePageDto,
+  v1CreateSpaceDto,
+  v1ErrorBody,
+  v1MemberRoleDto,
+  v1MovePageDto,
+  v1PageQuery,
+  v1SpaceListQuery,
+  v1SpaceStatusDto,
+  v1UpdatePageDto,
+  v1UpdateSpaceDto,
+  V1_DEFAULTS,
+} from './v1';
 
 /**
  * A등급 — **테스트 먼저** (docs/spinoff/public-api 설계서 3.3·3.5절 · FR-2211·2215·2223~2225).
@@ -265,5 +287,163 @@ describe('v1ErrorBody — 한 모양 (FR-2211)', () => {
 
   it('요청 번호가 없으면 null', () => {
     expect(v1ErrorBody(500, undefined, null).error.requestId).toBeNull();
+  });
+});
+
+describe('v1CreateSpaceDto — 이름만으로 팀 스페이스 (FR-2223)', () => {
+  it('이름만 주면 통과하고 설명은 빈 글, 분류는 없음이다', () => {
+    expect(v1CreateSpaceDto.parse({ name: '  장애 보고 ' })).toEqual({ name: '장애 보고', description: '', category: null });
+  });
+
+  it('분류는 **이름**으로 고른다 — id를 외우지 않는다', () => {
+    expect(v1CreateSpaceDto.parse({ name: 's', category: '운영' }).category).toBe('운영');
+    expect(v1CreateSpaceDto.parse({ name: 's', category: null }).category).toBeNull();
+  });
+
+  it('종류(kind)는 받지 않는다 — 에이전트가 만드는 것은 팀 스페이스뿐이다(개인 스페이스는 계정과 함께 생긴다)', () => {
+    expect(V1_DEFAULTS.spaceKind).toBe('team');
+    expect(v1CreateSpaceDto.safeParse({ name: 's', kind: 'personal' }).success).toBe(false);
+  });
+
+  it.each([
+    ['이름 없음', {}],
+    ['빈 이름', { name: '  ' }],
+    ['200자 넘는 이름', { name: 'x'.repeat(201) }],
+    ['2000자 넘는 설명', { name: 's', description: 'x'.repeat(2001) }],
+    ['빈 분류 이름', { name: 's', category: '  ' }],
+  ])('거절: %s', (_n, input) => {
+    expect(v1CreateSpaceDto.safeParse(input).success).toBe(false);
+  });
+});
+
+describe('v1UpdateSpaceDto', () => {
+  it('고칠 것만 — 분류는 null이면 지운다(없으면 그대로)', () => {
+    expect(v1UpdateSpaceDto.parse({ name: '새 이름' })).toEqual({ name: '새 이름' });
+    expect(v1UpdateSpaceDto.parse({ category: null })).toEqual({ category: null });
+    expect(v1UpdateSpaceDto.parse({ description: '', category: '운영' })).toEqual({ description: '', category: '운영' });
+  });
+
+  it('아무것도 고치지 않으면 거절한다', () => {
+    expect(v1UpdateSpaceDto.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('v1SpaceStatusDto', () => {
+  it('중지와 다시 쓰기', () => {
+    expect(v1SpaceStatusDto.parse({ status: 'suspended' })).toEqual({ status: 'suspended' });
+    expect(v1SpaceStatusDto.parse({ status: 'active' })).toEqual({ status: 'active' });
+  });
+
+  it('넘겨받기(takeover)는 중지에만 붙는다', () => {
+    expect(v1SpaceStatusDto.parse({ status: 'suspended', takeover: true })).toEqual({ status: 'suspended', takeover: true });
+    expect(v1SpaceStatusDto.parse({ status: 'suspended', takeover: false })).toEqual({ status: 'suspended' });
+    expect(v1SpaceStatusDto.safeParse({ status: 'active', takeover: true }).success).toBe(false);
+  });
+
+  it('모르는 상태는 거절', () => {
+    expect(v1SpaceStatusDto.safeParse({ status: 'deleted' }).success).toBe(false);
+  });
+});
+
+describe('Crew 입력 — 사용자 이름으로, 기본은 editor', () => {
+  it('넣기: 이름만 주면 editor', () => {
+    expect(V1_DEFAULTS.memberRole).toBe('editor');
+    expect(v1AddMemberDto.parse({ username: 'bob' })).toEqual({ username: 'bob', role: 'editor' });
+    expect(v1AddMemberDto.parse({ username: 'bob', role: 'viewer' }).role).toBe('viewer');
+  });
+
+  it('owner 자리는 줄 수 없다', () => {
+    expect(v1AddMemberDto.safeParse({ username: 'bob', role: 'owner' }).success).toBe(false);
+    expect(v1MemberRoleDto.safeParse({ role: 'owner' }).success).toBe(false);
+  });
+
+  it('자리 바꾸기는 역할이 필수다', () => {
+    expect(v1MemberRoleDto.parse({ role: 'viewer' })).toEqual({ role: 'viewer' });
+    expect(v1MemberRoleDto.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('분류 입력', () => {
+  it('이름만', () => {
+    expect(v1CategoryDto.parse({ name: ' 운영 ' })).toEqual({ name: '운영' });
+    expect(v1CategoryDto.safeParse({ name: '' }).success).toBe(false);
+    expect(v1CategoryDto.safeParse({ name: 'x'.repeat(51) }).success).toBe(false);
+  });
+});
+
+describe('v1SpaceListQuery', () => {
+  it('찾기 `q`와 `limit`는 모두 선택이다', () => {
+    expect(v1SpaceListQuery.parse({})).toEqual({});
+    expect(v1SpaceListQuery.parse({ q: ' 장애 ', limit: '10' })).toEqual({ q: '장애', limit: 10 });
+  });
+
+  it('limit 범위를 지킨다', () => {
+    expect(v1SpaceListQuery.safeParse({ limit: '0' }).success).toBe(false);
+    expect(v1SpaceListQuery.safeParse({ limit: String(V1_DEFAULTS.listLimitMax + 1) }).success).toBe(false);
+  });
+});
+
+describe('matchMember — 사용자 이름이나 id로 Crew 고르기', () => {
+  const members = [
+    { userId: UUID, username: 'alice', displayName: '앨리스' },
+    { userId: '5a6b7c8d-1111-4222-8333-444455556666', username: 'bob', displayName: '밥' },
+  ];
+
+  it('id로도 사용자 이름으로도, 대소문자는 무시한다', () => {
+    expect(matchMember(UUID, members)).toBe(members[0]);
+    expect(matchMember('bob', members)).toBe(members[1]);
+    expect(matchMember(' BOB ', members)).toBe(members[1]);
+  });
+
+  it('없으면 null', () => {
+    expect(matchMember('carol', members)).toBeNull();
+    expect(matchMember('', members)).toBeNull();
+  });
+});
+
+describe('응답 줄이기 — 에이전트가 쓸 것만', () => {
+  const view = {
+    id: UUID,
+    key: 'k',
+    name: '장애 보고',
+    description: '설명',
+    kind: 'team',
+    status: 'active',
+    suspendedByOwner: false,
+    categoryId: 'c1',
+    categoryName: '운영',
+    createdBy: 'u1',
+    createdByUsername: 'alice',
+    memberCount: 3,
+    myRole: 'owner',
+    access: { canRead: true, canWrite: true, canManageMembers: true, canEditInfo: true, canChangeStatus: true, canDelete: true, isOwner: true, crewFrozen: false },
+    createdAt: 'a',
+    updatedAt: 'b',
+  } as unknown as SpaceView;
+
+  it('스페이스: 이름·분류 이름·내 역할과 할 수 있는 일', () => {
+    expect(toV1Space(view)).toEqual({
+      id: UUID,
+      name: '장애 보고',
+      description: '설명',
+      kind: 'team',
+      status: 'active',
+      category: '운영',
+      categoryId: 'c1',
+      memberCount: 3,
+      myRole: 'owner',
+      canWrite: true,
+      canManageMembers: true,
+    });
+  });
+
+  it('Crew: 아이디·표시 이름·역할', () => {
+    expect(toV1Member({ userId: UUID, username: 'bob', displayName: '밥', role: 'editor', createdAt: 'x' })).toEqual({ userId: UUID, username: 'bob', displayName: '밥', role: 'editor' });
+  });
+
+  it('분류: 이름과 바꾸고 지울 수 있는지', () => {
+    expect(
+      toV1Category({ id: 'c1', name: '운영', createdBy: 'u1', createdAt: 'x', access: { canRename: true, canDelete: false }, usage: null }),
+    ).toEqual({ id: 'c1', name: '운영', canRename: true, canDelete: false });
   });
 });
