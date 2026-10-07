@@ -1,20 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, MARKDOWN_LIMITS } from './constants';
 import type { DocNode } from './document';
-import type { SpaceView } from './schemas';
+import type { AttachmentView, CommentView, SpaceView } from './schemas';
 import {
   bodyToDoc,
   docToBody,
+  matchLabel,
   matchMember,
   matchSpaces,
+  toV1Attachment,
   toV1Category,
+  toV1Comment,
   toV1Member,
   toV1Space,
   v1AddMemberDto,
   v1CategoryDto,
+  v1CommentDto,
+  v1CommentUpdateDto,
   v1CreatePageDto,
   v1CreateSpaceDto,
   v1ErrorBody,
+  v1LabelDto,
   v1MemberRoleDto,
   v1MovePageDto,
   v1PageQuery,
@@ -22,6 +28,7 @@ import {
   v1SpaceStatusDto,
   v1UpdatePageDto,
   v1UpdateSpaceDto,
+  v1UploadDto,
   V1_DEFAULTS,
 } from './v1';
 
@@ -445,5 +452,95 @@ describe('응답 줄이기 — 에이전트가 쓸 것만', () => {
     expect(
       toV1Category({ id: 'c1', name: '운영', createdBy: 'u1', createdAt: 'x', access: { canRename: true, canDelete: false }, usage: null }),
     ).toEqual({ id: 'c1', name: '운영', canRename: true, canDelete: false });
+  });
+});
+
+describe('v1CommentDto — 본문만으로 댓글 (FR-2223)', () => {
+  it('본문만 주면 통과하고 부모(답글 대상)는 없다', () => {
+    const r = v1CommentDto.parse({ body: '확인했습니다' });
+    expect(r.parentId).toBeNull();
+    expect(r.doc.type).toBe('doc');
+  });
+
+  it('답글은 parentId로, 본문은 json도 받는다', () => {
+    expect(v1CommentDto.parse({ body: 'x', parentId: UUID }).parentId).toBe(UUID);
+    expect(v1CommentDto.parse({ body: doc('직접'), format: 'json' }).doc).toEqual(doc('직접'));
+  });
+
+  it('거절: 본문 없음·HTML·모르는 칸·uuid가 아닌 parentId', () => {
+    expect(v1CommentDto.safeParse({}).success).toBe(false);
+    expect(v1CommentDto.safeParse({ body: '<script>x</script>' }).success).toBe(false);
+    expect(v1CommentDto.safeParse({ body: 'x', author: 'me' }).success).toBe(false);
+    expect(v1CommentDto.safeParse({ body: 'x', parentId: '댓글' }).success).toBe(false);
+  });
+
+  it('고치기는 본문만이다', () => {
+    expect(v1CommentUpdateDto.parse({ body: '고침' }).doc.type).toBe('doc');
+    expect(v1CommentUpdateDto.safeParse({}).success).toBe(false);
+    expect(v1CommentUpdateDto.safeParse({ body: 'x', parentId: UUID }).success).toBe(false);
+  });
+});
+
+describe('v1LabelDto·matchLabel — 라벨은 이름으로', () => {
+  it('이름만', () => {
+    expect(v1LabelDto.parse({ name: ' 운영 ' })).toEqual({ name: '운영' });
+    expect(v1LabelDto.safeParse({ name: '..' }).success).toBe(false);
+    expect(v1LabelDto.safeParse({ name: 'x'.repeat(41) }).success).toBe(false);
+  });
+
+  it('떼기는 이름이나 id로 — 대소문자는 무시', () => {
+    const labels = [
+      { id: UUID, name: 'ops' },
+      { id: '5a6b7c8d-1111-4222-8333-444455556666', name: '장애' },
+    ];
+    expect(matchLabel(UUID, labels)).toBe(labels[0]);
+    expect(matchLabel(' OPS ', labels)).toBe(labels[0]);
+    expect(matchLabel('장애', labels)).toBe(labels[1]);
+    expect(matchLabel('없음', labels)).toBeNull();
+    expect(matchLabel('', labels)).toBeNull();
+  });
+});
+
+describe('v1UploadDto — 텍스트나 base64로 올린다 (에이전트는 바이너리를 못 보낸다)', () => {
+  it('파일 이름과 내용이면 된다 — 인코딩 기본은 utf8', () => {
+    expect(V1_DEFAULTS.uploadEncoding).toBe('utf8');
+    expect(v1UploadDto.parse({ filename: ' 회의록.txt ', content: '안녕' })).toEqual({ filename: '회의록.txt', content: '안녕', encoding: 'utf8' });
+  });
+
+  it('base64는 글자 모양을 본다', () => {
+    expect(v1UploadDto.parse({ filename: 'a.pdf', content: 'JVBERi0=', encoding: 'base64' }).encoding).toBe('base64');
+    expect(v1UploadDto.safeParse({ filename: 'a.pdf', content: '이건 base64가 아님', encoding: 'base64' }).success).toBe(false);
+  });
+
+  it('거절: 이름 없음·경로가 든 이름·빈 내용·모르는 인코딩·모르는 칸', () => {
+    expect(v1UploadDto.safeParse({ content: 'x' }).success).toBe(false);
+    expect(v1UploadDto.safeParse({ filename: '../x.txt', content: 'x' }).success).toBe(false);
+    expect(v1UploadDto.safeParse({ filename: 'a/b.txt', content: 'x' }).success).toBe(false);
+    expect(v1UploadDto.safeParse({ filename: 'a.txt', content: '' }).success).toBe(false);
+    expect(v1UploadDto.safeParse({ filename: 'a.txt', content: 'x', encoding: 'hex' }).success).toBe(false);
+    expect(v1UploadDto.safeParse({ filename: 'a.txt', content: 'x', mime: 'text/html' }).success).toBe(false);
+  });
+});
+
+describe('응답 변환 — 댓글·첨부', () => {
+  it('댓글: 글쓴이 이름·본문은 형식대로·지울 수 있는지', () => {
+    const c: CommentView = { id: 'c1', pageId: 'p1', parentId: null, body: doc('안녕'), createdBy: 'u1', createdByName: '앨리스', createdAt: 'a', updatedAt: 'b', canDelete: true };
+    expect(toV1Comment(c, 'markdown')).toEqual({ id: 'c1', pageId: 'p1', parentId: null, author: '앨리스', createdAt: 'a', updatedAt: 'b', canDelete: true, format: 'markdown', body: '안녕' });
+    expect(toV1Comment(c, 'json').body).toEqual(doc('안녕'));
+  });
+
+  it('첨부: API로 받는 주소(url)와 본문에 넣을 위키 주소(href)를 준다', () => {
+    const a: AttachmentView = { id: UUID, pageId: 'p1', filename: '보고서.pdf', mime: 'application/pdf', size: 10, uploadedBy: 'u1', uploadedByName: '앨리스', createdAt: 'a' };
+    expect(toV1Attachment(a)).toEqual({
+      id: UUID,
+      pageId: 'p1',
+      filename: '보고서.pdf',
+      mime: 'application/pdf',
+      size: 10,
+      uploadedByName: '앨리스',
+      createdAt: 'a',
+      url: `/api/v1/attachments/${UUID}`,
+      href: `/api/attachments/${UUID}`,
+    });
   });
 });
