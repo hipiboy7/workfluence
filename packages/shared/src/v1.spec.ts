@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, MARKDOWN_LIMITS } from './constants';
 import type { DocNode } from './document';
-import { bodyToDoc, docToBody, matchSpaces, v1CreatePageDto, v1ErrorBody, v1PageQuery, v1UpdatePageDto, V1_DEFAULTS } from './v1';
+import { bodyToDoc, docToBody, matchSpaces, v1CreatePageDto, v1ErrorBody, v1MovePageDto, v1PageQuery, v1UpdatePageDto, V1_DEFAULTS } from './v1';
 
 /**
  * A등급 — **테스트 먼저** (docs/spinoff/public-api 설계서 3.3·3.5절 · FR-2211·2215·2223~2225).
@@ -135,6 +135,24 @@ describe('v1UpdatePageDto — 고칠 것만 (FR-2223)', () => {
   it('기준 버전은 양의 정수', () => {
     expect(v1UpdatePageDto.safeParse({ body: 'x', baseVersionNo: 0 }).success).toBe(false);
     expect(v1UpdatePageDto.safeParse({ body: 'x', baseVersionNo: 1.5 }).success).toBe(false);
+  });
+});
+
+describe('v1MovePageDto — 위치를 안 주면 맨 끝', () => {
+  it('부모만 주면 위치는 맨 끝(형제 수보다 큰 값)이다', () => {
+    const r = v1MovePageDto.parse({ parentId: UUID });
+    expect(r.parentId).toBe(UUID);
+    expect(r.position).toBe(V1_DEFAULTS.moveToEnd);
+  });
+
+  it('맨 위로 옮길 때는 parentId: null이고 위치는 고르면 쓴다', () => {
+    expect(v1MovePageDto.parse({ parentId: null, position: 0 })).toEqual({ parentId: null, position: 0 });
+  });
+
+  it('parentId는 있어야 한다(null이라도) — 모르는 채로 옮기지 않는다', () => {
+    expect(v1MovePageDto.safeParse({ position: 1 }).success).toBe(false);
+    expect(v1MovePageDto.safeParse({ parentId: UUID, position: -1 }).success).toBe(false);
+    expect(v1MovePageDto.safeParse({ parentId: UUID, extra: 1 }).success).toBe(false);
   });
 });
 

@@ -408,6 +408,22 @@ describe('flush — 화면의 저장 버튼 (P6 코드 리뷰 11)', () => {
   });
 });
 
+describe('hasLiveEditors — 공개 API가 편집 중인 페이지를 알아본다 (docs/spinoff/public-api FR-2216)', () => {
+  it('방이 없으면 false, 사람이 붙어 있으면 true, 모두 나가면 다시 false', async () => {
+    expect(gw.hasLiveEditors(pageId)).toBe(false);
+    const { room } = await attach();
+    expect(gw.hasLiveEditors(pageId)).toBe(true);
+    const sock = [...room.members][0] as { socket: FakeSocket };
+    sock.socket.emit('close');
+    await vi.waitFor(() => expect(gw.hasLiveEditors(pageId)).toBe(false));
+  });
+
+  it('다른 페이지는 영향이 없다', async () => {
+    await attach();
+    expect(gw.hasLiveEditors('00000000-0000-4000-8000-000000000000')).toBe(false);
+  });
+});
+
 describe('실시간 편집의 결함 셋 (P13 C.7, FR-1460~1462)', () => {
   const titleNow = async () => (await db.execute<{ title: string }>(sql`SELECT title FROM pages WHERE id = ${pageId}`)).rows[0].title;
   const idle = () => new Promise((r) => setTimeout(r, 5));
