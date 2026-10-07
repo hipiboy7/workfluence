@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOCUMENT_SCHEMA_VERSION, MARKDOWN_LIMITS } from './constants';
 import type { DocNode } from './document';
-import type { AttachmentView, CommentView, SpaceView } from './schemas';
+import type { AttachmentView, CommentView, PageTemplateView, SpaceView } from './schemas';
 import {
   bodyToDoc,
   docToBody,
@@ -13,6 +13,7 @@ import {
   toV1Comment,
   toV1Member,
   toV1Space,
+  toV1Template,
   v1AddMemberDto,
   v1CategoryDto,
   v1CommentDto,
@@ -27,6 +28,8 @@ import {
   v1SearchQuery,
   v1SpaceListQuery,
   v1SpaceStatusDto,
+  v1TemplateDto,
+  v1TemplateUpdateDto,
   v1UpdatePageDto,
   v1UpdateSpaceDto,
   v1UploadDto,
@@ -565,5 +568,52 @@ describe('v1SearchQuery — 검색어만 있으면 된다 (FR-2223)', () => {
     ['모르는 칸', { q: 'x', spaceId: UUID }],
   ])('거절: %s', (_n, input) => {
     expect(v1SearchQuery.safeParse(input).success).toBe(false);
+  });
+});
+
+describe('v1TemplateDto — 이름과 본문이면 된다 (FR-2223)', () => {
+  it('이름·본문만으로 통과하고 설명은 없다', () => {
+    const r = v1TemplateDto.parse({ name: ' 회의록 ', body: '## 안건\n- ' });
+    expect(r.name).toBe('회의록');
+    expect(r.description).toBeUndefined();
+    expect(r.content.type).toBe('doc');
+  });
+
+  it('설명은 고르면 쓰고(null도), 본문은 json도 받는다', () => {
+    expect(v1TemplateDto.parse({ name: 'a', body: 'b', description: '쓰임' }).description).toBe('쓰임');
+    expect(v1TemplateDto.parse({ name: 'a', body: 'b', description: null }).description).toBeNull();
+    expect(v1TemplateDto.parse({ name: 'a', body: doc('x'), format: 'json' }).content).toEqual(doc('x'));
+  });
+
+  it.each([
+    ['이름 없음', { body: 'b' }],
+    ['본문 없음', { name: 'a' }],
+    ['81자 이름', { name: 'x'.repeat(81), body: 'b' }],
+    ['201자 설명', { name: 'a', body: 'b', description: 'x'.repeat(201) }],
+    ['HTML 본문', { name: 'a', body: '<script>x</script>' }],
+    ['모르는 칸', { name: 'a', body: 'b', content: doc('x') }],
+  ])('거절: %s', (_n, input) => {
+    expect(v1TemplateDto.safeParse(input).success).toBe(false);
+  });
+});
+
+describe('v1TemplateUpdateDto', () => {
+  it('고칠 것만 — 있는 칸만 결과에 담긴다', () => {
+    expect(v1TemplateUpdateDto.parse({ name: '새' })).toEqual({ name: '새' });
+    expect(Object.keys(v1TemplateUpdateDto.parse({ body: '본문' }))).toEqual(['content']);
+    expect(v1TemplateUpdateDto.parse({ description: null })).toEqual({ description: null });
+  });
+
+  it('아무것도 고치지 않으면 거절한다', () => {
+    expect(v1TemplateUpdateDto.safeParse({}).success).toBe(false);
+    expect(v1TemplateUpdateDto.safeParse({ format: 'json' }).success).toBe(false);
+  });
+});
+
+describe('toV1Template', () => {
+  it('본문은 형식대로', () => {
+    const t: PageTemplateView = { id: 't1', name: '회의록', description: null, content: doc('안건'), updatedAt: 'x' };
+    expect(toV1Template(t, 'markdown')).toEqual({ id: 't1', name: '회의록', description: null, updatedAt: 'x', format: 'markdown', body: '안건' });
+    expect(toV1Template(t, 'json').body).toEqual(doc('안건'));
   });
 });
