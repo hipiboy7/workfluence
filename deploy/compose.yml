@@ -158,13 +158,17 @@ services:
     image: postgres:17
     profiles: ["setup"]
     logging: *logging
+    environment:
+      # 인증서의 이름 — 접속할 주소(도메인·IP)를 모두 SAN에 넣는다. 바꾸면 certs/의 두 파일을 지우고 다시 up 한다
+      TLS_CN: ${TLS_CN:-localhost}
+      TLS_SAN: ${TLS_SAN:-DNS:localhost,IP:127.0.0.1}
     user: root
     entrypoint: ["sh", "-c"]
     command:
       - >-
         if [ -s /certs/cert.pem ] && [ -s /certs/key.pem ]; then echo "[certs] 있다 — 그대로 쓴다"; exit 0; fi;
-        openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj "/CN=localhost"
-        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+        openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj "/CN=$${TLS_CN}"
+        -addext "subjectAltName=$${TLS_SAN}"
         -keyout /certs/key.pem -out /certs/cert.pem && chmod 600 /certs/key.pem && echo "[certs] 자체 서명 인증서를 만들었다"
     volumes:
       - ./certs:/certs
