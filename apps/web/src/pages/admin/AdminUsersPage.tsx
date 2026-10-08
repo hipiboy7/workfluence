@@ -21,6 +21,7 @@ import {
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { UserTokensPanel } from '../../components/UserTokensPanel';
 import { ROLE_NAMES, withCode } from '../../components/displayNames';
 import { CodeBlock, Field, FilterBar, Loading, Notice, Page, PageHeader, StatusBadge } from '../../components/ui';
 import { SEARCH_DELAY_MS } from '../../timing';
@@ -72,6 +73,8 @@ export function AdminUsersPage() {
     if (asked !== null) setQ(asked);
   }, [asked]);
   const [filter, setFilter] = useState<UserListFilter | ''>('');
+  // 그 사람의 API 토큰 패널 (FR-2222) — 한 번에 한 사람
+  const [tokenUser, setTokenUser] = useState<UserView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [temporary, setTemporary] = useState<{ username: string; password: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -225,6 +228,7 @@ export function AdminUsersPage() {
           </div>
         </Notice>
       )}
+      {tokenUser && <UserTokensPanel key={tokenUser.id} user={tokenUser} onClose={() => setTokenUser(null)} />}
       {!failed && (
         <FilterBar label="사용자 찾기" count={`전체 ${total}명 · ${rows.length}명 보는 중`}>
           <Field id="user-q" label="찾기">
@@ -373,6 +377,10 @@ export function AdminUsersPage() {
                           }
                         >
                           세션 강제 종료
+                        </button>
+                        {/* 새어 나간 토큰을 그 자리에서 죽인다 (공개 API — FR-2222). 값은 보이지 않는다 */}
+                        <button type="button" className="sm" disabled={!manages} title={reason} onClick={() => setTokenUser(u)}>
+                          API 토큰
                         </button>
                       </div>
                       {/* 누를 수 없는 까닭은 글로도 보인다(J.5.2) — 관리할 수 없는 줄은 전부, 자기 줄은 정지만 */}

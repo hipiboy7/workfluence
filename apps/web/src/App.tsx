@@ -13,6 +13,7 @@ import { PageViewPage } from './pages/PageViewPage';
 import { LabelPage } from './pages/LabelPage';
 import { LlmPage } from './pages/LlmPage';
 import { LlmPromptsPage } from './pages/LlmPromptsPage';
+import { ApiTokensPage } from './pages/ApiTokensPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { SearchPage } from './pages/SearchPage';
 import { TrashPage } from './pages/TrashPage';
@@ -74,6 +75,7 @@ export function App() {
             <Route path="/admin/llm" element={<AdminLlmPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
+            <Route path="/account/tokens" element={<ApiTokensPage />} />
             <Route path="/trash" element={<TrashPage />} />
             <Route path="/labels/:name" element={<LabelPage />} />
             {/* Phase 10 — 사내 LLM 질문 (P10_설계서_Llm G절). `/llm/prompts`는 고정 경로라 `/llm/:id`보다 먼저 맞는다 */}

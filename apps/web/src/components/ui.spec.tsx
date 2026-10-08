@@ -103,5 +103,7 @@ describe('sectionOf', () => {
   it('나머지는 메뉴의 구역', () => {
     expect(sectionOf('/admin/users')).toBe('관리');
     expect(sectionOf('/pages/x')).toBe('스페이스');
+    // 내 API 토큰은 스페이스 메뉴가 아니다 — 탭 제목이 "스페이스"로 나오지 않는다
+    expect(sectionOf('/account/tokens')).toBe('내 계정');
   });
 });

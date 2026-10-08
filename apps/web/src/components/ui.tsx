@@ -17,6 +17,7 @@ export function sectionOf(pathname: string): string {
   if (pathname.startsWith('/trash')) return '휴지통';
   if (pathname.startsWith('/notifications')) return '알림함';
   if (pathname.startsWith('/change-password')) return '비밀번호 변경';
+  if (pathname.startsWith('/account')) return '내 계정';
   return '스페이스';
 }
 

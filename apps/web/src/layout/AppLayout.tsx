@@ -165,6 +165,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           <span className="me" title={`${me.displayName}님 (${ROLE_NAMES[me.role]})`}>
             {me.displayName}님 <span className="muted">({ROLE_NAMES[me.role]})</span>
           </span>
+          <Link to="/account/tokens">API 토큰</Link>
           {/* 사내 계정은 비밀번호가 없다 — IdP에서 바꾼다 (P13 FR-1471) */}
           {me.hasPassword && <Link to="/change-password">비밀번호 변경</Link>}
           <button type="button" onClick={() => void logout().then(() => nav('/login'))}>
