@@ -18,6 +18,7 @@ import {
   type ApiTokenScope,
   type ApiTokenView,
   type CreateApiTokenDto,
+  type Principal,
 } from '@workfluence/shared';
 import { and, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
@@ -34,7 +35,7 @@ export type ApiAuthResult =
   | { ok: true; user: SessionUser; scopes: ApiTokenScope[]; tokenId: string }
   | { ok: false; code: ApiTokenProblem | 'API_DISABLED' };
 
-type RevokeReason = 'user' | 'sessions_revoked';
+type RevokeReason = 'user' | 'admin' | 'sessions_revoked';
 
 /** JWT의 시각은 초 단위다 — 행의 시각도 초로 맞춰 둘이 같은 순간을 가리키게 한다 */
 const toSecond = (d: Date) => new Date(Math.floor(d.getTime() / 1000) * 1000);
@@ -144,6 +145,37 @@ export class ApiTokensService implements OnModuleDestroy {
       if (row.revokedAt) return toView(row, now);
       const [done] = await tx.update(apiTokens).set({ revokedAt: now, revokedReason: 'user' satisfies RevokeReason }).where(eq(apiTokens.id, tokenId)).returning();
       await this.audit.record({ action: 'api_token.revoke', actorId: userId, targetType: 'api_token', targetId: tokenId, detail: { name: row.name, reason: 'user' }, ip }, tx);
+      return toView(done!, now);
+    });
+  }
+
+  /**
+   * 관리자가 남의 토큰 목록을 본다(사용자 관리). **그 사람을 관리할 수 있어야 한다**(`assertManageable` — 역할과 위임까지). 값은 없다
+   */
+  async listForUser(actor: Principal, userId: string, now = new Date()): Promise<ApiTokenView[]> {
+    await this.users.assertManageable(userId, actor);
+    return this.list(userId, now);
+  }
+
+  /**
+   * 관리자가 남의 토큰을 폐기한다(사용자 관리 — 새어 나간 토큰을 그 자리에서 죽인다). 감사에는 **폐기한 사람**이 남는다. 그 사람의 토큰이 아니면 404 —
+   * 다른 사람 주소에 남의 토큰 id를 끼워도 폐기되지 않는다. 이미 폐기된 것은 그대로 돌려준다(감사는 한 번)
+   */
+  async revokeForUser(actor: Principal, userId: string, tokenId: string, ip: string | null, now = new Date()): Promise<ApiTokenView> {
+    return this.db.transaction(async (tx) => {
+      await this.users.assertManageable(userId, actor, tx);
+      const [row] = await tx
+        .select()
+        .from(apiTokens)
+        .where(and(eq(apiTokens.id, tokenId), eq(apiTokens.userId, userId)))
+        .for('update');
+      if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: '토큰을 찾을 수 없다' });
+      if (row.revokedAt) return toView(row, now);
+      const [done] = await tx.update(apiTokens).set({ revokedAt: now, revokedReason: 'admin' satisfies RevokeReason }).where(eq(apiTokens.id, tokenId)).returning();
+      await this.audit.record(
+        { action: 'api_token.revoke', actorId: actor.id, targetType: 'api_token', targetId: tokenId, detail: { name: row.name, userId, reason: 'admin' }, ip },
+        tx,
+      );
       return toView(done!, now);
     });
   }

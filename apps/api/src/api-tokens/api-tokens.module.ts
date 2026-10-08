@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Module, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { API_TOKEN_LIMITS, API_TOKEN_SCOPES, createApiTokenDto, type ApiTokenView, type CreateApiTokenDto } from '@workfluence/shared';
 import type { Request } from 'express';
-import { AuthGuard, CurrentUser, type SessionUser } from '../auth/auth.guard';
+import { AuthGuard, CurrentUser, RequireAction, type SessionUser } from '../auth/auth.guard';
 import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { UsersModule } from '../users/users.module';
@@ -53,10 +53,32 @@ export class ApiTokensController {
   }
 }
 
+/**
+ * 사용자 관리에서 **그 사람의** 토큰을 보고 폐기한다 (FR-2222). 화면(세션)용이고 `user.manage`가 있어야 하며, 그 사람을 관리할 수 있어야 한다
+ * (역할과 위임 — `UsersService.assertManageable`). 값은 어디에도 없다 — 새어 나간 토큰을 죽이는 일이지 꺼내 보는 일이 아니다
+ */
+@Controller('api/users/:id/tokens')
+@UseGuards(AuthGuard)
+export class UserApiTokensController {
+  constructor(private readonly tokens: ApiTokensService) {}
+
+  @Get()
+  @RequireAction('user.manage')
+  list(@Param('id', UuidPipe) id: string, @CurrentUser() actor: SessionUser): Promise<ApiTokenView[]> {
+    return this.tokens.listForUser(actor, id);
+  }
+
+  @Delete(':tokenId')
+  @RequireAction('user.manage')
+  revoke(@Param('id', UuidPipe) id: string, @Param('tokenId', UuidPipe) tokenId: string, @CurrentUser() actor: SessionUser, @Req() req: Request): Promise<ApiTokenView> {
+    return this.tokens.revokeForUser(actor, id, tokenId, req.ip ?? null);
+  }
+}
+
 /** 공개 API 토큰 (docs/spinoff/public-api 계획서 4.1절) */
 @Module({
   imports: [UsersModule],
-  controllers: [ApiTokensController],
+  controllers: [ApiTokensController, UserApiTokensController],
   // 빈도 제한의 저장소는 이 모듈의 **provider 하나**다 — 로그인 등 IP별 제한(AuthModule)과 예산이 섞이지 않고, 가드가 몇 개로 만들어지든 예산은 하나다 (T-027)
   providers: [ApiTokensService, ApiTokenGuard, ApiRateLimitGuard, RateLimitStore],
   exports: [ApiTokensService, ApiTokenGuard, ApiRateLimitGuard, RateLimitStore],

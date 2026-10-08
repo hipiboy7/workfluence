@@ -284,6 +284,14 @@ export class UsersService {
     return target;
   }
 
+  /**
+   * 이 사람을 관리할 수 있는가 — 없으면 404, 역할과 위임이 모자라면 403. **행을 잠그고 읽는다**(`getManaged`). 사용자 관리 밖(그 사람의 API 토큰을
+   * 보고 폐기하는 일 — `ApiTokensService`)이 같은 판정을 쓰게 한 곳이다. 부르는 쪽이 트랜잭션을 넘기면 그 안에서 잠근다
+   */
+  assertManageable(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
+    return this.inTx(tx, (t) => this.getManaged(id, actor, t));
+  }
+
   async approve(id: string, actor: Principal, tx: Db = this.db): Promise<UserRow> {
     return this.inTx(tx, async (t) => {
       const target = await this.getManaged(id, actor, t);
