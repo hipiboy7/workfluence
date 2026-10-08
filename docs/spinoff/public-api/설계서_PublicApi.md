@@ -79,8 +79,8 @@
 | 메서드·경로 | 하는 일 |
 |---|---|
 | `GET /api/tokens/config` | `{ enabled, scopes, maxDays, defaultDays, maxPerUser }` — 화면이 폼을 그린다 |
-| `GET /api/tokens` | 내 토큰 목록(이름·scope·만든 때·만료·마지막 사용·폐기 까닭). 값은 없다 |
-| `POST /api/tokens` | `{ name, scopes, days? }` → `ApiTokenView & { token }` — **값은 이 응답에만** |
+| `GET /api/tokens` | 내 토큰 목록(이름·scope·만든 때·만료·마지막 사용·폐기한 때. 까닭은 감사로그에만 있다). 값은 없다 |
+| `POST /api/tokens` | `{ name, scopes, expiresInDays? }` → `ApiTokenView & { token }` — **값은 이 응답에만** |
 | `DELETE /api/tokens/:id` | 폐기(행은 남고 `revokedAt`·까닭이 찬다). 다시 폐기하면 감사가 또 남지 않는다 |
 | `GET /api/users/:id/tokens` | **관리자가** 그 사람의 토큰 목록을 본다(사용자 관리). `user.manage`가 있어야 하고 **그 사람을 관리할 수 있어야** 한다(역할·위임 — `UsersService.assertManageable`, 행을 잠근다). 값은 없다 |
 | `DELETE /api/users/:id/tokens/:tokenId` | **관리자가** 그 사람의 토큰을 폐기한다. 폐기 까닭 `admin`, 감사 `api_token.revoke`의 행위자는 폐기한 사람이다. 그 사람의 토큰이 아니면 404(남의 id를 끼워도 안 된다). 다시 폐기하면 감사가 또 남지 않는다 |

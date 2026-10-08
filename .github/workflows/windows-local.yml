@@ -180,7 +180,7 @@ jobs:
             $f = Join-Path $dir 'data\settings.env'
             if (-not (Test-Path -LiteralPath $f)) { return }
             foreach ($line in [IO.File]::ReadAllLines($f)) {
-              if ($line -match '^(WF_ROOT_PASSWORD|WF_PG_EMBEDDED_PASSWORD|WF_SESSION_SECRET|WF_LLM_MASTER_KEY)=(.*)$') {
+              if ($line -match '^(WF_ROOT_PASSWORD|WF_PG_EMBEDDED_PASSWORD|WF_SESSION_SECRET|WF_LLM_MASTER_KEY|WF_API_JWT_SECRET)=(.*)$') {
                 $v = $Matches[2].Trim().Trim("'")
                 if ($v -and -not $script:secrets.Contains($v)) { $script:secrets.Add($v); Write-Output "::add-mask::$v" }
               }
@@ -574,7 +574,7 @@ jobs:
             $f = Join-Path (Join-Path $env:RUNNER_TEMP $d) 'data\settings.env'
             if (-not (Test-Path -LiteralPath $f)) { continue }
             foreach ($line in [IO.File]::ReadAllLines($f)) {
-              if ($line -match '^(WF_ROOT_PASSWORD|WF_PG_EMBEDDED_PASSWORD|WF_SESSION_SECRET|WF_LLM_MASTER_KEY)=(.*)$') {
+              if ($line -match '^(WF_ROOT_PASSWORD|WF_PG_EMBEDDED_PASSWORD|WF_SESSION_SECRET|WF_LLM_MASTER_KEY|WF_API_JWT_SECRET)=(.*)$') {
                 $v = $Matches[2].Trim().Trim("'")
                 if ($v) { $secrets.Add($v) }
               }
