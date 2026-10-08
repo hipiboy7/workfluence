@@ -144,4 +144,23 @@ describe('실제 경로 표(V1_OPERATIONS)의 불변식', () => {
     expect(text).not.toMatch(/https?:\/\/(?!json-schema\.org)/);
     expect(d.info.version).toBe('1.0.0');
   });
+
+  it('모든 `$ref`가 문서 안의 실제 자리를 가리킨다', () => {
+    const refs: string[] = [];
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') {
+        for (const [k, x] of Object.entries(v)) {
+          if (k === '$ref' && typeof x === 'string') refs.push(x);
+          else walk(x);
+        }
+      }
+    };
+    walk(d);
+    expect(refs.length).toBeGreaterThan(100);
+    for (const r of new Set(refs)) {
+      const target = r.replace(/^#\//, '').split('/').reduce<any>((o, k) => o?.[k], d);
+      expect(target, r).toBeTruthy();
+    }
+  });
 });

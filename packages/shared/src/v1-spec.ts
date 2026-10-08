@@ -34,7 +34,6 @@ import {
 } from './v1';
 import {
   v1Attachment,
-  v1AttachmentJson,
   v1AuditEvent,
   v1Category,
   v1Comment,
@@ -49,7 +48,6 @@ import {
   v1Ok,
   v1Page,
   v1PageRestored,
-  v1PageSummary,
   v1PageTree,
   v1Policy,
   v1SearchHit,
