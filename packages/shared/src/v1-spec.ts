@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { requiredScopes } from './api-token';
 import { API_RATE_LIMITS } from './constants';
-import { policyRangeOf, V1_FIELD_DOCS } from './v1-field-docs';
+import { policyRangeOf, V1_FIELD_DOCS, V1_RESPONSE_DOCS } from './v1-field-docs';
 import {
   auditQueryDto,
   createUserDto,
@@ -109,11 +109,14 @@ function jsonSchema(schema: z.ZodType, io: 'input' | 'output'): Json {
 const fieldDoc = (opId: string, field: string): string | undefined => V1_FIELD_DOCS[`${opId}.${field}`] ?? V1_FIELD_DOCS[field];
 
 /** 요청 본문의 칸마다 빠진 설명을 채운다. 정책 정수 칸은 진짜 허용 범위도 적는다 */
-function describeFields(schema: Json, opId: string): void {
+function describeFields(schema: Json, opId: string, response = false): void {
+  const root = schema as { items?: Json; allOf?: Json[]; anyOf?: Json[]; oneOf?: Json[] };
+  if (root.items) describeFields(root.items, opId, response);
+  for (const list of [root.allOf, root.anyOf, root.oneOf]) for (const sub of list ?? []) describeFields(sub, opId, response);
   const props = (schema as { properties?: Record<string, Json> }).properties;
   for (const [name, p] of Object.entries(props ?? {})) {
     if (!p.description) {
-      const d = fieldDoc(opId, name);
+      const d = response ? V1_RESPONSE_DOCS[name] : fieldDoc(opId, name);
       if (d) p.description = d;
     }
     const range = opId === 'settings.update' ? policyRangeOf(name) : undefined;
@@ -121,8 +124,8 @@ function describeFields(schema: Json, opId: string): void {
       p.minimum = range.min;
       p.maximum = range.max;
     }
-    describeFields(p, opId);
-    if (p.items) describeFields(p.items as Json, opId);
+    describeFields(p, opId, response);
+    if (p.items) describeFields(p.items as Json, opId, response);
   }
 }
 
@@ -190,7 +193,11 @@ function requestBodyOf(op: V1Op): Json | undefined {
 
 function responseOf(op: V1Op): Json {
   const r = op.response;
-  if (r instanceof z.ZodType) return { description: '성공', content: { 'application/json': { schema: jsonSchema(r, 'output') } } };
+  if (r instanceof z.ZodType) {
+    const schema = jsonSchema(r, 'output');
+    describeFields(schema, op.id, true);
+    return { description: '성공', content: { 'application/json': { schema } } };
+  }
   return { description: r.description, content: { [r.contentType]: { schema: { type: 'string' } } } };
 }
 

@@ -101,3 +101,88 @@ export const V1_FIELD_DOCS: Record<string, string> = {
 export function policyRangeOf(field: string): { min: number; max: number } | undefined {
   return field in POLICY_DEFAULTS ? POLICY_RANGES[field] : undefined;
 }
+
+/**
+ * 성공 응답의 칸 설명 — 이름으로 찾는다(같은 이름은 어느 응답에서나 같은 뜻이다. 뜻이 갈리는 이름은 둘을 함께 적는다).
+ * 코드가 붙인 설명이 있으면 그것이 이긴다. 빠진 칸이 있으면 `v1-spec.spec.ts`가 실패한다
+ */
+export const V1_RESPONSE_DOCS: Record<string, string> = {
+  // 공통
+  id: '그 대상의 id — 다른 호출의 경로에 넣는다',
+  ok: '성공이면 늘 true',
+  count: '바뀐 것의 수',
+  items: '결과 목록 — 없으면 빈 배열',
+  name: '이름',
+  title: '제목',
+  description: '설명(없으면 null)',
+  status: '상태 — 스페이스는 active·suspended, 사용자는 pending·active·locked·suspended',
+  kind: '종류 — 스페이스는 personal(개인)·team(팀), 알림은 알림의 종류',
+  type: '문서 노드의 종류(doc·paragraph·heading 등)',
+  format: '본문의 형식 — markdown·json·text',
+  key: '스페이스를 가리키는 짧은 키',
+  createdAt: '만든 때(ISO 8601)',
+  updatedAt: '마지막으로 바뀐 때(ISO 8601)',
+  deletedAt: '지운 때(ISO 8601)',
+  readAt: '읽음으로 바꾼 때(ISO 8601) — 안 읽었으면 null',
+  size: '크기(바이트)',
+  mime: '파일의 MIME 형식',
+  filename: '파일 이름',
+  snippet: '검색어 둘레의 본문 조각',
+  // 사람
+  username: '사용자 아이디(로그인 이름)',
+  displayName: '화면에 보이는 이름',
+  email: '이메일 주소(없으면 null)',
+  role: '역할 — root·admin·member (Crew는 owner·editor·viewer)',
+  grants: '받은 위임의 목록(없으면 빈 배열)',
+  mustChangePassword: '다음 로그인에서 비밀번호를 바꿔야 하면 true',
+  author: '쓴 사람의 이름',
+  createdBy: '만든 사람의 id',
+  createdByName: '만든 사람의 이름',
+  uploadedByName: '올린 사람의 이름',
+  deletedByName: '지운 사람의 이름',
+  userId: '사용자의 id',
+  actorId: '그 일을 한 사용자의 id — 시스템이 했으면 null',
+  actorName: '그 일을 한 사람의 이름',
+  actorUsername: '그 일을 한 사람의 아이디',
+  // 스페이스·페이지
+  spaceId: '스페이스의 id',
+  spaceName: '스페이스의 이름',
+  space: '스페이스 — id와 이름',
+  pageId: '페이지의 id',
+  pageTitle: '페이지의 제목',
+  commentId: '댓글의 id',
+  parentId: '부모의 id — 맨 위면 null',
+  position: '형제 사이의 자리(0이 맨 앞)',
+  category: '분류의 이름(없으면 null)',
+  categoryId: '분류의 id(없으면 null)',
+  memberCount: 'Crew에 든 사람의 수',
+  myRole: '이 스페이스에서 내 역할 — owner·editor·viewer(Crew가 아니면 null)',
+  canWrite: '내가 이 스페이스에 쓸 수 있으면 true',
+  canManageMembers: '내가 Crew를 바꿀 수 있으면 true(관리자가 중지한 동안은 관리자만)',
+  canDelete: '내가 지울 수 있으면 true',
+  canRename: '내가 이름을 바꿀 수 있으면 true',
+  currentVersionNo: '지금 버전 번호 — 고칠 때 `baseVersionNo`로 보낸다',
+  versionNo: '버전 번호(1부터)',
+  // 버전 비교
+  from: '비교의 앞쪽 버전 — 번호·제목·고친 사람·시각',
+  to: '비교의 뒤쪽 버전 — 번호·제목·고친 사람·시각',
+  titleChanged: '두 버전의 제목이 다르면 true',
+  diff: '본문의 차이 — 바뀐 블록 수와 블록별 차이',
+  changed: '본문이 달라졌으면 true',
+  added: '새로 생긴 블록의 수',
+  removed: '없어진 블록의 수',
+  modified: '고쳐진 블록의 수',
+  blocks: '블록별 차이의 목록',
+  // 감사
+  action: '행위 코드(예: page.delete, api_token.create)',
+  detail: '그 행위의 자세한 내용(행위마다 다르다) — 토큰으로 한 일이면 `jti`가 그 토큰의 번호',
+  ip: '요청한 주소(없으면 null)',
+  targetId: '그 일을 당한 대상의 id',
+  targetType: '그 일을 당한 대상의 종류',
+  // 명세·정책
+  openapi: 'OpenAPI 버전',
+  allowedExtensions: '올릴 수 있는 파일 확장자의 목록',
+  passwordMinCharClasses: '비밀번호에 들어야 하는 글자 종류의 수',
+  passwordMinLength: '비밀번호의 최소 글자 수',
+  uploadMaxMb: '첨부 한 개의 최대 크기(MB)',
+};

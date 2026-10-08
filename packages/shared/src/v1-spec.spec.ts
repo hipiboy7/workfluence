@@ -177,7 +177,7 @@ describe('실제 경로 표(V1_OPERATIONS)의 불변식', () => {
 });
 
 describe('입력 칸마다 설명이 있다 — 에이전트가 이름만 보고 짐작하지 않게', () => {
-  type Schema = { properties?: Record<string, Schema & { description?: string }>; items?: Schema; description?: string };
+  type Schema = { properties?: Record<string, Schema & { description?: string }>; items?: Schema; allOf?: Schema[]; anyOf?: Schema[]; oneOf?: Schema[]; description?: string };
   const doc = buildOpenApi(V1_OPERATIONS, V1_OPENAPI_INFO) as {
     paths: Record<string, Record<string, { operationId: string; parameters?: { name: string; description?: string; schema?: { description?: string } }[]; requestBody?: { content: Record<string, { schema: Schema }> } }>>;
   };
@@ -210,6 +210,7 @@ describe('입력 칸마다 설명이 있다 — 에이전트가 이름만 보고
         walk(v, `${at}.${k}`);
       }
       if (s?.items) walk(s.items, `${at}[]`);
+      for (const sub of [...(s?.allOf ?? []), ...(s?.anyOf ?? []), ...(s?.oneOf ?? [])]) walk(sub, at);
     };
     for (const o of ops as unknown as R[]) walk(o.responses['200']?.content?.['application/json']?.schema, o.operationId);
     expect([...missing].sort()).toEqual([]);
