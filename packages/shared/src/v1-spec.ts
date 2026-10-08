@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { requiredScopes } from './api-token';
-import { API_RATE_LIMITS } from './constants';
+import { API_RATE_LIMITS, API_TOKEN_LIMITS } from './constants';
 import { policyRangeOf, V1_FIELD_DOCS, V1_RESPONSE_DOCS } from './v1-field-docs';
 import {
   auditQueryDto,
@@ -86,6 +86,8 @@ export type V1Op = {
   admin?: boolean;
   /** 토큰이 필요 없다 */
   public?: boolean;
+  /** 이 동작이 409를 줄 수 있는 까닭 — 없으면 읽기는 409가 없고, 쓰기는 일반 문구를 쓴다 */
+  conflict?: string;
   params?: Record<string, { kind: 'uuid' | 'integer' | 'string'; description: string }>;
   query?: z.ZodType;
   body?: z.ZodType;
@@ -109,14 +111,14 @@ function jsonSchema(schema: z.ZodType, io: 'input' | 'output'): Json {
 const fieldDoc = (opId: string, field: string): string | undefined => V1_FIELD_DOCS[`${opId}.${field}`] ?? V1_FIELD_DOCS[field];
 
 /** 요청 본문의 칸마다 빠진 설명을 채운다. 정책 정수 칸은 진짜 허용 범위도 적는다 */
-function describeFields(schema: Json, opId: string, response = false): void {
+function describeFields(schema: Json, opId: string, mode: 'body' | 'response' = 'body'): void {
   const root = schema as { items?: Json; allOf?: Json[]; anyOf?: Json[]; oneOf?: Json[] };
-  if (root.items) describeFields(root.items, opId, response);
-  for (const list of [root.allOf, root.anyOf, root.oneOf]) for (const sub of list ?? []) describeFields(sub, opId, response);
+  if (root.items) describeFields(root.items, opId, mode);
+  for (const list of [root.allOf, root.anyOf, root.oneOf]) for (const sub of list ?? []) describeFields(sub, opId, mode);
   const props = (schema as { properties?: Record<string, Json> }).properties;
   for (const [name, p] of Object.entries(props ?? {})) {
     if (!p.description) {
-      const d = response ? V1_RESPONSE_DOCS[name] : fieldDoc(opId, name);
+      const d = mode === 'response' ? V1_RESPONSE_DOCS[name] : (V1_FIELD_DOCS[`${opId}.body.${name}`] ?? V1_FIELD_DOCS[`body.${name}`] ?? fieldDoc(opId, name));
       if (d) p.description = d;
     }
     const range = opId === 'settings.update' ? policyRangeOf(name) : undefined;
@@ -124,8 +126,8 @@ function describeFields(schema: Json, opId: string, response = false): void {
       p.minimum = range.min;
       p.maximum = range.max;
     }
-    describeFields(p, opId, response);
-    if (p.items) describeFields(p.items as Json, opId, response);
+    describeFields(p, opId, mode);
+    if (p.items) describeFields(p.items as Json, opId, mode);
   }
 }
 
@@ -138,12 +140,19 @@ const ERRORS: Record<string, string> = {
   '404': '없거나 볼 수 없다 — 둘을 구별하지 않는다',
   '429': '토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다',
 };
-const CONFLICT = '기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다';
+const CONFLICT_GENERIC = '요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)';
+const CONFLICTS = {
+  update: '`VERSION_CONFLICT` — `baseVersionNo`가 지금 버전과 다르다(그 사이 누가 고쳤다). `error.details.currentVersionNo`가 지금 버전이다: 페이지를 다시 읽어 내 고침을 합친 뒤 그 버전을 `baseVersionNo`로 다시 보낸다. `PAGE_BEING_EDITED` — 사람이 실시간으로 편집 중이다: 잠시 뒤 다시 시도한다',
+  editing: '`PAGE_BEING_EDITED` — 사람이 이 페이지를 실시간으로 편집 중이라 건드리지 않는다. 잠시 뒤 다시 시도한다',
+  space: '`SPACE_AMBIGUOUS` — 같은 이름의 스페이스가 여럿이다. `error.details.candidates`의 id로 다시 부른다',
+  grants: '`expected`가 서버의 지금 위임 목록과 다르다(그 사이 누가 바꿨다) — 다시 읽어 보고 보낸다',
+} as const;
 
-const errorResponses = (method: V1Op['method']): Json => {
+const errorResponses = (op: V1Op): Json => {
   const out: Json = {};
   for (const [code, description] of Object.entries(ERRORS)) out[code] = { description, content: { 'application/json': { schema: ERROR_REF } } };
-  if (method !== 'get') out['409'] = { description: CONFLICT, content: { 'application/json': { schema: ERROR_REF } } };
+  const conflict = op.conflict ?? (op.method !== 'get' ? CONFLICT_GENERIC : undefined);
+  if (conflict) out['409'] = { description: conflict, content: { 'application/json': { schema: ERROR_REF } } };
   return out;
 };
 
@@ -195,7 +204,7 @@ function responseOf(op: V1Op): Json {
   const r = op.response;
   if (r instanceof z.ZodType) {
     const schema = jsonSchema(r, 'output');
-    describeFields(schema, op.id, true);
+    describeFields(schema, op.id, 'response');
     return { description: '성공', content: { 'application/json': { schema } } };
   }
   return { description: r.description, content: { [r.contentType]: { schema: { type: 'string' } } } };
@@ -220,7 +229,7 @@ export function buildOpenApi(ops: readonly V1Op[], info: OpenApiInfo): object {
       security: op.public ? [] : [{ bearerAuth: requiredScopes(op.method, op.admin === true) }],
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
-      responses: { '200': responseOf(op), ...(op.public ? {} : errorResponses(op.method)) },
+      responses: { '200': responseOf(op), ...(op.public ? {} : errorResponses(op)) },
     };
     (paths[op.path] ??= {})[op.method] = entry;
   }
@@ -253,15 +262,15 @@ const exportQuery = z.object({ versionNo: z.coerce.number().int().positive().opt
 
 export const V1_OPERATIONS: V1Op[] = [
   // ---- 페이지 ----
-  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 본문은 `GET /pages/{id}`로 읽는다.', query: v1PageTreeQuery, response: v1PageTree },
+  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 본문은 `GET /pages/{id}`로 읽는다.', query: v1PageTreeQuery, response: v1PageTree },
   { id: 'pages.get', method: 'get', path: '/pages/{id}', tag: 'pages', summary: '페이지 읽기', description: `페이지 하나를 본문과 함께 읽는다. 조상 경로(\`ancestors\`)와 지금 버전 번호(\`currentVersionNo\`)가 함께 온다 — 고칠 때 기준 버전으로 쓴다. ${formatNote}`, params: pid, query: v1PageQuery, response: v1Page },
-  { id: 'pages.create', method: 'post', path: '/pages', tag: 'pages', summary: '페이지 만들기', description: '필수는 `space`(이름이나 id)·`title`·`body`뿐이다. 부모를 안 주면 맨 위, 위치는 맨 끝에 만들고 서버가 정한 값을 응답이 말한다. 본문은 마크다운이 기본이다(`format`=json이면 문서 객체). 원시 HTML·그림·허용 밖 링크는 400이다.', body: v1CreatePageDto, query: v1PageQuery, response: v1Page },
-  { id: 'pages.update', method: 'patch', path: '/pages/{id}', tag: 'pages', summary: '페이지 고치기', description: '고칠 것(`title`·`body`)만 보낸다 — 안 보낸 것은 그대로다. 기준 버전(`baseVersionNo`)을 안 주면 지금 버전이다. 사람이 그 페이지를 실시간으로 편집 중이면 409 `PAGE_BEING_EDITED` — 편집이 끝난 뒤 다시 시도한다. 기준 버전이 어긋나면 409 `VERSION_CONFLICT`.', params: pid, body: v1UpdatePageDto, query: v1PageQuery, response: v1Page },
-  { id: 'pages.move', method: 'patch', path: '/pages/{id}/move', tag: 'pages', summary: '페이지 옮기기', description: '부모(`parentId`, null이면 맨 위)만 있으면 된다. 위치를 안 주면 형제의 맨 끝이다.', params: pid, body: v1MovePageDto, response: v1MovedPage },
-  { id: 'pages.delete', method: 'delete', path: '/pages/{id}', tag: 'pages', summary: '페이지 지우기(휴지통으로)', description: '휴지통으로 보낸다 — 보존 기간 안에는 `POST /trash/pages/{id}/restore`로 되살린다.', params: pid, response: v1Ok },
+  { id: 'pages.create', method: 'post', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '페이지 만들기', description: '필수는 `space`(이름이나 id)·`title`·`body`뿐이다. 부모를 안 주면 맨 위, 위치는 맨 끝에 만들고 서버가 정한 값을 응답이 말한다. 본문은 마크다운이 기본이다(`format`=json이면 문서 객체). 원시 HTML·그림·허용 밖 링크는 400이다.', body: v1CreatePageDto, query: v1PageQuery, response: v1Page },
+  { id: 'pages.update', method: 'patch', path: '/pages/{id}', tag: 'pages', conflict: CONFLICTS.update, summary: '페이지 고치기', description: '고칠 것(`title`·`body`)만 보낸다 — 안 보낸 것은 그대로다. 기준 버전(`baseVersionNo`)을 안 주면 지금 버전이다. 사람이 그 페이지를 실시간으로 편집 중이면 409 `PAGE_BEING_EDITED` — 편집이 끝난 뒤 다시 시도한다. 기준 버전이 어긋나면 409 `VERSION_CONFLICT`.', params: pid, body: v1UpdatePageDto, query: v1PageQuery, response: v1Page },
+  { id: 'pages.move', method: 'patch', path: '/pages/{id}/move', tag: 'pages', conflict: CONFLICTS.editing, summary: '페이지 옮기기', description: '부모(`parentId`, null이면 맨 위)만 있으면 된다. 위치를 안 주면 형제의 맨 끝이다.', params: pid, body: v1MovePageDto, response: v1MovedPage },
+  { id: 'pages.delete', method: 'delete', path: '/pages/{id}', tag: 'pages', conflict: CONFLICTS.editing, summary: '페이지 지우기(휴지통으로)', description: '휴지통으로 보낸다 — 보존 기간 안에는 `POST /trash/pages/{id}/restore`로 되살린다.', params: pid, response: v1Ok },
   { id: 'pages.versions', method: 'get', path: '/pages/{id}/versions', tag: 'pages', summary: '버전 이력', description: '버전 번호·제목·고친 사람·시각의 목록(본문 없이). 본문은 버전 하나를 읽어 본다.', params: pid, response: array(v1VersionSummary) },
   { id: 'pages.version', method: 'get', path: '/pages/{id}/versions/{no}', tag: 'pages', summary: '옛 버전 읽기', description: `버전 하나의 본문을 읽는다. ${formatNote}`, params: { ...pid, no: int('버전 번호') }, query: v1PageQuery, response: v1Version },
-  { id: 'pages.restoreVersion', method: 'post', path: '/pages/{id}/versions/{no}/restore', tag: 'pages', summary: '옛 버전으로 되돌리기', description: '그 버전의 내용을 새 버전으로 더한다(이력은 지워지지 않는다). 편집 중이면 409 `PAGE_BEING_EDITED`.', params: { ...pid, no: int('되돌릴 버전 번호') }, query: v1PageQuery, response: v1Page },
+  { id: 'pages.restoreVersion', method: 'post', path: '/pages/{id}/versions/{no}/restore', tag: 'pages', conflict: CONFLICTS.editing, summary: '옛 버전으로 되돌리기', description: '그 버전의 내용을 새 버전으로 더한다(이력은 지워지지 않는다). 편집 중이면 409 `PAGE_BEING_EDITED`.', params: { ...pid, no: int('되돌릴 버전 번호') }, query: v1PageQuery, response: v1Page },
   { id: 'pages.diff', method: 'get', path: '/pages/{id}/versions/{a}/diff/{b}', tag: 'pages', summary: '두 버전 비교', description: '`a` 버전에서 `b` 버전으로 무엇이 바뀌었는지 블록 단위로 돌려준다(추가·삭제·수정 수와 블록별 차이).', params: { ...pid, a: int('앞 버전 번호'), b: int('뒤 버전 번호') }, response: v1Diff },
   { id: 'pages.export', method: 'get', path: '/pages/{id}/export', tag: 'pages', summary: '페이지를 HTML 한 파일로 내보내기', description: '내려받는 파일(`Content-Disposition: attachment`)이다. 감사로그에 남는다.', params: pid, query: exportQuery, response: { contentType: 'text/html', description: 'HTML 한 파일' } },
 
@@ -303,7 +312,7 @@ export const V1_OPERATIONS: V1Op[] = [
   { id: 'attachments.delete', method: 'delete', path: '/attachments/{id}', tag: 'attachments', summary: '첨부 지우기', description: '그 스페이스에 쓸 수 있는 사람, 또는 올린 사람이 지운다(중지된 스페이스에서는 아무도).', params: { id: id('첨부의 id') }, response: v1Ok },
 
   // ---- 검색 ----
-  { id: 'search.find', method: 'get', path: '/search', tag: 'search', summary: '페이지 검색', description: '필수는 검색어(`q`)뿐이다 — 내가 읽을 수 있는 모든 스페이스에서 찾는다. `space`(이름이나 id)로 좁힌다. 없는 스페이스 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`다. 모르는 쿼리 칸은 400.', query: v1SearchQuery, response: v1Items(v1SearchHit) },
+  { id: 'search.find', method: 'get', path: '/search', tag: 'search', conflict: CONFLICTS.space, summary: '페이지 검색', description: '필수는 검색어(`q`)뿐이다 — 내가 읽을 수 있는 모든 스페이스에서 찾는다. `space`(이름이나 id)로 좁힌다. 없는 스페이스 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`다. 모르는 쿼리 칸은 400.', query: v1SearchQuery, response: v1Items(v1SearchHit) },
 
   // ---- 템플릿 ----
   { id: 'templates.list', method: 'get', path: '/templates', tag: 'templates', summary: '페이지 템플릿 목록', description: `새 페이지의 본문으로 쓸 틀. 본문을 읽어 \`POST /pages\`의 \`body\`로 보내면 된다. ${formatNote}`, query: v1PageQuery, response: v1Items(v1Template) },
@@ -332,7 +341,7 @@ export const V1_OPERATIONS: V1Op[] = [
   { id: 'users.unsuspend', method: 'post', path: '/users/{id}/unsuspend', tag: 'admin', admin: true, summary: '정지 풀기', description: '정지한 계정을 활성으로 되돌린다.', params: uid, response: v1User },
   { id: 'users.terminateSessions', method: 'post', path: '/users/{id}/terminate-sessions', tag: 'admin', admin: true, summary: '세션 모두 끊기', description: '끊은 세션의 수를 돌려준다.', params: uid, response: v1Count },
   { id: 'users.setRole', method: 'patch', path: '/users/{id}/role', tag: 'admin', admin: true, summary: '역할 바꾸기', description: 'root만 root를 줄 수 있다. 자기가 할 수 없는 위임을 가진 사람은 바꾸지 못한다.', params: uid, body: updateUserRoleDto, response: v1User },
-  { id: 'users.setGrants', method: 'put', path: '/users/{id}/grants', tag: 'admin', admin: true, summary: '맡기는 권한 주고 거두기', description: '`grants`로 그 사람의 위임을 통째로 바꾼다. 받는 역할이 아니면 사라진다.', params: uid, body: userGrantsDto, response: v1User },
+  { id: 'users.setGrants', method: 'put', path: '/users/{id}/grants', tag: 'admin', conflict: CONFLICTS.grants, admin: true, summary: '맡기는 권한 주고 거두기', description: '`grants`로 그 사람의 위임을 통째로 바꾼다. 받는 역할이 아니면 사라진다.', params: uid, body: userGrantsDto, response: v1User },
   { id: 'settings.get', method: 'get', path: '/settings/policy', tag: 'admin', admin: true, summary: '운영 정책값 읽기', description: '업로드 크기·허용 확장자·세션 시간·비밀번호 규칙·잠금·보존 기간 등. 서버의 천장(`uploadCeilingMb`)이 함께 온다.', response: v1Policy },
   { id: 'settings.update', method: 'patch', path: '/settings/policy', tag: 'admin', admin: true, summary: '운영 정책값 고치기', description: '고칠 값만 보낸다. 범위를 벗어나면 400. 감사 기록 단계는 시스템 관리자(root)만 바꾼다.', body: policyPatchDto, response: v1Ok },
   { id: 'audit.list', method: 'get', path: '/audit', tag: 'admin', admin: true, summary: '감사로그 읽기', description: '행위(`action`)·사람(`actorId`)·기간(`from`·`to`)·요청 번호(`requestId`)로 거른다. 읽기 전용이다(append-only) — 쓰는 경로는 없다. 응답을 `{items}`로 싼다(화면용은 배열).', query: auditQueryDto, response: v1Items(v1AuditEvent) },
@@ -351,6 +360,12 @@ export const V1_OPENAPI_INFO: OpenApiInfo = {
     `빈도 제한: 토큰마다 읽기 ${API_RATE_LIMITS.read.max}번·쓰기 ${API_RATE_LIMITS.write.max}번 / ${API_RATE_LIMITS.read.windowSec}초. 넘으면 429와 \`Retry-After\`.`,
     '오류: 모두 `{ "error": { "code", "message", "requestId" } }` 한 모양이다. 분기는 문장이 아니라 `code`로 한다. `requestId`를 알려 주면 운영자가 로그·감사에서 그 요청을 찾는다.',
     `본문: 읽기는 markdown(기본)·json·text, 쓰기는 markdown(기본)·json. 만들 때 필수는 대개 이름·제목·본문뿐이고 나머지는 서버가 기본값(예: 목록 ${V1_DEFAULTS.listLimit}개)으로 채워 응답이 그 값을 말한다.`,
+    '주소: 이 명세를 받은 서버의 주소 + `/api/v1`. 경로는 모두 `/api/v1`을 뺀 꼴로 적었다.',
+    `토큰: 사람이 화면(내 정보 → API 토큰)에서 발급·폐기한다 — 이 API에는 발급·폐기 경로가 없다. 유효기간은 발급할 때 고르며 기본 ${API_TOKEN_LIMITS.defaultDays}일·최대 ${API_TOKEN_LIMITS.maxDays}일, 사람마다 ${API_TOKEN_LIMITS.maxPerUser}개까지. 갱신은 없다 — 만료·폐기되면 사람이 새로 발급해 넘긴다. 비밀번호 변경·정지·강제 종료는 토큰을 모두 끊는다.`,
+    '오류 코드 — 401: `TOKEN_MISSING`(헤더 없음)·`TOKEN_INVALID`(서명·형식이 틀림)·`TOKEN_UNKNOWN`(서명은 맞는데 그 번호·주인의 발급 기록이 없음)·`TOKEN_EXPIRED`(만료)·`TOKEN_REVOKED`(폐기)·`ACCOUNT_INACTIVE`(주인이 정지됨 등 활성이 아님) — 모두 사람이 새 토큰을 받거나 풀어야 하니 재시도하지 말고 멈춘다. 403: `INSUFFICIENT_SCOPE`·`FORBIDDEN`·`PASSWORD_CHANGE_REQUIRED`(주인이 화면에서 비밀번호를 바꿔야 토큰을 쓸 수 있음). 400: `INVALID_REQUEST`(`message`가 칸과 까닭을 말한다)·`INVALID_JSON`. 404: `NOT_FOUND`·`SPACE_NOT_FOUND` 등. 409: 각 동작의 409 설명을 본다. 413: `PAYLOAD_TOO_LARGE`·`TOO_LARGE_FOR_JSON`. 429: `RATE_LIMITED`. 503: `API_DISABLED`(서버에서 공개 API를 꺼 둠). 500: `INTERNAL` — `requestId`를 운영자에게 알린다.',
+    '고칠 때: 페이지 고치기는 본문 **전체 교체**다(부분 수정이 없다). 읽은 `currentVersionNo`를 `baseVersionNo`로 보내야 그 사이 남의 고침을 덮지 않는다 — 안 보내면 지금 버전이 기준이 되어 충돌 검사가 없다. 같은 요청을 되풀이해도 중복을 막는 키는 없다: 만들기(POST)는 실패해도 만들어졌을 수 있으니 다시 보내기 전에 목록으로 확인한다.',
+    '`format`: 쿼리의 `format`은 **응답**에 실을 본문 형식이고, 요청 본문의 `format`은 **보내는** `body`의 형식이다(둘은 따로 정한다). 마크다운은 원시 HTML·그림 문법·허용 밖 링크를 받지 않고 400이다.',
+    '목록: 쪽 나누기가 없다. 모두 `limit`까지만 돌려주고(동작마다 최대값이 다르다) 넘는 것은 잘린다 — 많으면 스페이스·검색어·기간으로 조건을 좁혀 나누어 받는다. `GET /users`만 `offset`·`total`을 쓴다.',
     '이 API는 더하기만 한다(필드·경로 추가). 빼거나 뜻을 바꾸면 v2다.',
   ].join('\n'),
 };

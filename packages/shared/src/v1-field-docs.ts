@@ -1,3 +1,4 @@
+import { AUDIT_ACTIONS } from './constants';
 import { POLICY_DEFAULTS, POLICY_RANGES, type Policy } from './policy';
 
 /**
@@ -14,7 +15,9 @@ const policy = (text: string, key: keyof Policy): string => {
 
 export const V1_FIELD_DOCS: Record<string, string> = {
   // ---- 공통 쿼리 ----
-  format: '본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만',
+  format: '응답에 실을 본문 형식 — markdown(기본)·json·text',
+  'body.format': '보내는 `body`의 형식 — markdown(기본: body는 마크다운 글)·json(body는 문서 객체)',
+  'attachments.download.format': '`json`이면 파일을 JSON(`encoding`·`content` — 글은 utf8, 이진은 base64)으로 싸서 돌려준다. 안 주면 파일 그대로 내려받는다(413 `TOO_LARGE_FOR_JSON` — 너무 크면 JSON으로 못 받는다)',
   limit: '돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값',
   q: '찾을 말 — 이름의 일부(대소문자 무시)',
   offset: '건너뛸 수(앞에서부터) — 다음 쪽을 읽을 때 쓴다',
@@ -23,10 +26,10 @@ export const V1_FIELD_DOCS: Record<string, string> = {
   'spaces.setStatus.status': '바꿀 상태 — active(다시 쓰기)·suspended(중지)',
 
   // ---- 감사 ----
-  action: '행위 코드로 거른다(예: page.delete, api_token.create)',
+  action: `행위 코드로 거른다. 값: ${AUDIT_ACTIONS.join(' · ')}`,
   actorId: '그 일을 한 사용자의 id로 거른다',
-  from: '이 시각부터(포함) — ISO 8601. 날짜만 주면 그날 00:00부터',
-  to: '이 시각까지(제외) — ISO 8601. 날짜만 주면 그날 00:00까지',
+  from: '이 시각부터(포함) — ISO 8601(예: 2026-10-08T09:00:00Z). 날짜만 주면 그날 00:00부터',
+  to: '이 시각까지(제외) — ISO 8601(예: 2026-10-08T18:00:00Z). 날짜만 주면 그날 00:00까지',
   requestId: '요청 번호로 거른다 — 오류 응답의 `error.requestId`나 로그 한 줄의 값',
 
   // ---- 페이지·댓글 ----
@@ -175,7 +178,7 @@ export const V1_RESPONSE_DOCS: Record<string, string> = {
   blocks: '블록별 차이의 목록',
   // 감사
   action: '행위 코드(예: page.delete, api_token.create)',
-  detail: '그 행위의 자세한 내용(행위마다 다르다) — 토큰으로 한 일이면 `jti`가 그 토큰의 번호',
+  detail: '그 행위의 자세한 내용(행위마다 다르다 — 예: `settings.update`는 `{ before, after }`로 바뀐 정책의 이전·이후 값) — 토큰으로 한 요청이면 `jti`가 그 토큰의 번호',
   ip: '요청한 주소(없으면 null)',
   targetId: '그 일을 당한 대상의 id',
   targetType: '그 일을 당한 대상의 종류',

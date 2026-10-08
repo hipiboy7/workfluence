@@ -39,6 +39,12 @@ info:
     빈도 제한: 토큰마다 읽기 120번·쓰기 30번 / 60초. 넘으면 429와 `Retry-After`.
     오류: 모두 `{ "error": { "code", "message", "requestId" } }` 한 모양이다. 분기는 문장이 아니라 `code`로 한다. `requestId`를 알려 주면 운영자가 로그·감사에서 그 요청을 찾는다.
     본문: 읽기는 markdown(기본)·json·text, 쓰기는 markdown(기본)·json. 만들 때 필수는 대개 이름·제목·본문뿐이고 나머지는 서버가 기본값(예: 목록 200개)으로 채워 응답이 그 값을 말한다.
+    주소: 이 명세를 받은 서버의 주소 + `/api/v1`. 경로는 모두 `/api/v1`을 뺀 꼴로 적었다.
+    토큰: 사람이 화면(내 정보 → API 토큰)에서 발급·폐기한다 — 이 API에는 발급·폐기 경로가 없다. 유효기간은 발급할 때 고르며 기본 90일·최대 365일, 사람마다 10개까지. 갱신은 없다 — 만료·폐기되면 사람이 새로 발급해 넘긴다. 비밀번호 변경·정지·강제 종료는 토큰을 모두 끊는다.
+    오류 코드 — 401: `TOKEN_MISSING`(헤더 없음)·`TOKEN_INVALID`(서명·형식이 틀림)·`TOKEN_UNKNOWN`(서명은 맞는데 그 번호·주인의 발급 기록이 없음)·`TOKEN_EXPIRED`(만료)·`TOKEN_REVOKED`(폐기)·`ACCOUNT_INACTIVE`(주인이 정지됨 등 활성이 아님) — 모두 사람이 새 토큰을 받거나 풀어야 하니 재시도하지 말고 멈춘다. 403: `INSUFFICIENT_SCOPE`·`FORBIDDEN`·`PASSWORD_CHANGE_REQUIRED`(주인이 화면에서 비밀번호를 바꿔야 토큰을 쓸 수 있음). 400: `INVALID_REQUEST`(`message`가 칸과 까닭을 말한다)·`INVALID_JSON`. 404: `NOT_FOUND`·`SPACE_NOT_FOUND` 등. 409: 각 동작의 409 설명을 본다. 413: `PAYLOAD_TOO_LARGE`·`TOO_LARGE_FOR_JSON`. 429: `RATE_LIMITED`. 503: `API_DISABLED`(서버에서 공개 API를 꺼 둠). 500: `INTERNAL` — `requestId`를 운영자에게 알린다.
+    고칠 때: 페이지 고치기는 본문 **전체 교체**다(부분 수정이 없다). 읽은 `currentVersionNo`를 `baseVersionNo`로 보내야 그 사이 남의 고침을 덮지 않는다 — 안 보내면 지금 버전이 기준이 되어 충돌 검사가 없다. 같은 요청을 되풀이해도 중복을 막는 키는 없다: 만들기(POST)는 실패해도 만들어졌을 수 있으니 다시 보내기 전에 목록으로 확인한다.
+    `format`: 쿼리의 `format`은 **응답**에 실을 본문 형식이고, 요청 본문의 `format`은 **보내는** `body`의 형식이다(둘은 따로 정한다). 마크다운은 원시 HTML·그림 문법·허용 밖 링크를 받지 않고 400이다.
+    목록: 쪽 나누기가 없다. 모두 `limit`까지만 돌려주고(동작마다 최대값이 다르다) 넘는 것은 잘린다 — 많으면 스페이스·검색어·기간으로 조건을 좁혀 나누어 받는다. `GET /users`만 `offset`·`total`을 쓴다.
     이 API는 더하기만 한다(필드·경로 추가). 빼거나 뜻을 바꾸면 v2다.
   title: "워크플루언스 공개 API"
   version: "1.0.0"
@@ -100,7 +106,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -124,7 +130,7 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "`json`이면 파일을 JSON(`encoding`·`content` — 글은 utf8, 이진은 base64)으로 싸서 돌려준다. 안 주면 파일 그대로 내려받는다(413 `TOO_LARGE_FOR_JSON` — 너무 크면 JSON으로 못 받는다)"
           in: query
           name: format
           required: false
@@ -189,7 +195,7 @@ paths:
             maximum: 500
             minimum: 1
             type: integer
-        - description: "행위 코드로 거른다(예: page.delete, api_token.create)"
+        - description: "행위 코드로 거른다. 값: auth.login.success · auth.login.failure · auth.logout · auth.password.change · auth.id.recover · auth.password.recover · user.signup · user.create · user.approve · user.unlock · user.password.reset · user.sessions.terminate · user.role.change · user.grants.change · user.suspend · user.unsuspend · category.create · space.create · space.update · space.status.change · space.delete · space.member.add · space.member.role.change · space.member.remove · page.create · page.update · page.move · page.delete · page.restore · page.version.restore · attachment.upload · attachment.download · attachment.delete · comment.create · comment.update · comment.delete · page.restore.trash · space.restore · trash.purge · audit.purge · backup.create · backup.restore · label.attach · label.detach · category.update · category.delete · settings.update · page.export · page.collab.save · page.collab.flush · page.collab.title · template.create · template.update · template.delete · mail.send · mail.fail · page.collab.reject · llm.provider.create · llm.provider.delete · llm.ask · llm.conversation.purge · auth.password.reset.request · auth.password.reset · auth.email.help · api_token.create · api_token.revoke"
           in: query
           name: action
           required: false
@@ -204,12 +210,12 @@ paths:
             format: uuid
             pattern: "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             type: string
-        - description: "이 시각부터(포함) — ISO 8601. 날짜만 주면 그날 00:00부터"
+        - description: "이 시각부터(포함) — ISO 8601(예: 2026-10-08T09:00:00Z). 날짜만 주면 그날 00:00부터"
           in: query
           name: from
           required: false
           schema: {}
-        - description: "이 시각까지(제외) — ISO 8601. 날짜만 주면 그날 00:00까지"
+        - description: "이 시각까지(제외) — ISO 8601(예: 2026-10-08T18:00:00Z). 날짜만 주면 그날 00:00까지"
           in: query
           name: to
           required: false
@@ -256,7 +262,7 @@ paths:
                                 type: string
                               type: object
                             - type: "null"
-                          description: "그 행위의 자세한 내용(행위마다 다르다) — 토큰으로 한 일이면 `jti`가 그 토큰의 번호"
+                          description: "그 행위의 자세한 내용(행위마다 다르다 — 예: `settings.update`는 `{ before, after }`로 바뀐 정책의 이전·이후 값) — 토큰으로 한 요청이면 `jti`가 그 토큰의 번호"
                         id:
                           description: "그 대상의 id — 다른 호출의 경로에 넣는다"
                           type: string
@@ -475,7 +481,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -544,7 +550,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -638,7 +644,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -707,7 +713,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -731,7 +737,7 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -851,7 +857,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -1204,7 +1210,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -1329,7 +1335,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -1476,6 +1482,12 @@ paths:
               schema:
                 "$ref": "#/components/schemas/Error"
           description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "409":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "`SPACE_AMBIGUOUS` — 같은 이름의 스페이스가 여럿이다. `error.details.candidates`의 id로 다시 부른다"
         "429":
           content:
             "application/json":
@@ -1492,7 +1504,7 @@ paths:
       description: "필수는 `space`(이름이나 id)·`title`·`body`뿐이다. 부모를 안 주면 맨 위, 위치는 맨 끝에 만들고 서버가 정한 값을 응답이 말한다. 본문은 마크다운이 기본이다(`format`=json이면 문서 객체). 원시 HTML·그림·허용 밖 링크는 400이다."
       operationId: pages.create
       parameters:
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -1657,7 +1669,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "`SPACE_AMBIGUOUS` — 같은 이름의 스페이스가 여럿이다. `error.details.candidates`의 id로 다시 부른다"
         "429":
           content:
             "application/json":
@@ -1726,7 +1738,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "`PAGE_BEING_EDITED` — 사람이 이 페이지를 실시간으로 편집 중이라 건드리지 않는다. 잠시 뒤 다시 시도한다"
         "429":
           content:
             "application/json":
@@ -1750,7 +1762,7 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -1894,7 +1906,7 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -2047,7 +2059,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "`VERSION_CONFLICT` — `baseVersionNo`가 지금 버전과 다르다(그 사이 누가 고쳤다). `error.details.currentVersionNo`가 지금 버전이다: 페이지를 다시 읽어 내 고침을 합친 뒤 그 버전을 `baseVersionNo`로 다시 보낸다. `PAGE_BEING_EDITED` — 사람이 실시간으로 편집 중이다: 잠시 뒤 다시 시도한다"
         "429":
           content:
             "application/json":
@@ -2231,7 +2243,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "`PAGE_BEING_EDITED` — 사람이 이 페이지를 실시간으로 편집 중이라 건드리지 않는다. 잠시 뒤 다시 시도한다"
         "429":
           content:
             "application/json":
@@ -2505,7 +2517,7 @@ paths:
           required: true
           schema:
             type: integer
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -2619,7 +2631,7 @@ paths:
           required: true
           schema:
             type: integer
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -2745,7 +2757,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "`PAGE_BEING_EDITED` — 사람이 이 페이지를 실시간으로 편집 중이라 건드리지 않는다. 잠시 뒤 다시 시도한다"
         "429":
           content:
             "application/json":
@@ -2988,7 +3000,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -3013,7 +3025,7 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -3141,7 +3153,7 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -3269,7 +3281,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -3423,7 +3435,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -3498,7 +3510,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -3608,6 +3620,12 @@ paths:
               schema:
                 "$ref": "#/components/schemas/Error"
           description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "409":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "`SPACE_AMBIGUOUS` — 같은 이름의 스페이스가 여럿이다. `error.details.candidates`의 id로 다시 부른다"
         "429":
           content:
             "application/json":
@@ -3831,7 +3849,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4114,7 +4132,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4183,7 +4201,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4451,7 +4469,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4637,7 +4655,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4729,7 +4747,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4836,7 +4854,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4981,7 +4999,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -4999,7 +5017,7 @@ paths:
       description: "새 페이지의 본문으로 쓸 틀. 본문을 읽어 `POST /pages`의 `body`로 보내면 된다. `format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text."
       operationId: templates.list
       parameters:
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -5108,7 +5126,7 @@ paths:
       description: "**관리자만.** 이름과 본문이면 된다(설명은 선택). 같은 이름·내용이면 있던 것을 돌려준다."
       operationId: templates.create
       parameters:
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -5228,7 +5246,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -5297,7 +5315,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -5321,7 +5339,7 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+        - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
           name: format
           required: false
@@ -5438,7 +5456,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -5604,7 +5622,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -5762,7 +5780,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -6065,7 +6083,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -6184,7 +6202,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -6333,7 +6351,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "`expected`가 서버의 지금 위임 목록과 다르다(그 사이 누가 바꿨다) — 다시 읽어 보고 보낸다"
         "429":
           content:
             "application/json":
@@ -6468,7 +6486,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -6587,7 +6605,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -6658,7 +6676,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -6777,7 +6795,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
@@ -6896,7 +6914,7 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
-          description: "기준 버전이 어긋났거나(`VERSION_CONFLICT`) 사람이 편집 중(`PAGE_BEING_EDITED`)이거나 이름이 겹친다"
+          description: "요청이 지금의 상태와 맞지 않는다 — `error.code`와 `error.message`가 까닭을 말한다(다시 읽어 상태를 확인한 뒤 고쳐서 보낸다)"
         "429":
           content:
             "application/json":
