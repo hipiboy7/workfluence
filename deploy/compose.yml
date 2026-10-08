@@ -2,6 +2,8 @@
 # 아래 명령은 저장소의 맨 위에서 친다 — 환경 파일은 deploy/.env다(맨 위의 .env는 개발용). 폐쇄망에서는 묶음을 푼 디렉토리에서
 # `-f compose.yml --env-file .env`로 친다(docs/guide/설치및실행가이드.md).
 # 기동 순서: docker compose -f deploy/compose.yml --env-file deploy/.env up -d
+# 한 번에 띄우기(개발 서버): deploy/.env에 COMPOSE_PROFILES=setup — 표 만들기·첫 계정·자체 서명 인증서까지 `up -d` 하나로. 아래 setup·certs
+# 같은 서버에 여럿이면: deploy/.env에 COMPOSE_PROJECT_NAME(컨테이너·볼륨 이름)·WF_HTTPS_PORT·WF_APP_IMAGE를 따로 둔다 — 겹치면 남의 스택을 잡는다
 # 마이그레이션(명시적 단계): docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/migrate.js
 # 시드(최초 1회):            docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/db/seed.js
 # 월간 작업:                 docker compose -f deploy/compose.yml --env-file deploy/.env run --rm tools node dist/cli/<작업>.js
@@ -19,7 +21,7 @@ x-logging: &logging
 services:
   postgres:
     image: postgres:17
-    container_name: workfluence-postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-workfluence}-postgres
     logging: *logging
     environment:
       POSTGRES_DB: workfluence
@@ -36,7 +38,7 @@ services:
 
   api:
     image: ${WF_APP_IMAGE:-workfluence-app:latest}
-    container_name: workfluence-api
+    container_name: ${COMPOSE_PROJECT_NAME:-workfluence}-api
     logging: *logging
     environment:
       WF_ENV: production
@@ -97,6 +99,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # `setup` profile이 켜져 있으면(COMPOSE_PROFILES=setup) 표 만들기·첫 계정이 끝난 뒤에 뜬다. 꺼져 있으면 기다리지 않는다
+      setup:
+        condition: service_completed_successfully
+        required: false
     expose:
       - "3000"
     restart: unless-stopped
@@ -139,9 +145,34 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # **한 번에 띄우기** — `COMPOSE_PROFILES=setup`이면 `docker compose up -d` 한 번에 표 만들기(앱 계정·권한 포함)와 첫 계정을 하고 앱이 뜬다.
+  # 둘 다 멱등이라 다시 `up` 해도 된다. 운영(폐쇄망)은 이 profile을 켜지 않는다 — 마이그레이션은 명시적 단계다(CLAUDE.md 6절)
+  setup:
+    extends:
+      service: tools
+    profiles: ["setup"]
+    command: ["sh", "-c", "node dist/db/migrate.js && node dist/db/seed.js"]
+
+  # 인증서가 없으면 자체 서명 인증서를 만든다(`setup` profile만). 있으면 건드리지 않는다 — 운영의 인증서는 사람이 둔다
+  certs:
+    image: postgres:17
+    profiles: ["setup"]
+    logging: *logging
+    user: root
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        if [ -s /certs/cert.pem ] && [ -s /certs/key.pem ]; then echo "[certs] 있다 — 그대로 쓴다"; exit 0; fi;
+        openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj "/CN=localhost"
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+        -keyout /certs/key.pem -out /certs/cert.pem && chmod 600 /certs/key.pem && echo "[certs] 자체 서명 인증서를 만들었다"
+    volumes:
+      - ./certs:/certs
+    restart: "no"
+
   nginx:
     image: nginx:1.27-alpine
-    container_name: workfluence-nginx
+    container_name: ${COMPOSE_PROJECT_NAME:-workfluence}-nginx
     logging: *logging
     ports:
       - "${WF_HTTPS_PORT:-8443}:443"
@@ -149,7 +180,12 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
     depends_on:
-      - api
+      api:
+        condition: service_started
+      # `setup` profile이면 인증서가 없을 때 자체 서명 인증서를 먼저 만든다
+      certs:
+        condition: service_completed_successfully
+        required: false
     restart: unless-stopped
     # nginx만 헬스체크가 없었다 (CLAUDE.md 8.3절 "모든 서비스 ... 헬스체크").
     # TLS 종단이 여기라 **자기 자신에게 https로 물어본다** — 인증서가 만료·오배치되면

@@ -197,6 +197,19 @@ grep -q '^WF_PG_APP_PASSWORD=.' deploy/.env || echo "WF_PG_APP_PASSWORD=$(openss
 
 `deploy/.env`는 커밋하지 않는다. 저장소의 `.gitignore`가 이미 막고 있다 (`git check-ignore -v deploy/.env`로 확인된다).
 
+## 4-1. 같은 서버에 내 스택을 따로, 한 번에 띄운다
+
+이 서버는 공유 인스턴스다. `deploy/compose.yml`의 기본 이름(`workfluence-*`, 볼륨 `deploy_*`, 이미지 `workfluence-app:latest`, 포트 8443)을 그대로 쓰면 **남이 띄운 같은 스택을 잡는다.** 내 `deploy/.env`에 넷을 더한다.
+
+```
+COMPOSE_PROJECT_NAME=<내 이름>-workfluence
+COMPOSE_PROFILES=setup
+WF_HTTPS_PORT=<비어 있는 포트>
+WF_APP_IMAGE=<내 이름>-workfluence-app:latest
+```
+
+그다음 `deploy/build.sh`로 이미지를 만들고(위 이름으로 태그한다) `deploy` 디렉토리에서 `docker compose up -d` 하나면 된다 — `setup` profile이 표 만들기(앱 계정·권한 포함)와 첫 계정을, `certs`가 인증서가 없을 때 자체 서명 인증서를 만든 뒤 앱과 nginx가 뜬다. 둘 다 멱등이다. **폐쇄망 운영에서는 `COMPOSE_PROFILES`를 두지 않는다** — 마이그레이션은 명시적 단계다(설치및실행가이드).
+
 ## 5. 이미지를 만든다 — 값 3
 
 ```bash
