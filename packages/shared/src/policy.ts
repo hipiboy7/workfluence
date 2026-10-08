@@ -59,7 +59,7 @@ export type Policy = typeof POLICY_DEFAULTS;
 export const POLICY_KEYS = Object.keys(POLICY_DEFAULTS) as (keyof Policy)[];
 
 /** 정수 값의 허용 범위. **아래 끝은 "그 값으로 두면 기능이 죽는다"를 막는 선이다** */
-const RANGES: Record<string, { min: number; max: number }> = {
+export const POLICY_RANGES: Record<string, { min: number; max: number }> = {
   uploadMaxMb: { min: 1, max: 1024 },
   sessionIdleMinutes: { min: 1, max: 1440 },
   sessionAbsoluteHours: { min: 1, max: 720 },
@@ -98,7 +98,7 @@ export function auditRecorded(action: AuditAction, level: number): boolean {
 }
 
 const isValidInt = (key: string, v: unknown): v is number => {
-  const r = RANGES[key];
+  const r = POLICY_RANGES[key];
   return !!r && typeof v === 'number' && Number.isInteger(v) && v >= r.min && v <= r.max;
 };
 
@@ -168,7 +168,7 @@ export function validatePolicyPatch(patch: Record<string, unknown>): string[] {
     if (key === 'allowedExtensions') {
       if (!isValidExtensions(v)) errors.push('허용 확장자는 우리가 판정할 수 있는 소문자 확장자 목록이어야 하고 비어 있을 수 없다');
     } else if (!isValidInt(key, v)) {
-      const r = RANGES[key];
+      const r = POLICY_RANGES[key];
       errors.push(`${key}는 ${r.min}~${r.max} 사이의 정수여야 한다`);
     }
   }

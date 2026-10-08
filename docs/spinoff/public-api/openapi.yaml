@@ -123,7 +123,8 @@ paths:
           schema:
             format: uuid
             type: string
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -178,7 +179,8 @@ paths:
       description: "행위(`action`)·사람(`actorId`)·기간(`from`·`to`)·요청 번호(`requestId`)로 거른다. 읽기 전용이다(append-only) — 쓰는 경로는 없다. 응답을 `{items}`로 싼다(화면용은 배열)."
       operationId: audit.list
       parameters:
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -186,28 +188,33 @@ paths:
             maximum: 500
             minimum: 1
             type: integer
-        - in: query
+        - description: "행위 코드로 거른다(예: page.delete, api_token.create)"
+          in: query
           name: action
           required: false
           schema:
             maxLength: 60
             type: string
-        - in: query
+        - description: "그 일을 한 사용자의 id로 거른다"
+          in: query
           name: actorId
           required: false
           schema:
             format: uuid
             pattern: "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             type: string
-        - in: query
+        - description: "이 시각부터(포함) — ISO 8601. 날짜만 주면 그날 00:00부터"
+          in: query
           name: from
           required: false
           schema: {}
-        - in: query
+        - description: "이 시각까지(제외) — ISO 8601. 날짜만 주면 그날 00:00까지"
+          in: query
           name: to
           required: false
           schema: {}
-        - in: query
+        - description: "요청 번호로 거른다 — 오류 응답의 `error.requestId`나 로그 한 줄의 값"
+          in: query
           name: requestId
           required: false
           schema:
@@ -391,6 +398,7 @@ paths:
               additionalProperties: false
               properties:
                 name:
+                  description: "분류 이름"
                   maxLength: 50
                   minLength: 1
                   type: string
@@ -548,6 +556,7 @@ paths:
               additionalProperties: false
               properties:
                 name:
+                  description: "새 분류 이름"
                   maxLength: 50
                   minLength: 1
                   type: string
@@ -698,7 +707,8 @@ paths:
           schema:
             format: uuid
             type: string
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -828,7 +838,8 @@ paths:
       description: "쓰이는 라벨의 이름 목록."
       operationId: labels.list
       parameters:
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -901,7 +912,8 @@ paths:
           required: true
           schema:
             type: string
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -987,7 +999,8 @@ paths:
       description: "**자기 것만** 본다 — 사용자 id를 받는 경로가 없다."
       operationId: notifications.list
       parameters:
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -1418,7 +1431,8 @@ paths:
       description: "필수는 `space`(이름이나 id)·`title`·`body`뿐이다. 부모를 안 주면 맨 위, 위치는 맨 끝에 만들고 서버가 정한 값을 응답이 말한다. 본문은 마크다운이 기본이다(`format`=json이면 문서 객체). 원시 HTML·그림·허용 밖 링크는 400이다."
       operationId: pages.create
       parameters:
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -1664,7 +1678,8 @@ paths:
           schema:
             format: uuid
             type: string
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -1797,7 +1812,8 @@ paths:
           schema:
             format: uuid
             type: string
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -1818,7 +1834,8 @@ paths:
                   exclusiveMinimum: 0
                   maximum: 9007199254740991
                   type: integer
-                body: {}
+                body:
+                  description: "새 본문 — `format`이 markdown이면 마크다운 글, json이면 문서 객체. 안 주면 본문은 그대로"
                 format:
                   default: markdown
                   description: "body의 형식 — markdown(기본) 또는 json(문서 객체)"
@@ -2038,8 +2055,10 @@ paths:
                       pattern: "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                       type: string
                     - type: "null"
+                  description: "새 부모 페이지의 id — null이면 스페이스의 맨 위로 옮긴다"
                 position:
                   default: 1000000
+                  description: "형제 사이의 자리(0이 맨 앞) — 안 주면 형제의 맨 끝"
                   maximum: 9007199254740991
                   minimum: 0
                   type: integer
@@ -2369,7 +2388,8 @@ paths:
           required: true
           schema:
             type: integer
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -2477,7 +2497,8 @@ paths:
           required: true
           schema:
             type: integer
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -2721,15 +2742,18 @@ paths:
               additionalProperties: false
               properties:
                 content:
+                  description: "파일 내용 — `encoding`이 utf8이면 글 그대로, base64면 base64 글"
                   minLength: 1
                   type: string
                 encoding:
                   default: utf8
+                  description: "`content`의 인코딩 — utf8(글 파일, 기본)·base64(이진 파일)"
                   enum:
                     - utf8
                     - base64
                   type: string
                 filename:
+                  description: "파일 이름 — 경로 구분자(/, \\)를 쓸 수 없다. 허용 확장자만 올라간다(`GET /settings/policy`의 allowedExtensions)"
                   maxLength: 255
                   minLength: 1
                   type: string
@@ -2741,6 +2765,7 @@ paths:
             schema:
               properties:
                 file:
+                  description: "올릴 파일 — 이름은 파일 부분의 이름을 쓴다. 허용 확장자·크기는 `GET /settings/policy`"
                   format: binary
                   type: string
               required:
@@ -2843,7 +2868,8 @@ paths:
           schema:
             format: uuid
             type: string
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -2962,7 +2988,8 @@ paths:
           schema:
             format: uuid
             type: string
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -2994,6 +3021,7 @@ paths:
                       type: string
                     - type: "null"
                   default: null
+                  description: "답글이면 부모 댓글의 id — 없으면 새 댓글"
               required:
                 - body
               type: object
@@ -3178,6 +3206,7 @@ paths:
               additionalProperties: false
               properties:
                 name:
+                  description: "라벨 이름 — 없으면 만든다. 소문자로 저장된다"
                   maxLength: 40
                   minLength: 1
                   type: string
@@ -3338,7 +3367,8 @@ paths:
             maxLength: 200
             minLength: 1
             type: string
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -3506,64 +3536,79 @@ paths:
               additionalProperties: false
               properties:
                 allowedExtensions:
+                  description: "올릴 수 있는 파일 확장자의 전체 목록(점 없이, 소문자) — 목록에 없는 확장자의 첨부는 거절한다"
                   items:
                     type: string
                   type: array
                 auditLevel:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "감사 기록 단계 — 3 전체·2 줄임(실시간 자동 저장을 뺀다)·1 최소. 시스템 관리자(root)만 바꾼다 (1~3, 기본 3)"
+                  maximum: 3
+                  minimum: 1
                   type: integer
                 auditRetentionDays:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "감사로그를 두는 기간(일) — 지나면 정리 (90~3650, 기본 365)"
+                  maximum: 3650
+                  minimum: 90
                   type: integer
                 llmConversationMax:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "사람마다 남기는 사내 LLM 대화의 최대 수 (1~1000, 기본 100)"
+                  maximum: 1000
+                  minimum: 1
                   type: integer
                 llmPinnedMax:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "고정할 수 있는 대화의 최대 수(0이면 고정을 안 쓴다) — 대화 최대 수보다 작아야 한다 (0~999, 기본 20)"
+                  maximum: 999
+                  minimum: 0
                   type: integer
                 llmRetentionDays:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "고정하지 않은 사내 LLM 대화를 마지막 사용 뒤 두는 기간(일) (1~365, 기본 7)"
+                  maximum: 365
+                  minimum: 1
                   type: integer
                 lockoutMinutes:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "잠그는 시간(분) (1~1440, 기본 15)"
+                  maximum: 1440
+                  minimum: 1
                   type: integer
                 lockoutThreshold:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "로그인에 이만큼 틀리면 계정을 잠근다(횟수) (3~100, 기본 5)"
+                  maximum: 100
+                  minimum: 3
                   type: integer
                 passwordMinCharClasses:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "비밀번호에 들어야 하는 글자 종류의 수(영문 대·소문자·숫자·특수) (2~4, 기본 2)"
+                  maximum: 4
+                  minimum: 2
                   type: integer
                 passwordMinLength:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "비밀번호의 최소 글자 수 (8~128, 기본 8)"
+                  maximum: 128
+                  minimum: 8
                   type: integer
                 passwordResetMail:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "메일 재설정 켜기(1)·끄기(0) (0~1, 기본 1)"
+                  maximum: 1
+                  minimum: 0
                   type: integer
                 sessionAbsoluteHours:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "로그인한 지 이만큼 지나면 무조건 끝나는 시간(시간) (1~720, 기본 12)"
+                  maximum: 720
+                  minimum: 1
                   type: integer
                 sessionIdleMinutes:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "아무것도 안 하면 로그인이 끝나는 시간(분) (1~1440, 기본 30)"
+                  maximum: 1440
+                  minimum: 1
                   type: integer
                 trashRetentionDays:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "휴지통에 두는 기간(일) — 지나면 물리 삭제 (1~3650, 기본 30)"
+                  maximum: 3650
+                  minimum: 1
                   type: integer
                 uploadMaxMb:
-                  maximum: 9007199254740991
-                  minimum: -9007199254740991
+                  description: "첨부 한 개의 최대 크기(MB) (1~1024, 기본 20)"
+                  maximum: 1024
+                  minimum: 1
                   type: integer
               type: object
         required: true
@@ -3629,13 +3674,15 @@ paths:
       description: "내가 볼 수 있는 스페이스. `q`로 이름을 찾고 `limit`으로 자른다."
       operationId: spaces.list
       parameters:
-        - in: query
+        - description: "찾을 말 — 이름의 일부(대소문자 무시)"
+          in: query
           name: q
           required: false
           schema:
             maxLength: 100
             type: string
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -3763,11 +3810,14 @@ paths:
                       type: string
                     - type: "null"
                   default: null
+                  description: "스페이스를 넣을 분류의 이름(선택) — 없는 분류면 만든다"
                 description:
                   default: ""
+                  description: "스페이스 설명(선택)"
                   maxLength: 2000
                   type: string
                 name:
+                  description: "스페이스 이름 — 같은 이름이 둘이어도 되지만 이름으로 고를 때는 409(SPACE_AMBIGUOUS)가 난다"
                   maxLength: 200
                   minLength: 1
                   type: string
@@ -4077,10 +4127,13 @@ paths:
                       minLength: 1
                       type: string
                     - type: "null"
+                  description: "새 분류의 이름 — null이면 분류를 없앤다"
                 description:
+                  description: "새 설명 — null이면 지운다"
                   maxLength: 2000
                   type: string
                 name:
+                  description: "새 스페이스 이름"
                   maxLength: 200
                   minLength: 1
                   type: string
@@ -4284,11 +4337,13 @@ paths:
               properties:
                 role:
                   default: editor
+                  description: "Crew 역할 — editor(고칠 수 있다)·viewer(읽기만). 안 주면 editor"
                   enum:
                     - editor
                     - viewer
                   type: string
                 username:
+                  description: "Crew에 넣을 사용자의 아이디"
                   pattern: "^[a-z0-9._-]{2,64}$"
                   type: string
               required:
@@ -4477,6 +4532,7 @@ paths:
               additionalProperties: false
               properties:
                 role:
+                  description: "바꿀 Crew 역할 — editor·viewer. owner는 줄 수 없다"
                   enum:
                     - editor
                     - viewer
@@ -4574,11 +4630,13 @@ paths:
               additionalProperties: false
               properties:
                 status:
+                  description: "바꿀 상태 — active(다시 쓰기)·suspended(중지)"
                   enum:
                     - active
                     - suspended
                   type: string
                 takeover:
+                  description: "관리자가 중지를 넘겨받을 때만 true — 화면이 본 \"주인이 건 중지\"를 그대로 관리자가 건 중지로 바꾼다. 그 사이 주인이 풀었으면 409"
                   type: boolean
               required:
                 - status
@@ -4692,7 +4750,8 @@ paths:
       description: "새 페이지의 본문으로 쓸 틀. 본문을 읽어 `POST /pages`의 `body`로 보내면 된다. `format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text."
       operationId: templates.list
       parameters:
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -4794,7 +4853,8 @@ paths:
       description: "**관리자만.** 이름과 본문이면 된다(설명은 선택). 같은 이름·내용이면 있던 것을 돌려준다."
       operationId: templates.create
       parameters:
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -4817,6 +4877,7 @@ paths:
                     - maxLength: 200
                       type: string
                     - type: "null"
+                  description: "템플릿 설명(선택)"
                 format:
                   default: markdown
                   description: "body의 형식 — markdown(기본) 또는 json(문서 객체)"
@@ -4825,6 +4886,7 @@ paths:
                     - json
                   type: string
                 name:
+                  description: "템플릿 이름"
                   maxLength: 80
                   minLength: 1
                   type: string
@@ -4998,7 +5060,8 @@ paths:
           schema:
             format: uuid
             type: string
-        - in: query
+        - description: "본문 형식 — markdown(기본)·json·text. 쓰기는 markdown·json만"
+          in: query
           name: format
           required: false
           schema:
@@ -5014,12 +5077,14 @@ paths:
             schema:
               additionalProperties: false
               properties:
-                body: {}
+                body:
+                  description: "새 본문 — 문서 객체(JSON). 안 주면 그대로"
                 description:
                   anyOf:
                     - maxLength: 200
                       type: string
                     - type: "null"
+                  description: "새 설명 — null이면 지운다"
                 format:
                   default: markdown
                   description: "body의 형식 — markdown(기본) 또는 json(문서 객체)"
@@ -5028,6 +5093,7 @@ paths:
                     - json
                   type: string
                 name:
+                  description: "새 템플릿 이름"
                   maxLength: 80
                   minLength: 1
                   type: string
@@ -5124,7 +5190,8 @@ paths:
       description: "내가 되살릴 수 있는 것만."
       operationId: trash.pages
       parameters:
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -5282,7 +5349,8 @@ paths:
       description: "내가 되살릴 수 있는 것만."
       operationId: trash.spaces
       parameters:
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -5433,13 +5501,15 @@ paths:
       description: "이름·아이디로 찾고(`q`) 상태로 거르고(`status`) 나누어 읽는다(`limit`·`offset`, 전체 수는 `total`)."
       operationId: users.list
       parameters:
-        - in: query
+        - description: "찾을 말 — 이름의 일부(대소문자 무시)"
+          in: query
           name: q
           required: false
           schema:
             maxLength: 100
             type: string
-        - in: query
+        - description: "계정 상태로 거른다 — pending(승인 대기)·active·locked·suspended. 안 주면 모두"
+          in: query
           name: status
           required: false
           schema:
@@ -5449,7 +5519,8 @@ paths:
               - locked
               - suspended
             type: string
-        - in: query
+        - description: "돌려줄 가장 많은 수 — 넘으면 400이고 안 주면 기본값"
+          in: query
           name: limit
           required: false
           schema:
@@ -5457,7 +5528,8 @@ paths:
             maximum: 500
             minimum: 1
             type: integer
-        - in: query
+        - description: "건너뛸 수(앞에서부터) — 다음 쪽을 읽을 때 쓴다"
+          in: query
           name: offset
           required: false
           schema:
@@ -5581,22 +5653,27 @@ paths:
             schema:
               properties:
                 displayName:
+                  description: "화면에 보일 이름"
                   maxLength: 100
                   minLength: 1
                   type: string
                 email:
+                  description: "이메일 주소"
                   maxLength: 254
                   type: string
                 password:
+                  description: "처음 비밀번호 — 비밀번호 규칙(`GET /settings/policy`)을 지켜야 한다. 응답에는 나오지 않는다"
                   minLength: 8
                   type: string
                 role:
+                  description: "계정 역할 — root·admin·member. root는 root만 줄 수 있다"
                   enum:
                     - root
                     - admin
                     - member
                   type: string
                 username:
+                  description: "새 계정의 아이디(로그인 이름)"
                   pattern: "^[a-z0-9._-]{2,64}$"
                   type: string
               required:
@@ -5836,6 +5913,7 @@ paths:
               additionalProperties: false
               properties:
                 expected:
+                  description: "화면이 본 지금의 위임 목록 — 서버의 목록과 다르면 409(그 사이 누가 바꿨다). 안 주면 확인 없이 바꾼다"
                   items:
                     enum:
                       - llm.manage
@@ -5845,6 +5923,7 @@ paths:
                     type: string
                   type: array
                 grants:
+                  description: "그 사람에게 줄 위임의 전체 목록 — 목록에 없는 위임은 거둔다. 받는 역할이 아니면 효력이 없다"
                   items:
                     enum:
                       - llm.manage
@@ -5974,6 +6053,7 @@ paths:
             schema:
               properties:
                 role:
+                  description: "바꿀 역할 — root·admin·member. root는 root만 줄 수 있다"
                   enum:
                     - root
                     - admin

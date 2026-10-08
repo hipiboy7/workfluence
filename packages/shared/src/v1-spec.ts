@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { requiredScopes } from './api-token';
 import { API_RATE_LIMITS } from './constants';
+import { policyRangeOf, V1_FIELD_DOCS } from './v1-field-docs';
 import {
   auditQueryDto,
   createUserDto,
@@ -104,6 +105,27 @@ function jsonSchema(schema: z.ZodType, io: 'input' | 'output'): Json {
   return s;
 }
 
+/** 칸의 설명 — 코드가 붙인 것이 먼저, 없으면 칸 설명 표(`V1_FIELD_DOCS`)에서 `동작id.칸`, `칸` 차례로 */
+const fieldDoc = (opId: string, field: string): string | undefined => V1_FIELD_DOCS[`${opId}.${field}`] ?? V1_FIELD_DOCS[field];
+
+/** 요청 본문의 칸마다 빠진 설명을 채운다. 정책 정수 칸은 진짜 허용 범위도 적는다 */
+function describeFields(schema: Json, opId: string): void {
+  const props = (schema as { properties?: Record<string, Json> }).properties;
+  for (const [name, p] of Object.entries(props ?? {})) {
+    if (!p.description) {
+      const d = fieldDoc(opId, name);
+      if (d) p.description = d;
+    }
+    const range = opId === 'settings.update' ? policyRangeOf(name) : undefined;
+    if (range && p.type === 'integer') {
+      p.minimum = range.min;
+      p.maximum = range.max;
+    }
+    describeFields(p, opId);
+    if (p.items) describeFields(p.items as Json, opId);
+  }
+}
+
 const PATH_CALLS = /\{(\w+)\}/g;
 const ERROR_REF = { $ref: '#/components/schemas/Error' };
 const ERRORS: Record<string, string> = {
@@ -142,7 +164,8 @@ function parametersOf(op: V1Op): Json[] {
     const s = jsonSchema(op.query, 'input') as { properties?: Record<string, Json>; required?: string[] };
     for (const [name, schema] of Object.entries(s.properties ?? {})) {
       const { description, ...rest } = schema as { description?: string };
-      out.push({ name, in: 'query', required: (s.required ?? []).includes(name), ...(description ? { description } : {}), schema: rest });
+      const doc = description ?? fieldDoc(op.id, name);
+      out.push({ name, in: 'query', required: (s.required ?? []).includes(name), ...(doc ? { description: doc } : {}), schema: rest });
     }
   }
   return out;
@@ -150,11 +173,16 @@ function parametersOf(op: V1Op): Json[] {
 
 function requestBodyOf(op: V1Op): Json | undefined {
   const content: Json = {};
-  if (op.body) content['application/json'] = { schema: jsonSchema(op.body, 'input') };
+  if (op.body) {
+    const schema = jsonSchema(op.body, 'input');
+    describeFields(schema, op.id);
+    content['application/json'] = { schema };
+  }
   if (op.multipart) {
     const s = jsonSchema(op.multipart, 'input') as { properties?: Json; required?: string[] };
+    describeFields(s as Json, op.id);
     content['multipart/form-data'] = {
-      schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' }, ...(s.properties ?? {}) }, required: ['file', ...(s.required ?? [])] },
+      schema: { type: 'object', properties: { file: { type: 'string', format: 'binary', description: '올릴 파일 — 이름은 파일 부분의 이름을 쓴다. 허용 확장자·크기는 `GET /settings/policy`' }, ...(s.properties ?? {}) }, required: ['file', ...(s.required ?? [])] },
     };
   }
   return Object.keys(content).length > 0 ? { required: true, content } : undefined;

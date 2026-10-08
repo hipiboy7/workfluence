@@ -87,7 +87,7 @@ describe('buildOpenApi — 한 경로', () => {
   it('올리기(multipart)는 파일 칸을 이진으로 적는다', () => {
     const o = doc([op({ method: 'post', path: '/u', params: undefined, multipart: z.object({ filename: z.string().optional() }) })]).paths['/u'].post;
     const s = o.requestBody.content['multipart/form-data'].schema;
-    expect(s.properties.file).toEqual({ type: 'string', format: 'binary' });
+    expect(s.properties.file).toMatchObject({ type: 'string', format: 'binary' });
     expect(s.required).toContain('file');
   });
 
@@ -199,5 +199,19 @@ describe('입력 칸마다 설명이 있다 — 에이전트가 이름만 보고
     };
     for (const o of ops) for (const c of Object.values(o.requestBody?.content ?? {})) walk(c.schema, o.operationId);
     expect(missing).toEqual([]);
+  });
+
+  it('성공 응답의 칸마다 설명이 있다 — 에이전트는 응답을 읽고 다음 호출을 정한다', () => {
+    type R = { operationId: string; responses: Record<string, { content?: Record<string, { schema: Schema }> }> };
+    const missing = new Set<string>();
+    const walk = (s: Schema | undefined, at: string) => {
+      for (const [k, v] of Object.entries(s?.properties ?? {})) {
+        if (!v.description) missing.add(k);
+        walk(v, `${at}.${k}`);
+      }
+      if (s?.items) walk(s.items, `${at}[]`);
+    };
+    for (const o of ops as unknown as R[]) walk(o.responses['200']?.content?.['application/json']?.schema, o.operationId);
+    expect([...missing].sort()).toEqual([]);
   });
 });
