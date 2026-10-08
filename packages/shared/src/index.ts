@@ -16,3 +16,4 @@ export * from './policy';
 export * from './release';
 export * from './schemas';
 export * from './security';
+export * from './yaml-dump';
