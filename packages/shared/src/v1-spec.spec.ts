@@ -139,6 +139,17 @@ describe('실제 경로 표(V1_OPERATIONS)의 불변식', () => {
     expect(move.properties.position.default).toBe(V1_DEFAULTS.moveToEnd);
   });
 
+  it('**에이전트가 정하는 칸에는 설명이 있다** — 본문이 마크다운 글자인지 문서 객체인지, 스페이스를 이름으로 줘도 되는지를 명세가 말한다', () => {
+    const create = d.paths['/pages'].post.requestBody.content['application/json'].schema.properties;
+    for (const k of ['space', 'title', 'body']) expect(create[k].description, `pages.create ${k}`).toMatch(/\S{4}/);
+    expect(create.body.description).toContain('마크다운');
+    expect(create.space.description).toContain('이름');
+    const update = d.paths['/pages/{id}'].patch.requestBody.content['application/json'].schema.properties;
+    expect(update.baseVersionNo.description).toContain('기준');
+    const search = d.paths['/search'].get.parameters;
+    expect(search.find((p: any) => p.name === 'q').description).toMatch(/\S{4}/);
+  });
+
   it('명세는 JSON으로 직렬화되고 외부 주소를 담지 않는다(폐쇄망)', () => {
     const text = JSON.stringify(d);
     expect(text).not.toMatch(/https?:\/\/(?!json-schema\.org)/);
