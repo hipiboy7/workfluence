@@ -125,7 +125,7 @@ describe('감사', () => {
     const root = await person(db, 'sys', 'root');
     await users.suspend((await person(db, 'bob')).id, root, req);
     const r = await audit.list(auditQueryDto.parse({ action: 'user.suspend' }));
-    expect(r).toHaveLength(1);
-    expect(r[0]).toMatchObject({ action: 'user.suspend' });
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({ action: 'user.suspend' });
   });
 });

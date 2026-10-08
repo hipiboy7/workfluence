@@ -14,7 +14,7 @@
 | Q1 | JWT 발급 | **(가) 서버가 서명하는 긴 수명 JWT**를 사용자가 화면에서 발급. HS256, `WF_API_JWT_SECRET` | 끝 (`api-tokens/`). (나)로 가면 발급 경로와 토큰 수명만 바뀌고 가드·표는 그대로다 |
 | Q2 | 만료 | 필수·최대 365일·기본 90일 (`API_TOKEN_LIMITS`) | 끝. **상한을 운영 설정으로 조절하는 것은 아직 없다**(계획서는 "관리 화면"이라 했다) → 7절 남은 일 |
 | Q3 | scope | `read` ⊂ `write`, 그리고 `admin`은 따로 (`API_TOKEN_SCOPES`) | 끝 (`packages/shared/src/api-token.ts`) |
-| Q4 | 관리 기능 | `admin` scope가 **더** 있어야 한다. 읽기용 관리자 토큰이 새도 정지·역할 변경은 못 한다 | 가드 끝(`API_ADMIN_KEY`). **v1 관리 경로에 그 표시를 붙이는 것은 4단계** |
+| Q4 | 관리 기능 | `admin` scope가 **더** 있어야 한다. 읽기용 관리자 토큰이 새도 정지·역할 변경은 못 한다 | 가드 끝(`API_ADMIN_KEY`). v1 관리 경로에 그 표시를 붙였다(4단계 끝) |
 | Q5 | 토큰 수 | 한 사람 10개 (`API_TOKEN_LIMITS.maxPerUser`) | 끝 |
 | Q6 | 편집 중 저장 (G2) | **(가) 409 `PAGE_BEING_EDITED`** — 사람의 입력을 절대 건드리지 않는다 | 4단계. 방이 열려 있는지는 `CollabGateway`가 안다 |
 | Q7 | 본문 형식 (G1) | 마크다운 읽기·쓰기를 v1에 넣는다 (`format=json\|markdown\|text`) | 3-1단계 |
@@ -205,6 +205,22 @@
 - "템플릿으로 페이지 만들기"는 이 단계에서 따로 만들지 않았다 — 에이전트는 템플릿 본문을 읽어 `POST /pages`의 `body`로 보내면 된다.
 - 실제 호출 확인(2026-10-07, 개발 서버): member의 템플릿 만들기 403, admin의 이름·본문만으로 만들기, member의 템플릿 목록, 페이지를 지우고 휴지통에서 되살려 다시 읽힘, 안 읽은 알림 수·모두 읽음.
 
+**관리 — 사용자·정책·감사 (끝 2026-10-08 — 4단계 마지막 조각, `apps/api/src/v1/v1-admin.controller.ts`)**
+
+| 경로 | 에이전트가 정하는 것 | 화면용과 다른 점 |
+|---|---|---|
+| `GET /api/v1/users?q=&status=` | — | 화면용과 같은 목록·거름 |
+| `POST /api/v1/users` | `username`·`displayName`·`email`·`password`·`role` | 같은 유스케이스(개인 스페이스·감사) |
+| `POST …/users/:id/approve·unlock·suspend·unsuspend·terminate-sessions` | — | 정지·강제 종료는 그 사람의 토큰·세션·편집 연결을 그 자리에서 끊는다 |
+| `PATCH …/users/:id/role` · `PUT …/users/:id/grants` | `role` · `grants` | root만 root를 준다. 위임 규칙(`DELEGATION`)은 같다 |
+| `GET·PATCH /api/v1/settings/policy` | 고칠 정책값 | 감사 단계는 root만 |
+| `GET /api/v1/audit` | 거름(`action`·`actorId`·`from`·`to`·`requestId`·`limit`) | 응답을 `{items}`로 싼다(화면용은 배열) |
+
+- **모든 경로에 `admin` scope가 더 필요하다**(Q4) — 읽기도 `read`+`admin`, 쓰기는 `write`+`admin`. 사람의 권한(`user.manage` 등)은 그 위에서 따로 본다(FR-2208).
+- **비밀번호 초기화(`reset-password`)는 열지 않았다**(FR-2209) — 없는 경로라 404다. 시험이 컨트롤러에 초기화 경로가 없음을 지킨다.
+- **사내 LLM 연결 관리는 v1에 두지 않는다**(사용자 결정 2026-10-08) — 사내 LLM은 별도 마이크로서비스가 맡고 그 서비스가 이 API의 소비자다. 앱 안의 화면용 LLM 기능은 그대로다.
+- 실제 호출 확인(2026-10-08, 개발 서버): `read·write` 토큰의 사용자 목록 403 `INSUFFICIENT_SCOPE`(필요한 scope를 말함), `read+admin`의 사용자·감사·정책 읽기 200, `read+admin`의 정지 403(쓰기 scope 없음), 초기화 경로 404, 전부 가진 토큰의 없는 사용자 정지 404.
+
 ### 3.4 마크다운 변환의 경계 (3-1단계)
 
 - **읽기**는 이미 공유 함수 `pageMarkdown`이 있다(화면의 복사 단추가 쓴다). v1은 그 함수와 텍스트 변환을 그대로 쓴다.
@@ -244,7 +260,7 @@
 | 단계 | 일 | 비고 |
 |---|---|---|
 | ~~3-1~~ | ~~마크다운 → 문서 변환 (A, 시험 먼저)~~ → **끝 2026-10-07**(`96034fb` Red → Green) | 3.4절 |
-| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·댓글·라벨·첨부·검색·템플릿·휴지통·알림·빈도 제한은 끝(2026-10-07)** — 3.3절. 남은 모듈(LLM·관리), 관리 경로의 `admin` 표시, 비밀번호 초기화 제외(FR-2209) |
+| 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·댓글·라벨·첨부·검색·템플릿·휴지통·알림·빈도 제한은 끝(2026-10-07)** — 3.3절. **관리(사용자·정책·감사)도 끝(2026-10-08)** — `admin` 표시, 비밀번호 초기화 제외(FR-2209). 사내 LLM은 v1에 두지 않는다 |
 | 5 | OpenAPI 생성 + 계약 시험 | |
 | 6 | 토큰 화면 + E2E | |
 | 7 | API 사용가이드(curl·에이전트 도구 정의 예), 가이드에 가리키는 줄(장애대응 401/403/429, 사용자가이드, 학습가이드, 설계서_Architecture 11절) | `pnpm verify:docs` |
