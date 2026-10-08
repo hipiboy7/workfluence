@@ -82,6 +82,10 @@
 | `GET /api/tokens` | 내 토큰 목록(이름·scope·만든 때·만료·마지막 사용·폐기 까닭). 값은 없다 |
 | `POST /api/tokens` | `{ name, scopes, days? }` → `ApiTokenView & { token }` — **값은 이 응답에만** |
 | `DELETE /api/tokens/:id` | 폐기(행은 남고 `revokedAt`·까닭이 찬다). 다시 폐기하면 감사가 또 남지 않는다 |
+| `GET /api/users/:id/tokens` | **관리자가** 그 사람의 토큰 목록을 본다(사용자 관리). `user.manage`가 있어야 하고 **그 사람을 관리할 수 있어야** 한다(역할·위임 — `UsersService.assertManageable`, 행을 잠근다). 값은 없다 |
+| `DELETE /api/users/:id/tokens/:tokenId` | **관리자가** 그 사람의 토큰을 폐기한다. 폐기 까닭 `admin`, 감사 `api_token.revoke`의 행위자는 폐기한 사람이다. 그 사람의 토큰이 아니면 404(남의 id를 끼워도 안 된다). 다시 폐기하면 감사가 또 남지 않는다 |
+
+**화면 (6단계, 끝 2026-10-08)**: 위 막대의 **API 토큰**(`/account/tokens`) — 서버 설정(`/api/tokens/config`)을 따르는 발급 폼(이름·권한·만료 일수; 관리 권한은 관리자만 고른다), **값은 발급 직후 한 번만** 보이고 복사·확인 뒤 사라진다, 목록(상태·마지막 사용)에서 확인 뒤 폐기, 쓰는 법(명세 주소·머리말). 사용자 관리의 줄마다 **API 토큰** 단추가 그 사람의 목록 패널을 연다(관리할 수 없는 행은 눌리지 않는다). 목록은 두 화면이 같은 컴포넌트(`ApiTokenList`)를 쓴다.
 
 ### 3.2 v1 가드의 실패 (구현됨 — `api-token.guard.ts`)
 
@@ -271,7 +275,7 @@
 | v1 컨트롤러 | `apps/api/src/v1/` | B | **페이지·스페이스·분류·댓글·라벨·첨부·검색·템플릿·휴지통·알림 끝**, 나머지 모듈은 같은 틀로 |
 | OpenAPI 경로 표·생성·응답 스키마 | `packages/shared/src/v1-spec.ts`(경로 표 `V1_OPERATIONS`·`buildOpenApi`)·`v1-responses.ts` | A | **끝**(5) |
 | OpenAPI 컨트롤러·계약 시험 | `apps/api/src/v1/v1-openapi.controller.ts` · `v1-openapi.contract.integration.spec.ts` | B | **끝**(5) |
-| 토큰 화면 | `apps/web` | B(측정만) · C E2E | 6 |
+| 토큰 화면 | `apps/web/src/pages/ApiTokensPage.tsx` · `components/ApiTokenList.tsx` · `UserTokensPanel.tsx` · `pages/admin/AdminUsersPage.tsx` | B(측정만) · C E2E(`e2e/api-tokens.spec.ts`) | **끝**(6) |
 
 ## 7. 남은 일과 판단이 필요한 것
 
@@ -280,7 +284,7 @@
 | ~~3-1~~ | ~~마크다운 → 문서 변환 (A, 시험 먼저)~~ → **끝 2026-10-07**(`96034fb` Red → Green) | 3.4절 |
 | 4 | v1 컨트롤러·오류 필터·빈도 제한·`format`·409·`ancestors`·`src` | **페이지(비교·내보내기 포함)·스페이스(Crew)·분류·댓글·라벨·첨부·검색·템플릿·휴지통·알림·빈도 제한은 끝(2026-10-07)** — 3.3절. **관리(사용자·정책·감사)도 끝(2026-10-08)** — `admin` 표시, 비밀번호 초기화 제외(FR-2209). 사내 LLM은 v1에 두지 않는다 |
 | 5 | OpenAPI 생성 + 계약 시험 | **끝 2026-10-08** — 3.6절 |
-| 6 | 토큰 화면 + E2E | |
+| 6 | 토큰 화면 + E2E | **끝 2026-10-08** — 3.1절 |
 | 7 | API 사용가이드(curl·에이전트 도구 정의 예), 가이드에 가리키는 줄(장애대응 401/403/429, 사용자가이드, 학습가이드, 설계서_Architecture 11절) | `pnpm verify:docs` |
 | 8 | 검토 — `/code-review`·`/security-review`(인증이라 필수)·self-reviewer·doc-consistency, Linux 이미지 빌드·크기 | 병합 **전에** 돌린다(`CLAUDE.md` 13절) |
 | 미정 | 토큰 만료 상한을 운영 설정으로 조절할지(Q2) | 지금은 상수다. 필요해지면 `settings`에 키 하나 |
