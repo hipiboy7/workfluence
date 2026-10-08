@@ -210,7 +210,7 @@ TLS_CN=<접속 도메인>
 TLS_SAN=DNS:<접속 도메인>,DNS:localhost,IP:127.0.0.1,IP:<서버 IP>
 ```
 
-`TLS_CN`·`TLS_SAN`은 자체 서명 인증서에 넣을 이름이다 — 접속할 도메인과 IP를 모두 넣는다. 바꾸면 `deploy/certs/`의 두 파일을 지우고 다시 `up -d` 한 뒤 nginx를 다시 시작한다. 도메인은 접속하는 쪽의 hosts(또는 사내 DNS)에 서버 IP로 등록한다. 셸에 사내 프록시 설정이 있으면 그 도메인을 `NO_PROXY`에 더한다 — 아니면 요청이 프록시로 가서 닿지 않는다.
+`TLS_CN`·`TLS_SAN`은 자체 서명 인증서에 넣을 이름이다 — 접속할 도메인과 IP를 모두 넣는다. 바꾸면 deploy 아래 certs 디렉토리의 두 파일(`cert.pem`·`key.pem`)을 지우고 다시 `up -d` 한 뒤 nginx를 다시 시작한다. 도메인은 접속하는 쪽의 hosts(또는 사내 DNS)에 서버 IP로 등록한다. 셸에 사내 프록시 설정이 있으면 그 도메인을 `NO_PROXY`에 더한다 — 아니면 요청이 프록시로 가서 닿지 않는다.
 
 그다음 `deploy/build.sh`로 이미지를 만들고(위 이름으로 태그한다) `deploy` 디렉토리에서 `docker compose up -d` 하나면 된다 — `setup` profile이 표 만들기(앱 계정·권한 포함)와 첫 계정을, `certs`가 인증서가 없을 때 자체 서명 인증서를 만든 뒤 앱과 nginx가 뜬다. 둘 다 멱등이다. **폐쇄망 운영에서는 `COMPOSE_PROFILES`를 두지 않는다** — 마이그레이션은 명시적 단계다(설치및실행가이드).
 
