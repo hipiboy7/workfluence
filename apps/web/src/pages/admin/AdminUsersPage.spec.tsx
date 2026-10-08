@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { MeView, UserView } from '@workfluence/shared';
+import type { ApiTokenView, MeView, UserView } from '@workfluence/shared';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,7 @@ let calls: Call[] = [];
 let me: MeView;
 let rows: UserView[];
 let listStatus = 200;
+let userTokens: Record<string, ApiTokenView[]> = {};
 
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(JSON.stringify(body)) }) as unknown as Response;
@@ -36,6 +37,7 @@ const user = (over: Partial<UserView>): UserView => ({
 beforeEach(() => {
   calls = [];
   listStatus = 200;
+  userTokens = {};
   me = { id: 'r1', username: 'root', displayName: '시스템 관리자', role: 'root', mustChangePassword: false, grants: [], hasPassword: true };
   rows = [user({ id: 'a1', username: 'boss', role: 'admin' }), user({ id: 'm1', username: 'alice' })];
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
@@ -64,6 +66,13 @@ beforeEach(() => {
       const id = url.split('/')[3];
       rows = rows.map((r) => (r.id === id ? { ...r, grants: (body as { grants: UserView['grants'] }).grants } : r));
       return Promise.resolve(json(200, rows.find((r) => r.id === id)));
+    }
+    const tokenList = /^\/api\/users\/([^/]+)\/tokens$/.exec(url);
+    if (tokenList && method === 'GET') return Promise.resolve(json(200, userTokens[tokenList[1]!] ?? []));
+    const tokenOne = /^\/api\/users\/([^/]+)\/tokens\/([^/]+)$/.exec(url);
+    if (tokenOne && method === 'DELETE') {
+      userTokens[tokenOne[1]!] = (userTokens[tokenOne[1]!] ?? []).map((t) => (t.id === tokenOne[2] ? { ...t, status: 'revoked', revokedAt: '2026-10-08T00:00:00.000Z' } : t));
+      return Promise.resolve(json(200, userTokens[tokenOne[1]!]!.find((t) => t.id === tokenOne[2])));
     }
     return Promise.reject(new Error(`시험에 없는 요청: ${method} ${url}`));
   }) as unknown as typeof fetch;
@@ -435,5 +444,55 @@ describe('AdminUsersPage — 화면 체계 (P17 J.6 관리 다섯)', () => {
     expect(screen.queryByRole('search')).toBeNull();
     expect(screen.queryByRole('table')).toBeNull();
     expect(screen.queryByText('불러오는 중…')).toBeNull();
+  });
+});
+
+describe('AdminUsersPage — API 토큰 (docs/spinoff/public-api 설계서 FR-2222)', () => {
+  const tok = (over: Partial<ApiTokenView> = {}): ApiTokenView => ({
+    id: 't1',
+    name: '새어 나간 봇',
+    scopes: ['read'],
+    status: 'active',
+    createdAt: '2026-10-01T00:00:00.000Z',
+    expiresAt: '2026-12-30T00:00:00.000Z',
+    lastUsedAt: null,
+    revokedAt: null,
+    ...over,
+  });
+
+  it('**그 사람의 토큰을 보고 폐기한다** — 단추를 누르면 그 줄 사람의 토큰 목록이 열리고, 폐기는 확인을 거친다. 값은 어디에도 없다', async () => {
+    userTokens = { m1: [tok()] };
+    renderPage();
+    await screen.findByText('alice');
+    fireEvent.click(rowButton('alice', 'API 토큰')!);
+    const panel = (await screen.findByRole('region', { name: /alice.*API 토큰|API 토큰.*alice/ })) as HTMLElement;
+    expect(calls).toContainEqual({ method: 'GET', url: '/api/users/m1/tokens', body: undefined });
+    await within(panel).findByRole('row', { name: /새어 나간 봇/ });
+
+    fireEvent.click(within(panel).getByRole('button', { name: '폐기' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('새어 나간 봇');
+    fireEvent.click(within(dialog).getByRole('button', { name: '폐기한다' }));
+    await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', url: '/api/users/m1/tokens/t1', body: undefined }));
+    await waitFor(() => expect(within(panel).getByText('폐기됨')).toBeTruthy());
+  });
+
+  it('토큰이 없으면 없다고 말하고, 닫으면 패널이 사라진다', async () => {
+    renderPage();
+    await screen.findByText('alice');
+    fireEvent.click(rowButton('alice', 'API 토큰')!);
+    const panel = (await screen.findByRole('region', { name: /API 토큰/ })) as HTMLElement;
+    await within(panel).findByText('발급한 토큰이 없다');
+    fireEvent.click(within(panel).getByRole('button', { name: '닫기' }));
+    expect(screen.queryByRole('region', { name: /API 토큰/ })).toBeNull();
+  });
+
+  it('**관리할 수 없는 행(root)에는 눌리지 않는다** — 서버가 403으로 막는 것을 누르게 두지 않는다', async () => {
+    me = { ...me, role: 'admin' };
+    rows = [user({ id: 'r9', username: 'sysroot', role: 'root' }), user({ id: 'm1', username: 'alice' })];
+    renderPage();
+    await screen.findByText('alice');
+    expect((rowButton('sysroot', 'API 토큰') as HTMLButtonElement).disabled).toBe(true);
+    expect((rowButton('alice', 'API 토큰') as HTMLButtonElement).disabled).toBe(false);
   });
 });
