@@ -1,14 +1,16 @@
-import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { API_TOKEN_LIMITS } from '@workfluence/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../audit/audit.service';
+import { ACTION_KEY, toSessionUser } from '../auth/auth.guard';
 import { RevocationBus } from '../common/revocation.bus';
 import { loadEnv } from '../config/config.module';
 import { apiTokens, auditEvents, users } from '../db/schema';
 import { SettingsService } from '../settings/settings.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
 import { UsersService } from '../users/users.service';
+import { UserApiTokensController } from './api-tokens.module';
 import { ApiTokensService } from './api-tokens.service';
 import { verifyApiToken } from './domain/jwt';
 
@@ -274,5 +276,67 @@ describe('세션을 끊으면 토큰도 끊는다 (분석서 G3)', () => {
     bus.revoke(u.id, 'some-session-id');
     await new Promise((r) => setTimeout(r, 50));
     expect((await svc.authenticate(token, NOW)).ok).toBe(true);
+  });
+});
+
+describe('관리자가 남의 토큰을 보고 폐기한다 (FR-2222 — 사용자 관리)', () => {
+  const as = async (username: string, role: 'member' | 'admin' | 'root') => {
+    const u = await addUser(username, { role });
+    return { row: u, actor: toSessionUser(u) };
+  };
+
+  it('관리자는 member의 토큰 목록을 본다 — 값은 없다', async () => {
+    const admin = await as('adm', 'admin');
+    const alice = await addUser('alice');
+    const { token } = await create(alice.id, { name: '봇 하나' });
+    const list = await svc.listForUser(admin.actor, alice.id, NOW);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ name: '봇 하나', status: 'active' });
+    expect(JSON.stringify(list)).not.toContain(token.split('.')[2]);
+  });
+
+  it('폐기하면 그 토큰은 곧바로 쓸 수 없고, 감사에는 **누가** 폐기했는지 남는다', async () => {
+    const admin = await as('adm', 'admin');
+    const alice = await addUser('alice');
+    const { token, view } = await create(alice.id);
+    const done = await svc.revokeForUser(admin.actor, alice.id, view.id, '10.0.0.9', NOW);
+    expect(done).toMatchObject({ id: view.id, status: 'revoked' });
+    expect(await svc.authenticate(token, NOW)).toMatchObject({ ok: false, code: 'TOKEN_REVOKED' });
+    const [row] = await auditRows('api_token.revoke');
+    expect(row).toMatchObject({ actorId: admin.row.id, targetId: view.id, ip: '10.0.0.9', detail: { name: '보고서 봇', userId: alice.id, reason: 'admin' } });
+  });
+
+  it('이미 폐기된 것을 다시 폐기해도 감사는 한 번이다', async () => {
+    const admin = await as('adm', 'admin');
+    const alice = await addUser('alice');
+    const { view } = await create(alice.id);
+    await svc.revokeForUser(admin.actor, alice.id, view.id, null, NOW);
+    await svc.revokeForUser(admin.actor, alice.id, view.id, null, NOW);
+    expect(await auditRows('api_token.revoke')).toHaveLength(1);
+  });
+
+  it('남의 토큰 id를 다른 사람 주소에 끼워도 안 된다 — 404', async () => {
+    const admin = await as('adm', 'admin');
+    const alice = await addUser('alice');
+    const bob = await addUser('bob');
+    const { view } = await create(bob.id);
+    await expect(svc.revokeForUser(admin.actor, alice.id, view.id, null, NOW)).rejects.toBeInstanceOf(NotFoundException);
+    expect((await svc.list(bob.id, NOW))[0]!.status).toBe('active');
+  });
+
+  it('없는 사용자는 404, **자기가 관리할 수 없는 사람**(root)의 토큰은 보지도 폐기하지도 못한다 — 403', async () => {
+    const admin = await as('adm', 'admin');
+    const root = await as('sys', 'root');
+    const { view } = await create(root.row.id);
+    await expect(svc.listForUser(admin.actor, '00000000-0000-4000-8000-000000000000', NOW)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.listForUser(admin.actor, root.row.id, NOW)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(svc.revokeForUser(admin.actor, root.row.id, view.id, null, NOW)).rejects.toBeInstanceOf(ForbiddenException);
+    expect((await svc.list(root.row.id, NOW))[0]!.status).toBe('active');
+  });
+
+  it('경로는 `user.manage` 권한이 있어야 한다 — 토큰 목록은 남의 계정 정보다', () => {
+    for (const name of ['list', 'revoke'] as const) {
+      expect(Reflect.getMetadata(ACTION_KEY, UserApiTokensController.prototype[name])).toBe('user.manage');
+    }
   });
 });
