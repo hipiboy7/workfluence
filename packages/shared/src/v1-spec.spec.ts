@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { V1_DEFAULTS } from './v1';
-import { buildOpenApi, V1_OPERATIONS, type V1Op } from './v1-spec';
+import { buildOpenApi, V1_OPENAPI_INFO, V1_OPERATIONS, type V1Op } from './v1-spec';
 
 /**
  * 공개 API v1의 OpenAPI 명세 (docs/spinoff/public-api 설계서 FR-2220·2221·2224). A등급 — 순수 함수다.
@@ -173,5 +173,31 @@ describe('실제 경로 표(V1_OPERATIONS)의 불변식', () => {
       const target = r.replace(/^#\//, '').split('/').reduce<any>((o, k) => o?.[k], d);
       expect(target, r).toBeTruthy();
     }
+  });
+});
+
+describe('입력 칸마다 설명이 있다 — 에이전트가 이름만 보고 짐작하지 않게', () => {
+  type Schema = { properties?: Record<string, Schema & { description?: string }>; items?: Schema; description?: string };
+  const doc = buildOpenApi(V1_OPERATIONS, V1_OPENAPI_INFO) as {
+    paths: Record<string, Record<string, { operationId: string; parameters?: { name: string; description?: string; schema?: { description?: string } }[]; requestBody?: { content: Record<string, { schema: Schema }> } }>>;
+  };
+  const ops = Object.values(doc.paths).flatMap((p) => Object.values(p));
+
+  it('쿼리·경로 매개변수에 설명이 있다', () => {
+    const missing = ops.flatMap((o) => (o.parameters ?? []).filter((p) => !p.description && !p.schema?.description).map((p) => `${o.operationId}.${p.name}`));
+    expect(missing).toEqual([]);
+  });
+
+  it('요청 본문의 칸마다 설명이 있다', () => {
+    const missing: string[] = [];
+    const walk = (s: Schema | undefined, at: string) => {
+      for (const [k, v] of Object.entries(s?.properties ?? {})) {
+        if (!v.description) missing.push(`${at}.${k}`);
+        walk(v, `${at}.${k}`);
+      }
+      if (s?.items) walk(s.items, `${at}[]`);
+    };
+    for (const o of ops) for (const c of Object.values(o.requestBody?.content ?? {})) walk(c.schema, o.operationId);
+    expect(missing).toEqual([]);
   });
 });
