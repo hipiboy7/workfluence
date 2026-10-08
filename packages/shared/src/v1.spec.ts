@@ -632,3 +632,49 @@ describe('v1PageTreeQuery — 범위 밖의 limit과 모르는 칸은 받지 않
     expect(v1PageTreeQuery.safeParse({ space: 'a', x: 1 }).success).toBe(false);
   });
 });
+
+describe('목록의 창(offset·limit) — 잘렸는지 에이전트가 알게 한다', async () => {
+  const { windowOf, fetchSize, v1ListQuery, v1PageTreeQuery, V1_DEFAULTS } = await import('./v1');
+  const rows = [1, 2, 3, 4, 5];
+
+  it('fetchSize는 한 개를 더 가져와 "더 있나"를 안다', () => {
+    expect(fetchSize(2, 0)).toBe(3);
+    expect(fetchSize(2, 4)).toBe(7);
+  });
+
+  it('남은 것이 없으면 nextOffset은 null이다', () => {
+    expect(windowOf(rows, 5, 0)).toEqual({ items: [1, 2, 3, 4, 5], nextOffset: null });
+    expect(windowOf(rows, 10, 0)).toEqual({ items: [1, 2, 3, 4, 5], nextOffset: null });
+  });
+
+  it('남은 것이 있으면 nextOffset이 다음 시작이다', () => {
+    expect(windowOf(rows, 2, 0)).toEqual({ items: [1, 2], nextOffset: 2 });
+    expect(windowOf(rows, 2, 2)).toEqual({ items: [3, 4], nextOffset: 4 });
+    expect(windowOf(rows, 2, 4)).toEqual({ items: [5], nextOffset: null });
+  });
+
+  it('끝을 넘어선 offset은 빈 목록이다', () => {
+    expect(windowOf(rows, 2, 9)).toEqual({ items: [], nextOffset: null });
+  });
+
+  it('fetchSize만큼 가져온 목록으로 창을 만들면 끝까지 이어 받을 수 있다', () => {
+    const all = Array.from({ length: 7 }, (_, i) => i);
+    const got: number[] = [];
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const w: { items: number[]; nextOffset: number | null } = windowOf(all.slice(0, fetchSize(3, offset)), 3, offset);
+      got.push(...w.items);
+      offset = w.nextOffset;
+    }
+    expect(got).toEqual(all);
+  });
+
+  it('쿼리: offset은 기본 0, 음수·상한 밖·모르는 칸은 거절', () => {
+    expect(v1ListQuery.parse({}).offset).toBe(0);
+    expect(v1ListQuery.parse({ offset: '30' }).offset).toBe(30);
+    expect(v1ListQuery.safeParse({ offset: '-1' }).success).toBe(false);
+    expect(v1ListQuery.safeParse({ offset: String(V1_DEFAULTS.offsetMax + 1) }).success).toBe(false);
+    expect(v1ListQuery.safeParse({ x: 1 }).success).toBe(false);
+    expect(v1PageTreeQuery.parse({ space: 'a' }).offset).toBe(0);
+  });
+});
