@@ -138,7 +138,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
   -d '{"filename":"회의록.txt","content":"안건 1"}' "$BASE/api/v1/pages/$PAGE_ID/attachments"
 ```
 
-글은 `utf8`(기본), 바이너리는 `"encoding":"base64"`로 보낸다. 파일 그대로 올리려면 multipart(`file` 칸)도 된다. 형식(mime)은 받지 않고 확장자에서 정한다. 종류·크기 규칙은 화면과 같다. 응답의 `href`를 본문에 `[이름](주소)`로 넣으면 사람이 눌러 받는다(문서에는 그림 노드가 없어 링크로 건다). 받을 때는 기본이 바이너리이고, `?format=json`이면 글·base64로 JSON에 담긴다.
+글은 `utf8`(기본), 바이너리는 `"encoding":"base64"`로 보낸다. 파일 그대로 올리려면 multipart(`file` 칸)도 된다. 형식(mime)은 받지 않고 확장자에서 정한다. 종류·크기 규칙은 화면과 같다. 응답의 `href`를 본문에 마크다운 링크(대괄호 이름 뒤에 괄호 주소)로 넣으면 사람이 눌러 받는다(문서에는 그림 노드가 없어 링크로 건다). 받을 때는 기본이 바이너리이고, `?format=json`이면 글·base64로 JSON에 담긴다.
 
 ### 3.9 템플릿으로 시작하기
 
