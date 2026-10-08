@@ -1350,7 +1350,7 @@ paths:
         - notifications
   "/openapi.json":
     get:
-      description: "인증 없이 받는다. 이 문서 자체다."
+      description: "인증 없이 받는다. 이 문서 자체다. 같은 명세를 줄 단위로 읽고 비교하기 좋은 YAML로 받으려면 `GET /openapi.yaml`."
       operationId: spec.openapi
       responses:
         "200":
@@ -1367,7 +1367,37 @@ paths:
                 type: object
           description: "성공"
       security: []
-      summary: "이 명세"
+      summary: "이 명세(JSON)"
+      tags:
+        - spec
+  "/openapi.sha256":
+    get:
+      description: "인증 없이 받는다. `GET /openapi.yaml` 글의 SHA-256(16진수 64자, 줄바꿈 없음)이다. 앞서 받은 값과 같으면 명세가 바뀌지 않았으니 다시 받지 않는다. 다르면 `openapi.yaml`을 받아 앞의 것과 비교한다."
+      operationId: spec.openapiHash
+      responses:
+        "200":
+          content:
+            "text/plain":
+              schema:
+                type: string
+          description: "SHA-256 16진수"
+      security: []
+      summary: "명세의 해시"
+      tags:
+        - spec
+  "/openapi.yaml":
+    get:
+      description: "인증 없이 받는다. 이 문서 자체를 키를 정렬한 YAML로 — 같은 코드는 늘 같은 글이라, 앞서 받은 것과 줄 단위로 비교하면 바뀐 경로·칸만 보인다. 받기 전에 `GET /openapi.sha256`으로 바뀌었는지 먼저 본다."
+      operationId: spec.openapiYaml
+      responses:
+        "200":
+          content:
+            "application/yaml":
+              schema:
+                type: string
+          description: "명세(YAML)"
+      security: []
+      summary: "이 명세(YAML)"
       tags:
         - spec
   "/pages":

@@ -347,7 +347,9 @@ export const V1_OPERATIONS: V1Op[] = [
   { id: 'audit.list', method: 'get', path: '/audit', tag: 'admin', admin: true, summary: '감사로그 읽기', description: '행위(`action`)·사람(`actorId`)·기간(`from`·`to`)·요청 번호(`requestId`)로 거른다. 읽기 전용이다(append-only) — 쓰는 경로는 없다. 응답을 `{items}`로 싼다(화면용은 배열).', query: auditQueryDto, response: v1Items(v1AuditEvent) },
 
   // ---- 명세 ----
-  { id: 'spec.openapi', method: 'get', path: '/openapi.json', tag: 'spec', public: true, summary: '이 명세', description: '인증 없이 받는다. 이 문서 자체다.', response: z.looseObject({ openapi: z.string() }) },
+  { id: 'spec.openapi', method: 'get', path: '/openapi.json', tag: 'spec', public: true, summary: '이 명세(JSON)', description: '인증 없이 받는다. 이 문서 자체다. 같은 명세를 줄 단위로 읽고 비교하기 좋은 YAML로 받으려면 `GET /openapi.yaml`.', response: z.looseObject({ openapi: z.string() }) },
+  { id: 'spec.openapiYaml', method: 'get', path: '/openapi.yaml', tag: 'spec', public: true, summary: '이 명세(YAML)', description: '인증 없이 받는다. 이 문서 자체를 키를 정렬한 YAML로 — 같은 코드는 늘 같은 글이라, 앞서 받은 것과 줄 단위로 비교하면 바뀐 경로·칸만 보인다. 받기 전에 `GET /openapi.sha256`으로 바뀌었는지 먼저 본다.', response: { contentType: 'application/yaml', description: '명세(YAML)' } },
+  { id: 'spec.openapiHash', method: 'get', path: '/openapi.sha256', tag: 'spec', public: true, summary: '명세의 해시', description: '인증 없이 받는다. `GET /openapi.yaml` 글의 SHA-256(16진수 64자, 줄바꿈 없음)이다. 앞서 받은 값과 같으면 명세가 바뀌지 않았으니 다시 받지 않는다. 다르면 `openapi.yaml`을 받아 앞의 것과 비교한다.', response: { contentType: 'text/plain', description: 'SHA-256 16진수' } },
 ];
 
 export const V1_OPENAPI_INFO: OpenApiInfo = {

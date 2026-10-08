@@ -2,8 +2,8 @@
 
 - 읽는 사람: 위키의 기능을 **프로그램으로 쓰려는 개발자**와 **LLM 에이전트(도구를 부르는 서비스)**. 위키 화면을 쓰는 법은 [사용자가이드](../../guide/사용자가이드.md) 28절이다
 - 무엇을 답하나: "토큰을 어떻게 받고, 어떤 요청을 어떻게 보내고, 오류가 오면 무엇을 하나"
-- 정확한 경로·입력·응답의 모양은 이 문서가 아니라 **명세**(`GET /api/v1/openapi.json`)가 정본이다. 이 문서는 명세를 읽는 법과 자주 하는 일의 예다
-- 기준: 2026-10-08의 코드(공개 API v1 — 동작 64개). 설계 근거는 [설계서_PublicApi](설계서_PublicApi.md)
+- 정확한 경로·입력·응답의 모양은 이 문서가 아니라 **명세**(`GET /api/v1/openapi.yaml`)가 정본이다. 이 문서는 명세를 받아 읽는 법과 자주 하는 일의 예다
+- 기준: 2026-10-08의 코드(공개 API v1 — 동작 66개). 설계 근거는 [설계서_PublicApi](설계서_PublicApi.md)
 - 아래 `curl` 예는 개발 서버에서 순서대로 실제로 불러 확인했다 (2026-10-08)
 
 ## 1. 시작하기
@@ -36,10 +36,19 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/spaces"
 ### 1.3 명세 받기
 
 ```bash
-curl -s "$BASE/api/v1/openapi.json" -o openapi.json
+curl -s "$BASE/api/v1/openapi.yaml" -o openapi.yaml
+curl -s "$BASE/api/v1/openapi.sha256"
 ```
 
-**인증 없이** 받는다. OpenAPI 3.1이고 경로마다 요약·설명·입력·응답·필요한 권한이 있다. 에이전트가 쓰는 법은 5절이다.
+셋 다 **인증 없이** 받는다.
+
+| 주소 | 무엇 |
+|---|---|
+| `GET /api/v1/openapi.yaml` | 명세(OpenAPI 3.1) — **키를 정렬한 YAML**. 한 줄에 한 항목이고 같은 코드는 늘 같은 글이라, 앞서 받은 것과 줄 단위로 비교하면 바뀐 곳만 보인다. 에이전트는 이것을 읽는다 |
+| `GET /api/v1/openapi.sha256` | 위 YAML 글의 SHA-256(16진수 64자, 줄바꿈 없음). 받은 파일의 해시(`sha256sum openapi.yaml`)와 같다 |
+| `GET /api/v1/openapi.json` | 같은 명세의 JSON(한 줄로 압축돼 온다) |
+
+경로마다 요약·설명·입력·응답·필요한 권한이 있고, 칸마다 뜻·단위·범위·기본값이 있다. 머리말(`info.description`)에 토큰·오류 코드·고칠 때의 규칙이 있다. 에이전트가 쓰는 법은 5절이다.
 
 ## 2. 약속
 
@@ -208,14 +217,18 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/users?q=alice"
 
 사내 LLM 서비스처럼 도구를 부르는 쪽은 **명세에서 도구를 만든다.** 손으로 옮겨 적으면 어긋난다.
 
-### 5.1 명세를 읽는 법 — 통째로 넣지 않는다
+### 5.1 명세를 받아 읽는 법 — 처음은 전체, 그 뒤는 변동분
 
-명세는 약 125KB(동작 64개)다. 에이전트의 문맥에 **통째로** 넣지 않는다. 두 단계로 읽는다.
+명세는 YAML로 약 270KB·7,000줄(동작 66개)이다.
 
-1. **지도**: `paths`를 돌며 `tags`·`operationId`·`summary`만 모은다 — 도구 목록 설명으로 충분하다(태그: pages·spaces·categories·comments·labels·attachments·search·templates·trash·notifications·admin·spec)
-2. **필요한 경로만 펼친다**: 에이전트가 고른 `operationId`의 `description`·`parameters`·`requestBody`·`security`만 읽어 그 도구의 입력 스키마로 쓴다
-
-`security`의 scope(`read`·`write`·`admin`)로 **토큰에 없는 도구는 처음부터 빼는** 것도 좋다.
+1. **처음** — `openapi.yaml`을 받아 **전체를** 분석해 도구를 만든다. 받은 파일과 `openapi.sha256` 값을 함께 보관한다.
+   - 머리말(`info.description`)을 먼저 읽는다 — 토큰, 오류 코드와 각각의 대처, 고칠 때 `baseVersionNo`를 보내는 규칙, 목록은 `limit`까지만 온다는 것이 여기 있다
+   - `paths`의 동작마다 `operationId`·`summary`·`description`·`parameters`·`requestBody`·`responses`·`security`로 도구 하나를 만든다(5.2절). 409가 있는 동작은 그 409 설명이 무엇이 겹쳤는지와 다음에 할 일을 말한다
+   - `security`의 scope(`read`·`write`·`admin`)로 **토큰에 없는 도구는 처음부터 뺀다**
+2. **그 뒤** — 주기로(또는 도구 호출이 400·404로 이상하게 실패할 때) `GET /openapi.sha256`만 부른다.
+   - 보관한 값과 **같으면** 명세가 바뀌지 않았다. 아무것도 하지 않는다
+   - **다르면** `openapi.yaml`을 다시 받아 보관한 파일과 줄 단위로 비교한다(`diff old.yaml new.yaml`). 키가 정렬돼 있어 바뀐 경로·칸만 차이로 나온다 — 그 경로의 도구만 다시 만들고, 사라진 경로의 도구는 뺀다. 새 파일과 새 해시를 보관한다
+3. 이 API는 **더하기만** 한다(머리말) — 같은 v1 안에서는 경로·칸이 늘 뿐, 있던 칸의 뜻이 바뀌거나 사라지지 않는다. 그래서 변동분은 대개 "새 경로·새 칸"이다
 
 ### 5.2 도구 정의 예
 
