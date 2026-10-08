@@ -1,7 +1,7 @@
 # 스핀오프 — 공개 API (Public API v1)
 
 - 무엇: workfluence의 기능을 **LLM 에이전트와 2차 개발자**가 프로그램으로 쓰도록 여는 REST API(`/api/v1`)와 그 인증(JWT)
-- 작업 브랜치: `tanminkwan-reat-api` (main에서 분기, PR로 돌려보낸다)
+- 작업 브랜치: `tanminkwan-rest-api` (main에서 분기, PR로 돌려보낸다)
 - 기능 요청 원문: [`요청원문.md`](요청원문.md) · 백로그 항목: [`docs/기능백로그.md`](../../기능백로그.md) F-015
 - 작성일: 2026-10-02
 
