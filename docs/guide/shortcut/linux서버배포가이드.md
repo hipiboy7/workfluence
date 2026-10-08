@@ -200,10 +200,10 @@ grep -q '^WF_PG_APP_PASSWORD=.' deploy/.env || echo "WF_PG_APP_PASSWORD=$(openss
 ## 5. 이미지를 만든다 — 값 3
 
 ```bash
-GIT_SHA=$(git rev-parse HEAD) docker compose -f deploy/compose.yml --env-file deploy/.env build api
+deploy/build.sh
 ```
 
-**`GIT_SHA=…`를 빼지 않는다.** 이미지에 빌드한 커밋이 라벨(`org.opencontainers.image.revision`)로 붙는다. 반입 묶음을 만들 때(12절)
+**빌드는 compose가 아니라 `deploy/build.sh`가 한다**(`docker build`) — compose는 만들어 둔 이미지를 띄우기만 한다. 스크립트가 `GIT_SHA`를 넣는다. 이미지에 빌드한 커밋이 라벨(`org.opencontainers.image.revision`)로 붙는다. 반입 묶음을 만들 때(12절)
 이 라벨이 저장소의 지금 커밋과 다르면 **묶지 않는다** — 다른 커밋으로 만든 이미지를 반입하지 않게. 빼면 라벨이 `unknown`이 된다.
 
 처음 빌드는 의존성 설치까지 하므로 몇 분 걸린다. 끝나면 라벨과 크기를 본다.
@@ -322,7 +322,7 @@ docker compose -f deploy/compose.yml --env-file deploy/.env logs postgres --tail
 | 증상 | 원인 | 조치 |
 |---|---|---|
 | `WF_PG_PASSWORD를 .env에 설정` (또는 `WF_PG_APP_PASSWORD`·`WF_SESSION_SECRET`) | 환경 파일이 없거나 그 키가 비었다 | 4절을 다시 한다. `--env-file deploy/.env`를 빼먹지 않았는지, 루트 `.env`를 가리키고 있지 않은지 확인한다 |
-| 빌드가 의존성 설치에서 멈춘다 (`ETIMEDOUT`) | 프록시가 빌드 컨테이너에 전달되지 않는다 | 셸에 `HTTP_PROXY`가 있는지 본다 (1.1절). `deploy/compose.yml`의 `build.args`가 그 값을 넘기므로, 셸에 값이 있으면 그대로 다시 빌드하면 된다. 값이 없으면 서버 담당자에게 프록시 주소를 받아 셸에 넣고 빌드한다 |
+| 빌드가 의존성 설치에서 멈춘다 (`ETIMEDOUT`) | 프록시가 빌드 컨테이너에 전달되지 않는다 | 셸에 `HTTP_PROXY`가 있는지 본다 (1.1절). `deploy/build.sh`가 그 값을 넘기므로, 셸에 값이 있으면 그대로 다시 빌드하면 된다. 값이 없으면 서버 담당자에게 프록시 주소를 받아 셸에 넣고 빌드한다 |
 | 빌드 중 `no space left` | 디스크 부족 | 3.1절 순서로 좁게 비운 뒤 다시. `docker system prune`은 쓰지 않는다 |
 | `db":"unreachable"` | 데이터베이스가 안 떴거나 앱 계정으로 붙지 못한다 | `docker compose ps`로 postgres가 healthy인지, 로그에 디스크 오류가 없는지 본다. 앱 로그에 `28P01 … "workfluence_app"`이면 6절의 표 만들기를 앱보다 먼저 하지 않았거나 `WF_PG_APP_PASSWORD`를 바꾸고 표 만들기를 다시 치지 않았다 — 6절의 `migrate.js`를 치고 `up -d api` ([장애대응](../장애대응가이드.md) 7.31절) |
 | 화면이 500이고 앱 로그에 `permission denied` | 앱 계정에 권한이 없다 | 6절의 `migrate.js`를 다시 친다 ([장애대응](../장애대응가이드.md) 7.30절) |

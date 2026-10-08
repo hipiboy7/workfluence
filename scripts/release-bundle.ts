@@ -60,7 +60,7 @@ function assertAppImageIsHead(images: string[]): void {
   if (label !== head) {
     throw new Error(
       `앱 이미지(${app})는 커밋 ${label || '(라벨 없음)'}로 빌드됐다 — 지금은 ${head}다. 지금 커밋으로 다시 빌드한다: ` +
-        'GIT_SHA=$(git rev-parse HEAD) docker compose -f deploy/compose.yml --env-file deploy/.env build api',
+        'deploy/build.sh',
     );
   }
   console.log(`[release] 앱 이미지 ${app} = 커밋 ${head.slice(0, 7)}`);
