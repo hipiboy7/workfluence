@@ -1,11 +1,12 @@
-import { ConflictException, Controller, Delete, Get, Inject, NotFoundException, Param, ParseIntPipe, Patch, Post, Query, Req, Res, Body, BadRequestException } from '@nestjs/common';
+import { ConflictException, Controller, Delete, Get, Inject, Param, ParseIntPipe, Patch, Post, Query, Req, Res, Body, BadRequestException } from '@nestjs/common';
 import {
   docToBody,
   v1CreatePageDto,
   v1MovePageDto,
   v1PageQuery,
+  v1PageTreeQuery,
+  type V1PageTreeQuery,
   v1UpdatePageDto,
-  V1_DEFAULTS,
   type PageDiffView,
   type PageSummary,
   type V1PageQuery,
@@ -83,14 +84,11 @@ export class V1PagesController {
   /** 스페이스의 페이지 트리 — 본문 없이 */
   @Get()
   async list(
-    @Query('space') space: string | undefined,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit: number | undefined,
+    @Query(new ZodPipe(v1PageTreeQuery)) query: V1PageTreeQuery,
     @CurrentUser() me: SessionUser,
   ): Promise<{ space: { id: string; name: string }; items: PageSummary[] }> {
-    if (!space?.trim()) throw new NotFoundException({ code: 'SPACE_REQUIRED', message: 'space(스페이스 이름이나 id)가 필요하다' });
-    const target = await resolveSpaceRef(this.spaces, space, me);
-    const cap = Math.min(Math.max(1, limit ?? V1_DEFAULTS.listLimit), V1_DEFAULTS.listLimitMax);
-    return { space: target, items: (await this.pages.tree(target.id, me)).slice(0, cap) };
+    const target = await resolveSpaceRef(this.spaces, query.space, me);
+    return { space: target, items: (await this.pages.tree(target.id, me)).slice(0, query.limit) };
   }
 
   @Get(':id')

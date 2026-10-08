@@ -12,11 +12,16 @@ import { attachLabelDto, idSchema, usernameSchema, type AttachmentView, type Cat
  * 그 기본값은 이 파일의 `V1_DEFAULTS` **한 곳**에 있고, OpenAPI의 `default`와 사용가이드가 거기서 나온다.
  */
 
+/** v1 경로의 접두사 — 응답이 싣는 주소와 컨트롤러가 같은 값을 본다 */
+export const V1_BASE_PATH = '/api/v1';
+
 export const V1_DEFAULTS = {
   /** 쓸 때 본문의 형식 — 에이전트는 마크다운을 쓴다 */
   writeFormat: 'markdown',
   /** 읽을 때 본문의 형식 — 마크다운이 JSON 트리보다 훨씬 짧아 에이전트의 문맥을 덜 쓴다 */
   readFormat: 'markdown',
+  /** 이름으로 스페이스를 고를 때 팀·개인 각각 훑는 수 — 볼 수 있는 스페이스 수보다 넉넉하다 */
+  spaceLookupMax: 5000,
   /** 목록·트리의 상한 */
   listLimit: 200,
   /** 목록 상한으로 줄 수 있는 가장 큰 값 */
@@ -171,6 +176,13 @@ export const toV1Template = (t: PageTemplateView, format: V1ReadFormat): V1Templ
 // ---- 검색 ----
 
 /** 검색 — 필수는 검색어뿐이다. 스페이스는 이름이나 id로 좁힌다(없으면 읽을 수 있는 전부). 쿼리의 모르는 칸도 거절한다 */
+/** 페이지 트리의 쿼리 — 범위 밖의 `limit`·모르는 칸은 400 */
+export const v1PageTreeQuery = z.strictObject({
+  space: z.string().describe('스페이스의 이름이나 id'),
+  limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.listLimitMax).default(V1_DEFAULTS.listLimit).describe('돌려줄 가장 많은 수'),
+});
+export type V1PageTreeQuery = z.infer<typeof v1PageTreeQuery>;
+
 export const v1SearchQuery = z.strictObject({
   q: z.string().trim().min(1).max(200).describe('검색어 — 제목과 본문에서 찾는다(두 글자부터 된다)'),
   space: spaceRef.optional(),
@@ -273,7 +285,7 @@ export const toV1Attachment = (a: AttachmentView): V1AttachmentView => ({
   size: a.size,
   uploadedByName: a.uploadedByName,
   createdAt: a.createdAt,
-  url: `/api/v1/attachments/${a.id}`,
+  url: `${V1_BASE_PATH}/attachments/${a.id}`,
   href: `/api/attachments/${a.id}`,
 });
 export type V1LabelView = LabelView;

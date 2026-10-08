@@ -102,7 +102,7 @@ describe('만들기 — 스페이스·제목·본문만으로 된다 (FR-2223)',
     const first = await mk('첫째');
     const second = await mk('둘째');
     expect(second.position).toBeGreaterThan(first.position);
-    expect((await ctrl.list(space.id, undefined, owner)).items.map((p) => p.title)).toEqual(['첫째', '둘째']);
+    expect((await ctrl.list({ space: space.id, limit: 200 }, owner)).items.map((p) => p.title)).toEqual(['첫째', '둘째']);
   });
 
   it('format: json이면 본문을 문서로 받는다', async () => {
@@ -173,7 +173,7 @@ describe('읽기 — 마크다운이 기본 (FR-2215)', () => {
     const { owner, space, mk } = await setup();
     const a = await mk('A');
     await mk('B', a.id);
-    const byName = await ctrl.list('장애 보고', undefined, owner);
+    const byName = await ctrl.list({ space: '장애 보고', limit: 200 }, owner);
     expect(byName.space).toMatchObject({ id: space.id, name: '장애 보고' });
     expect(byName.items.map((p) => [p.title, p.parentId])).toEqual([
       ['A', null],
@@ -187,7 +187,7 @@ describe('읽기 — 마크다운이 기본 (FR-2215)', () => {
     await mk('1');
     await mk('2');
     await mk('3');
-    expect((await ctrl.list(space.id, 2, owner)).items).toHaveLength(2);
+    expect((await ctrl.list({ space: space.id, limit: 2 }, owner)).items).toHaveLength(2);
   });
 });
 
@@ -254,7 +254,7 @@ describe('옮기기·지우기', () => {
     const c = await mk('C');
     const moved = await ctrl.move(a.id, v1MovePageDto.parse({ parentId: null }), owner, req);
     expect(moved.id).toBe(a.id);
-    const list = await ctrl.list(space.id, undefined, owner).then((l) => l.items.map((p) => p.title));
+    const list = await ctrl.list({ space: space.id, limit: 200 }, owner).then((l) => l.items.map((p) => p.title));
     expect(list).toEqual(['B', 'C', 'A']);
     void b;
     void c;

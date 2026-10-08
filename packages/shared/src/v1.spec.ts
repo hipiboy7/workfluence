@@ -617,3 +617,18 @@ describe('toV1Template', () => {
     expect(toV1Template(t, 'json').body).toEqual(doc('안건'));
   });
 });
+
+describe('v1PageTreeQuery — 범위 밖의 limit과 모르는 칸은 받지 않는다', async () => {
+  const { v1PageTreeQuery, V1_DEFAULTS } = await import('./v1');
+  it('limit을 안 주면 기본값', () => {
+    expect(v1PageTreeQuery.parse({ space: 'a' }).limit).toBe(V1_DEFAULTS.listLimit);
+  });
+  it('limit이 범위 밖이면 거절한다 (조용히 자르지 않는다)', () => {
+    expect(v1PageTreeQuery.safeParse({ space: 'a', limit: '0' }).success).toBe(false);
+    expect(v1PageTreeQuery.safeParse({ space: 'a', limit: String(V1_DEFAULTS.listLimitMax + 1) }).success).toBe(false);
+  });
+  it('space가 없거나 모르는 칸이 있으면 거절한다', () => {
+    expect(v1PageTreeQuery.safeParse({}).success).toBe(false);
+    expect(v1PageTreeQuery.safeParse({ space: 'a', x: 1 }).success).toBe(false);
+  });
+});

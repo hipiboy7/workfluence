@@ -1,13 +1,10 @@
 import { NotFoundException, ConflictException } from '@nestjs/common';
-import { idSchema, matchSpaces, type SpaceView } from '@workfluence/shared';
+import { idSchema, matchSpaces, V1_DEFAULTS, type SpaceView } from '@workfluence/shared';
 import type { SessionUser } from '../auth/auth.guard';
 import { SpacesService } from '../spaces/spaces.service';
 
-/** 스페이스 목록에서 이름으로 찾을 때 훑는 상한 — 볼 수 있는 스페이스 수보다 넉넉하다 */
-const SPACE_LOOKUP_LIMIT = 500;
-
 /** 내가 읽을 수 있는 스페이스 — 팀과 개인을 합쳐 한 목록으로(에이전트는 둘을 가르지 않는다). 읽지 못하는 것은 서비스가 이미 뺐다 */
-export async function readableSpaces(spaces: SpacesService, me: SessionUser, filter: { q?: string } = {}, limit = SPACE_LOOKUP_LIMIT): Promise<SpaceView[]> {
+export async function readableSpaces(spaces: SpacesService, me: SessionUser, filter: { q?: string } = {}, limit: number = V1_DEFAULTS.spaceLookupMax): Promise<SpaceView[]> {
   const [team, personal] = await Promise.all([spaces.list(me, 'team', limit, filter), spaces.list(me, 'personal', limit, filter)]);
   return [...new Map([...team, ...personal].map((s) => [s.id, s])).values()];
 }

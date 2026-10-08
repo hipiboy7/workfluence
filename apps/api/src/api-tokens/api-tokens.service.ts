@@ -54,6 +54,10 @@ function toView(row: ApiTokenRowDb, now: Date): ApiTokenView {
   };
 }
 
+/** 세션을 끊는 통지에 따른 토큰 폐기의 재시도 — 횟수와 첫 간격(ms) */
+const REVOKE_ATTEMPTS = 3;
+const REVOKE_RETRY_MS = 200;
+
 /**
  * 공개 API 토큰 — 발급·목록·폐기·인증 (docs/spinoff/public-api 계획서 4.1절).
  *
@@ -74,9 +78,7 @@ export class ApiTokensService implements OnModuleDestroy {
   ) {
     this.unsubscribe = bus.onRevoke((userId, sid) => {
       if (sid !== undefined) return;
-      this.revokeAllFor(userId, new Date()).catch((e: unknown) => {
-        this.log.warn(logLine('session.revoke_failed', 'API 토큰 폐기 실패', { targetUserId: userId }, e));
-      });
+      void this.revokeWithRetry(userId);
     });
   }
 
@@ -181,6 +183,22 @@ export class ApiTokensService implements OnModuleDestroy {
   }
 
   /** 세션을 모두 끊을 때 함께 (G3). 누가 끊었는지는 그 동작의 감사가 말한다 — 여기는 까닭만 */
+  /** 통지는 커밋 뒤라 한 번 실패하면 토큰이 산다 — 몇 번 더 해 보고, 끝내 안 되면 남긴다 */
+  private async revokeWithRetry(userId: string): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.revokeAllFor(userId, new Date());
+        return;
+      } catch (e) {
+        if (attempt >= REVOKE_ATTEMPTS) {
+          this.log.warn(logLine('session.revoke_failed', 'API 토큰 폐기 실패', { targetUserId: userId }, e));
+          return;
+        }
+        await new Promise((r) => setTimeout(r, REVOKE_RETRY_MS * attempt));
+      }
+    }
+  }
+
   async revokeAllFor(userId: string, now: Date): Promise<number> {
     return this.db.transaction(async (tx) => {
       const done = await tx

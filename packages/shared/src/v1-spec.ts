@@ -22,7 +22,7 @@ import {
   v1LabelDto,
   v1MemberRoleDto,
   v1MovePageDto,
-  v1PageQuery,
+  v1PageQuery, v1PageTreeQuery,
   v1SearchQuery,
   v1SpaceListQuery,
   v1SpaceStatusDto,
@@ -214,16 +214,11 @@ const sid = { id: id('스페이스의 id') };
 const uid = { id: id('사용자의 id') };
 const formatNote = '`format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text.';
 
-/** 페이지 트리의 쿼리 — 컨트롤러가 직접 읽는다. 스페이스는 이름이나 id */
-const pageTreeQuery = z.object({
-  space: z.string().describe('스페이스의 이름이나 id'),
-  limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.listLimitMax).default(V1_DEFAULTS.listLimit).optional().describe('돌려줄 가장 많은 수'),
-});
 const exportQuery = z.object({ versionNo: z.coerce.number().int().positive().optional().describe('이 버전을 내보낸다 — 없으면 지금 버전') });
 
 export const V1_OPERATIONS: V1Op[] = [
   // ---- 페이지 ----
-  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 본문은 `GET /pages/{id}`로 읽는다.', query: pageTreeQuery, response: v1PageTree },
+  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 본문은 `GET /pages/{id}`로 읽는다.', query: v1PageTreeQuery, response: v1PageTree },
   { id: 'pages.get', method: 'get', path: '/pages/{id}', tag: 'pages', summary: '페이지 읽기', description: `페이지 하나를 본문과 함께 읽는다. 조상 경로(\`ancestors\`)와 지금 버전 번호(\`currentVersionNo\`)가 함께 온다 — 고칠 때 기준 버전으로 쓴다. ${formatNote}`, params: pid, query: v1PageQuery, response: v1Page },
   { id: 'pages.create', method: 'post', path: '/pages', tag: 'pages', summary: '페이지 만들기', description: '필수는 `space`(이름이나 id)·`title`·`body`뿐이다. 부모를 안 주면 맨 위, 위치는 맨 끝에 만들고 서버가 정한 값을 응답이 말한다. 본문은 마크다운이 기본이다(`format`=json이면 문서 객체). 원시 HTML·그림·허용 밖 링크는 400이다.', body: v1CreatePageDto, query: v1PageQuery, response: v1Page },
   { id: 'pages.update', method: 'patch', path: '/pages/{id}', tag: 'pages', summary: '페이지 고치기', description: '고칠 것(`title`·`body`)만 보낸다 — 안 보낸 것은 그대로다. 기준 버전(`baseVersionNo`)을 안 주면 지금 버전이다. 사람이 그 페이지를 실시간으로 편집 중이면 409 `PAGE_BEING_EDITED` — 편집이 끝난 뒤 다시 시도한다. 기준 버전이 어긋나면 409 `VERSION_CONFLICT`.', params: pid, body: v1UpdatePageDto, query: v1PageQuery, response: v1Page },
