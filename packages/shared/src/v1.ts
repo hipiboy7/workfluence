@@ -64,9 +64,11 @@ export function docToBody(format: V1ReadFormat, doc: DocNode): string | DocNode 
 
 // ---- 입력 ----
 
-const spaceRef = z.string().trim().min(1).max(200);
-const titleSchema = z.string().trim().min(1).max(300);
-const bodyField = z.unknown().refine((v) => v !== undefined, { message: '본문(body)이 필요하다' });
+const spaceRef = z.string().trim().min(1).max(200).describe('스페이스의 이름이나 id');
+const titleSchema = z.string().trim().min(1).max(300).describe('페이지의 제목 — 300자까지');
+const bodyField = z.unknown().refine((v) => v !== undefined, { message: '본문(body)이 필요하다' }).describe('본문 — format이 markdown(기본)이면 마크다운 글자, json이면 문서 객체');
+/** 쓰기 본문의 형식 — 칸마다 같은 설명이 붙게 한 곳에 둔다 */
+const writeFormat = z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat).describe('body의 형식 — markdown(기본) 또는 json(문서 객체)');
 
 /** 변환 결과를 입력의 `body` 칸 오류로 */
 function convert(format: V1WriteFormat, body: unknown, ctx: z.RefinementCtx): DocNode {
@@ -82,8 +84,8 @@ export const v1CreatePageDto = z
     space: spaceRef,
     title: titleSchema,
     body: bodyField,
-    format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat),
-    parentId: idSchema.nullable().default(null),
+    format: writeFormat,
+    parentId: idSchema.nullable().default(null).describe('부모 페이지의 id — 안 주면 스페이스의 맨 위'),
   })
   .transform((v, ctx) => ({ space: v.space, title: v.title, parentId: v.parentId, doc: convert(v.format, v.body, ctx) }));
 export type V1CreatePageDto = z.infer<typeof v1CreatePageDto>;
@@ -93,8 +95,8 @@ export const v1UpdatePageDto = z
   .strictObject({
     title: titleSchema.optional(),
     body: z.unknown().optional(),
-    format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat),
-    baseVersionNo: z.number().int().positive().optional(),
+    format: writeFormat,
+    baseVersionNo: z.number().int().positive().optional().describe('고치는 기준이 되는 버전 번호 — 안 주면 지금 버전. 그 사이 다른 사람이 저장했으면 409 VERSION_CONFLICT'),
   })
   .refine((v) => v.title !== undefined || v.body !== undefined, { message: '고칠 것이 없다 — title이나 body 중 하나는 있어야 한다' })
   .transform((v, ctx) => ({
@@ -141,13 +143,13 @@ const templateDescription = z.string().trim().max(200).nullable();
 
 /** 템플릿 만들기 — 필수는 이름과 본문이다(관리자만 — 화면용과 같다). 설명은 선택 */
 export const v1TemplateDto = z
-  .strictObject({ name: templateName, body: bodyField, format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat), description: templateDescription.optional() })
+  .strictObject({ name: templateName, body: bodyField, format: writeFormat, description: templateDescription.optional() })
   .transform((v, ctx) => ({ name: v.name, description: v.description, content: convert(v.format, v.body, ctx) }));
 export type V1TemplateDto = z.infer<typeof v1TemplateDto>;
 
 /** 템플릿 고치기 — 고칠 것만(있는 칸만 결과에 담긴다). 설명은 `null`이면 지운다 */
 export const v1TemplateUpdateDto = z
-  .strictObject({ name: templateName.optional(), body: z.unknown().optional(), format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat), description: templateDescription.optional() })
+  .strictObject({ name: templateName.optional(), body: z.unknown().optional(), format: writeFormat, description: templateDescription.optional() })
   .refine((v) => v.name !== undefined || v.body !== undefined || v.description !== undefined, { message: '고칠 것이 없다 — name·body·description 중 하나는 있어야 한다' })
   .transform((v, ctx) => ({
     ...(v.name !== undefined ? { name: v.name } : {}),
@@ -170,7 +172,7 @@ export const toV1Template = (t: PageTemplateView, format: V1ReadFormat): V1Templ
 
 /** 검색 — 필수는 검색어뿐이다. 스페이스는 이름이나 id로 좁힌다(없으면 읽을 수 있는 전부). 쿼리의 모르는 칸도 거절한다 */
 export const v1SearchQuery = z.strictObject({
-  q: z.string().trim().min(1).max(200),
+  q: z.string().trim().min(1).max(200).describe('검색어 — 제목과 본문에서 찾는다(두 글자부터 된다)'),
   space: spaceRef.optional(),
   limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.searchLimitMax).default(V1_DEFAULTS.searchLimit),
 });
@@ -180,12 +182,12 @@ export type V1SearchQuery = z.infer<typeof v1SearchQuery>;
 
 /** 댓글 쓰기 — 필수는 본문뿐이다. 답글이면 `parentId` */
 export const v1CommentDto = z
-  .strictObject({ body: bodyField, format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat), parentId: idSchema.nullable().default(null) })
+  .strictObject({ body: bodyField, format: writeFormat, parentId: idSchema.nullable().default(null) })
   .transform((v, ctx) => ({ parentId: v.parentId, doc: convert(v.format, v.body, ctx) }));
 export type V1CommentDto = z.infer<typeof v1CommentDto>;
 
 export const v1CommentUpdateDto = z
-  .strictObject({ body: bodyField, format: z.enum(V1_WRITE_FORMATS).default(V1_DEFAULTS.writeFormat) })
+  .strictObject({ body: bodyField, format: writeFormat })
   .transform((v, ctx) => ({ doc: convert(v.format, v.body, ctx) }));
 export type V1CommentUpdateDto = z.infer<typeof v1CommentUpdateDto>;
 

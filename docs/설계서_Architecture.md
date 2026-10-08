@@ -355,6 +355,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 사내 LLM의 형식이 다르다 (다른 게이트웨이) | 6절 축 | M | `LLM_CLIENT` 뒤의 어댑터(`apps/api/src/llm/openai.client.ts`)와 형식 읽기(`domain/openai.ts`)만 바꾼다 |
 | 사내 메일 API의 형식이 다르다 (현장의 API가 다른 필드·성공 판정) | 6절 축 | S | 요청 모양(`apps/api/src/mail/domain/request.ts`)과 그 시험만 바꾼다. 주소·형식·보내는 이름·인증 헤더는 이미 설정이다(P18) |
 | 사람에게 **다른 행위도** 맡긴다 | 권한 판정 | L | `DELEGABLE_ACTIONS`와 규칙표 `DELEGATION`(`packages/shared/src/permissions.ts` — 받는 역할과 주는 사람)에 하나 더하고, 마이그레이션으로 `users_grants_known_chk`·`users_grants_holder_chk`를 고친다 — 잊으면 `apps/api/src/db/constraints.integration.spec.ts`가 둘이 다르다고 막는다. 사용자 관리 화면의 이름표(`GRANT_LABELS`)는 타입이 채우라고 한다. 받은 사람은 행위자가 할 수 없는 위임을 가진 셈이 되므로 관리의 우열(`canManageUser`)이 저절로 따라간다 |
+| 프로그램·에이전트도 쓰게 한다(공개 API v1에 경로를 더한다) | ③ + 경로 표 | S~M | 화면용과 **같은 서비스·유스케이스**를 부르는 얇은 컨트롤러(`apps/api/src/v1/`, `@UseV1()`)를 더하고, **경로 표 `V1_OPERATIONS`**(`packages/shared/src/v1-spec.ts`)에 한 줄 + 응답 스키마(`v1-responses.ts`)를 더한다. 빠뜨리면 계약 시험(`v1-openapi.contract.integration.spec.ts`)이 막는다. 규칙을 컨트롤러에 다시 쓰지 않는다 — 유스케이스에 없으면 유스케이스로 먼저 옮긴다. 설계는 [설계서_PublicApi](spinoff/public-api/설계서_PublicApi.md), 쓰는 법은 [API 사용가이드](spinoff/public-api/API사용가이드.md) |
 | 새 로그 줄을 더한다 | 로그 | S | `LOG_EVENTS`(`packages/shared/src/constants.ts`)에 코드를 더하고 `logLine()`으로 남긴다. 장애대응가이드 7.28절 표에 한 줄 — 빠뜨리면 `verify:docs`가 막는다 |
 
 ### 11.3 값을 추가할 때 함께 고쳐야 하는 짝
@@ -368,6 +369,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 권한 행위 추가 | `permissions.ts`의 허용 표 · 엔드포인트 가드 | 기본 거부라 아무도 못 쓴다 |
 | 편집기 확장 추가 | 문서 허용 목록(노드·속성·마크·자식·노드별 마크) · 문서 스키마 버전 | 대조 테스트가 깨진다. 넘어가면 REST는 400, 실시간 편집은 그 기능을 쓰는 사람의 연결이 끊긴다 |
 | 테이블 컬럼 추가 | 마이그레이션 SQL · 시드의 빈 값 채우기 | 기존 행이 비어 있는 채로 남는다 |
+| 공개 API v1의 경로·응답 모양 변경 | `V1_OPERATIONS` 한 줄 · `v1-responses.ts` · [API 사용가이드](spinoff/public-api/API사용가이드.md)의 예 | 계약 시험이 깨진다(경로 표 ↔ 컨트롤러, 실제 응답 ↔ 스키마). v1은 더하기만 한다 — 빼거나 뜻을 바꾸면 v2 |
 | API 응답 모양 변경 | `schemas.ts`의 뷰 타입 · 화면 | 타입 검사는 통과하고 화면만 깨진다 |
 
 ### 11.4 확장을 싸게 유지하는 규칙
