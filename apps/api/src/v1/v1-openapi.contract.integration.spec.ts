@@ -1,10 +1,13 @@
 import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  toSortedYaml,
   buildOpenApi,
   createUserDto,
   listLimitDto,
@@ -139,6 +142,29 @@ describe('GET /api/v1/openapi.json', () => {
     // 토큰 가드가 없다 — 토큰 없는 요청이 닿는다
     expect(Reflect.getMetadata('__guards__', V1OpenApiController)).toBeUndefined();
     expect(Reflect.getMetadata('__guards__', V1OpenApiController.prototype.get)).toBeUndefined();
+  });
+});
+
+describe('GET /api/v1/openapi.yaml · openapi.sha256 — 에이전트가 파일로 받아 읽고, 해시로 바뀌었는지만 먼저 본다', () => {
+  const ctrl = new V1OpenApiController();
+  const yaml = toSortedYaml(buildOpenApi(V1_OPERATIONS, info));
+
+  it('yaml은 정렬한 YAML이고 json과 같은 명세다', () => {
+    expect(ctrl.yaml()).toBe(yaml);
+  });
+
+  it('sha256은 yaml 글의 SHA-256(16진수)이다 — 줄바꿈 없이 해시만', () => {
+    expect(ctrl.sha256()).toBe(createHash('sha256').update(yaml).digest('hex'));
+    expect(ctrl.sha256()).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('둘 다 인증 없이 받는다 — 토큰 가드가 없다', () => {
+    for (const fn of [ctrl.yaml, ctrl.sha256]) expect(Reflect.getMetadata('__guards__', fn)).toBeUndefined();
+  });
+
+  it('저장소의 openapi.yaml(`pnpm api:spec`)과 해시가 같다 — 파일을 받은 쪽과 서버가 같은 것을 본다', () => {
+    const file = readFileSync(resolve(__dirname, '../../../../docs/spinoff/public-api/openapi.yaml'), 'utf8');
+    expect(createHash('sha256').update(file).digest('hex')).toBe(ctrl.sha256());
   });
 });
 
