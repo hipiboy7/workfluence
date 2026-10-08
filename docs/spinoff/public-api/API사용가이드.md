@@ -3,7 +3,7 @@
 - 읽는 사람: 위키의 기능을 **프로그램으로 쓰려는 개발자**와 **LLM 에이전트(도구를 부르는 서비스)**. 위키 화면을 쓰는 법은 [사용자가이드](../../guide/사용자가이드.md) 28절이다
 - 무엇을 답하나: "토큰을 어떻게 받고, 어떤 요청을 어떻게 보내고, 오류가 오면 무엇을 하나"
 - 정확한 경로·입력·응답의 모양은 이 문서가 아니라 **명세**(`GET /api/v1/openapi.json`)가 정본이다. 이 문서는 명세를 읽는 법과 자주 하는 일의 예다
-- 기준: 2026-10-08의 코드(공개 API v1 — 경로 64개). 설계 근거는 [설계서_PublicApi](설계서_PublicApi.md)
+- 기준: 2026-10-08의 코드(공개 API v1 — 동작 64개). 설계 근거는 [설계서_PublicApi](설계서_PublicApi.md)
 - 아래 `curl` 예는 개발 서버에서 순서대로 실제로 불러 확인했다 (2026-10-08)
 
 ## 1. 시작하기
@@ -210,7 +210,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/users?q=alice"
 
 ### 5.1 명세를 읽는 법 — 통째로 넣지 않는다
 
-명세는 약 125KB(경로 64개)다. 에이전트의 문맥에 **통째로** 넣지 않는다. 두 단계로 읽는다.
+명세는 약 125KB(동작 64개)다. 에이전트의 문맥에 **통째로** 넣지 않는다. 두 단계로 읽는다.
 
 1. **지도**: `paths`를 돌며 `tags`·`operationId`·`summary`만 모은다 — 도구 목록 설명으로 충분하다(태그: pages·spaces·categories·comments·labels·attachments·search·templates·trash·notifications·admin·spec)
 2. **필요한 경로만 펼친다**: 에이전트가 고른 `operationId`의 `description`·`parameters`·`requestBody`·`security`만 읽어 그 도구의 입력 스키마로 쓴다

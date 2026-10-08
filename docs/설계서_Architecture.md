@@ -172,6 +172,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `llm_conversations` | `id`, `user_id`, `title`, `provider_id`(SET NULL), `prompt_name`, `system_prompt`, `pinned_at`, `retain_from`, `updated_at` | P10 | 보관 규칙은 세 시각이다 — `updated_at`(순서)·`retain_from`(보존 기간의 기준)·`pinned_at`(고정). 지시문은 시작할 때의 복사본 |
 | `llm_messages` | `id`, `seq`(차례), `conversation_id`(CASCADE), `role`, `content`, `model`, `status` | P10 | 질문과 답. 생각 과정은 넣지 않는다. 대화와 수명이 같다 |
 | `password_reset_tokens` | `id`, `user_id`(CASCADE), `token_hash` uq, `password_mark`, `created_at`, `expires_at` | P19 | 메일 재설정 링크. **값은 두지 않고 SHA-256만** — DB가 새어도 링크가 되지 않는다. `password_mark`는 발급 때의 비밀번호 해시에서 뽑은 표시로, 비밀번호가 어느 길로 바뀌었든 링크를 죽인다. 한 사람에게 살아 있는 것은 하나다 (`P19_설계서_Recovery` C.3) |
+| `api_tokens` | `id`(= JWT의 jti), `user_id`(CASCADE), `name`, `scopes`(read·write·admin), `created_at`, `expires_at`, `last_used_at`, `revoked_at`·`revoked_reason` | 공개 API(F-015, `0014`) | 프로그램용 토큰. **값은 두지 않고** 서명(`WF_API_JWT_SECRET`)으로 검증해 jti로 이 행을 찾는다. 요청마다 폐기·만료와 사용자 상태를 다시 본다 |
 
 ### 3.2 규약
 
