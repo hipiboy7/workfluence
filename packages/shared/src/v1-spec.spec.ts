@@ -33,6 +33,13 @@ describe('buildOpenApi — 한 경로', () => {
     expect(o.parameters).toEqual([{ name: 'id', in: 'path', required: true, description: '식별자', schema: { type: 'string', format: 'uuid' } }]);
   });
 
+  it('**성공 응답 코드는 서버와 같다** — POST는 201, 나머지는 200 (Nest의 기본값, v1에는 바꾸는 곳이 없다)', () => {
+    const d = doc([op({ id: 'p', method: 'post', path: '/p', params: undefined }), op({ id: 'g', path: '/g', params: undefined })]);
+    expect(Object.keys(d.paths['/p'].post.responses)).toContain('201');
+    expect(Object.keys(d.paths['/p'].post.responses)).not.toContain('200');
+    expect(Object.keys(d.paths['/g'].get.responses)).toContain('200');
+  });
+
   it('읽기는 scope read, 쓰기는 write, 관리 경로는 admin이 더 — 가드(requiredScopes)와 같다', () => {
     const d = doc([
       op({ id: 'a', path: '/a' , params: undefined }),
