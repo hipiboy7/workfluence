@@ -4,6 +4,7 @@ import { AppLayout } from './layout/AppLayout';
 import { AuthLayout } from './layout/AuthLayout';
 import { NotFoundPage } from './components/RequireUuidParam';
 import { RequireUuidParam } from './components/RequireUuidParam';
+import { ChatPage } from './pages/ChatPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { EmailHelpPage } from './pages/EmailHelpPage';
 import { FindAccountPage } from './pages/FindAccountPage';
@@ -82,6 +83,9 @@ export function App() {
             <Route path="/llm" element={<RequireUuidParam><LlmPage /></RequireUuidParam>} />
             <Route path="/llm/prompts" element={<LlmPromptsPage />} />
             <Route path="/llm/:id" element={<RequireUuidParam><LlmPage /></RequireUuidParam>} />
+            {/* Phase 21 — 채팅 (P21_설계서_Chat G절) */}
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat/:id" element={<RequireUuidParam><ChatPage /></RequireUuidParam>} />
             <Route path="/spaces/:id" element={<RequireUuidParam><SpacePage /></RequireUuidParam>} />
             <Route path="/pages/:id" element={<RequireUuidParam><PageViewPage /></RequireUuidParam>} />
             <Route path="/pages/:id/edit" element={<RequireUuidParam><PageEditorPage /></RequireUuidParam>} />

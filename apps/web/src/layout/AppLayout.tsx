@@ -44,6 +44,7 @@ function currentSection(pathname: string): string {
   if (pathname === '/' || pathname.startsWith('/spaces') || pathname.startsWith('/pages')) return 'spaces';
   if (pathname.startsWith('/search') || pathname.startsWith('/labels')) return 'search';
   if (pathname.startsWith('/llm')) return 'llm';
+  if (pathname.startsWith('/chat')) return 'chat';
   if (pathname.startsWith('/trash')) return 'trash';
   if (pathname.startsWith('/admin')) return 'admin';
   return '';
@@ -144,6 +145,11 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             <li>
               <Link to="/llm" aria-current={here('llm')}>
                 LLM 질문
+              </Link>
+            </li>
+            <li>
+              <Link to="/chat" aria-current={here('chat')}>
+                채팅
               </Link>
             </li>
             <li>
