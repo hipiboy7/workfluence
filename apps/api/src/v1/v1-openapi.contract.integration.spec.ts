@@ -35,6 +35,12 @@ import {
   V1_OPENAPI_INFO,
   V1_OPERATIONS,
   type AppEnv,
+  chatMessagesQueryDto,
+  chatUserSearchDto,
+  createChatRoomDto,
+  inviteChatMembersDto,
+  markChatReadDto,
+  sendChatMessageDto,
 } from '@workfluence/shared';
 import type { z } from 'zod';
 import { API_ADMIN_KEY } from '../api-tokens/api-token.guard';
@@ -69,6 +75,9 @@ import { UsersService } from '../users/users.service';
 import { UserUseCases } from '../users/users.usecases';
 import { V1AuditController, V1PolicyController, V1UsersController } from './v1-admin.controller';
 import { V1AttachmentsController, V1CommentsController, V1LabelsController } from './v1-content.controller';
+import { ChatHub } from '../chat/chat.hub';
+import { ChatService } from '../chat/chat.service';
+import { V1ChatController } from './v1-chat.controller';
 import { V1NotificationsController, V1TemplatesController, V1TrashController } from './v1-misc.controller';
 import { V1OpenApiController } from './v1-openapi.controller';
 import { V1PagesController } from './v1-pages.controller';
@@ -221,6 +230,7 @@ beforeAll(async () => {
     users: new V1UsersController(usersSvc, new UserUseCases(usersSvc, audit, spacesSvc, notif, bus, db)),
     policy: new V1PolicyController(new PolicyUseCases(settings, audit, db)),
     audit: new V1AuditController(audit),
+    chat: new V1ChatController(new ChatService(db, new ChatHub(), { WF_CHAT_MAX_MESSAGE_CHARS: 4000 })),
   };
 });
 afterAll(async () => {
@@ -332,6 +342,23 @@ describe('실제 응답이 응답 스키마를 지킨다 (FR-2221)', () => {
     conform('settings.get', await c.policy.get(root));
     conform('settings.update', await c.policy.update(policyPatchDto.parse({ passwordMinLength: 10 }), root, req));
     conform('audit.list', await c.audit.list(auditQueryDto.parse({})));
+  });
+
+  it('채팅 — 방·메시지·읽음·사람 찾기 (P21)', async () => {
+    const owner = await person(db, 'chat-owner');
+    const mate = await person(db, 'chat-mate');
+    const third = await person(db, 'chat-third');
+    const direct = await c.chat.create(createChatRoomDto.parse({ kind: 'direct', userId: mate.id }), owner);
+    conform('chat.createRoom', direct);
+    const group = await c.chat.create(createChatRoomDto.parse({ kind: 'group', name: '팀', userIds: [mate.id] }), owner);
+    conform('chat.rooms', await c.chat.rooms(owner));
+    conform('chat.room', await c.chat.room(group.id, owner));
+    conform('chat.invite', await c.chat.invite(group.id, inviteChatMembersDto.parse({ userIds: [third.id] }), owner));
+    conform('chat.send', await c.chat.send(direct.id, sendChatMessageDto.parse({ body: '안녕', clientMsgId: 'c1' }), owner));
+    conform('chat.messages', await c.chat.messages(direct.id, chatMessagesQueryDto.parse({}), mate));
+    conform('chat.read', await c.chat.read(direct.id, markChatReadDto.parse({ seq: 1 }), mate));
+    conform('chat.users', await c.chat.users(chatUserSearchDto.parse({ q: 'chat' }), owner));
+    conform('chat.leave', await c.chat.leave(group.id, third));
   });
 
   it('JSON 응답인 모든 경로를 실제로 불러 확인했다 — 빠진 것이 있으면 여기서 드러난다', () => {

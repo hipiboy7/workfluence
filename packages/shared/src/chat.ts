@@ -122,59 +122,104 @@ export function unreadCount(lastSeq: number, lastReadSeq: number): number {
 }
 
 // ---- 요청 본문·질의 (E절) ----
+// 칸마다 `.describe`가 있다 — 공개 API 명세(`v1-spec.ts`)가 그대로 싣는다(설명이 빠지면 `v1-spec.spec.ts`가 실패한다)
 
 /** 방 만들기 — 1:1은 상대 한 사람, 여럿은 이름과 부를 사람들(만든 사람은 자동으로 든다) */
 export const createChatRoomDto = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('direct'), userId: idSchema }).strict(),
   z
     .object({
-      kind: z.literal('group'),
-      name: z.string().trim().min(1).max(CHAT_LIMITS.maxRoomNameChars),
-      userIds: z.array(idSchema).min(1).max(CHAT_LIMITS.maxRoomMembers),
+      kind: z.literal('direct').describe('방의 종류 — `direct`는 1:1 방(두 사람 사이에 하나뿐이라 이미 있으면 그 방을 돌려준다)'),
+      userId: idSchema.describe('상대 사용자의 id — `GET /chat/users`로 찾는다. 자기 자신·정지·승인 대기 사용자는 안 된다'),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('group').describe('방의 종류 — `group`은 이름이 있는 여럿 방(만든 사람이 초대한다)'),
+      name: z.string().trim().min(1).max(CHAT_LIMITS.maxRoomNameChars).describe(`여럿 방의 이름 — 1~${CHAT_LIMITS.maxRoomNameChars}자`),
+      userIds: z.array(idSchema).min(1).max(CHAT_LIMITS.maxRoomMembers).describe(`방에 부를 사용자들의 id — 1~${CHAT_LIMITS.maxRoomMembers}명(만든 사람은 빼도 든다). 하나라도 부를 수 없으면 404 \`USER_NOT_FOUND\``),
     })
     .strict(),
 ]);
 export type CreateChatRoomDto = z.infer<typeof createChatRoomDto>;
 
-export const inviteChatMembersDto = z.object({ userIds: z.array(idSchema).min(1).max(CHAT_LIMITS.maxRoomMembers) }).strict();
+export const inviteChatMembersDto = z
+  .object({ userIds: z.array(idSchema).min(1).max(CHAT_LIMITS.maxRoomMembers).describe(`초대할 사용자들의 id — 1~${CHAT_LIMITS.maxRoomMembers}명. 이미 든 사람은 그대로 둔다`) })
+  .strict();
 export type InviteChatMembersDto = z.infer<typeof inviteChatMembersDto>;
 
 /** 본문 글자 수 상한은 설정(`WF_CHAT_MAX_MESSAGE_CHARS`)이라 서버가 `validateChatBody`로 한 번 더 본다 */
 export const sendChatMessageDto = z
-  .object({ body: z.string(), clientMsgId: z.string().min(1).max(CHAT_LIMITS.maxClientMsgIdChars).optional() })
+  .object({
+    body: z.string().describe('메시지 본문 — 평문(마크다운·HTML로 해석하지 않는다). 공백뿐이거나 제어 문자가 있거나 서버 상한(기본 4000자)을 넘으면 400 `EMPTY`·`BAD_CHAR`·`TOO_LONG`'),
+    clientMsgId: z
+      .string()
+      .min(1)
+      .max(CHAT_LIMITS.maxClientMsgIdChars)
+      .optional()
+      .describe(`보내는 쪽이 정하는 중복 방지 값 — 1~${CHAT_LIMITS.maxClientMsgIdChars}자. 같은 방에서 같은 사람이 같은 값을 되풀이하면 한 번만 받고 응답의 \`duplicate\`가 true다(끊겼다 다시 보낼 때 쓴다). 안 주면 중복을 막지 않는다`),
+  })
   .strict();
 export type SendChatMessageDto = z.infer<typeof sendChatMessageDto>;
 
-export const markChatReadDto = z.object({ seq: z.number().int().min(0) }).strict();
+export const markChatReadDto = z
+  .object({ seq: z.number().int().min(0).describe('여기까지 읽었다는 메시지 번호 — 내려가지 않고 방의 마지막 번호를 넘으면 마지막 번호로 줄인다') })
+  .strict();
 export type MarkChatReadDto = z.infer<typeof markChatReadDto>;
 
 export const chatMessagesQueryDto = z.object({
-  beforeSeq: z.coerce.number().int().min(0).optional(),
-  afterSeq: z.coerce.number().int().min(0).optional(),
-  limit: z.coerce.number().int().min(1).optional(),
+  beforeSeq: z.coerce.number().int().min(0).optional().describe('이 번호보다 **이전** 메시지를 읽는다(옛 메시지로 거슬러 간다). `afterSeq`와 함께 줄 수 없다'),
+  afterSeq: z.coerce.number().int().min(0).optional().describe('이 번호보다 **이후** 메시지를 읽는다(끊겼다 돌아와 놓친 것을 받는다 — 마지막으로 받은 `seq`를 준다). `beforeSeq`와 함께 줄 수 없다'),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(`돌려줄 가장 많은 수 — 1 이상, 안 주면 ${CHAT_LIMITS.pageDefault}, ${CHAT_LIMITS.pageMax}를 넘으면 ${CHAT_LIMITS.pageMax}로 줄인다. 번호를 안 주면 가장 새 메시지부터 그만큼`),
 });
 export type ChatMessagesQueryDto = z.infer<typeof chatMessagesQueryDto>;
 
-export const chatUserSearchDto = z.object({ q: z.string().trim().max(100).default(''), limit: z.coerce.number().int().min(1).max(50).default(20) });
+export const chatUserSearchDto = z.object({
+  q: z.string().trim().max(100).default('').describe('찾을 말 — 표시 이름의 일부(대소문자 무시). 안 주면 이름 순으로 앞에서부터'),
+  limit: z.coerce.number().int().min(1).max(50).default(20).describe('돌려줄 가장 많은 수 — 1~50, 기본 20'),
+});
 
 // ---- 응답 ----
 
-export type ChatMessageView = { id: string; roomId: string; seq: number; senderId: string; body: string; createdAt: string };
+const iso = z.string().describe('ISO 8601 시각(UTC)');
 
-export type ChatRoomView = {
-  id: string;
-  kind: ChatRoomKind;
-  /** 여럿 방의 이름. 1:1은 null — 화면이 상대의 이름을 그린다 */
-  name: string | null;
-  createdBy: string;
-  members: { userId: string; displayName: string }[];
-  lastSeq: number;
-  lastMessageAt: string | null;
-  lastMessage: ChatMessageView | null;
-  unread: number;
-};
+export const chatMessageSchema = z.object({
+  id: z.string().describe('메시지의 id'),
+  roomId: z.string().describe('방의 id'),
+  seq: z.number().int().describe('방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다'),
+  senderId: z.string().describe('보낸 사용자의 id'),
+  body: z.string().describe('본문(평문)'),
+  createdAt: iso.describe('보낸 시각'),
+});
+export type ChatMessageView = z.infer<typeof chatMessageSchema>;
 
-export type ChatUserView = { id: string; displayName: string };
+export const chatRoomSchema = z.object({
+  id: z.string().describe('방의 id'),
+  kind: z.enum(['direct', 'group']).describe('`direct`는 1:1, `group`은 이름이 있는 여럿 방'),
+  name: z.string().nullable().describe('여럿 방의 이름 — 1:1은 null(상대의 이름을 보여 준다)'),
+  createdBy: z.string().describe('만든 사용자의 id — 여럿 방은 만든 사람만 초대한다'),
+  members: z.array(z.object({ userId: z.string().describe('참여자의 id'), displayName: z.string().describe('참여자의 표시 이름') })).describe('참여자들(표시 이름 순)'),
+  lastSeq: z.number().int().describe('방의 마지막 메시지 번호 — 메시지가 없으면 0'),
+  lastMessageAt: iso.nullable().describe('마지막 메시지의 시각 — 없으면 null'),
+  lastMessage: chatMessageSchema.nullable().describe('마지막 메시지 — 없으면 null'),
+  unread: z.number().int().describe('내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다'),
+});
+export type ChatRoomView = z.infer<typeof chatRoomSchema>;
+
+export const chatRoomCreatedSchema = chatRoomSchema.extend({ created: z.boolean().describe('이번 요청이 방을 새로 만들었으면 true — 이미 있던 1:1 방을 돌려준 것이면 false') });
+
+export const chatSentSchema = chatMessageSchema.extend({
+  duplicate: z.boolean().describe('같은 `clientMsgId`의 되풀이라 새로 만들지 않고 처음 받은 메시지를 돌려줬으면 true(다시 알리지도 않는다)'),
+});
+
+export const chatReadSchema = z.object({ lastReadSeq: z.number().int().describe('지금 내가 읽은 마지막 번호') });
+
+export const chatUserSchema = z.object({ id: z.string().describe('사용자의 id'), displayName: z.string().describe('표시 이름') });
+export type ChatUserView = z.infer<typeof chatUserSchema>;
 
 /** 서버가 연결을 닫을 때의 코드(4000대는 응용이 정한다). 클라이언트가 까닭을 알아 다시 붙을지 정한다 */
 export const CHAT_CLOSE = {

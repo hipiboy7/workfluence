@@ -45,6 +45,9 @@ info:
     고칠 때: 페이지 고치기는 본문 **전체 교체**다(부분 수정이 없다). 읽은 `currentVersionNo`를 `baseVersionNo`로 꼭 보낸다 — 그래야 그 사이 남의 고침을 덮지 않는다(안 보내면 400). 같은 요청을 되풀이해도 중복을 막는 키는 없다: 만들기(POST)는 실패해도 만들어졌을 수 있으니 다시 보내기 전에 목록으로 확인한다.
     `format`: 쿼리의 `format`은 **응답**에 실을 본문 형식이고, 요청 본문의 `format`은 **보내는** `body`의 형식이다(둘은 따로 정한다). 마크다운은 원시 HTML·그림 문법·허용 밖 링크를 받지 않고 400이다.
     목록: 쪽 나누기가 없다. 모두 `limit`까지만 돌려주고(동작마다 최대값이 다르다) 넘는 것은 잘린다 — 많으면 스페이스·검색어·기간으로 조건을 좁혀 나누어 받는다. `GET /users`만 `offset`·`total`을 쓴다.
+    채팅 실시간 연결: 사람 없이 도는 클라이언트(에이전트)는 WebSocket `GET /api/v1/chat/ws`(wss)로 새 메시지를 받고 보낸다 — OpenAPI가 WebSocket을 표현하지 못해 여기 적는다. 업그레이드 요청에 `Authorization: Bearer <토큰>`을 보낸다(토큰을 주소의 질의로 주면 401 — 주소는 로그에 남는다). 연결 하나로 내가 참여한 **모든 방**의 새 메시지가 온다. 토큰의 read가 있어야 연결되고(없으면 403), 메시지를 보내려면 write가 더 있어야 한다. 모든 프레임은 JSON 글 한 덩어리다.
+    서버가 보내는 프레임(`type`): `hello`(연결 직후 한 번 — `userId`, 참여한 방 `roomIds`) · `message`(방의 새 메시지 — `roomId`·`seq`·`senderId`·`body`·`createdAt`, 내가 보낸 것도 온다) · `ack`(내가 보낸 `send`의 결과 — `clientMsgId`·`roomId`·`seq`·`createdAt`) · `room`(내가 방에 들었거나 나갔다 — `roomId`·`change`=joined|left. 방이 새로 생기면 연결을 다시 열지 않아도 이 프레임이 온다) · `error`(보낸 것 하나를 거절 — `code`·`roomId`·`clientMsgId`, 연결은 그대로). 클라이언트가 보내는 프레임은 하나다: `{"type":"send","roomId":"…","body":"…","clientMsgId":"(선택)"}`. `error.code`: `EMPTY`·`TOO_LONG`·`BAD_CHAR`(본문) · `ROOM_NOT_FOUND`(참여하지 않은 방) · `INSUFFICIENT_SCOPE`(read 토큰) · `RATE_LIMITED`(연결마다 분당 한도 — 기본 60).
+    채팅 연결의 규칙: 모르는 `type`·모르는 칸·JSON이 아닌 글·바이너리·너무 큰 프레임(기본 64KiB)은 서버가 연결을 닫는다(close 코드 4400, 큰 것은 1009) — 같은 것을 다시 보내지 말고 프레임을 고친다. 토큰이 폐기·만료되거나 주인이 정지되거나 비밀번호 변경·강제 종료가 있으면 연결이 닫히고(4401) 다시 붙지 말고 새 토큰을 받는다. 같은 사용자의 연결이 상한(기본 5개)을 넘으면 가장 오래된 연결이 닫힌다(4409). 서버가 30초마다 ping을 보내니 WebSocket 라이브러리의 pong 자동 응답을 끄지 않는다. **연결은 새 메시지만 보낸다** — 끊겼다 돌아오면 방마다 마지막으로 받은 `seq` 이후를 `GET /chat/rooms/{id}/messages?afterSeq=`로 받아 메우고, 같은 메시지가 둘 올 수 있으니 `(roomId, seq)`로 거른다. 연달아 보낸 `send`는 보낸 순서대로 번호를 받는다.
     이 API는 더하기만 한다(필드·경로 추가). 빼거나 뜻을 바꾸면 v2다.
   title: "워크플루언스 공개 API"
   version: "1.0.0"
@@ -657,6 +660,1146 @@ paths:
       summary: "분류 이름 바꾸기"
       tags:
         - categories
+  "/chat/rooms":
+    get:
+      description: "내가 참여한 방 — 마지막 메시지가 새로운 방이 앞이다(메시지가 없으면 만든 시각). 방마다 참여자·마지막 메시지·안 읽은 수(`unread`)가 있다. 새 메시지를 실시간으로 받으려면 머리말의 \"채팅 실시간 연결\"을 본다."
+      operationId: chat.rooms
+      responses:
+        "200":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  items:
+                    description: "결과 목록 — 없으면 빈 배열"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        createdBy:
+                          description: "만든 사용자의 id — 여럿 방은 만든 사람만 초대한다"
+                          type: string
+                        id:
+                          description: "방의 id"
+                          type: string
+                        kind:
+                          description: "`direct`는 1:1, `group`은 이름이 있는 여럿 방"
+                          enum:
+                            - direct
+                            - group
+                          type: string
+                        lastMessage:
+                          anyOf:
+                            - additionalProperties: false
+                              properties:
+                                body:
+                                  description: "본문(평문)"
+                                  type: string
+                                createdAt:
+                                  description: "보낸 시각"
+                                  type: string
+                                id:
+                                  description: "메시지의 id"
+                                  type: string
+                                roomId:
+                                  description: "방의 id"
+                                  type: string
+                                senderId:
+                                  description: "보낸 사용자의 id"
+                                  type: string
+                                seq:
+                                  description: "방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다"
+                                  maximum: 9007199254740991
+                                  minimum: -9007199254740991
+                                  type: integer
+                              required:
+                                - id
+                                - roomId
+                                - seq
+                                - senderId
+                                - body
+                                - createdAt
+                              type: object
+                            - type: "null"
+                          description: "마지막 메시지 — 없으면 null"
+                        lastMessageAt:
+                          anyOf:
+                            - description: "ISO 8601 시각(UTC)"
+                              type: string
+                            - type: "null"
+                          description: "마지막 메시지의 시각 — 없으면 null"
+                        lastSeq:
+                          description: "방의 마지막 메시지 번호 — 메시지가 없으면 0"
+                          maximum: 9007199254740991
+                          minimum: -9007199254740991
+                          type: integer
+                        members:
+                          description: "참여자들(표시 이름 순)"
+                          items:
+                            additionalProperties: false
+                            properties:
+                              displayName:
+                                description: "참여자의 표시 이름"
+                                type: string
+                              userId:
+                                description: "참여자의 id"
+                                type: string
+                            required:
+                              - userId
+                              - displayName
+                            type: object
+                          type: array
+                        name:
+                          description: "여럿 방의 이름 — 1:1은 null(상대의 이름을 보여 준다)"
+                          type:
+                            - string
+                            - "null"
+                        unread:
+                          description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
+                          maximum: 9007199254740991
+                          minimum: -9007199254740991
+                          type: integer
+                      required:
+                        - id
+                        - kind
+                        - name
+                        - createdBy
+                        - members
+                        - lastSeq
+                        - lastMessageAt
+                        - lastMessage
+                        - unread
+                      type: object
+                    type: array
+                required:
+                  - items
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - read
+      summary: "내 채팅 방 목록"
+      tags:
+        - chat
+    post:
+      description: "`kind`가 `direct`면 상대 한 사람과의 1:1 방, `group`이면 이름과 부를 사람들로 여럿 방을 만든다(만든 사람은 자동으로 든다). 1:1은 두 사람 사이에 하나뿐이라 순서와 상관없이 이미 있으면 그 방을 돌려준다. 방이 생기면 부른 사람의 연결에 `room` 프레임이 간다."
+      operationId: chat.createRoom
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              oneOf:
+                - additionalProperties: false
+                  properties:
+                    kind:
+                      const: direct
+                      description: "방의 종류 — `direct`는 1:1 방(두 사람 사이에 하나뿐이라 이미 있으면 그 방을 돌려준다)"
+                      type: string
+                    userId:
+                      description: "상대 사용자의 id — `GET /chat/users`로 찾는다. 자기 자신·정지·승인 대기 사용자는 안 된다"
+                      format: uuid
+                      pattern: "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      type: string
+                  required:
+                    - kind
+                    - userId
+                  type: object
+                - additionalProperties: false
+                  properties:
+                    kind:
+                      const: group
+                      description: "방의 종류 — `group`은 이름이 있는 여럿 방(만든 사람이 초대한다)"
+                      type: string
+                    name:
+                      description: "여럿 방의 이름 — 1~100자"
+                      maxLength: 100
+                      minLength: 1
+                      type: string
+                    userIds:
+                      description: "방에 부를 사용자들의 id — 1~100명(만든 사람은 빼도 든다). 하나라도 부를 수 없으면 404 `USER_NOT_FOUND`"
+                      items:
+                        format: uuid
+                        pattern: "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        type: string
+                      maxItems: 100
+                      minItems: 1
+                      type: array
+                  required:
+                    - kind
+                    - name
+                    - userIds
+                  type: object
+        required: true
+      responses:
+        "201":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  created:
+                    description: "이번 요청이 방을 새로 만들었으면 true — 이미 있던 1:1 방을 돌려준 것이면 false"
+                    type: boolean
+                  createdBy:
+                    description: "만든 사용자의 id — 여럿 방은 만든 사람만 초대한다"
+                    type: string
+                  id:
+                    description: "방의 id"
+                    type: string
+                  kind:
+                    description: "`direct`는 1:1, `group`은 이름이 있는 여럿 방"
+                    enum:
+                      - direct
+                      - group
+                    type: string
+                  lastMessage:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          body:
+                            description: "본문(평문)"
+                            type: string
+                          createdAt:
+                            description: "보낸 시각"
+                            type: string
+                          id:
+                            description: "메시지의 id"
+                            type: string
+                          roomId:
+                            description: "방의 id"
+                            type: string
+                          senderId:
+                            description: "보낸 사용자의 id"
+                            type: string
+                          seq:
+                            description: "방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다"
+                            maximum: 9007199254740991
+                            minimum: -9007199254740991
+                            type: integer
+                        required:
+                          - id
+                          - roomId
+                          - seq
+                          - senderId
+                          - body
+                          - createdAt
+                        type: object
+                      - type: "null"
+                    description: "마지막 메시지 — 없으면 null"
+                  lastMessageAt:
+                    anyOf:
+                      - description: "ISO 8601 시각(UTC)"
+                        type: string
+                      - type: "null"
+                    description: "마지막 메시지의 시각 — 없으면 null"
+                  lastSeq:
+                    description: "방의 마지막 메시지 번호 — 메시지가 없으면 0"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                  members:
+                    description: "참여자들(표시 이름 순)"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        displayName:
+                          description: "참여자의 표시 이름"
+                          type: string
+                        userId:
+                          description: "참여자의 id"
+                          type: string
+                      required:
+                        - userId
+                        - displayName
+                      type: object
+                    type: array
+                  name:
+                    description: "여럿 방의 이름 — 1:1은 null(상대의 이름을 보여 준다)"
+                    type:
+                      - string
+                      - "null"
+                  unread:
+                    description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                required:
+                  - id
+                  - kind
+                  - name
+                  - createdBy
+                  - members
+                  - lastSeq
+                  - lastMessageAt
+                  - lastMessage
+                  - unread
+                  - created
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "409":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "이 동작은 409를 주지 않는다(1:1 방이 이미 있으면 그 방을 `created=false`로 돌려준다)"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - write
+      summary: "채팅 방 만들기"
+      tags:
+        - chat
+  "/chat/rooms/{id}":
+    get:
+      description: "참여한 방 하나 — 목록의 한 항목과 같은 모양이다. 참여자가 아니면 방이 있는지도 알려 주지 않고 404다."
+      operationId: chat.room
+      parameters:
+        - description: "방의 id"
+          in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  createdBy:
+                    description: "만든 사용자의 id — 여럿 방은 만든 사람만 초대한다"
+                    type: string
+                  id:
+                    description: "방의 id"
+                    type: string
+                  kind:
+                    description: "`direct`는 1:1, `group`은 이름이 있는 여럿 방"
+                    enum:
+                      - direct
+                      - group
+                    type: string
+                  lastMessage:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          body:
+                            description: "본문(평문)"
+                            type: string
+                          createdAt:
+                            description: "보낸 시각"
+                            type: string
+                          id:
+                            description: "메시지의 id"
+                            type: string
+                          roomId:
+                            description: "방의 id"
+                            type: string
+                          senderId:
+                            description: "보낸 사용자의 id"
+                            type: string
+                          seq:
+                            description: "방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다"
+                            maximum: 9007199254740991
+                            minimum: -9007199254740991
+                            type: integer
+                        required:
+                          - id
+                          - roomId
+                          - seq
+                          - senderId
+                          - body
+                          - createdAt
+                        type: object
+                      - type: "null"
+                    description: "마지막 메시지 — 없으면 null"
+                  lastMessageAt:
+                    anyOf:
+                      - description: "ISO 8601 시각(UTC)"
+                        type: string
+                      - type: "null"
+                    description: "마지막 메시지의 시각 — 없으면 null"
+                  lastSeq:
+                    description: "방의 마지막 메시지 번호 — 메시지가 없으면 0"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                  members:
+                    description: "참여자들(표시 이름 순)"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        displayName:
+                          description: "참여자의 표시 이름"
+                          type: string
+                        userId:
+                          description: "참여자의 id"
+                          type: string
+                      required:
+                        - userId
+                        - displayName
+                      type: object
+                    type: array
+                  name:
+                    description: "여럿 방의 이름 — 1:1은 null(상대의 이름을 보여 준다)"
+                    type:
+                      - string
+                      - "null"
+                  unread:
+                    description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                required:
+                  - id
+                  - kind
+                  - name
+                  - createdBy
+                  - members
+                  - lastSeq
+                  - lastMessageAt
+                  - lastMessage
+                  - unread
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - read
+      summary: "채팅 방 하나"
+      tags:
+        - chat
+  "/chat/rooms/{id}/members":
+    post:
+      description: "여럿 방(`group`)을 **만든 사람만** 초대할 수 있다(아니면 403, 1:1 방은 누구도 못 한다). 이미 든 사람은 그대로 두고, 부를 수 없는 사람(정지·승인 대기·없는 id)이 하나라도 있으면 404 `USER_NOT_FOUND`다. 초대된 사람의 연결에 `room` 프레임이 간다."
+      operationId: chat.invite
+      parameters:
+        - description: "방의 id"
+          in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              additionalProperties: false
+              properties:
+                userIds:
+                  description: "초대할 사용자들의 id — 1~100명. 이미 든 사람은 그대로 둔다"
+                  items:
+                    format: uuid
+                    pattern: "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    type: string
+                  maxItems: 100
+                  minItems: 1
+                  type: array
+              required:
+                - userIds
+              type: object
+        required: true
+      responses:
+        "201":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  createdBy:
+                    description: "만든 사용자의 id — 여럿 방은 만든 사람만 초대한다"
+                    type: string
+                  id:
+                    description: "방의 id"
+                    type: string
+                  kind:
+                    description: "`direct`는 1:1, `group`은 이름이 있는 여럿 방"
+                    enum:
+                      - direct
+                      - group
+                    type: string
+                  lastMessage:
+                    anyOf:
+                      - additionalProperties: false
+                        properties:
+                          body:
+                            description: "본문(평문)"
+                            type: string
+                          createdAt:
+                            description: "보낸 시각"
+                            type: string
+                          id:
+                            description: "메시지의 id"
+                            type: string
+                          roomId:
+                            description: "방의 id"
+                            type: string
+                          senderId:
+                            description: "보낸 사용자의 id"
+                            type: string
+                          seq:
+                            description: "방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다"
+                            maximum: 9007199254740991
+                            minimum: -9007199254740991
+                            type: integer
+                        required:
+                          - id
+                          - roomId
+                          - seq
+                          - senderId
+                          - body
+                          - createdAt
+                        type: object
+                      - type: "null"
+                    description: "마지막 메시지 — 없으면 null"
+                  lastMessageAt:
+                    anyOf:
+                      - description: "ISO 8601 시각(UTC)"
+                        type: string
+                      - type: "null"
+                    description: "마지막 메시지의 시각 — 없으면 null"
+                  lastSeq:
+                    description: "방의 마지막 메시지 번호 — 메시지가 없으면 0"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                  members:
+                    description: "참여자들(표시 이름 순)"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        displayName:
+                          description: "참여자의 표시 이름"
+                          type: string
+                        userId:
+                          description: "참여자의 id"
+                          type: string
+                      required:
+                        - userId
+                        - displayName
+                      type: object
+                    type: array
+                  name:
+                    description: "여럿 방의 이름 — 1:1은 null(상대의 이름을 보여 준다)"
+                    type:
+                      - string
+                      - "null"
+                  unread:
+                    description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                required:
+                  - id
+                  - kind
+                  - name
+                  - createdBy
+                  - members
+                  - lastSeq
+                  - lastMessageAt
+                  - lastMessage
+                  - unread
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "409":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "이 동작은 409를 주지 않는다"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - write
+      summary: "여럿 방에 초대하기"
+      tags:
+        - chat
+  "/chat/rooms/{id}/members/me":
+    delete:
+      description: "내가 여럿 방에서 나간다 — 나간 뒤에는 그 방의 메시지를 읽지도 보내지도 못한다. 1:1 방은 나갈 수 없다(400 `DIRECT_ROOM`)."
+      operationId: chat.leave
+      parameters:
+        - description: "방의 id"
+          in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: true
+                    description: "성공이면 늘 true"
+                    type: boolean
+                required:
+                  - ok
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "409":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "이 동작은 409를 주지 않는다"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - write
+      summary: "방에서 나가기"
+      tags:
+        - chat
+  "/chat/rooms/{id}/messages":
+    get:
+      description: "결과는 늘 **번호(`seq`) 오름차순**이다. 번호를 안 주면 가장 새 메시지 `limit`개, `beforeSeq`면 그 이전, `afterSeq`면 그 이후 — 실시간 연결이 끊겼다 돌아오면 마지막으로 받은 `seq`를 `afterSeq`로 주어 놓친 것을 받는다(연결은 새 메시지만 보내 준다). 둘을 함께 주면 400."
+      operationId: chat.messages
+      parameters:
+        - description: "방의 id"
+          in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: "이 번호보다 **이전** 메시지를 읽는다(옛 메시지로 거슬러 간다). `afterSeq`와 함께 줄 수 없다"
+          in: query
+          name: beforeSeq
+          required: false
+          schema:
+            maximum: 9007199254740991
+            minimum: 0
+            type: integer
+        - description: "이 번호보다 **이후** 메시지를 읽는다(끊겼다 돌아와 놓친 것을 받는다 — 마지막으로 받은 `seq`를 준다). `beforeSeq`와 함께 줄 수 없다"
+          in: query
+          name: afterSeq
+          required: false
+          schema:
+            maximum: 9007199254740991
+            minimum: 0
+            type: integer
+        - description: "돌려줄 가장 많은 수 — 1 이상, 안 주면 50, 200를 넘으면 200로 줄인다. 번호를 안 주면 가장 새 메시지부터 그만큼"
+          in: query
+          name: limit
+          required: false
+          schema:
+            maximum: 9007199254740991
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  items:
+                    description: "결과 목록 — 없으면 빈 배열"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        body:
+                          description: "본문(평문)"
+                          type: string
+                        createdAt:
+                          description: "보낸 시각"
+                          type: string
+                        id:
+                          description: "메시지의 id"
+                          type: string
+                        roomId:
+                          description: "방의 id"
+                          type: string
+                        senderId:
+                          description: "보낸 사용자의 id"
+                          type: string
+                        seq:
+                          description: "방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다"
+                          maximum: 9007199254740991
+                          minimum: -9007199254740991
+                          type: integer
+                      required:
+                        - id
+                        - roomId
+                        - seq
+                        - senderId
+                        - body
+                        - createdAt
+                      type: object
+                    type: array
+                required:
+                  - items
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - read
+      summary: "방의 메시지 읽기"
+      tags:
+        - chat
+    post:
+      description: "방에 평문 메시지를 보낸다. 방 안에서 번호가 매겨지고 참여자 모두의 실시간 연결에 `message` 프레임이 간다. 실시간 연결(`send` 프레임)을 쓸 수 없는 곳에서 쓴다. 끊겼다 다시 보낼 수 있으면 `clientMsgId`를 붙인다 — 같은 값은 한 번만 받는다. 채팅 쓰기는 공개 API의 쓰기 한도(분당 30)가 아니라 채팅 전용 한도(기본 분당 60)를 쓴다."
+      operationId: chat.send
+      parameters:
+        - description: "방의 id"
+          in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              additionalProperties: false
+              properties:
+                body:
+                  description: "메시지 본문 — 평문(마크다운·HTML로 해석하지 않는다). 공백뿐이거나 제어 문자가 있거나 서버 상한(기본 4000자)을 넘으면 400 `EMPTY`·`BAD_CHAR`·`TOO_LONG`"
+                  type: string
+                clientMsgId:
+                  description: "보내는 쪽이 정하는 중복 방지 값 — 1~64자. 같은 방에서 같은 사람이 같은 값을 되풀이하면 한 번만 받고 응답의 `duplicate`가 true다(끊겼다 다시 보낼 때 쓴다). 안 주면 중복을 막지 않는다"
+                  maxLength: 64
+                  minLength: 1
+                  type: string
+              required:
+                - body
+              type: object
+        required: true
+      responses:
+        "201":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  body:
+                    description: "본문(평문)"
+                    type: string
+                  createdAt:
+                    description: "보낸 시각"
+                    type: string
+                  duplicate:
+                    description: "같은 `clientMsgId`의 되풀이라 새로 만들지 않고 처음 받은 메시지를 돌려줬으면 true(다시 알리지도 않는다)"
+                    type: boolean
+                  id:
+                    description: "메시지의 id"
+                    type: string
+                  roomId:
+                    description: "방의 id"
+                    type: string
+                  senderId:
+                    description: "보낸 사용자의 id"
+                    type: string
+                  seq:
+                    description: "방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                required:
+                  - id
+                  - roomId
+                  - seq
+                  - senderId
+                  - body
+                  - createdAt
+                  - duplicate
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "409":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "이 동작은 409를 주지 않는다(같은 `clientMsgId`의 되풀이는 `duplicate=true`로 돌려준다)"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - write
+      summary: "메시지 보내기"
+      tags:
+        - chat
+  "/chat/rooms/{id}/read":
+    put:
+      description: "방에서 여기까지 읽었다고 표시한다 — 안 읽은 수(`unread`)가 줄어든다. 번호는 내려가지 않는다(더 작은 값을 주면 그대로 둔다). 방의 마지막 번호를 넘으면 마지막 번호로 줄인다."
+      operationId: chat.read
+      parameters:
+        - description: "방의 id"
+          in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              additionalProperties: false
+              properties:
+                seq:
+                  description: "여기까지 읽었다는 메시지 번호 — 내려가지 않고 방의 마지막 번호를 넘으면 마지막 번호로 줄인다"
+                  maximum: 9007199254740991
+                  minimum: 0
+                  type: integer
+              required:
+                - seq
+              type: object
+        required: true
+      responses:
+        "200":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  lastReadSeq:
+                    description: "지금 내가 읽은 마지막 번호"
+                    maximum: 9007199254740991
+                    minimum: -9007199254740991
+                    type: integer
+                required:
+                  - lastReadSeq
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "409":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "이 동작은 409를 주지 않는다"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - write
+      summary: "읽음 표시"
+      tags:
+        - chat
+  "/chat/users":
+    get:
+      description: "활성 사용자의 id와 표시 이름만 돌려준다(아이디·메일은 싣지 않는다). 나는 빠진다. `q`는 표시 이름의 일부, 이름 순이다. 방을 만들거나 초대할 `userId`를 여기서 얻는다."
+      operationId: chat.users
+      parameters:
+        - description: "찾을 말 — 표시 이름의 일부(대소문자 무시). 안 주면 이름 순으로 앞에서부터"
+          in: query
+          name: q
+          required: false
+          schema:
+            default: ""
+            maxLength: 100
+            type: string
+        - description: "돌려줄 가장 많은 수 — 1~50, 기본 20"
+          in: query
+          name: limit
+          required: false
+          schema:
+            default: 20
+            maximum: 50
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            "application/json":
+              schema:
+                additionalProperties: false
+                properties:
+                  items:
+                    description: "결과 목록 — 없으면 빈 배열"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        displayName:
+                          description: "표시 이름"
+                          type: string
+                        id:
+                          description: "사용자의 id"
+                          type: string
+                      required:
+                        - id
+                        - displayName
+                      type: object
+                    type: array
+                required:
+                  - items
+                type: object
+          description: "성공"
+        "400":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "입력이 틀렸다 — `error.code`와 `error.message`가 까닭을 말한다"
+        "401":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰이 없거나 쓸 수 없다(만료·폐기·정지) — `TOKEN_*`"
+        "403":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "scope가 모자라거나(`INSUFFICIENT_SCOPE`) 사람의 권한이 없다(`FORBIDDEN`) — 토큰은 사람보다 더 할 수 없다"
+        "404":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "없거나 볼 수 없다 — 둘을 구별하지 않는다"
+        "429":
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "토큰별 빈도 제한을 넘었다 — `Retry-After`(초)만큼 기다린다"
+      security:
+        - bearerAuth:
+            - read
+      summary: "방에 부를 사람 찾기"
+      tags:
+        - chat
   "/comments/{id}":
     delete:
       description: "쓴 사람, 또는 그 스페이스에 쓸 수 있고 페이지를 지울 권한이 있는 사람만 지운다(중지된 스페이스에서는 아무도). 답글은 함께 지워지지 않는다."
@@ -6996,4 +8139,5 @@ tags:
   - name: trash
   - name: notifications
   - name: admin
+  - name: chat
   - name: spec

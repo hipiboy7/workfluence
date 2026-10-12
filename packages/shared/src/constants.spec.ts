@@ -17,9 +17,9 @@ describe('LOG_EVENTS — 로그 줄의 안정된 event 코드', () => {
     expect(LOG_EVENTS).toContain('http.unhandled');
   });
 
-  it('영역은 정해진 것만 — 기동·요청·헬스·인증·세션·메일·LLM·실시간 편집', () => {
+  it('영역은 정해진 것만 — 기동·요청·헬스·인증·세션·메일·LLM·실시간 편집·채팅', () => {
     const areas = new Set(LOG_EVENTS.map((e) => e.split('.')[0]));
-    expect([...areas].sort()).toEqual(['app', 'auth', 'collab', 'health', 'http', 'llm', 'mail', 'session']);
+    expect([...areas].sort()).toEqual(['app', 'auth', 'chat', 'collab', 'health', 'http', 'llm', 'mail', 'session']);
   });
 
   it('**사내 IdP와의 처리가 실패하면 남는 줄이 있다** — 바깥 탓이라 warn이다 (FR-1215, P11 코드 리뷰)', () => {
