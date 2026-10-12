@@ -355,6 +355,21 @@ describe('끊기 (FR-2411)', () => {
   });
 });
 
+describe('끊은 연결의 프레임 (코드 리뷰 3 · 보안 검토 1)', () => {
+  it('세션을 끊은 뒤에 도착하거나 줄에 쌓여 있던 프레임은 메시지가 되지 않는다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const { room } = await svc.createRoom(a, { kind: 'direct', userId: b.id });
+    const c = asClient(await viaSession(a.id));
+    // 서버가 연결을 끊은 뒤에도 클라이언트가 닫기에 응답하지 않고 계속 보내는 상황 — 끊은 연결의 처리기를 직접 부른다
+    const conn = [...(gw as unknown as { conns: Set<{ userId: string; ws: WebSocket }> }).conns].find((x) => x.userId === a.id)!;
+    bus.revoke(a.id);
+    await (gw as unknown as { onFrame(c: unknown, d: Buffer, bin: boolean, ip: null): Promise<void> }).onFrame(conn, Buffer.from(JSON.stringify({ type: 'send', roomId: room.id, body: '유령' })), false, null);
+    expect(await svc.listMessages(b, room.id, {})).toEqual([]);
+    await c.closed;
+  });
+});
+
 describe('끄기 (FR-2420)', () => {
   it('꺼져 있으면 채팅 경로는 404로 닫힌다 — 응답 없이 열려 남지 않는다', async () => {
     await gw.onModuleDestroy();

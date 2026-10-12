@@ -13,6 +13,7 @@ import { AppLayout, SideSlot } from './AppLayout';
  */
 
 let me: MeView;
+let chatEnabled = true;
 let calls: { method: string; url: string }[];
 const json = (status: number, body: unknown) =>
   ({ ok: status < 400, status, headers: new Headers(), body: null, text: () => Promise.resolve(body === undefined ? '' : JSON.stringify(body)) }) as unknown as Response;
@@ -20,11 +21,13 @@ const json = (status: number, body: unknown) =>
 beforeEach(() => {
   me = { id: 'm1', username: 'kim', displayName: '김', role: 'member', mustChangePassword: false, grants: [], hasPassword: true };
   calls = [];
+  chatEnabled = true;
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const url = String(input);
     calls.push({ method, url });
     if (url === '/api/auth/me') return Promise.resolve(json(200, me));
+    if (url === '/api/auth/config') return Promise.resolve(json(200, { chatEnabled }));
     if (url === '/api/notifications/unread-count') return Promise.resolve(json(200, { count: 0 }));
     if (method === 'POST' && url === '/api/auth/logout') return Promise.resolve(json(204, undefined));
     return Promise.reject(new Error(`시험에 없는 요청: ${method} ${url}`));
@@ -243,5 +246,15 @@ describe('AppLayout — 왼쪽 칸 접기 (J.3.3·J.3.6, FR-1853 · 병합 전 �
     expect(await screen.findByText('검색 본문')).toBeTruthy();
     expect(await screen.findByRole('navigation', { name: '바로가기' })).toBeTruthy();
     expect(screen.queryByText('스페이스 트리')).toBeNull();
+  });
+});
+
+describe('AppLayout — 채팅 메뉴 (P21 FR-2420)', () => {
+  it('채팅이 꺼져 있으면(서버 설정) 위 막대에서 채팅이 사라진다', async () => {
+    chatEnabled = false;
+    renderAt('/search');
+    const nav = await screen.findByRole('navigation', { name: '주 메뉴' });
+    await waitFor(() => expect(within(nav).queryByRole('link', { name: '채팅' })).toBeNull());
+    expect(within(nav).getByRole('link', { name: '검색' })).toBeTruthy();
   });
 });

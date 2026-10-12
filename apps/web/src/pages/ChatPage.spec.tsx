@@ -76,8 +76,10 @@ beforeEach(() => {
     if (url === '/api/chat/rooms' && method === 'GET') return Promise.resolve(json(200, { items: rooms }));
     const m = /^\/api\/chat\/rooms\/([^/]+)\/messages\?(.*)$/.exec(url);
     if (m && method === 'GET') {
-      const after = new URLSearchParams(m[2]).get('afterSeq');
-      return Promise.resolve(json(200, { items: (messages[m[1]!] ?? []).filter((x) => (after === null ? true : x.seq > Number(after))) }));
+      const qs = new URLSearchParams(m[2]);
+      const after = qs.get('afterSeq');
+      const limit = Number(qs.get('limit') ?? 50);
+      return Promise.resolve(json(200, { items: (messages[m[1]!] ?? []).filter((x) => (after === null ? true : x.seq > Number(after))).slice(0, limit) }));
     }
     if (/\/read$/.test(url) && method === 'PUT') return Promise.resolve(json(200, { lastReadSeq: body.seq }));
     if (/\/members\/me$/.test(url) && method === 'DELETE') return Promise.resolve(json(200, { ok: true }));
@@ -182,7 +184,7 @@ describe('끊김·실패 (G절)', () => {
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(2), { timeout: 3_000 });
     hello();
     expect(await screen.findByText('끊긴 사이에 온 것')).toBeTruthy();
-    expect(calls.some((c) => c.url === `/api/chat/rooms/${R1}/messages?afterSeq=2`)).toBe(true);
+    expect(calls.some((c) => c.url === `/api/chat/rooms/${R1}/messages?afterSeq=2&limit=200`)).toBe(true);
   });
 
   it('세션이 끝나(4401) 닫히면 다시 로그인하라고 말하고 다시 붙지 않는다', async () => {
@@ -278,5 +280,51 @@ describe('여럿 방의 초대·나가기 (FR-2402)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '나간다' }));
     await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', url: `/api/chat/rooms/${R2}/members/me`, body: undefined }));
     expect(await screen.findByText('방을 고른다')).toBeTruthy();
+  });
+});
+
+describe('놓친 메시지 메우기와 받기 전의 프레임 (코드 리뷰 1·2)', () => {
+  it('끊긴 사이 200개를 넘게 쌓였어도 이어서 받아 빈 구간이 없다', async () => {
+    open(`/chat/${R1}`);
+    await screen.findByText('첫 번째');
+    hello();
+    sock().drop();
+    messages[R1] = [...messages[R1]!, ...Array.from({ length: 450 }, (_, i) => msg(R1, i + 3, `쌓인 ${i + 3}`))];
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(2), { timeout: 3_000 });
+    hello();
+    await waitFor(() => expect(pane().getByText('쌓인 452')).toBeTruthy(), { timeout: 3_000 });
+    const gets = calls.filter((c) => c.url.startsWith(`/api/chat/rooms/${R1}/messages?afterSeq=`)).map((c) => c.url);
+    expect(gets).toEqual([`/api/chat/rooms/${R1}/messages?afterSeq=2&limit=200`, `/api/chat/rooms/${R1}/messages?afterSeq=202&limit=200`, `/api/chat/rooms/${R1}/messages?afterSeq=402&limit=200`]);
+    expect(pane().getAllByRole('listitem').length).toBeGreaterThan(450); // 번호가 이어진다
+  });
+
+  it('방을 열려고 메시지를 받아 오는 사이에 먼저 도착한 실시간 메시지를 버리지 않는다', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (/\/messages\?/.test(String(input)) && (init?.method ?? 'GET') === 'GET') await gate; // 받아 오는 중
+      return (original as typeof fetch)(input as string, init);
+    }) as unknown as typeof fetch;
+    open(`/chat/${R1}`);
+    hello();
+    sock().recv({ type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '먼저 온 것', createdAt: '2026-10-12T01:05:00.000Z' });
+    release();
+    await waitFor(() => expect(pane().getByText('첫 번째')).toBeTruthy());
+    expect(pane().getByText('먼저 온 것')).toBeTruthy();
+  });
+});
+
+describe('연결 상한으로 밀려났을 때 (코드 리뷰 4)', () => {
+  it('스스로 다시 붙지 않고 알린다 — 누르면 다시 붙는다', async () => {
+    open(`/chat/${R1}`);
+    await screen.findByText('첫 번째');
+    hello();
+    sock().drop(4409);
+    expect(await screen.findByText(/연결이 너무 많아/)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 1_200));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '다시 연결' }));
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 });

@@ -62,7 +62,7 @@ curl -s "$BASE/api/v1/openapi.sha256"
 | 본문 형식 | 읽을 때 `format`=`markdown`(기본)·`json`·`text`, 쓸 때 본문과 `format`=`markdown`(기본)·`json`. 마크다운은 원시 HTML·그림·허용 밖 링크를 거절한다(400, 줄 번호와 까닭만 말하고 입력은 되읊지 않는다) |
 | 이름으로 고르기 | 스페이스·분류·사용자(Crew)·라벨은 id를 외우지 않고 **이름으로** 부를 수 있다. 없는 이름은 404이고, 분류는 고를 수 있는 이름을 `details.available`로 준다 |
 | 기본값 | 만들 때 필수는 대개 **어디·제목·본문**뿐이다. 나머지는 서버가 채우고 **응답이 채운 값을 말한다**(부모·위치·버전) — 다음 호출에 id를 외우지 않아도 된다 |
-| 빈도 제한 | 토큰마다 읽기 120번·쓰기 30번 / 분. 넘으면 429 `RATE_LIMITED`와 `Retry-After`(초) |
+| 빈도 제한 | 토큰마다 읽기 120번·쓰기 30번 / 분. 넘으면 429 `RATE_LIMITED`와 `Retry-After`(초). **채팅 보내기만 예외** — 사용자마다 분당 60(3.13절) |
 | 감사 | 토큰으로 한 일도 감사로그에 화면과 같은 이름으로 남고 **어느 토큰인지**(`jti`)가 함께 남는다 |
 | 호환 | v1은 더하기만 한다(필드·경로 추가). 빼거나 뜻을 바꾸면 v2다. 모르는 응답 필드는 무시한다 |
 
@@ -206,7 +206,7 @@ ws.on('message', (data) => {
 | 서버→나 | `hello` | 연결 직후 한 번 — `userId`, 참여한 방 `roomIds` |
 | 서버→나 | `message` | 방의 새 메시지(`roomId`·`seq`·`senderId`·`body`·`createdAt`) — **내가 보낸 것도 온다** |
 | 서버→나 | `ack` | 내가 보낸 `send`의 결과(`clientMsgId`·`roomId`·`seq`·`createdAt`) |
-| 서버→나 | `room` | 내가 방에 들었다·나갔다(`change`) — 방이 새로 생기면 연결을 다시 열지 않아도 온다 |
+| 서버→나 | `room` | 내가 방에 들었다·나갔다(`change`=joined·left), 또는 내가 든 방의 참여자가 바뀌었다(`members`) — 방이 새로 생기면 연결을 다시 열지 않아도 온다 |
 | 서버→나 | `error` | 보낸 것 하나를 거절(`code`·`roomId`·`clientMsgId`) — 연결은 그대로. `EMPTY`·`TOO_LONG`·`BAD_CHAR`·`ROOM_NOT_FOUND`·`INSUFFICIENT_SCOPE`·`RATE_LIMITED` |
 | 나→서버 | `send` | `{"type":"send","roomId":"…","body":"…","clientMsgId":"(선택)"}` — **이것 하나뿐이다** |
 
@@ -214,9 +214,9 @@ ws.on('message', (data) => {
 - **모르는 `type`·모르는 칸·JSON이 아닌 글·바이너리·너무 큰 프레임**은 서버가 연결을 닫는다(코드 4400, 큰 것은 1009). 같은 것을 다시 보내지 말고 프레임을 고친다.
 - 토큰이 폐기·만료되거나 주인이 정지·비밀번호 변경·세션 강제 종료를 당하면 연결이 닫힌다(**4401**) — 다시 붙지 말고 새 토큰을 받는다.
 - 같은 사용자의 연결이 상한(기본 5)을 넘으면 **가장 오래된** 연결이 닫힌다(**4409**) — 닫지 않고 다시 열기만 하면 쌓이지 않는다.
-- **연결은 새 메시지만 보낸다.** 끊겼다 돌아오면 방마다 마지막으로 받은 `seq` 이후를 `GET /chat/rooms/{id}/messages?afterSeq=<seq>`로 받아 메우고, 같은 메시지가 둘 오면 `(roomId, seq)`로 거른다.
+- **연결은 새 메시지만 보낸다.** 끊겼다 돌아오면 방마다 마지막으로 받은 `seq` 이후를 `GET /chat/rooms/{id}/messages?afterSeq=<seq>&limit=200`으로 받아 메운다 — **한 번에 `limit`개까지만 오므로 `limit`개가 다 오면 마지막 `seq`로 이어서 받는다**(아니면 가운데 구멍이 남는다). 같은 메시지가 둘 오면 `(roomId, seq)`로 거른다.
 - 연달아 보낸 `send`는 보낸 순서대로 번호를 받는다. 끊겼다 다시 보낼 때는 **같은 `clientMsgId`**로 보낸다 — 같은 값은 한 번만 받는다(REST 보내기의 응답은 `duplicate: true`).
-- 분당 보내기 한도는 연결마다(REST는 토큰마다) 기본 60이다 — 공개 API의 쓰기 한도(30)와 별개다. 넘으면 `RATE_LIMITED`(REST는 429와 `Retry-After`).
+- 분당 보내기 한도는 **사용자마다** 기본 60이다 — 연결·토큰을 여럿 열어도 한 예산이고 화면의 보내기도 같은 예산이다. 공개 API의 쓰기 한도(30)와 별개다. 넘으면 `RATE_LIMITED`(REST는 429와 `details.retryAfterSec`).
 - 서버가 30초마다 ping을 보낸다 — WebSocket 라이브러리의 pong 자동 응답을 끄지 않는다.
 - 메시지는 **평문**이다. 방은 참여자만 읽고 쓴다 — 참여하지 않은 방은 있는지도 알려 주지 않는 404다. 메시지의 보존·삭제·감사는 정하지 않았다(보류 39).
 
@@ -238,9 +238,11 @@ ws.on('message', (data) => {
 | 503 | `API_DISABLED` | 서버에 공개 API가 꺼져 있다 → 운영자에게 |
 | 400 | `INVALID_REQUEST` | 입력이 틀렸다 → 메시지가 칸과 까닭을 말한다(값은 싣지 않는다) |
 | 400 | `INVALID_JSON` | 본문이 JSON이 아니다 |
+| 400 | `EMPTY`·`TOO_LONG`·`BAD_CHAR`·`DIRECT_ROOM`·`SELF_ROOM`·`NO_MEMBERS`·`BAD_QUERY` | 채팅 — 메시지 본문의 문제·1:1 방에서 나가기·자기 자신과의 1:1·부를 사람이 없다·번호 질의가 틀렸다(3.13절) |
 | 413 | `PAYLOAD_TOO_LARGE` | 본문이 너무 크다 |
 | 413 | `TOO_LARGE_FOR_JSON` | 첨부가 JSON으로 받기에 너무 크다 → `format` 없이 바이너리로 받는다 |
 | 404 | `NOT_FOUND` | 없거나 볼 수 없다 — 둘을 구별하지 않는다 |
+| 404 | `ROOM_NOT_FOUND`·`USER_NOT_FOUND`·`CHAT_DISABLED` | 채팅 — 참여하지 않은 방(있는지도 알려 주지 않는다)·부를 수 없는 사용자(정지·승인 대기·없는 id)·서버가 채팅을 껐다 |
 | 404 | `SPACE_NOT_FOUND`·`SPACE_REQUIRED`·`CATEGORY_NOT_FOUND`·`MEMBER_NOT_FOUND`·`LABEL_NOT_FOUND` | 이름으로 부른 것이 없다 → 이름을 다시 본다(스페이스는 `GET /api/v1/spaces`, 분류는 오류의 `details.available`) |
 | 409 | `SPACE_AMBIGUOUS` | 같은 이름의 스페이스가 여럿이다 → id로 고른다 |
 | 409 | `VERSION_CONFLICT` | 기준 버전이 어긋났다 → `details.currentVersionNo`로 다시 읽고 고쳐 다시 보낸다 |

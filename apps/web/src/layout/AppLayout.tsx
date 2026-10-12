@@ -2,6 +2,7 @@ import { can, type MeView } from '@workfluence/shared';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
+import { api } from '../api';
 import { useAuth } from '../auth';
 import { MenuIcon } from '../components/icons';
 import { ROLE_NAMES } from '../components/displayNames';
@@ -75,6 +76,13 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [slotEl, setSlotEl] = useState<HTMLElement | null>(null);
   const [claims, setClaims] = useState(0);
+  // 채팅이 꺼져 있으면 메뉴를 숨긴다(P21 FR-2420). 알 수 없으면(요청 실패) 보인다 — 숨겨서 못 쓰는 것보다 눌러서 안내를 보는 편이 낫다
+  const [chatEnabled, setChatEnabled] = useState(true);
+  useEffect(() => {
+    api<{ chatEnabled?: boolean }>('/api/auth/config')
+      .then((c) => setChatEnabled(c.chatEnabled !== false))
+      .catch(() => undefined);
+  }, []);
 
   const toggle = useCallback(() => {
     setCollapsed((v) => {
@@ -147,11 +155,13 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 LLM 질문
               </Link>
             </li>
-            <li>
-              <Link to="/chat" aria-current={here('chat')}>
-                채팅
-              </Link>
-            </li>
+            {chatEnabled && (
+              <li>
+                <Link to="/chat" aria-current={here('chat')}>
+                  채팅
+                </Link>
+              </li>
+            )}
             <li>
               <Link to="/trash" aria-current={here('trash')}>
                 휴지통

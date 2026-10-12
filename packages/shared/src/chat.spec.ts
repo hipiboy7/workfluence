@@ -141,3 +141,12 @@ describe('요청 본문 (E절)', () => {
     expect(chatMessagesQueryDto.safeParse({ beforeSeq: '-1' }).success).toBe(false);
   });
 });
+
+describe('seq 상한 (보안 검토 7)', () => {
+  it('JS가 다루는 정수를 넘는 번호는 거절한다 — DB 오류(500)가 되지 않게', async () => {
+    const { chatMessagesQueryDto, markChatReadDto } = await import('./chat');
+    expect(chatMessagesQueryDto.safeParse({ beforeSeq: '1e30' }).success).toBe(false);
+    expect(chatMessagesQueryDto.safeParse({ afterSeq: String(Number.MAX_SAFE_INTEGER) }).success).toBe(true);
+    expect(markChatReadDto.safeParse({ seq: 1e30 }).success).toBe(false);
+  });
+});

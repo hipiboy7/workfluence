@@ -282,6 +282,11 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
   if (env.WF_ENV === 'production' && env.WF_MAIL_ENABLED && env.WF_MAIL_MOCK) {
     problems.push('WF_MAIL_MOCK: 운영(production)에서 메일을 켰으면 false여야 한다 — 모의는 보내지 않고 로그로만 남긴다');
   }
+  // 채팅 (P21 자체 점검 10) — 한 프레임은 글자 상한의 최악(글자당 UTF-8 4바이트)과 JSON 봉투를 담아야 한다. 아니면 상한 안의 메시지가 `TOO_LONG` 안내 대신
+  // 연결을 닫아 버려("다시 보내기 → 또 닫힘") 조용히 이상해진다 — 기동에서 잡는다
+  if (env.WF_CHAT_ENABLED && env.WF_CHAT_MAX_FRAME_BYTES < env.WF_CHAT_MAX_MESSAGE_CHARS * 4 + 1024) {
+    problems.push(`WF_CHAT_MAX_FRAME_BYTES: 메시지 글자 상한(${env.WF_CHAT_MAX_MESSAGE_CHARS}자)을 담으려면 ${env.WF_CHAT_MAX_MESSAGE_CHARS * 4 + 1024} 이상이어야 한다(글자당 최대 4바이트 + 프레임 봉투)`);
+  }
   if (problems.length) throw new EnvValidationError(problems);
   return env;
 }

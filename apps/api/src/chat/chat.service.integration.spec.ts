@@ -1,5 +1,5 @@
 import type { ChatMessageView } from '@workfluence/shared';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { users } from '../db/schema';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
@@ -77,7 +77,9 @@ describe('여럿 방 (FR-2402)', () => {
     expect(rooms.filter((r) => r.userId === c.id && r.change === 'joined')).toHaveLength(1);
     await svc.leave(b, room.id);
     expect((await svc.getRoom(a.id, room.id)).members).toHaveLength(2);
-    expect(rooms.at(-1)).toMatchObject({ userId: b.id, change: 'left' });
+    expect(rooms.filter((r) => r.userId === b.id && r.change === 'left')).toHaveLength(1);
+    // 방에 남은 사람들의 참여자 목록도 바뀌었다고 알린다(자체 점검 5)
+    expect(rooms.filter((r) => r.change === 'members' && r.userId === a.id)).toHaveLength(2); // 초대 때 한 번 + 나감 때 한 번
   });
   it('만든 사람이 아니면 초대하지 못한다 — 참여자가 아니면 방이 없는 것과 같다', async () => {
     const a = await person(db, 'a');
@@ -210,5 +212,35 @@ describe('사람 찾기 (E절)', () => {
     expect((await svc.searchUsers(me, '', 10)).map((u) => u.displayName)).toEqual(['ki%m', 'kim']);
     await db.update(users).set({ status: 'suspended' }).where(eq(users.username, 'kim'));
     expect((await svc.searchUsers(me, 'ki', 10)).map((u) => u.displayName)).toEqual(['ki%m']);
+  });
+});
+
+describe('보내기 한도는 사용자마다 한 예산이다 (보안 검토 2)', () => {
+  it('REST·WebSocket 어느 길로 보내든, 몇 개의 연결·토큰으로 보내든 같은 한도를 나눠 쓴다', async () => {
+    const limited = new ChatService(db, hub, { WF_CHAT_MAX_MESSAGE_CHARS: 10, WF_CHAT_SEND_PER_MIN: 2 });
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const { room } = await limited.createRoom(a, { kind: 'direct', userId: b.id });
+    await limited.send(a, room.id, { body: '1' });
+    await limited.send(a, room.id, { body: '2' });
+    await expect(limited.send(a, room.id, { body: '3' })).rejects.toMatchObject({ status: 429, response: { code: 'RATE_LIMITED', details: { retryAfterSec: 60 } } });
+    await limited.send(b, room.id, { body: '상대는 따로' });
+    expect((await limited.listMessages(a, room.id, {})).map((m) => m.body)).toEqual(['1', '2', '상대는 따로']);
+  });
+});
+
+describe('읽음 표시와 나가기가 겹쳐도 (코드 리뷰 5)', () => {
+  it('확인과 쓰기 사이에 방을 나갔으면 500이 아니라 404다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const { room } = await svc.createRoom(a, { kind: 'group', name: 'g', userIds: [b.id] });
+    await svc.send(a, room.id, { body: 'x' });
+    // isMember 확인을 통과시킨 뒤 UPDATE 전에 나간 상태를 흉내 낸다
+    const spy = vi.spyOn(svc, 'isMember').mockImplementationOnce(async () => {
+      await svc.leave(b, room.id);
+      return true;
+    });
+    await expect(svc.markRead(b, room.id, 1)).rejects.toMatchObject({ status: 404 });
+    spy.mockRestore();
   });
 });

@@ -23,7 +23,6 @@ import { SettingsService } from '../settings/settings.service';
 import { UsersService } from '../users/users.service';
 import { ChatHub } from './chat.hub';
 import { ChatService } from './chat.service';
-import { SendRateWindow } from './domain/send-rate';
 import { readChatWsPath, type ChatWsKind } from './domain/ws-path';
 
 type Conn = {
@@ -38,7 +37,6 @@ type Conn = {
   alive: boolean;
   lastCheckedAt: number;
   openedAt: number;
-  rate: SendRateWindow;
   /** 이 연결의 프레임을 **받은 순서대로** 하나씩 처리하는 줄 — 한 클라이언트가 연달아 보낸 메시지가 뒤바뀌지 않게 */
   chain: Promise<void>;
 };
@@ -197,7 +195,6 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       alive: true,
       lastCheckedAt: now,
       openedAt: now,
-      rate: new SendRateWindow(this.env.WF_CHAT_SEND_PER_MIN, 60_000),
       chain: Promise.resolve(),
     };
     // 한 사용자의 동시 연결 상한 — 넘으면 **가장 오래된** 연결을 닫는다(재접속을 되풀이하는 클라이언트가 쌓이지 않게, NFR-241)
@@ -215,11 +212,16 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       conn.chain = conn.chain.then(() => this.onFrame(conn, data, isBinary, ip)).catch(() => undefined);
     });
     this.sendTo(conn, { type: 'hello', userId: auth.userId, roomIds });
+    // 인증과 이 자리 사이에 세션·토큰이 폐기됐으면 알림을 놓쳤다 — 지금 한 번 더 본다(보안 검토 6)
+    void this.verify(conn);
   }
 
   // ---- 받기 ----
 
   private async onFrame(conn: Conn, data: RawData, isBinary: boolean, ip: string | null): Promise<void> {
+    // **끊은(또는 끊기는) 연결의 프레임은 처리하지 않는다.** `ws.close()`는 닫기 핸드셰이크가 끝날 때까지(최대 30초) 받기를 멈추지 않고, 처리 줄에 이미 쌓인 프레임도 있다 —
+    // 세션·토큰이 죽어 끊은 연결이 그 뒤로도 메시지를 쓰지 못하게 한다 (코드 리뷰 3 · 보안 검토 1)
+    if (!this.conns.has(conn) || conn.ws.readyState !== conn.ws.OPEN) return;
     if (isBinary) return this.reject(conn, 'binary_frame', ip);
     const parsed = parseChatClientFrame(data.toString(), this.env.WF_CHAT_MAX_MESSAGE_CHARS);
     if (!parsed.ok) {
@@ -236,16 +238,12 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       this.sendTo(conn, { type: 'error', code: 'INSUFFICIENT_SCOPE', roomId: f.roomId, ...echo });
       return;
     }
-    if (!conn.rate.take(Date.now())) {
-      this.log.warn(logLine('chat.rate_limited', '채팅 보내기 한도를 넘었다', { targetUserId: conn.userId, kind: conn.kind }));
-      this.sendTo(conn, { type: 'error', code: 'RATE_LIMITED', roomId: f.roomId, ...echo });
-      return;
-    }
     try {
       const r = await this.chat.send({ id: conn.userId }, f.roomId, { body: f.body, ...(f.clientMsgId !== undefined ? { clientMsgId: f.clientMsgId } : {}) });
       this.sendTo(conn, { type: 'ack', clientMsgId: f.clientMsgId ?? null, roomId: f.roomId, seq: r.message.seq, createdAt: r.message.createdAt });
     } catch (e) {
       const code = (e as { response?: { code?: string } }).response?.code;
+      if (code === 'RATE_LIMITED') this.log.warn(logLine('chat.rate_limited', '채팅 보내기 한도를 넘었다', { targetUserId: conn.userId, kind: conn.kind }));
       if (code) this.sendTo(conn, { type: 'error', code, roomId: f.roomId, ...echo });
       else {
         this.log.error(logLine('chat.send_failed', '채팅 보내기 실패', { kind: conn.kind }, e));
@@ -309,22 +307,26 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** 이 연결의 세션·토큰이 지금도 살아 있는가 — 아니면 끊는다. 판정을 못 하면 끊지 않는다(다음 주기에 다시 본다) */
+  private async verify(conn: Conn): Promise<void> {
+    try {
+      const live =
+        conn.kind === 'session'
+          ? (await this.sessionState(conn.sid!)) !== null && (await this.activeUser(conn.userId))
+          : await this.tokens.isLive(conn.userId, conn.tokenId!);
+      if (!live) this.closeWhere((x) => x === conn, '재판정', conn.userId);
+    } catch (e) {
+      this.log.warn(logLine('chat.recheck_failed', '채팅 연결 재판정 실패', { targetUserId: conn.userId }, e));
+    }
+  }
+
   /** 주기 재판정 — 버스가 닿지 않는 변화(만료·정지)를 잡는다. 연결마다 마지막 판정 시각을 들고 주기가 지난 것만 본다 */
   private async recheck(): Promise<void> {
     const now = Date.now();
     for (const c of [...this.conns]) {
       if (now - c.lastCheckedAt < this.env.WF_CHAT_RECHECK_MS) continue;
       c.lastCheckedAt = now;
-      try {
-        const live =
-          c.kind === 'session'
-            ? (await this.sessionState(c.sid!)) !== null && (await this.activeUser(c.userId))
-            : await this.tokens.isLive(c.userId, c.tokenId!);
-        if (!live) this.closeWhere((x) => x === c, '재판정', c.userId);
-      } catch (e) {
-        // 판정을 못 했다고 끊지는 않는다 — 다음 주기에 다시 본다
-        this.log.warn(logLine('chat.recheck_failed', '채팅 연결 재판정 실패', { targetUserId: c.userId }, e));
-      }
+      await this.verify(c);
     }
   }
 

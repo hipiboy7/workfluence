@@ -23,7 +23,8 @@ import { ChatService } from '../chat/chat.service';
  * 채팅 REST — 공개 API(v1, headless) (P21_설계서_Chat E절). 화면용(`chat/chat.controller.ts`)과 **본문·응답이 같고** 인증만 토큰이다 — 읽기는 `read`, 보내기·방 만들기·읽음은 `write` scope. 빈도 제한은 `ChatApiRateGuard`(채팅 쓰기는 공개 API의 분당 30이 아니라 `WF_CHAT_SEND_PER_MIN`).
  */
 @Controller('api/v1/chat')
-@UseGuards(ApiTokenGuard, ChatApiRateGuard, ChatEnabledGuard)
+// 꺼져 있으면 예산을 쓰기 전에 404다(자체 점검 12) — 토큰 확인 → 켜짐 → 빈도 제한
+@UseGuards(ApiTokenGuard, ChatEnabledGuard, ChatApiRateGuard)
 @UseFilters(V1ExceptionFilter)
 export class V1ChatController {
   constructor(private readonly svc: ChatService) {}

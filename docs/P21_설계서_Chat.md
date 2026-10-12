@@ -43,10 +43,10 @@
 | FR-2406 | 연결이 끊겼다 돌아온 클라이언트는 방마다 `afterSeq`로 **놓친 메시지**를 받는다(REST) — 연결이 보내 주는 것은 새 것뿐이다 | 통합 |
 | FR-2407 | 읽음 표시 — 참여자는 방마다 **마지막으로 읽은 번호**를 올린다. 안 읽은 수 = 그 뒤 메시지 수 | 통합 |
 | FR-2410 | **headless 접속** — 공개 API 토큰으로 `/api/v1/chat/*`(REST)와 `/api/v1/chat/ws`(WebSocket)에 닿는다. 읽기(`read` scope)는 방·메시지 읽기와 수신, 쓰기(`write`)는 보내기·방 만들기·읽음 | 통합 |
-| FR-2411 | 토큰으로 연 연결은 **토큰이 죽으면(폐기·만료·정지·비밀번호 변경·세션 강제 종료) 그 자리에서** 끊기고, 권한이 줄면 주기 재판정이 끊는다 | 통합 |
+| FR-2411 | 토큰으로 연 연결은 **토큰이 폐기되거나 세션이 끊기면(폐기·비밀번호 변경·세션 강제 종료·정지) 그 자리에서** 끊기고, 만료와 그 밖의 변화는 주기 재판정(`WF_CHAT_RECHECK_MS`)이 끊는다. 끊은 연결이 보낸 프레임은 처리하지 않는다 | 통합 |
 | FR-2412 | 브라우저 연결은 세션 쿠키 + **같은 출처(`Origin`)**만 받는다. 토큰 연결은 `Origin`을 보지 않는다(브라우저가 아니다) | 통합 |
 | FR-2420 | 설정으로 채팅을 끈다(`WF_CHAT_ENABLED=false`) — 끄면 메뉴가 사라지고 연결·REST가 거절된다 | 통합 |
-| NFR-240 | 보내기 한도 — 연결마다 분당 N건(`WF_CHAT_SEND_PER_MIN`). 넘으면 그 메시지만 거절하고 연결은 둔다 | 통합 |
+| NFR-240 | 보내기 한도 — **사용자마다** 분당 N건(`WF_CHAT_SEND_PER_MIN`): 화면·headless, REST·WebSocket이 한 예산이다(연결·토큰마다 세면 곱해진다 — 보안 검토 2). 넘으면 그 메시지만 429 `RATE_LIMITED`로 거절하고 연결은 둔다 | 통합 |
 | NFR-241 | 한 사용자의 동시 연결 상한(`WF_CHAT_MAX_CONNECTIONS_PER_USER`) — 넘으면 **가장 오래된 연결을 닫는다**(에이전트가 재접속을 되풀이해도 쌓이지 않는다) | 통합 |
 | NFR-242 | 메시지 본문을 **로그에 남기지 않는다**(CLAUDE.md 7절) | 로그 대조 |
 
@@ -73,7 +73,7 @@
 | 클라→서버 | `send` | `roomId`, `body`, `clientMsgId`(선택) |
 | 서버→클라 | `ack` | `clientMsgId`, `roomId`, `seq`, `createdAt` — 보낸 사람에게만 |
 | 서버→클라 | `message` | `roomId`, `seq`, `senderId`, `body`, `createdAt` — **보낸 사람 포함** 참여자 모두 |
-| 서버→클라 | `room` | 방이 생기거나 초대·나감 — `roomId`, `change` |
+| 서버→클라 | `room` | 방이 생기거나 초대·나감 — `roomId`, `change`(`joined`·`left`는 당사자에게, `members`는 방에 남은 다른 참여자에게) |
 | 서버→클라 | `error` | `code`, `roomId?`, `clientMsgId?` — 그 메시지만 거절하고 연결은 둔다 |
 | 양쪽 | 프로토콜 ping/pong | 30초 주기 — 응답이 없으면 끊는다(실시간 편집과 같다) |
 
@@ -83,7 +83,7 @@
 
 | 표 | 칸 | 비고 |
 |---|---|---|
-| `chat_rooms` | `id` uuid, `kind` (`direct`/`group`), `name` text null, `created_by` uuid, `created_at`, `last_seq` bigint(기본 0) | 1:1은 `name` 없음. `last_seq`는 새 메시지의 번호를 매기는 곳(행 잠금) |
+| `chat_rooms` | `id` uuid, `kind` (`direct`/`group`), `name` text null, `created_by` uuid, `created_at`, `last_seq` bigint(기본 0), `last_message_at` timestamptz null(방 목록 정렬) | 1:1은 `name` 없음. `last_seq`는 새 메시지의 번호를 매기는 곳(행 잠금) |
 | `chat_members` | `room_id`, `user_id`, `joined_at`, `last_read_seq` bigint(기본 0), 기본키(`room_id`,`user_id`) | 나가면 행을 지운다(되돌리기 없음) |
 | `chat_direct_pairs` | `user_a`, `user_b`(`user_a < user_b`), `room_id` | 쌍의 유일성. 1:1 만들기가 두 사람 순서와 무관하게 같은 방을 돌려준다 |
 | `chat_messages` | `id` uuid, `room_id`, `seq` bigint, `sender_id`, `body` text, `client_msg_id` text null, `created_at` | 고유(`room_id`,`seq`) · 고유(`room_id`,`sender_id`,`client_msg_id`) — 같은 값의 되풀이를 한 번만 받는다 |
@@ -99,6 +99,7 @@
 | 메서드·경로 | 하는 일 | scope |
 |---|---|---|
 | `GET /rooms` | 내가 참여한 방 — 마지막 메시지 시각 순, `unread` 포함 | read |
+| `GET /rooms/{id}` | 참여한 방 하나(목록의 한 항목과 같은 모양) | read |
 | `POST /rooms` | `{kind:'direct', userId}` 또는 `{kind:'group', name, userIds[]}` | write |
 | `POST /rooms/{id}/members` | 여럿 방에 초대(만든 사람만) | write |
 | `DELETE /rooms/{id}/members/me` | 방에서 나가기 | write |
@@ -152,3 +153,5 @@
 4. **빈도 제한** — 사용자 결정("추천대로"): 채팅 쓰기는 공개 API의 분당 30이 아니라 채팅 전용 한도(`WF_CHAT_SEND_PER_MIN`, 기본 60)만 쓴다. WebSocket은 연결마다, REST는 토큰마다(`ChatApiRateGuard`, 공개 API 쓰기 예산과 키가 달라 서로 소진시키지 않는다).
 5. **한 연결의 프레임은 받은 순서대로 하나씩 처리한다** — 처음에는 프레임마다 바로 저장을 불러, 연달아 보낸 메시지의 번호가 뒤바뀔 수 있었다(시험이 잡았다). 연결마다 처리 줄(`chain`)을 둔다.
 6. **방 목록은 연결과 상관없이 화면이 먼저 받는다** — 처음에는 `hello`를 받은 뒤에야 받아, 연결이 막히면 목록과 지난 메시지가 비어 보였다(컴포넌트 시험이 잡았다).
+7. **병합 전 검토(2026-10-12)에서 고친 것** — ① 끊은 연결의 프레임은 처리하지 않는다(`ws.close()`는 핸드셰이크가 끝날 때까지 받기를 멈추지 않고 처리 줄에 쌓인 프레임도 있다) ② 보내기 한도는 사용자마다 한 예산(`SendLimiter` — 연결·토큰마다 세면 곱해지고 화면용 REST에는 한도가 없었다) ③ 연결이 선 직후 한 번 더 판정(인증과 `join` 사이의 폐기 경합) ④ 재접속 때 놓친 메시지는 한 번에 200개씩 이어서 받는다 ⑤ 받기 전인 방의 실시간 메시지를 버리지 않는다 ⑥ 연결 상한으로 밀려난(4409) 화면은 스스로 다시 붙지 않는다(서로 쫓아내는 되풀이) ⑦ 초대·나감을 남은 참여자에게도 알린다(`room` 프레임의 `members`) ⑧ 읽음 표시가 나가기와 겹치면 404 ⑨ 번호 질의의 상한(`CHAT_LIMITS.maxSeq`) ⑩ 채팅을 끄면 위 막대의 메뉴가 사라진다(`/api/auth/config`의 `chatEnabled`, FR-2420) ⑪ 프레임 상한이 글자 상한의 최악(글자당 4바이트)을 담지 못하면 기동을 거부한다(`WF_CHAT_MAX_FRAME_BYTES`) ⑫ `ChatInvite`의 lint 오류(검증기록의 "`pnpm check` 통과"가 그 시점에는 사실이 아니었다 — 초대 화면을 더한 뒤 다시 돌리지 않았다).
+8. **알면서 두는 것** — 방 만들기·초대에는 횟수 제한과 상대의 동의·차단이 없다(괴롭힘·스팸 방을 받는 쪽이 없앨 길이 없다 — 1:1은 나갈 수 없다). 보류 39에서 보존·삭제와 함께 정한다. 사람 찾기는 활성 사용자 전원의 id·표시 이름을 연다(A.1-8). 연결 상한은 세션·토큰 구분 없이 사용자 단위라 탈취한 토큰이 그 사람의 화면 연결을 밀어낼 수 있다(가용성). 여럿 방을 만든 사람이 나가면 더 초대할 수 없다. 쓰기 쪽 느린 소비자는 `bufferedAmount`를 보지 않는다(ping에 답하지 못하면 끊긴다).

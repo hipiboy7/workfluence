@@ -102,11 +102,12 @@ export class AuthController {
   /** 화면이 OIDC 버튼을 보일지 정하는 데 쓴다 (FR-219) */
   @Get('config')
   @Public()
-  async config(): Promise<{ oidcEnabled: boolean; collabEnabled: boolean; resetMailEnabled: boolean }> {
+  async config(): Promise<{ oidcEnabled: boolean; collabEnabled: boolean; chatEnabled: boolean; resetMailEnabled: boolean }> {
     // 실시간 편집 여부를 화면이 알아야 한다 (FR-711). 꺼져 있으면 단독 편집기를 띄운다 —
     // 화면이 모르면 WebSocket을 열려다 실패하고 사용자는 이유를 알 수 없다.
+    // 채팅이 꺼져 있으면 화면이 메뉴를 숨긴다(P21 FR-2420)
     // 메일 재설정을 쓸 수 있는지도 준다(P19 FR-2008) — 아니면 비밀번호 찾기가 그 단추를 보이지 않는다
-    return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED, resetMailEnabled: await this.resetMailOn() };
+    return { oidcEnabled: this.env.WF_OIDC_ENABLED, collabEnabled: this.env.WF_COLLAB_ENABLED, chatEnabled: this.env.WF_CHAT_ENABLED, resetMailEnabled: await this.resetMailOn() };
   }
 
   /**

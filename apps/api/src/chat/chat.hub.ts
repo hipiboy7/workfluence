@@ -10,14 +10,14 @@ import type { ChatMessageView } from '@workfluence/shared';
 @Injectable()
 export class ChatHub {
   private readonly messageListeners = new Set<(memberIds: string[], message: ChatMessageView) => void>();
-  private readonly roomListeners = new Set<(userId: string, roomId: string, change: 'joined' | 'left') => void>();
+  private readonly roomListeners = new Set<(userId: string, roomId: string, change: 'joined' | 'left' | 'members') => void>();
 
   onMessage(fn: (memberIds: string[], message: ChatMessageView) => void): () => void {
     this.messageListeners.add(fn);
     return () => this.messageListeners.delete(fn);
   }
 
-  onRoom(fn: (userId: string, roomId: string, change: 'joined' | 'left') => void): () => void {
+  onRoom(fn: (userId: string, roomId: string, change: 'joined' | 'left' | 'members') => void): () => void {
     this.roomListeners.add(fn);
     return () => this.roomListeners.delete(fn);
   }
@@ -32,7 +32,7 @@ export class ChatHub {
     }
   }
 
-  publishRoom(userId: string, roomId: string, change: 'joined' | 'left'): void {
+  publishRoom(userId: string, roomId: string, change: 'joined' | 'left' | 'members'): void {
     for (const fn of this.roomListeners) {
       try {
         fn(userId, roomId, change);

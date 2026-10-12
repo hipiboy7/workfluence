@@ -126,6 +126,7 @@
 - 컨트롤러는 화면용과 같은 `PageUseCases`를 부른다 — 감사(`page.create` 등)와 멘션 메일이 같은 길이다. **감사 행에는 `detail.jti`(토큰 번호)가 요청 문맥에서 자동으로 붙는다**(FR-2212).
 - 응답이 서버가 채운 값(부모·위치·버전)을 말한다(FR-2225).
 - **빈도 제한(FR-2213, 끝)**: 토큰마다 읽기 120/분·쓰기 30/분(`API_RATE_LIMITS` — **측정 전의 값**). 넘으면 429 `RATE_LIMITED`에 `Retry-After`(초)와 `details.retryAfterSec`. 읽기와 쓰기는 따로 세고, 토큰 가드를 **통과한** 요청만 센다. 저장소는 `ApiTokensModule`의 `RateLimitStore` 하나라 로그인 등 IP별 제한과 섞이지 않는다. 모든 v1 컨트롤러는 `@UseV1()` 한 줄로 토큰 가드 → 빈도 제한 → 오류 한 모양을 함께 건다(순서가 뜻이 있다).
+- **채팅(Phase 21, `docs/P21_설계서_Chat.md`)은 이 절의 규칙에서 다르다**: 쓰기 한도는 토큰마다 분당 30이 아니라 **사용자마다** 분당 `WF_CHAT_SEND_PER_MIN`(기본 60 — `ChatService.send`가 센다, 화면·REST·WebSocket이 한 예산). 읽기는 위의 토큰별 120이고 가드는 `ChatApiRateGuard`다. 채팅 REST 아홉은 `packages/shared/src/chat.ts`의 zod 스키마(칸마다 `.describe`)를 그대로 명세에 싣는다. **WebSocket은 OpenAPI가 표현하지 못해** 명세 머리말과 API사용가이드 3.13절에 쓴다. 채팅만의 오류 코드: `ROOM_NOT_FOUND`·`USER_NOT_FOUND`·`CHAT_DISABLED`·`DIRECT_ROOM`·`SELF_ROOM`·`NO_MEMBERS`·`BAD_QUERY`와 본문의 `EMPTY`·`TOO_LONG`·`BAD_CHAR`.
 - 실제 호출 확인(2026-10-07, 개발 서버·컨테이너 아님): 쿠키·CSRF 헤더 없이 토큰만으로 만들기·고치기·읽기, 토큰 없음 401, HTML 본문 400(입력을 되읊지 않음), 모르는 칸 400, 없는 스페이스 404, 기준 버전 어긋남 409, read 토큰의 쓰기 403, 세션 쿠키만으로는 401, 감사 행의 `jti`. 빈도 제한(쓰기 40번 연속 → 28개 200·12개 429, 앞서 쓰기 2번이 먼저 세어져 30에서 막힘, 읽기는 별도 예산)·`diff`·내보내기 헤더도 같은 서버에서 확인했다. **편집 중 409는 시험의 대역으로만 확인했다**(실제 WebSocket 편집과 겹치는 시험은 5단계 이후 E2E).
 
 
@@ -231,16 +232,16 @@
 
 | 무엇 | 어디 | 규칙 |
 |---|---|---|
-| 경로 표 `V1_OPERATIONS` | `packages/shared/src/v1-spec.ts` | 경로마다 한 줄 — 메서드·경로·`모듈.동작` id·요약·설명·`admin`/`public` 표시와 **이미 있는 zod 스키마**(요청 쿼리·본문, 응답). 지금 64개 |
+| 경로 표 `V1_OPERATIONS` | `packages/shared/src/v1-spec.ts` | 경로마다 한 줄 — 메서드·경로·`모듈.동작` id·요약·설명·`admin`/`public` 표시와 **이미 있는 zod 스키마**(요청 쿼리·본문, 응답). 2026-10-08에는 64개, 채팅(Phase 21)을 더한 지금은 75개 |
 | 만드는 함수 `buildOpenApi` | 같은 파일 | OpenAPI 3.1. 요청은 **입력 쪽**(변환 전의 받는 모양), 응답은 출력 쪽 JSON Schema. scope는 가드와 같은 `requiredScopes`로 정한다 — 읽기 `read`·쓰기 `write`·관리 `admin`이 더. 칸이 어긋나거나 같은 경로·id가 둘이면 **만들지 않는다**(조용히 하나가 가려지지 않게) |
 | 응답 스키마 | `packages/shared/src/v1-responses.ts` | 실제 응답의 모양을 zod로 선언 |
 | 기본값 | `V1_DEFAULTS` | 명세의 `default`가 그 상수와 같다(FR-2224) — 시험이 본다 |
 
 - **계약 시험이 양방향으로 지킨다**(FR-2221, `v1-openapi.contract.integration.spec.ts`): 실제 컨트롤러의 메서드·경로·`admin` 표시가 경로 표와 같고(Nest 라우트 표시에서 읽는다), 컨트롤러를 **실제로 불러** 얻은 응답이 응답 스키마를 지킨다 — JSON 응답인 모든 경로(바이너리·HTML인 `pages.export`·`attachments.download`는 형식만 적는다). 스키마의 한 칸을 일부러 틀리게 해 시험이 깨지는 것도 봤다.
 - 오류 한 모양(`Error`)은 모든 경로의 400·401·403·404·429(쓰기는 409도)에서 `components`를 가리킨다. 요약·설명은 "어느 경로를 언제 쓰나"를 말한다(에이전트가 읽는다).
-- 새 의존성이 없다(zod 4 내장 `z.toJSONSchema`). Swagger UI는 싣지 않는다(이미지 예산). 크기는 약 125KB(64개 경로) — 에이전트가 통째로 문맥에 넣기엔 크므로 7단계 사용가이드에 "태그(`tags`)별로 필요한 경로만 읽는다"를 적는다.
-- 실제 호출 확인(2026-10-08, 개발 서버): 토큰 없이 200, OpenAPI 3.1·45개 경로·64개 동작, 관리 경로의 security는 `admin`+`read`, 명세 자신은 `[]`.
-- **에이전트가 받는 길**(2026-10-08 더함 — 스핀오프 README "왜 만드는가"): `GET /api/v1/openapi.yaml`(키를 정렬한 YAML — `toSortedYaml`, `packages/shared/src/yaml-dump.ts`)과 `GET /api/v1/openapi.sha256`(그 글의 SHA-256). 둘 다 인증 없이, 서버가 켜질 때 한 번 만든다(`apps/api/src/v1/v1-openapi.controller.ts`). 저장소 사본 `docs/spinoff/public-api/openapi.yaml`과 같은 글임을 계약 시험이 해시로 본다. 이로써 47개 경로·66개 동작이다. 개발 서버에서 받은 YAML·해시·저장소 사본의 SHA-256이 모두 같음을 확인했다.
+- 새 의존성이 없다(zod 4 내장 `z.toJSONSchema`). Swagger UI는 싣지 않는다(이미지 예산). 크기는 처음 약 125KB(64개 동작) — 채팅(Phase 21)을 더한 지금은 75개 동작·약 8,000줄 — 에이전트가 통째로 문맥에 넣기엔 크므로 7단계 사용가이드에 "태그(`tags`)별로 필요한 경로만 읽는다"를 적는다.
+- 실제 호출 확인(2026-10-08, 개발 서버): 토큰 없이 200, OpenAPI 3.1·45개 경로·64개 동작(그날의 실측 — 채팅을 더한 지금은 75개 동작), 관리 경로의 security는 `admin`+`read`, 명세 자신은 `[]`.
+- **에이전트가 받는 길**(2026-10-08 더함 — 스핀오프 README "왜 만드는가"): `GET /api/v1/openapi.yaml`(키를 정렬한 YAML — `toSortedYaml`, `packages/shared/src/yaml-dump.ts`)과 `GET /api/v1/openapi.sha256`(그 글의 SHA-256). 둘 다 인증 없이, 서버가 켜질 때 한 번 만든다(`apps/api/src/v1/v1-openapi.controller.ts`). 저장소 사본 `docs/spinoff/public-api/openapi.yaml`과 같은 글임을 계약 시험이 해시로 본다. 이로써 47개 경로·66개 동작이었다(2026-10-08 — 채팅 9개를 더해 지금 75개 동작). 개발 서버에서 받은 YAML·해시·저장소 사본의 SHA-256이 모두 같음을 확인했다.
 - **응답 스키마의 한계**: 응답 TS 타입과 zod 스키마가 컴파일로 묶여 있지 않다 — 어긋남은 계약 시험(실제 호출)이 잡는다. 시험이 부르지 못하는 분기(드문 응답 모양)는 못 본다.
 
 ### 3.4 마크다운 변환의 경계 (3-1단계)

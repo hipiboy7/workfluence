@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   canInviteToRoom,
   directPairKey,
@@ -18,6 +18,7 @@ import { DB, type Db } from '../db/db.module';
 import { byName } from '../db/order';
 import { chatDirectPairs, chatMembers, chatMessages, chatRooms, users } from '../db/schema';
 import { ChatHub } from './chat.hub';
+import { SendLimiter } from './domain/send-limiter';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -42,11 +43,16 @@ const toMessage = (m: typeof chatMessages.$inferSelect): ChatMessageView => ({
  */
 @Injectable()
 export class ChatService {
+  /** 사용자마다 분당 보내기 한도 — 화면·headless, REST·WebSocket이 한 예산이다(보안 검토 2) */
+  private readonly limiter: SendLimiter;
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly hub: ChatHub,
-    @Inject(APP_ENV) private readonly env: Pick<AppEnvToken, 'WF_CHAT_MAX_MESSAGE_CHARS'>,
-  ) {}
+    @Inject(APP_ENV) private readonly env: Pick<AppEnvToken, 'WF_CHAT_MAX_MESSAGE_CHARS'> & Partial<Pick<AppEnvToken, 'WF_CHAT_SEND_PER_MIN'>>,
+  ) {
+    this.limiter = new SendLimiter(env.WF_CHAT_SEND_PER_MIN ?? 60);
+  }
 
   /** 연결이 서는 순간 구독할 방들 */
   async roomIdsOf(userId: string): Promise<string[]> {
@@ -186,6 +192,13 @@ export class ChatService {
       .onConflictDoNothing()
       .returning({ userId: chatMembers.userId });
     for (const a of added) this.hub.publishRoom(a.userId, roomId, 'joined');
+    // 이미 있던 참여자들의 참여자 목록도 바뀌었다 — 새 사람의 메시지가 "(나간 사람)"으로 그려지지 않게(자체 점검 5)
+    if (added.length > 0) {
+      const addedIds = new Set(added.map((a) => a.userId));
+      for (const m of await this.db.select({ u: chatMembers.userId }).from(chatMembers).where(eq(chatMembers.roomId, roomId))) {
+        if (!addedIds.has(m.u)) this.hub.publishRoom(m.u, roomId, 'members');
+      }
+    }
     return this.getRoom(me.id, roomId);
   }
 
@@ -196,6 +209,7 @@ export class ChatService {
     if (room.kind === 'direct') throw new BadRequestException({ code: 'DIRECT_ROOM', message: '1:1 방에서는 나갈 수 없다' });
     await this.db.delete(chatMembers).where(and(eq(chatMembers.roomId, roomId), eq(chatMembers.userId, me.id)));
     this.hub.publishRoom(me.id, roomId, 'left');
+    for (const m of await this.db.select({ u: chatMembers.userId }).from(chatMembers).where(eq(chatMembers.roomId, roomId))) this.hub.publishRoom(m.u, roomId, 'members');
   }
 
   /**
@@ -228,6 +242,10 @@ export class ChatService {
   async send(me: { id: string }, roomId: string, input: { body: unknown; clientMsgId?: string }): Promise<{ message: ChatMessageView; duplicate: boolean }> {
     const body = validateChatBody(input.body, this.env.WF_CHAT_MAX_MESSAGE_CHARS);
     if (!body.ok) throw new BadRequestException({ code: body.code, message: '메시지를 보낼 수 없다 (' + body.code + ')' });
+    if (!this.limiter.take(me.id, Date.now())) {
+      const wait = this.limiter.retryAfterSec();
+      throw new HttpException({ code: 'RATE_LIMITED', message: `너무 자주 보냈다 — ${wait}초 안에 다시 시도한다`, details: { retryAfterSec: wait } }, HttpStatus.TOO_MANY_REQUESTS);
+    }
 
     const out = await this.db.transaction(async (tx) => {
       const [room] = await tx.select().from(chatRooms).where(eq(chatRooms.id, roomId)).for('update');
@@ -263,7 +281,9 @@ export class ChatService {
       .set({ lastReadSeq: sql`GREATEST(${chatMembers.lastReadSeq}, ${target})` })
       .where(and(eq(chatMembers.roomId, roomId), eq(chatMembers.userId, me.id)))
       .returning({ lastReadSeq: chatMembers.lastReadSeq });
-    return { lastReadSeq: row!.lastReadSeq };
+    // 확인과 쓰기 사이에 방에서 나갔다 — 500이 아니라 없는 방이다
+    if (!row) throw notFoundRoom();
+    return { lastReadSeq: row.lastReadSeq };
   }
 
   /** 방에 부를 사람 찾기 — 활성 사용자의 표시 이름만(아이디·메일은 싣지 않는다). 나는 빠진다 */

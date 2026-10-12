@@ -16,6 +16,8 @@ export const CHAT_LIMITS = {
   maxRoomNameChars: 100,
   /** 방을 만들 때 부를 수 있는 사람 수 */
   maxRoomMembers: 100,
+  /** 메시지 번호의 상한 — JS가 정확히 다루는 정수(DB의 bigint보다 작다). 넘는 값은 거절한다(질의가 DB 오류가 되지 않게) */
+  maxSeq: Number.MAX_SAFE_INTEGER,
 } as const;
 
 export type ChatRoomKind = 'direct' | 'group';
@@ -43,7 +45,8 @@ export type ChatServerFrame =
   | { type: 'hello'; userId: string; roomIds: string[] }
   | { type: 'ack'; clientMsgId: string | null; roomId: string; seq: number; createdAt: string }
   | { type: 'message'; roomId: string; seq: number; senderId: string; body: string; createdAt: string }
-  | { type: 'room'; roomId: string; change: 'joined' | 'left' }
+  /** `joined`·`left`는 당사자에게, `members`는 방에 남은 다른 참여자에게(초대·나감으로 참여자 목록이 바뀌었다) */
+  | { type: 'room'; roomId: string; change: 'joined' | 'left' | 'members' }
   | { type: 'error'; code: string; roomId?: string; clientMsgId?: string };
 
 export function encodeChatFrame(frame: ChatServerFrame): string {
@@ -162,13 +165,13 @@ export const sendChatMessageDto = z
 export type SendChatMessageDto = z.infer<typeof sendChatMessageDto>;
 
 export const markChatReadDto = z
-  .object({ seq: z.number().int().min(0).describe('여기까지 읽었다는 메시지 번호 — 내려가지 않고 방의 마지막 번호를 넘으면 마지막 번호로 줄인다') })
+  .object({ seq: z.number().int().min(0).max(CHAT_LIMITS.maxSeq).describe('여기까지 읽었다는 메시지 번호 — 내려가지 않고 방의 마지막 번호를 넘으면 마지막 번호로 줄인다') })
   .strict();
 export type MarkChatReadDto = z.infer<typeof markChatReadDto>;
 
 export const chatMessagesQueryDto = z.object({
-  beforeSeq: z.coerce.number().int().min(0).optional().describe('이 번호보다 **이전** 메시지를 읽는다(옛 메시지로 거슬러 간다). `afterSeq`와 함께 줄 수 없다'),
-  afterSeq: z.coerce.number().int().min(0).optional().describe('이 번호보다 **이후** 메시지를 읽는다(끊겼다 돌아와 놓친 것을 받는다 — 마지막으로 받은 `seq`를 준다). `beforeSeq`와 함께 줄 수 없다'),
+  beforeSeq: z.coerce.number().int().min(0).max(CHAT_LIMITS.maxSeq).optional().describe('이 번호보다 **이전** 메시지를 읽는다(옛 메시지로 거슬러 간다). `afterSeq`와 함께 줄 수 없다'),
+  afterSeq: z.coerce.number().int().min(0).max(CHAT_LIMITS.maxSeq).optional().describe('이 번호보다 **이후** 메시지를 읽는다(끊겼다 돌아와 놓친 것을 받는다 — 마지막으로 받은 `seq`를 준다). `beforeSeq`와 함께 줄 수 없다'),
   limit: z.coerce
     .number()
     .int()

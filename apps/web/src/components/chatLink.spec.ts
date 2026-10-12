@@ -110,6 +110,20 @@ describe('createChatLink (G절)', () => {
     expect(h.link.state).toBe('refused');
   });
 
+  it('연결 상한으로 밀려나면(4409) 스스로 다시 붙지 않는다 — 사람이 누르면 다시 붙는다 (코드 리뷰 4)', () => {
+    const h = harness();
+    h.link.start();
+    h.hello(h.sockets[0]!);
+    h.sockets[0]!.drop(CHAT_CLOSE.evicted);
+    expect(h.link.state).toBe('evicted');
+    expect(h.timers.filter((t) => t.live)).toEqual([]);
+    h.link.reconnect();
+    expect(h.sockets).toHaveLength(2);
+    h.hello(h.sockets[1]!);
+    expect(h.link.state).toBe('live');
+    expect(h.resyncs()).toBe(1);
+  });
+
   it('보내기는 ack로 끝난다 — clientMsgId를 붙여 보낸다', async () => {
     const h = harness();
     h.link.start();

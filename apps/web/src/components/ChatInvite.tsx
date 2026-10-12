@@ -15,22 +15,21 @@ export function ChatInvite({ room, onInvited, onCancel }: { room: ChatRoomView; 
   const [picked, setPicked] = useState<ChatUserView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const inRoom = new Set(room.members.map((m) => m.userId));
+  // 이미 든 사람 — 효과가 의존하는 것은 이 열쇠 하나다(초대 직후 목록에서도 빠져야 한다)
+  const inRoomKey = room.members.map((m) => m.userId).join(',');
 
   useEffect(() => {
     let live = true;
     const t = setTimeout(() => {
       api<{ items: ChatUserView[] }>(`/api/chat/users?q=${encodeURIComponent(q)}`)
-        .then((r) => live && setFound(r.items.filter((u) => !inRoom.has(u.id))))
+        .then((r) => live && setFound(r.items.filter((u) => !inRoomKey.split(',').includes(u.id))))
         .catch((e: unknown) => live && setError(errText(e)));
     }, 200);
     return () => {
       live = false;
       clearTimeout(t);
     };
-    // 방의 참여자가 바뀌면(초대 직후) 목록에서도 빠져야 한다
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, room.members.length]);
+  }, [q, inRoomKey]);
 
   const toggle = (u: ChatUserView) => setPicked((cur) => (cur.some((p) => p.id === u.id) ? cur.filter((p) => p.id !== u.id) : [...cur, u]));
 

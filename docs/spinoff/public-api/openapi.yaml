@@ -46,8 +46,8 @@ info:
     `format`: 쿼리의 `format`은 **응답**에 실을 본문 형식이고, 요청 본문의 `format`은 **보내는** `body`의 형식이다(둘은 따로 정한다). 마크다운은 원시 HTML·그림 문법·허용 밖 링크를 받지 않고 400이다.
     목록: 쪽 나누기가 없다. 모두 `limit`까지만 돌려주고(동작마다 최대값이 다르다) 넘는 것은 잘린다 — 많으면 스페이스·검색어·기간으로 조건을 좁혀 나누어 받는다. `GET /users`만 `offset`·`total`을 쓴다.
     채팅 실시간 연결: 사람 없이 도는 클라이언트(에이전트)는 WebSocket `GET /api/v1/chat/ws`(wss)로 새 메시지를 받고 보낸다 — OpenAPI가 WebSocket을 표현하지 못해 여기 적는다. 업그레이드 요청에 `Authorization: Bearer <토큰>`을 보낸다(토큰을 주소의 질의로 주면 401 — 주소는 로그에 남는다). 연결 하나로 내가 참여한 **모든 방**의 새 메시지가 온다. 토큰의 read가 있어야 연결되고(없으면 403), 메시지를 보내려면 write가 더 있어야 한다. 모든 프레임은 JSON 글 한 덩어리다.
-    서버가 보내는 프레임(`type`): `hello`(연결 직후 한 번 — `userId`, 참여한 방 `roomIds`) · `message`(방의 새 메시지 — `roomId`·`seq`·`senderId`·`body`·`createdAt`, 내가 보낸 것도 온다) · `ack`(내가 보낸 `send`의 결과 — `clientMsgId`·`roomId`·`seq`·`createdAt`) · `room`(내가 방에 들었거나 나갔다 — `roomId`·`change`=joined|left. 방이 새로 생기면 연결을 다시 열지 않아도 이 프레임이 온다) · `error`(보낸 것 하나를 거절 — `code`·`roomId`·`clientMsgId`, 연결은 그대로). 클라이언트가 보내는 프레임은 하나다: `{"type":"send","roomId":"…","body":"…","clientMsgId":"(선택)"}`. `error.code`: `EMPTY`·`TOO_LONG`·`BAD_CHAR`(본문) · `ROOM_NOT_FOUND`(참여하지 않은 방) · `INSUFFICIENT_SCOPE`(read 토큰) · `RATE_LIMITED`(연결마다 분당 한도 — 기본 60).
-    채팅 연결의 규칙: 모르는 `type`·모르는 칸·JSON이 아닌 글·바이너리·너무 큰 프레임(기본 64KiB)은 서버가 연결을 닫는다(close 코드 4400, 큰 것은 1009) — 같은 것을 다시 보내지 말고 프레임을 고친다. 토큰이 폐기·만료되거나 주인이 정지되거나 비밀번호 변경·강제 종료가 있으면 연결이 닫히고(4401) 다시 붙지 말고 새 토큰을 받는다. 같은 사용자의 연결이 상한(기본 5개)을 넘으면 가장 오래된 연결이 닫힌다(4409). 서버가 30초마다 ping을 보내니 WebSocket 라이브러리의 pong 자동 응답을 끄지 않는다. **연결은 새 메시지만 보낸다** — 끊겼다 돌아오면 방마다 마지막으로 받은 `seq` 이후를 `GET /chat/rooms/{id}/messages?afterSeq=`로 받아 메우고, 같은 메시지가 둘 올 수 있으니 `(roomId, seq)`로 거른다. 연달아 보낸 `send`는 보낸 순서대로 번호를 받는다.
+    서버가 보내는 프레임(`type`): `hello`(연결 직후 한 번 — `userId`, 참여한 방 `roomIds`) · `message`(방의 새 메시지 — `roomId`·`seq`·`senderId`·`body`·`createdAt`, 내가 보낸 것도 온다) · `ack`(내가 보낸 `send`의 결과 — `clientMsgId`·`roomId`·`seq`·`createdAt`) · `room`(내가 방에 들었거나 나갔다(`change`=joined|left), 또는 내가 든 방의 참여자가 바뀌었다(`members`) — `roomId`와 `change`. 방이 새로 생기면 연결을 다시 열지 않아도 이 프레임이 온다) · `error`(보낸 것 하나를 거절 — `code`·`roomId`·`clientMsgId`, 연결은 그대로). 클라이언트가 보내는 프레임은 하나다: `{"type":"send","roomId":"…","body":"…","clientMsgId":"(선택)"}`. `error.code`: `EMPTY`·`TOO_LONG`·`BAD_CHAR`(본문) · `ROOM_NOT_FOUND`(참여하지 않은 방) · `INSUFFICIENT_SCOPE`(read 토큰) · `RATE_LIMITED`(사용자마다 분당 한도 — 기본 60. 연결·토큰을 여럿 열어도, REST로 보내도 한 예산).
+    채팅 연결의 규칙: 모르는 `type`·모르는 칸·JSON이 아닌 글·바이너리·너무 큰 프레임(기본 64KiB)은 서버가 연결을 닫는다(close 코드 4400, 큰 것은 1009) — 같은 것을 다시 보내지 말고 프레임을 고친다. 토큰이 폐기·만료되거나 주인이 정지되거나 비밀번호 변경·강제 종료가 있으면 연결이 닫히고(4401) 다시 붙지 말고 새 토큰을 받는다. 같은 사용자의 연결이 상한(기본 5개)을 넘으면 가장 오래된 연결이 닫힌다(4409). 서버가 30초마다 ping을 보내니 WebSocket 라이브러리의 pong 자동 응답을 끄지 않는다. **연결은 새 메시지만 보낸다** — 끊겼다 돌아오면 방마다 마지막으로 받은 `seq` 이후를 `GET /chat/rooms/{id}/messages?afterSeq=<seq>&limit=200`으로 받아 메우되 **`limit`개가 다 오면 마지막 `seq`로 이어서 받고**(한 번에 `limit`개까지만 온다 — 아니면 가운데 구멍이 남는다), 같은 메시지가 둘 올 수 있으니 `(roomId, seq)`로 거른다. 연달아 보낸 `send`는 보낸 순서대로 번호를 받는다.
     이 API는 더하기만 한다(필드·경로 추가). 빼거나 뜻을 바꾸면 v2다.
   title: "워크플루언스 공개 API"
   version: "1.0.0"
@@ -1520,7 +1520,7 @@ paths:
       tags:
         - chat
     post:
-      description: "방에 평문 메시지를 보낸다. 방 안에서 번호가 매겨지고 참여자 모두의 실시간 연결에 `message` 프레임이 간다. 실시간 연결(`send` 프레임)을 쓸 수 없는 곳에서 쓴다. 끊겼다 다시 보낼 수 있으면 `clientMsgId`를 붙인다 — 같은 값은 한 번만 받는다. 채팅 쓰기는 공개 API의 쓰기 한도(분당 30)가 아니라 채팅 전용 한도(기본 분당 60)를 쓴다."
+      description: "방에 평문 메시지를 보낸다. 방 안에서 번호가 매겨지고 참여자 모두의 실시간 연결에 `message` 프레임이 간다. 실시간 연결(`send` 프레임)을 쓸 수 없는 곳에서 쓴다. 끊겼다 다시 보낼 수 있으면 `clientMsgId`를 붙인다 — 같은 값은 한 번만 받는다. 채팅 쓰기는 공개 API의 쓰기 한도(분당 30)가 아니라 채팅 전용 한도(**사용자마다** 기본 분당 60 — 연결·토큰을 여럿 열어도 한 예산)를 쓴다. 넘으면 429 `RATE_LIMITED`와 `details.retryAfterSec`."
       operationId: chat.send
       parameters:
         - description: "방의 id"

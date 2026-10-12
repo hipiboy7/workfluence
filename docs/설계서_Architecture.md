@@ -22,7 +22,7 @@
 [브라우저]
     │ HTTPS
     ▼
-[nginx]  TLS 종단 · X-Forwarded-* 전달 · WebSocket 프록시(실시간 편집) · 업로드 상한
+[nginx]  TLS 종단 · X-Forwarded-* 전달 · WebSocket 프록시(실시간 편집·채팅) · 업로드 상한
          흐름 응답(LLM 질문)은 앱이 `X-Accel-Buffering: no`로 버퍼링을 끈다
     │ HTTP (컨테이너 네트워크)
     ▼
@@ -85,11 +85,14 @@ workfluence/
 │   │   │   ├── templates/        [P6] 페이지 템플릿
 │   │   │   ├── mail/             [P6] 메일 발송 경계 (MAIL_SENDER · mock/http). [P18] domain/{request,compose}(요청 모양·메일 글) · post(보내는 길 — 앱과 시험 명령이 함께) /
 │   │   │   │                     [P19] compose의 재설정 메일
-│   │   │   └── llm/              [P10] 사내 LLM 질문 — domain/{secret,openai,think,conversation}.ts ·
-│   │   │                         LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
+│   │   │   ├── llm/              [P10] 사내 LLM 질문 — domain/{secret,openai,think,conversation}.ts ·
+│   │   │   │                     LLM_CLIENT 경계(OpenAI 호환 어댑터) · NDJSON 중계 · 보관 규칙 · 만료 정리
+│   │   │   └── chat/             [P21] 채팅 — ChatService(방·메시지·읽음) · ChatHub(사건 → 연결) · ChatGateway(WebSocket, 화면·headless 두 입구) ·
+│   │   │                         chat.controller.ts(화면용 REST) · chat-api-rate.guard.ts · domain/{ws-path,send-rate,send-limiter}.ts  (headless용 REST는 v1/v1-chat.controller.ts)
 │   │   └── drizzle/              마이그레이션 SQL (커밋)
 │   └── web/                      React + Vite SPA
 │       └── src/{components,layout,pages,api.ts,auth.tsx,styles.css}   api.ts = 모든 API 호출이 지나는 한 곳(CSRF 머리말 · [P10] 경로의 `.`·`..` 조각 막기) ·
+│                                 [P21] pages/ChatPage.tsx · components/{chatLink,chatState}.ts (연결 상태 기계·상태 계산 — React 밖) · components/Chat{SideNav,NewRoom,Invite}.tsx
 │                                 [P10] components/RequireUuidParam.tsx (주소의 id가 식별자 모양일 때만 화면을 그린다)
 │                                 [P14] components/pageTree.ts (트리 펼치기 하나 — 트리·위치 고르기·옮기기) · components/{MovePage,SpaceManage}.tsx ·
 │                                 pages/admin/AdminSpacesPage.tsx (모든 스페이스 + 분류)
@@ -139,6 +142,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `llm.ts` | LLM 질문의 흐름 줄(NDJSON) 모양·줄 나누기·줄 읽기, LLM 주소 판정 | 서버가 쓰고 화면이 읽는다. 주소 판정은 관리 화면과 서버가 같아야 한다 |
 | `markdown.ts` | 문서 JSON → 마크다운·텍스트(페이지 복사), 마크다운 안에 넣을 글자(`markdownText`)·링크 주소(`markdownLinkTarget`) | 허용 목록이 `document.ts`와 한 곳에서 나와야 한다. 평문 추출은 검색 인덱스와 같은 함수다. 메일(P18)도 같은 이스케이프 규칙을 쓴다 |
 | `mail.ts` | 사내 메일 API 설정의 판정 — 보내는 주소·인증 헤더 이름과 값, 본문 형식 (P18) | 기동 검사(`env.ts`)가 쓴다. 비밀은 인증 헤더로만 받는다 |
+| `chat.ts` | 채팅의 규칙 — 본문 판정, 클라이언트·서버 프레임 모양과 파서(모르는 칸·type은 받지 않는다), 1:1 쌍 열쇠, 초대 판정, 쪽 나누기, 요청 본문(zod)·응답 스키마(공개 API 명세가 그대로 싣는다), 연결 닫힘 코드(`CHAT_CLOSE`) (P21) | 서버(`apps/api/src/chat/`)·화면·공개 API 명세가 같은 것을 쓴다 |
 
 전부 **A등급**(테스트 먼저, ≥90%)이다. 입출력이 결정적이고 외부 의존이 없다.
 
@@ -173,6 +177,10 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `llm_messages` | `id`, `seq`(차례), `conversation_id`(CASCADE), `role`, `content`, `model`, `status` | P10 | 질문과 답. 생각 과정은 넣지 않는다. 대화와 수명이 같다 |
 | `password_reset_tokens` | `id`, `user_id`(CASCADE), `token_hash` uq, `password_mark`, `created_at`, `expires_at` | P19 | 메일 재설정 링크. **값은 두지 않고 SHA-256만** — DB가 새어도 링크가 되지 않는다. `password_mark`는 발급 때의 비밀번호 해시에서 뽑은 표시로, 비밀번호가 어느 길로 바뀌었든 링크를 죽인다. 한 사람에게 살아 있는 것은 하나다 (`P19_설계서_Recovery` C.3) |
 | `api_tokens` | `id`(= JWT의 jti), `user_id`(CASCADE), `name`, `scopes`(read·write·admin), `created_at`, `expires_at`, `last_used_at`, `revoked_at`·`revoked_reason` | 공개 API(F-015, `0014`) | 프로그램용 토큰. **값은 두지 않고** 서명(`WF_API_JWT_SECRET`)으로 검증해 jti로 이 행을 찾는다. 요청마다 폐기·만료와 사용자 상태를 다시 본다 |
+| `chat_rooms` | `id`, `kind`(direct·group), `name`(여럿 방만), `created_by`(CASCADE), `created_at`, `last_seq`, `last_message_at` | 채팅(F-016, `0015`) | 방. `last_seq`는 새 메시지의 번호를 매기는 곳(행 잠금). 스페이스에 속하지 않는다 |
+| `chat_members` | `room_id`·`user_id`(복합 키, CASCADE), `joined_at`, `last_read_seq` | 채팅(`0015`) | 참여자. 판정은 이 표에 행이 있는가 하나 — 없으면 방이 있는지도 알려 주지 않는 404 |
+| `chat_direct_pairs` | `user_a`·`user_b`(`user_a < user_b`, 복합 키), `room_id`(유일) | 채팅(`0015`) | 1:1 방의 쌍 — 두 사람 사이에 방 하나 |
+| `chat_messages` | `id`, `room_id`(CASCADE), `seq`, `sender_id`, `body`(평문), `client_msg_id`, `created_at` | 채팅(`0015`) | 고치지도 지우지도 않는 모양(보류 39). 유일 키 `(room_id, seq)`·`(room_id, sender_id, client_msg_id)` |
 
 ### 3.2 규약
 
@@ -319,6 +327,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 18 | 사내 메일 API 설정(F-012) — 요청 모양을 사용자가 준 사내 API 설명(`subject`·`content`·`receivers`·`sender_name`)으로 한 곳(`apps/api/src/mail/domain/request.ts`)에 두고, 주소·형식(평문·마크다운)·보내는 이름·인증 헤더를 `WF_MAIL_*` 설정으로(기동 검사는 공유 `mail.ts`·`env.ts`). 메일 글은 `domain/compose.ts`(평문·마크다운 — 마크다운은 공유 `markdownText`로 이스케이프), 제목은 보내는 경계에서 한 줄로. 시험 명령 `apps/api/src/cli/mail-test.ts`(compose `tools`) |
 | 19 | 비밀번호를 잊었을 때 두 길·서식 단추 줄(F-011·F-013) — 두 길의 조건을 표시 이름+email로, 메일 재설정 링크(`auth/recovery.service.ts` · `domain/reset-link.ts` — 32바이트 값의 해시만·30분·한 번·5분에 한 통, 받는 계정은 공유 `canResetPasswordByMail`, 쓰기는 로그인 줄 안에서 세션·링크를 지운다), email 확인 요청(`email.confirm.request` — 받는 사람은 root), 운영 설정 `passwordResetMail`, 표 `password_reset_tokens`(`0013_recovery`). 편집기와 댓글 칸의 서식 단추 줄(`formatActions.ts` — 허용 목록·편집기 스키마는 그대로). 새 `WF_` 키·의존성 없음 |
 | 20 | RHEL 9에 반입(F-014) — 들고 갈 것의 목록(설치및실행가이드 0.1절 — 반입 묶음, 서버에 Docker가 없으면 Docker 묶음), Docker 묶음(`pnpm release:docker` — `scripts/docker-bundle.ts`, 빌드 서버에 깔린 판의 RPM·`PACKAGES.txt`·Docker 공개키·지문. 판정은 공유 `release.ts`의 `DOCKER_BUNDLE_RPMS`·`dockerKeyProblem`·`rpmSignatureProblems`·`formatPackages`), RHEL 9 준비(설치및실행가이드 0.3·0.4절 — 서명은 임시 RPM DB로 판정하고 dnf도 보게 한다·부딪히는 패키지·망 대역·SELinux를 끄지 않는다·firewalld는 Docker가 연 포트를 거르지 않는다). 앱의 동작·구성·설정 키·의존성 변경 없음 |
+| 21 | 채팅과 headless 접속(F-016) — `chat/` 모듈(방·메시지·읽음·사람 찾기 `ChatService`, 사건을 연결로 알리는 `ChatHub`, 한 서버에 편집 게이트웨이와 **경로로 나눠 붙는** WebSocket `ChatGateway`: 화면은 세션 쿠키+같은 출처, headless는 `Authorization: Bearer`), 표 넷(`0015_chat`), 환경변수 7개(`WF_CHAT_*`), 로그 event `chat.*` 9개, 공유 계약 `chat.ts`, `RevocationBus.revokeToken`(토큰 하나의 폐기를 그 토큰의 연결에), 공개 API 명세에 채팅 REST 9개와 실시간 연결 규칙, 화면 `ChatPage`(연결 상태 기계 `chatLink.ts`·상태 계산 `chatState.ts`) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

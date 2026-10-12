@@ -323,3 +323,15 @@ describe('사내 메일 API (P18_설계서_Mail FR-1902·1904)', () => {
     expect(() => mail({ WF_MAIL_API_TOKEN: 'tok' })).toThrow(/WF_MAIL_API_TOKEN/);
   });
 });
+
+describe('채팅 설정의 교차 검증 (P21 자체 점검 10)', () => {
+  const base = valid as Record<string, string>;
+  it('프레임 상한이 글자 상한의 최악을 담지 못하면 기동을 거부한다', () => {
+    expect(() => parseEnv({ ...base, WF_CHAT_MAX_MESSAGE_CHARS: '50000' })).toThrow(/WF_CHAT_MAX_FRAME_BYTES/);
+  });
+  it('기본값과 맞게 올린 값은 받는다. 끄면 보지 않는다', () => {
+    expect(() => parseEnv({ ...base })).not.toThrow();
+    expect(() => parseEnv({ ...base, WF_CHAT_MAX_MESSAGE_CHARS: '50000', WF_CHAT_MAX_FRAME_BYTES: '300000' })).not.toThrow();
+    expect(() => parseEnv({ ...base, WF_CHAT_ENABLED: 'false', WF_CHAT_MAX_MESSAGE_CHARS: '50000' })).not.toThrow();
+  });
+});

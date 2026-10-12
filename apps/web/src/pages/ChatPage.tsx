@@ -1,4 +1,4 @@
-import type { ChatMessageView, ChatRoomView, ChatServerFrame } from '@workfluence/shared';
+import { CHAT_LIMITS, type ChatMessageView, type ChatRoomView, type ChatServerFrame } from '@workfluence/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api } from '../api';
@@ -59,6 +59,8 @@ export function ChatPage() {
   viewingRef.current = viewing;
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  /** 처음 메시지를 받아 온 방 — 받기 전에 온 실시간 메시지로 목록이 생겨도 "받았다"로 치지 않는다(코드 리뷰 2) */
+  const loadedRef = useRef(new Set<string>());
   const listEnd = useRef<HTMLLIElement | null>(null);
 
   const room = useMemo(() => rooms?.find((r) => r.id === viewing) ?? null, [rooms, viewing]);
@@ -78,16 +80,28 @@ export function ChatPage() {
     [],
   );
 
-  /** 방의 메시지를 읽는다 — `afterSeq`가 있으면 그 뒤(놓친 것), 없으면 가장 새 것부터 */
-  const loadMessages = useCallback((roomId: string, q: { afterSeq?: number; beforeSeq?: number } = {}) => {
-    const qs = new URLSearchParams();
-    if (q.afterSeq !== undefined) qs.set('afterSeq', String(q.afterSeq));
-    if (q.beforeSeq !== undefined) qs.set('beforeSeq', String(q.beforeSeq));
-    return api<{ items: ChatMessageView[] }>(`/api/chat/rooms/${roomId}/messages?${qs.toString()}`).then((r) => {
+  /**
+   * 방의 메시지를 읽는다 — `afterSeq`가 있으면 그 뒤(놓친 것), 없으면 가장 새 것부터. **`afterSeq`는 한 번에 다 오지 않으면 이어서 받는다**(서버는 한 번에 최대 200개 —
+   * 그 이상 놓쳤을 때 빈 구간이 영구히 남지 않게, 코드 리뷰 1). 실시간으로 먼저 온 메시지와는 번호로 합친다
+   */
+  const loadMessages = useCallback(async (roomId: string, q: { afterSeq?: number; beforeSeq?: number } = {}) => {
+    const PAGE: number = CHAT_LIMITS.pageMax;
+    let after = q.afterSeq;
+    for (;;) {
+      const qs = new URLSearchParams();
+      if (after !== undefined) {
+        qs.set('afterSeq', String(after));
+        qs.set('limit', String(PAGE));
+      }
+      if (q.beforeSeq !== undefined) qs.set('beforeSeq', String(q.beforeSeq));
+      const r = await api<{ items: ChatMessageView[] }>(`/api/chat/rooms/${roomId}/messages?${qs.toString()}`);
       setMessages((cur) => ({ ...cur, [roomId]: mergeMessages(cur[roomId] ?? [], r.items) }));
       // 한 번에 받는 수(기본 50)를 다 채웠으면 더 옛것이 있을 수 있다
-      if (q.afterSeq === undefined) setHasMore((cur) => ({ ...cur, [roomId]: r.items.length >= 50 }));
-    });
+      if (after === undefined) setHasMore((cur) => ({ ...cur, [roomId]: r.items.length >= CHAT_LIMITS.pageDefault }));
+      if (after === undefined || r.items.length < PAGE) break;
+      after = r.items[r.items.length - 1]!.seq;
+    }
+    loadedRef.current.add(roomId);
   }, []);
 
   // 방 목록은 연결과 상관없이 먼저 받는다 — 연결이 늦거나 막혀도 목록과 지난 메시지는 보인다
@@ -104,7 +118,8 @@ export function ChatPage() {
       onFrame: (f: ChatServerFrame) => {
         if (f.type === 'message') {
           const m: ChatMessageView = { id: `${f.roomId}:${f.seq}`, roomId: f.roomId, seq: f.seq, senderId: f.senderId, body: f.body, createdAt: f.createdAt };
-          setMessages((cur) => (cur[f.roomId] ? { ...cur, [f.roomId]: mergeMessages(cur[f.roomId]!, [m]) } : cur));
+          // 받기 전인 방의 메시지도 버리지 않고 쌓아 둔다 — 처음 받아 온 것과 번호로 합쳐진다(코드 리뷰 2)
+          setMessages((cur) => ({ ...cur, [f.roomId]: mergeMessages(cur[f.roomId] ?? [], [m]) }));
           setRooms((cur) => (cur ? applyMessageToRooms(cur, m, meId, viewingRef.current) : cur));
         } else if (f.type === 'room') {
           void loadRooms();
@@ -113,7 +128,7 @@ export function ChatPage() {
       // 끊겼다 돌아왔다 — 방 목록을 다시 받고 열려 있는 방은 놓친 것을 메운다
       onResync: () => {
         void loadRooms();
-        for (const [roomId, list] of Object.entries(messagesRef.current)) void loadMessages(roomId, { afterSeq: lastSeqOf(list) }).catch(() => undefined);
+        for (const roomId of loadedRef.current) void loadMessages(roomId, { afterSeq: lastSeqOf(messagesRef.current[roomId] ?? []) }).catch(() => undefined);
       },
     });
     linkRef.current = link;
@@ -126,7 +141,7 @@ export function ChatPage() {
 
   // 방을 열면 메시지를 받는다
   useEffect(() => {
-    if (!viewing || messagesRef.current[viewing]) return;
+    if (!viewing || loadedRef.current.has(viewing)) return;
     loadMessages(viewing).catch((e: unknown) => setError(errText(e)));
   }, [viewing, loadMessages]);
 
@@ -210,6 +225,15 @@ export function ChatPage() {
       />
       {linkState === 'offline' && <Notice kind="warning">연결이 끊겼다 — 다시 붙는 중이다. 붙으면 놓친 메시지를 받는다.</Notice>}
       {linkState === 'revoked' && <Notice kind="error">로그인이 끝나 채팅 연결이 닫혔다 — 다시 로그인한 뒤 이 화면을 연다.</Notice>}
+      {linkState === 'evicted' && (
+        <Notice kind="warning">
+          같은 계정의 채팅 연결이 너무 많아 이 화면의 연결이 닫혔다 — 다른 탭을 닫은 뒤{' '}
+          <button type="button" className="subtle sm" onClick={() => linkRef.current?.reconnect()}>
+            다시 연결
+          </button>
+          한다.
+        </Notice>
+      )}
       {linkState === 'refused' && <Notice kind="error">서버가 이 화면의 요청을 받지 않고 연결을 닫았다 — 화면을 새로 고쳐 본다.</Notice>}
       {error && <Notice kind="error">{error}</Notice>}
       {adding && (

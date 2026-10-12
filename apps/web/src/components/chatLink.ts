@@ -5,12 +5,12 @@ import { CHAT_CLOSE, type ChatServerFrame } from '@workfluence/shared';
  * (`chatLink.spec.ts`). 편집 연결(`collabLink.ts`)과 같은 모양이다.
  *
  * - `connecting` 붙는 중 · `live` 받는 중(`hello`를 받은 뒤) · `offline` 끊겼고 곧 다시 붙는다 · `revoked` 세션이 끝났다(다시 붙지 않는다 — 다시 로그인해야 한다) ·
- *   `refused` 서버가 이 화면이 보낸 프레임을 받지 않고 끊었다(다시 붙어도 같다)
+ *   `refused` 서버가 이 화면이 보낸 프레임을 받지 않고 끊었다(다시 붙어도 같다) · `evicted` 같은 사용자의 연결이 상한을 넘어 이 연결이 밀려났다(스스로 다시 붙으면 다른 탭을 밀어내 서로 쫓아내므로 사람이 누를 때만 다시 붙는다)
  * - **다시 붙은 뒤에는 `onResync`를 부른다** — 연결은 새 메시지만 보내 주므로 끊긴 사이 놓친 것은 화면이 방마다 `afterSeq`로 메운다
  * - 보내기는 `clientMsgId`를 붙인다. 끊겨서 결과를 모르면 **같은 값으로 다시 보낸다** — 서버가 되풀이를 한 번만 받는다(A.1-6)
  */
 
-export type ChatLinkState = 'connecting' | 'live' | 'offline' | 'revoked' | 'refused';
+export type ChatLinkState = 'connecting' | 'live' | 'offline' | 'revoked' | 'refused' | 'evicted';
 
 /** 이 연결이 쓰는 만큼의 소켓 — 브라우저의 `WebSocket`, 시험은 가짜 */
 export type ChatSocketLike = {
@@ -55,6 +55,8 @@ const DEFAULT_BACKOFF = [1_000, 2_000, 4_000, 8_000, 15_000];
 export function createChatLink(deps: ChatLinkDeps): {
   start(): void;
   stop(): void;
+  /** 밀려난(`evicted`) 연결을 사람이 다시 잇는다 */
+  reconnect(): void;
   send(roomId: string, body: string, clientMsgId?: string): Promise<SendResult>;
   readonly state: ChatLinkState;
 } {
@@ -128,6 +130,7 @@ export function createChatLink(deps: ChatLinkDeps): {
       if (stopped) return;
       if (ev.code === CHAT_CLOSE.revoked) return setState('revoked');
       if (ev.code === CHAT_CLOSE.badFrame) return setState('refused');
+      if (ev.code === CHAT_CLOSE.evicted) return setState('evicted');
       setState('offline');
       const wait = backoff[Math.min(attempt, backoff.length - 1)]!;
       attempt += 1;
@@ -139,6 +142,11 @@ export function createChatLink(deps: ChatLinkDeps): {
   return {
     start(): void {
       stopped = false;
+      connect();
+    },
+    reconnect(): void {
+      if (state !== 'evicted' || socket) return;
+      attempt = 0;
       connect();
     },
     stop(): void {
