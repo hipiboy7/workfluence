@@ -261,7 +261,7 @@ describe('실제 응답이 응답 스키마를 지킨다 (FR-2221)', () => {
     conform('pages.tree', await c.pages.list({ space: sp.id, limit: 200 }, owner));
     conform('pages.get', await c.pages.get(child.id, md, owner));
     conform('pages.get', await c.pages.get(child.id, v1PageQuery.parse({ format: 'json' }), owner));
-    conform('pages.update', await c.pages.update(page.id, v1UpdatePageDto.parse({ body: '바뀐 본문' }), md, owner, req));
+    conform('pages.update', await c.pages.update(page.id, v1UpdatePageDto.parse({ body: '바뀐 본문', baseVersionNo: 1 }), md, owner, req));
     conform('pages.move', await c.pages.move(child.id, v1MovePageDto.parse({ parentId: null }), owner, req));
     conform('pages.versions', await c.pages.versions(page.id, owner));
     conform('pages.version', await c.pages.version(page.id, 1, md, owner));

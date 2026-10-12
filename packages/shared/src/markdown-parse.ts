@@ -38,6 +38,15 @@ const ESCAPABLE = /[!-/:-@[-`{-~]/;
 const ALNUM = /[\p{L}\p{N}]/u;
 const BLANK = /^[ \t]*$/;
 
+/**
+ * `<`로 시작하는 것이 **링크나 HTML로 읽히는 모양인가**. 아니면(`x<y`·`Map<String,Integer>`·`a <- b`) 그냥 글자다 — 글자 앞에 `<`가 온다고 거절하면
+ * 기술 글을 쓰는 사람의 요청이 400이 된다. HTML 모양은 CommonMark의 인라인 HTML(여는·닫는 태그·주석·처리 지시·선언)이다
+ */
+const ANGLE_LINK = /^<(?:https?:\/\/[^\s<>]*|[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*)>/i;
+const ANGLE_HTML =
+  /^<(?:[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/[A-Za-z][A-Za-z0-9-]*\s*>|!--|\?|![A-Za-z[])/;
+const isAngleConstruct = (rest: string): boolean => ANGLE_LINK.test(rest) || ANGLE_HTML.test(rest);
+
 const charge = (ctx: Ctx, n: number): void => {
   ctx.work += n;
   if (ctx.work > MARKDOWN_LIMITS.maxWork) throw new ParseError('마크다운이 너무 복잡하다 — 문단·표를 나누어 보낸다');
@@ -225,7 +234,7 @@ function parseInline(src: string, ctx: Ctx, loc: Loc): DocNode[] {
         flush();
         emit(inner, [...marks, { type: 'code' }]);
         i = close + n;
-      } else if (c === '<' && /[A-Za-z/!?]/.test(s[i + 1] ?? '')) {
+      } else if (c === '<' && isAngleConstruct(s.slice(i, i + 2100))) {
         const rest = s.slice(i, i + 2100);
         const auto = /^<(https?:\/\/[^\s<>]*)>/i.exec(rest);
         if (auto) {

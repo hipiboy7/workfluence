@@ -115,7 +115,7 @@
 | `GET /api/v1/pages?space=&limit=` | 스페이스(이름이나 id) | 본문 없는 트리. `limit` 기본 200·최대 1000 |
 | `GET /api/v1/pages/:id?format=` | 페이지 | `format` 기본 `markdown`(`json`·`text`) — 본문은 `body`, 형식은 `format`, **`ancestors`**(뿌리부터)가 함께 온다 |
 | `POST /api/v1/pages` | `space`·`title`·`body` | 스페이스를 **이름으로** 고른다(겹치면 409 `SPACE_AMBIGUOUS`+후보, 없거나 볼 수 없으면 404 `SPACE_NOT_FOUND`). 본문은 마크다운(`format`으로 `json`). 부모 없으면 맨 위, 위치는 맨 끝. 모르는 칸은 400 |
-| `PATCH /api/v1/pages/:id` | 고칠 `title`·`body` 중 하나 이상 | 안 준 것은 그대로, **기준 버전을 안 주면 지금 버전**(주면 지킨다 — 어긋나면 409 `VERSION_CONFLICT`+지금 버전). **사람이 실시간 편집 중이면 409 `PAGE_BEING_EDITED`**(쓰기 권한이 없으면 403이 먼저) |
+| `PATCH /api/v1/pages/:id` | 고칠 `title`·`body` 중 하나 이상 | 안 준 것은 그대로, **기준 버전(`baseVersionNo`)은 필수**(없으면 400 — 서버가 지금 버전으로 채우면 남의 고침을 조용히 덮는다. 어긋나면 409 `VERSION_CONFLICT`+지금 버전). **사람이 실시간 편집 중이면 409 `PAGE_BEING_EDITED`**(쓰기 권한이 없으면 403이 먼저) |
 | `PATCH /api/v1/pages/:id/move` | `parentId`(`null`=맨 위) | 위치를 안 주면 맨 끝 |
 | `DELETE /api/v1/pages/:id` | — | 휴지통으로 |
 | `GET …/versions` · `GET …/versions/:no?format=` | — | 버전 본문도 `format`대로 |

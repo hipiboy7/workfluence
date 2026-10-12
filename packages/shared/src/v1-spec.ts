@@ -23,7 +23,7 @@ import {
   v1LabelDto,
   v1MemberRoleDto,
   v1MovePageDto,
-  v1PageQuery, v1PageTreeQuery,
+  v1ExportQuery, v1PageQuery, v1PageTreeQuery,
   v1SearchQuery,
   v1SpaceListQuery,
   v1SpaceStatusDto,
@@ -50,6 +50,7 @@ import {
   v1Page,
   v1PageRestored,
   v1PageTree,
+  v1Truncated,
   v1Policy,
   v1SearchHit,
   v1Space,
@@ -258,14 +259,14 @@ const sid = { id: id('스페이스의 id') };
 const uid = { id: id('사용자의 id') };
 const formatNote = '`format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text.';
 
-const exportQuery = z.object({ versionNo: z.coerce.number().int().positive().optional().describe('이 버전을 내보낸다 — 없으면 지금 버전') });
+const exportQuery = v1ExportQuery;
 
 export const V1_OPERATIONS: V1Op[] = [
   // ---- 페이지 ----
-  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 본문은 `GET /pages/{id}`로 읽는다.', query: v1PageTreeQuery, response: v1PageTree },
+  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 많으면 `limit`에서 잘리고 `truncated`가 true다(`total`은 전체 수) — 잘린 목록의 일부 항목은 부모가 빠져 있을 수 있다. 본문은 `GET /pages/{id}`로 읽는다.', query: v1PageTreeQuery, response: v1PageTree },
   { id: 'pages.get', method: 'get', path: '/pages/{id}', tag: 'pages', summary: '페이지 읽기', description: `페이지 하나를 본문과 함께 읽는다. 조상 경로(\`ancestors\`)와 지금 버전 번호(\`currentVersionNo\`)가 함께 온다 — 고칠 때 기준 버전으로 쓴다. ${formatNote}`, params: pid, query: v1PageQuery, response: v1Page },
   { id: 'pages.create', method: 'post', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '페이지 만들기', description: '필수는 `space`(이름이나 id)·`title`·`body`뿐이다. 부모를 안 주면 맨 위, 위치는 맨 끝에 만들고 서버가 정한 값을 응답이 말한다. 본문은 마크다운이 기본이다(`format`=json이면 문서 객체). 원시 HTML·그림·허용 밖 링크는 400이다.', body: v1CreatePageDto, query: v1PageQuery, response: v1Page },
-  { id: 'pages.update', method: 'patch', path: '/pages/{id}', tag: 'pages', conflict: CONFLICTS.update, summary: '페이지 고치기', description: '고칠 것(`title`·`body`)만 보낸다 — 안 보낸 것은 그대로다. 기준 버전(`baseVersionNo`)을 안 주면 지금 버전이다. 사람이 그 페이지를 실시간으로 편집 중이면 409 `PAGE_BEING_EDITED` — 편집이 끝난 뒤 다시 시도한다. 기준 버전이 어긋나면 409 `VERSION_CONFLICT`.', params: pid, body: v1UpdatePageDto, query: v1PageQuery, response: v1Page },
+  { id: 'pages.update', method: 'patch', path: '/pages/{id}', tag: 'pages', conflict: CONFLICTS.update, summary: '페이지 고치기', description: '고칠 것(`title`·`body`)만 보낸다 — 안 보낸 것은 그대로다. 기준 버전(`baseVersionNo`)은 **꼭** 보낸다 — 페이지를 읽을 때 받은 `currentVersionNo`다. 사람이 그 페이지를 실시간으로 편집 중이면 409 `PAGE_BEING_EDITED` — 편집이 끝난 뒤 다시 시도한다. 기준 버전이 어긋나면 409 `VERSION_CONFLICT`.', params: pid, body: v1UpdatePageDto, query: v1PageQuery, response: v1Page },
   { id: 'pages.move', method: 'patch', path: '/pages/{id}/move', tag: 'pages', conflict: CONFLICTS.editing, summary: '페이지 옮기기', description: '부모(`parentId`, null이면 맨 위)만 있으면 된다. 위치를 안 주면 형제의 맨 끝이다.', params: pid, body: v1MovePageDto, response: v1MovedPage },
   { id: 'pages.delete', method: 'delete', path: '/pages/{id}', tag: 'pages', conflict: CONFLICTS.editing, summary: '페이지 지우기(휴지통으로)', description: '휴지통으로 보낸다 — 보존 기간 안에는 `POST /trash/pages/{id}/restore`로 되살린다.', params: pid, response: v1Ok },
   { id: 'pages.versions', method: 'get', path: '/pages/{id}/versions', tag: 'pages', summary: '버전 이력', description: '버전 번호·제목·고친 사람·시각의 목록(본문 없이). 본문은 버전 하나를 읽어 본다.', params: pid, response: array(v1VersionSummary) },
@@ -275,7 +276,7 @@ export const V1_OPERATIONS: V1Op[] = [
   { id: 'pages.export', method: 'get', path: '/pages/{id}/export', tag: 'pages', summary: '페이지를 HTML 한 파일로 내보내기', description: '내려받는 파일(`Content-Disposition: attachment`)이다. 감사로그에 남는다.', params: pid, query: exportQuery, response: { contentType: 'text/html', description: 'HTML 한 파일' } },
 
   // ---- 스페이스·Crew ----
-  { id: 'spaces.list', method: 'get', path: '/spaces', tag: 'spaces', summary: '스페이스 목록', description: '내가 볼 수 있는 스페이스. `q`로 이름을 찾고 `limit`으로 자른다.', query: v1SpaceListQuery, response: v1Items(v1Space) },
+  { id: 'spaces.list', method: 'get', path: '/spaces', tag: 'spaces', summary: '스페이스 목록', description: '내가 볼 수 있는 스페이스. `q`로 이름을 찾고 `limit`으로 자른다 — 잘렸으면 `truncated`가 true다.', query: v1SpaceListQuery, response: v1Items(v1Space).extend({ truncated: v1Truncated }) },
   { id: 'spaces.get', method: 'get', path: '/spaces/{id}', tag: 'spaces', summary: '스페이스 하나', description: '내 역할(`myRole`)과 할 수 있는 일(`canWrite`·`canManageMembers`)이 함께 온다.', params: sid, response: v1Space },
   { id: 'spaces.create', method: 'post', path: '/spaces', tag: 'spaces', summary: '팀 스페이스 만들기', description: '필수는 `name`뿐이다. 종류는 팀, 설명은 빈 글, 분류는 없음이 기본이다. 분류는 **이름으로** 고르고 없는 이름이면 404와 고를 수 있는 이름을 돌려준다.', body: v1CreateSpaceDto, response: v1Space },
   { id: 'spaces.update', method: 'patch', path: '/spaces/{id}', tag: 'spaces', summary: '스페이스 이름·설명·분류 고치기', description: '고칠 것만 보낸다. 분류는 null이면 지운다.', params: sid, body: v1UpdateSpaceDto, response: v1Space },
@@ -365,7 +366,7 @@ export const V1_OPENAPI_INFO: OpenApiInfo = {
     '주소: 이 명세를 받은 서버의 주소 + `/api/v1`. 경로는 모두 `/api/v1`을 뺀 꼴로 적었다.',
     `토큰: 사람이 화면(내 정보 → API 토큰)에서 발급·폐기한다 — 이 API에는 발급·폐기 경로가 없다. 유효기간은 발급할 때 고르며 기본 ${API_TOKEN_LIMITS.defaultDays}일·최대 ${API_TOKEN_LIMITS.maxDays}일, 사람마다 ${API_TOKEN_LIMITS.maxPerUser}개까지. 갱신은 없다 — 만료·폐기되면 사람이 새로 발급해 넘긴다. 비밀번호 변경·정지·강제 종료는 토큰을 모두 끊는다.`,
     '오류 코드 — 401: `TOKEN_MISSING`(헤더 없음)·`TOKEN_INVALID`(서명·형식이 틀림)·`TOKEN_UNKNOWN`(서명은 맞는데 그 번호·주인의 발급 기록이 없음)·`TOKEN_EXPIRED`(만료)·`TOKEN_REVOKED`(폐기)·`ACCOUNT_INACTIVE`(주인이 정지됨 등 활성이 아님) — 모두 사람이 새 토큰을 받거나 풀어야 하니 재시도하지 말고 멈춘다. 403: `INSUFFICIENT_SCOPE`·`FORBIDDEN`·`PASSWORD_CHANGE_REQUIRED`(주인이 화면에서 비밀번호를 바꿔야 토큰을 쓸 수 있음). 400: `INVALID_REQUEST`(`message`가 칸과 까닭을 말한다)·`INVALID_JSON`. 404: `NOT_FOUND`·`SPACE_NOT_FOUND` 등. 409: 각 동작의 409 설명을 본다. 413: `PAYLOAD_TOO_LARGE`·`TOO_LARGE_FOR_JSON`. 429: `RATE_LIMITED`. 503: `API_DISABLED`(서버에서 공개 API를 꺼 둠). 500: `INTERNAL` — `requestId`를 운영자에게 알린다.',
-    '고칠 때: 페이지 고치기는 본문 **전체 교체**다(부분 수정이 없다). 읽은 `currentVersionNo`를 `baseVersionNo`로 보내야 그 사이 남의 고침을 덮지 않는다 — 안 보내면 지금 버전이 기준이 되어 충돌 검사가 없다. 같은 요청을 되풀이해도 중복을 막는 키는 없다: 만들기(POST)는 실패해도 만들어졌을 수 있으니 다시 보내기 전에 목록으로 확인한다.',
+    '고칠 때: 페이지 고치기는 본문 **전체 교체**다(부분 수정이 없다). 읽은 `currentVersionNo`를 `baseVersionNo`로 꼭 보낸다 — 그래야 그 사이 남의 고침을 덮지 않는다(안 보내면 400). 같은 요청을 되풀이해도 중복을 막는 키는 없다: 만들기(POST)는 실패해도 만들어졌을 수 있으니 다시 보내기 전에 목록으로 확인한다.',
     '`format`: 쿼리의 `format`은 **응답**에 실을 본문 형식이고, 요청 본문의 `format`은 **보내는** `body`의 형식이다(둘은 따로 정한다). 마크다운은 원시 HTML·그림 문법·허용 밖 링크를 받지 않고 400이다.',
     '목록: 쪽 나누기가 없다. 모두 `limit`까지만 돌려주고(동작마다 최대값이 다르다) 넘는 것은 잘린다 — 많으면 스페이스·검색어·기간으로 조건을 좁혀 나누어 받는다. `GET /users`만 `offset`·`total`을 쓴다.',
     '이 API는 더하기만 한다(필드·경로 추가). 빼거나 뜻을 바꾸면 v2다.',

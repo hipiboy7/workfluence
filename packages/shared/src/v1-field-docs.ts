@@ -9,8 +9,7 @@ import { POLICY_DEFAULTS, POLICY_RANGES, type Policy } from './policy';
 
 const policy = (text: string, key: keyof Policy): string => {
   const r = POLICY_RANGES[key];
-  const range = r ? `${r.min}~${r.max}` : '';
-  return `${text}${range ? ` (${range}, 기본 ${String(POLICY_DEFAULTS[key])})` : ''}`;
+  return `${text} (${r.min}~${r.max}, 기본 ${String(POLICY_DEFAULTS[key])})`;
 };
 
 export const V1_FIELD_DOCS: Record<string, string> = {

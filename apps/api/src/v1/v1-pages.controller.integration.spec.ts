@@ -1,7 +1,8 @@
 import { ConflictException, ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { v1CreatePageDto, v1MovePageDto, v1PageQuery, v1UpdatePageDto } from '@workfluence/shared';
+import { v1CreatePageDto, v1ExportQuery, v1MovePageDto, v1PageQuery, v1UpdatePageDto } from '@workfluence/shared';
+import { ZodPipe } from '../common/zod.pipe';
 import { AuditService } from '../audit/audit.service';
 import { auditEvents, pages } from '../db/schema';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
@@ -187,15 +188,21 @@ describe('읽기 — 마크다운이 기본 (FR-2215)', () => {
     await mk('1');
     await mk('2');
     await mk('3');
-    expect((await ctrl.list({ space: space.id, limit: 2 }, owner)).items).toHaveLength(2);
+    const cut = await ctrl.list({ space: space.id, limit: 2 }, owner);
+    expect(cut.items).toHaveLength(2);
+    expect(cut.truncated).toBe(true);
+    expect(cut.total).toBeGreaterThan(2);
+    const whole = await ctrl.list({ space: space.id, limit: 200 }, owner);
+    expect(whole.truncated).toBe(false);
+    expect(whole.total).toBe(whole.items.length);
   });
 });
 
 describe('고치기 — 고칠 것만 (FR-2223)', () => {
-  it('본문만 주면 제목은 그대로고, 기준 버전은 서버가 지금 버전을 쓴다', async () => {
+  it('본문만 주면 제목은 그대로다', async () => {
     const { owner, mk } = await setup();
     const p = await mk('제목 유지');
-    const v2 = await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '새 본문' }), md, owner, req);
+    const v2 = await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '새 본문', baseVersionNo: 1 }), md, owner, req);
     expect(v2).toMatchObject({ title: '제목 유지', currentVersionNo: 2, body: '새 본문' });
     expect((await rows('page.update'))[0]).toMatchObject({ targetId: p.id, ip: '10.0.0.17', detail: { versionNo: 2 } });
   });
@@ -203,14 +210,14 @@ describe('고치기 — 고칠 것만 (FR-2223)', () => {
   it('제목만 주면 본문은 그대로다', async () => {
     const { owner, mk } = await setup();
     const p = await mk('옛 제목');
-    const v2 = await ctrl.update(p.id, v1UpdatePageDto.parse({ title: '새 제목' }), md, owner, req);
+    const v2 = await ctrl.update(p.id, v1UpdatePageDto.parse({ title: '새 제목', baseVersionNo: 1 }), md, owner, req);
     expect(v2).toMatchObject({ title: '새 제목', body: '옛 제목 본문', currentVersionNo: 2 });
   });
 
   it('**기준 버전을 주면 지킨다** — 어긋나면 409(VERSION_CONFLICT가 될 응답에 지금 버전)', async () => {
     const { owner, mk } = await setup();
     const p = await mk('충돌');
-    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '둘째' }), md, owner, req);
+    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '둘째', baseVersionNo: 1 }), md, owner, req);
     const r = await codeOf(ctrl.update(p.id, v1UpdatePageDto.parse({ body: '셋째', baseVersionNo: 1 }), md, owner, req));
     expect(r.status).toBe(409);
     expect(r.body.currentVersionNo).toBe(2);
@@ -220,7 +227,7 @@ describe('고치기 — 고칠 것만 (FR-2223)', () => {
     const { owner, mk } = await setup();
     const p = await mk('편집 중');
     live.hasLiveEditors.mockReturnValue(true);
-    expect(await codeOf(ctrl.update(p.id, v1UpdatePageDto.parse({ body: '덮어쓰기' }), md, owner, req))).toMatchObject({ status: 409, code: 'PAGE_BEING_EDITED' });
+    expect(await codeOf(ctrl.update(p.id, v1UpdatePageDto.parse({ body: '덮어쓰기', baseVersionNo: 1 }), md, owner, req))).toMatchObject({ status: 409, code: 'PAGE_BEING_EDITED' });
     const [row] = await db.select().from(pages).where(eq(pages.id, p.id));
     expect(row!.currentVersionNo).toBe(1);
     expect(await rows('page.update')).toHaveLength(0);
@@ -233,7 +240,7 @@ describe('고치기 — 고칠 것만 (FR-2223)', () => {
     const bob = await person(db, 'bob');
     await spacesSvc.addMember(space.id, { username: 'bob', role: 'viewer' }, owner);
     live.hasLiveEditors.mockReturnValue(true);
-    await expect(ctrl.update(p.id, v1UpdatePageDto.parse({ body: 'y' }), md, bob, req)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(ctrl.update(p.id, v1UpdatePageDto.parse({ body: 'y', baseVersionNo: 1 }), md, bob, req)).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('멘션 메일은 화면용과 같은 길로 간다 (커밋 뒤, 일으킨 사람 이름과 함께)', async () => {
@@ -241,7 +248,7 @@ describe('고치기 — 고칠 것만 (FR-2223)', () => {
     await person(db, 'bob', 'member', { email: 'bob@example.internal' });
     await spacesSvc.addMember(space.id, { username: 'bob', role: 'editor' }, owner);
     const p = await mk('부르기');
-    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '@bob 봐 주세요' }), md, owner, req);
+    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '@bob 봐 주세요', baseVersionNo: 1 }), md, owner, req);
     expect(notify).toHaveBeenCalledTimes(1);
   });
 });
@@ -282,7 +289,7 @@ describe('이력·되돌리기', () => {
   it('이력 목록과 옛 버전 읽기(형식 선택)', async () => {
     const { owner, mk } = await setup();
     const p = await mk('이력');
-    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '둘째 본문' }), md, owner, req);
+    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '둘째 본문', baseVersionNo: 1 }), md, owner, req);
     const list = await ctrl.versions(p.id, owner);
     expect(list.map((v) => v.versionNo)).toEqual(expect.arrayContaining([1, 2]));
     expect(await ctrl.version(p.id, 1, md, owner)).toMatchObject({ versionNo: 1, format: 'markdown', body: '이력 본문' });
@@ -291,7 +298,7 @@ describe('이력·되돌리기', () => {
   it('되돌리면 새 버전이 생긴다', async () => {
     const { owner, mk } = await setup();
     const p = await mk('되돌리기');
-    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '바뀜' }), md, owner, req);
+    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '바뀜', baseVersionNo: 1 }), md, owner, req);
     const back = await ctrl.restore(p.id, 1, md, owner, req);
     expect(back).toMatchObject({ currentVersionNo: 3, body: '되돌리기 본문' });
   });
@@ -318,7 +325,7 @@ describe('비교·내보내기', () => {
   it('두 버전의 차이를 화면용과 같은 모양으로 준다', async () => {
     const { owner, mk } = await setup();
     const p = await mk('차이');
-    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '바뀐 본문' }), md, owner, req);
+    await ctrl.update(p.id, v1UpdatePageDto.parse({ body: '바뀐 본문', baseVersionNo: 1 }), md, owner, req);
     const d = await ctrl.diff(p.id, 1, 2, owner);
     expect(d).toMatchObject({ from: { versionNo: 1 }, to: { versionNo: 2 }, titleChanged: false });
     expect(d.diff).toBeTruthy();
@@ -349,7 +356,7 @@ describe('비교·내보내기', () => {
         sent.body = b;
       },
     };
-    await ctrl.exportHtml(p.id, undefined, owner, req, res as never);
+    await ctrl.exportHtml(p.id, {}, owner, req, res as never);
     expect(sent.status).toBe(200);
     expect(sent.headers['Content-Type']).toMatch(/text\/html/);
     expect(sent.headers['Content-Disposition']).toMatch(/^attachment;/);
@@ -358,9 +365,9 @@ describe('비교·내보내기', () => {
     expect((await rows('page.export'))[0]).toMatchObject({ targetId: p.id, ip: '10.0.0.17', detail: { versionNo: 1 } });
   });
 
-  it('versionNo가 정수가 아니면 400', async () => {
-    const { owner, mk } = await setup();
-    const p = await mk('x');
-    await expect(ctrl.exportHtml(p.id, 'abc', owner, req, {} as never)).rejects.toMatchObject({ status: 400 });
+  it('versionNo가 양의 정수가 아니면 400 — 컨트롤러 앞의 검사(ZodPipe)가 막는다', () => {
+    const pipe = new ZodPipe(v1ExportQuery);
+    for (const bad of ['abc', '', '0', '-1', '99999999999']) expect(() => pipe.transform({ versionNo: bad })).toThrow();
+    expect(pipe.transform({ versionNo: '2' })).toEqual({ versionNo: 2 });
   });
 });

@@ -109,10 +109,10 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/pages/$PAGE_ID"
 
 ```bash
 curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"body":"# 큰 제목\n\n본문을 고쳤다."}' "$BASE/api/v1/pages/$PAGE_ID"
+  -d '{"body":"# 큰 제목\n\n본문을 고쳤다.","baseVersionNo":1}' "$BASE/api/v1/pages/$PAGE_ID"
 ```
 
-안 보낸 제목은 그대로이고, 기준 버전(`baseVersionNo`)을 안 주면 **지금 버전**을 기준으로 한다. 읽은 뒤 사이에 다른 사람이 저장했는지 확인하며 고치려면 읽을 때의 `currentVersionNo`를 `baseVersionNo`로 보낸다 — 어긋나면 409 `VERSION_CONFLICT`(`details.currentVersionNo`가 지금 버전) — 다시 읽고 고쳐서 다시 보낸다. **사람이 그 페이지를 실시간으로 편집 중이면** 409 `PAGE_BEING_EDITED` — 그 사람의 입력을 지우지 않으려고 막는다. 편집이 끝난 뒤 다시 시도한다.
+안 보낸 제목은 그대로다. 기준 버전(`baseVersionNo`)은 **꼭** 보낸다(없으면 400) — 페이지를 읽을 때 받은 `currentVersionNo`를 그대로 보내면 된다. 서버가 지금 버전으로 채우면 그 사이 다른 사람의 저장을 조용히 덮기 때문이다. 어긋나면 409 `VERSION_CONFLICT`(`details.currentVersionNo`가 지금 버전) — 다시 읽고 고쳐서 다시 보낸다. **사람이 그 페이지를 실시간으로 편집 중이면** 409 `PAGE_BEING_EDITED` — 그 사람의 입력을 지우지 않으려고 막는다. 편집이 끝난 뒤 다시 시도한다.
 
 ### 3.5 검색
 

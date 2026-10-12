@@ -30,7 +30,14 @@ export const v1PageSummary = z.object({
   currentVersionNo: z.number().int(),
   updatedAt: iso,
 });
-export const v1PageTree = z.object({ space: z.object({ id: z.string(), name: z.string() }), items: z.array(v1PageSummary) });
+/** 목록이 `limit`에서 잘렸는가 — 잘렸으면 `true`, 에이전트가 부분 목록을 전체로 읽지 않게 */
+export const v1Truncated = z.boolean().describe('`limit`에서 잘렸으면 true — 뒤에 더 있다. `limit`을 올리거나 조건을 좁혀 다시 읽는다');
+export const v1PageTree = z.object({
+  space: z.object({ id: z.string(), name: z.string() }),
+  items: z.array(v1PageSummary),
+  total: z.number().int().describe('이 스페이스의 페이지 수 전체(잘리기 전)'),
+  truncated: v1Truncated,
+});
 export const v1Page = z.object({
   id: z.string(),
   spaceId: z.string(),

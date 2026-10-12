@@ -12,6 +12,7 @@ for v in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
   args+=(--build-arg "${v}=${!v:-}")
 done
 # 이미지 이름 — 셸의 WF_APP_IMAGE, 없으면 deploy/.env의 것, 없으면 workfluence-app:latest. 같은 서버에 스택이 여럿이면 이름을 나눠야 남의 latest를 덮지 않는다
-IMAGE="${WF_APP_IMAGE:-$(grep -s '^WF_APP_IMAGE=' deploy/.env | tail -1 | cut -d= -f2-)}"
+# `|| true` — 키가 없으면 grep이 1로 끝나 pipefail이 스크립트를 조용히 죽인다
+IMAGE="${WF_APP_IMAGE:-$(grep -s '^WF_APP_IMAGE=' deploy/.env | tail -1 | cut -d= -f2- || true)}"
 IMAGE="${IMAGE:-workfluence-app:latest}"
 docker build -f deploy/Dockerfile "${args[@]}" -t "${IMAGE}" -t "${IMAGE%:*}:${GIT_SHA:0:7}" .

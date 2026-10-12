@@ -418,6 +418,16 @@ describe('hasLiveEditors — 공개 API가 편집 중인 페이지를 알아본�
     await vi.waitFor(() => expect(gw.hasLiveEditors(pageId)).toBe(false));
   });
 
+  it('**접속자가 없어도 저장 전 편집이 남은 방은 편집 중이다** — 공개 API가 정본을 바꾸면 그 입력이 사라진다', async () => {
+    const { room, socket } = await attach();
+    const sock = [...room.members][0] as { socket: FakeSocket };
+    sock.socket.emit('message', editUpdate(room.doc, '저장 전 글'));
+    room.members.clear();
+    expect((room as unknown as { lastChangeAt: number }).lastChangeAt).not.toBe(0);
+    expect(gw.hasLiveEditors(pageId)).toBe(true);
+    void socket;
+  });
+
   it('다른 페이지는 영향이 없다', async () => {
     await attach();
     expect(gw.hasLiveEditors('00000000-0000-4000-8000-000000000000')).toBe(false);

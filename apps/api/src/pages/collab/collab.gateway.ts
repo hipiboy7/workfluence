@@ -388,12 +388,13 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * 지금 이 페이지를 **사람이 실시간으로 편집하고 있는가** (공개 API FR-2216). 연결이 붙어 있거나 붙는 중이면 `true`다. 공개 API의 저장·되돌리기는
+   * 지금 이 페이지를 **사람이 실시간으로 편집하고 있는가** (공개 API FR-2216). 연결이 붙어 있거나 붙는 중이거나, **접속자는 나갔어도 저장 전 편집이
+   * 방에 남아 있으면** `true`다(`lastChangeAt` — 저장이 끝나면 0으로 돌아온다). 공개 API의 저장·되돌리기는
    * 이때 409로 물러선다 — 정본을 바꾸면 방이 앞선 정본을 만나 상태를 버리고 연결을 닫아, 사람의 저장 전 입력이 사라진다
    */
   hasLiveEditors(pageId: string): boolean {
     const room = this.rooms.get(pageId);
-    return !!room && (room.members.size > 0 || room.joining > 0);
+    return !!room && (room.members.size > 0 || room.joining > 0 || room.lastChangeAt !== 0);
   }
 
   /** 방을 얻는다. 없으면 저장된 실시간 상태에서, 그것도 없으면 **정본에서** 만든다 */

@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
+  capItems,
   matchMember,
   matchSpaces,
   toV1Category,
@@ -61,9 +62,11 @@ export class V1SpacesController {
   }
 
   @Get()
-  async list(@Query(new ZodPipe(v1SpaceListQuery)) q: V1SpaceListQuery, @CurrentUser() me: SessionUser): Promise<{ items: V1SpaceView[] }> {
+  async list(@Query(new ZodPipe(v1SpaceListQuery)) q: V1SpaceListQuery, @CurrentUser() me: SessionUser): Promise<{ items: V1SpaceView[]; truncated: boolean }> {
     const limit = q.limit ?? V1_DEFAULTS.listLimit;
-    return { items: (await readableSpaces(this.spaces, me, { q: q.q }, limit)).slice(0, limit).map(toV1Space) };
+    // 한도보다 하나 더 읽어 와야 잘렸는지 알 수 있다
+    const { items, truncated } = capItems(await readableSpaces(this.spaces, me, { q: q.q }, limit + 1), limit);
+    return { items: items.map(toV1Space), truncated };
   }
 
   @Get(':id')

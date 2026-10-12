@@ -87,7 +87,10 @@ describe('목록·읽기', () => {
     await spaces.create(create({ name: '남의 공간' }), other, req);
     expect((await spaces.list(query(), owner)).items.map((s) => s.name).sort()).toEqual(['인사 규정', '장애 보고']);
     expect((await spaces.list(query({ q: '장애' }), owner)).items.map((s) => s.name)).toEqual(['장애 보고']);
-    expect((await spaces.list(query({ limit: '1' }), owner)).items).toHaveLength(1);
+    const cut = await spaces.list(query({ limit: '1' }), owner);
+    expect(cut.items).toHaveLength(1);
+    expect(cut.truncated).toBe(true);
+    expect((await spaces.list(query(), owner)).truncated).toBe(false);
   });
 
   it('id로 읽는다 — 볼 수 없으면 404', async () => {

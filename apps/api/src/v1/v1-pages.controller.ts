@@ -1,10 +1,13 @@
-import { ConflictException, Controller, Delete, Get, Inject, Param, ParseIntPipe, Patch, Post, Query, Req, Res, Body, BadRequestException } from '@nestjs/common';
+import { ConflictException, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, Body } from '@nestjs/common';
 import {
+  capItems,
   docToBody,
   v1CreatePageDto,
+  v1ExportQuery,
   v1MovePageDto,
   v1PageQuery,
   v1PageTreeQuery,
+  v1VersionNo,
   type V1PageTreeQuery,
   v1UpdatePageDto,
   type PageDiffView,
@@ -69,7 +72,7 @@ export class V1PagesController {
    * **편집 중인 페이지는 건드리지 않는다** (G2, FR-2216). 정본을 바꾸면 방이 앞선 정본을 만나 사람의 저장 전 입력을 버린다. 쓰기 권한을 **먼저** 본다 —
    * 쓸 수 없는 사람에게 "누가 편집 중"이라는 사실보다 403이 먼저다
    */
-  private async assertWritableNow(id: string, me: SessionUser): Promise<{ title: string; spaceId: string; currentVersionNo: number }> {
+  private async assertWritableNow(id: string, me: SessionUser): Promise<Awaited<ReturnType<PagesService['get']>>> {
     const page = await this.pages.get(id, me);
     await this.spaces.assertWrite(page.spaceId, me);
     if (this.live.hasLiveEditors(id)) {
@@ -86,9 +89,10 @@ export class V1PagesController {
   async list(
     @Query(new ZodPipe(v1PageTreeQuery)) query: V1PageTreeQuery,
     @CurrentUser() me: SessionUser,
-  ): Promise<{ space: { id: string; name: string }; items: PageSummary[] }> {
+  ): Promise<{ space: { id: string; name: string }; items: PageSummary[]; total: number; truncated: boolean }> {
     const target = await resolveSpaceRef(this.spaces, query.space, me);
-    return { space: target, items: (await this.pages.tree(target.id, me)).slice(0, query.limit) };
+    const all = await this.pages.tree(target.id, me);
+    return { space: target, ...capItems(all, query.limit), total: all.length };
   }
 
   @Get(':id')
@@ -109,7 +113,7 @@ export class V1PagesController {
     return this.view(page.id, me, query.format);
   }
 
-  /** 고칠 것만 — 안 준 제목·본문은 그대로, 기준 버전을 안 주면 지금 버전. 편집 중이면 409 */
+  /** 고칠 것만 — 안 준 제목·본문은 그대로. **기준 버전은 꼭 보낸다**(없으면 400). 편집 중이면 409 */
   @Patch(':id')
   async update(
     @Param('id', UuidPipe) id: string,
@@ -119,8 +123,7 @@ export class V1PagesController {
     @Req() req: Request,
   ): Promise<V1PageView> {
     const current = await this.assertWritableNow(id, me);
-    const content = dto.doc ?? (await this.pages.get(id, me)).content;
-    await this.uc.update(id, { title: dto.title ?? current.title, content, baseVersionNo: dto.baseVersionNo ?? current.currentVersionNo }, me, metaOf(req));
+    await this.uc.update(id, { title: dto.title ?? current.title, content: dto.doc ?? current.content, baseVersionNo: dto.baseVersionNo }, me, metaOf(req));
     return this.view(id, me, query.format);
   }
 
@@ -148,7 +151,7 @@ export class V1PagesController {
   @Get(':id/versions/:no')
   async version(
     @Param('id', UuidPipe) id: string,
-    @Param('no', ParseIntPipe) no: number,
+    @Param('no', new ZodPipe(v1VersionNo)) no: number,
     @Query(new ZodPipe(v1PageQuery)) query: V1PageQuery,
     @CurrentUser() me: SessionUser,
   ): Promise<V1VersionView> {
@@ -160,7 +163,7 @@ export class V1PagesController {
   @Post(':id/versions/:no/restore')
   async restore(
     @Param('id', UuidPipe) id: string,
-    @Param('no', ParseIntPipe) no: number,
+    @Param('no', new ZodPipe(v1VersionNo)) no: number,
     @Query(new ZodPipe(v1PageQuery)) query: V1PageQuery,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
@@ -174,8 +177,8 @@ export class V1PagesController {
   @Get(':id/versions/:a/diff/:b')
   diff(
     @Param('id', UuidPipe) id: string,
-    @Param('a', ParseIntPipe) a: number,
-    @Param('b', ParseIntPipe) b: number,
+    @Param('a', new ZodPipe(v1VersionNo)) a: number,
+    @Param('b', new ZodPipe(v1VersionNo)) b: number,
     @CurrentUser() me: SessionUser,
   ): Promise<PageDiffView> {
     return this.pages.diff(id, a, b, me);
@@ -185,14 +188,12 @@ export class V1PagesController {
   @Get(':id/export')
   async exportHtml(
     @Param('id', UuidPipe) id: string,
-    @Query('versionNo') versionNo: string | undefined,
+    @Query(new ZodPipe(v1ExportQuery)) query: { versionNo?: number },
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const no = versionNo === undefined ? undefined : Number(versionNo);
-    if (no !== undefined && !Number.isInteger(no)) throw new BadRequestException('versionNo는 정수다');
-    const out = await this.uc.exportHtml(id, no, me, metaOf(req));
+    const out = await this.uc.exportHtml(id, query.versionNo, me, metaOf(req));
     res
       .status(200)
       .setHeader('Content-Type', 'text/html; charset=utf-8')

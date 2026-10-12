@@ -95,13 +95,27 @@ export const v1CreatePageDto = z
   .transform((v, ctx) => ({ space: v.space, title: v.title, parentId: v.parentId, doc: convert(v.format, v.body, ctx) }));
 export type V1CreatePageDto = z.infer<typeof v1CreatePageDto>;
 
-/** 페이지 고치기 — 고칠 것만. 기준 버전을 안 주면 서버가 지금 버전을 쓴다(편집 중이면 409 — 설계서 FR-2216) */
+/** 버전 번호의 가장 큰 값 — DB `integer`의 끝이다. 넘기면 조회가 PostgreSQL 오류(500)로 끝나므로 경계에서 막는다 */
+const VERSION_NO_MAX = 2_147_483_647;
+
+/** 경로·쿼리에서 오는 버전 번호 — 양의 정수만(`''`·`0`·음수·소수·글자·범위 밖은 400) */
+export const v1VersionNo = z.coerce.number().int().min(1).max(VERSION_NO_MAX);
+
+/** 내보내기 쿼리 — 버전을 안 주면 지금 버전 */
+export const v1ExportQuery = z.object({ versionNo: v1VersionNo.optional().describe('이 버전을 내보낸다 — 없으면 지금 버전') });
+
+/** 목록을 `limit`까지만 — 잘렸으면 `truncated`로 말한다(에이전트가 부분 목록을 전체로 읽지 않게) */
+export function capItems<T>(all: readonly T[], limit: number): { items: T[]; truncated: boolean } {
+  return { items: all.slice(0, limit), truncated: all.length > limit };
+}
+
+/** 페이지 고치기 — 고칠 것만. **기준 버전은 꼭 보낸다**: 서버가 지금 버전으로 채우면 그 사이 남의 고침을 조용히 덮는다(편집 중이면 409 — 설계서 FR-2216) */
 export const v1UpdatePageDto = z
   .strictObject({
     title: titleSchema.optional(),
     body: z.unknown().optional(),
     format: writeFormat,
-    baseVersionNo: z.number().int().positive().optional().describe('고치는 기준이 되는 버전 번호 — 안 주면 지금 버전. 그 사이 다른 사람이 저장했으면 409 VERSION_CONFLICT'),
+    baseVersionNo: z.number().int().min(1).max(VERSION_NO_MAX).describe('고치는 기준이 되는 버전 번호 — 페이지를 읽을 때 받은 `currentVersionNo`를 그대로 보낸다. 그 사이 다른 사람이 저장했으면 409 VERSION_CONFLICT'),
   })
   .refine((v) => v.title !== undefined || v.body !== undefined, { message: '고칠 것이 없다 — title이나 body 중 하나는 있어야 한다' })
   .transform((v, ctx) => ({
@@ -214,7 +228,8 @@ export function matchLabel<T extends { id: string; name: string }>(ref: string, 
   return labels.find((l) => l.id.toLowerCase() === wanted || l.name.toLowerCase() === wanted) ?? null;
 }
 
-const BASE64 = /^[A-Za-z0-9+/\r\n]*={0,2}$/;
+/** 줄바꿈을 뺀 뒤 4글자 묶음이고, 끝의 `=` 채움이 길이와 맞는다 — 잘린 base64가 깨진 파일로 저장되지 않게 */
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 /**
  * 첨부를 JSON으로 올린다 — 에이전트는 바이너리를 보낼 수 없다. 이름과 내용이면 된다(글은 utf8, 바이너리는 base64). **형식(mime)은 받지 않는다** — 올리는
@@ -232,7 +247,7 @@ export const v1UploadDto = z
     encoding: z.enum(['utf8', 'base64']).default(V1_DEFAULTS.uploadEncoding),
   })
   .superRefine((v, ctx) => {
-    if (v.encoding === 'base64' && !BASE64.test(v.content)) ctx.addIssue({ code: 'custom', message: 'base64가 아니다', path: ['content'] });
+    if (v.encoding === 'base64' && !BASE64.test(v.content.replace(/[\r\n]/g, ''))) ctx.addIssue({ code: 'custom', message: 'base64가 아니다', path: ['content'] });
   });
 export type V1UploadDto = z.infer<typeof v1UploadDto>;
 
