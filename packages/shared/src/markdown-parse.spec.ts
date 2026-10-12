@@ -383,6 +383,18 @@ describe('받지 않는 것 — 400의 까닭을 말한다', () => {
     expect(body('a < b, 1<2, <3')).toEqual([p(t('a < b, 1<2, <3'))]);
   });
 
+  it('**태그 모양이 아니면** `<` 뒤가 글자여도 그냥 글자다 — 비교식·제네릭 같은 기술 글', () => {
+    expect(body('x<y')).toEqual([p(t('x<y'))]);
+    expect(body('Map<String,Integer>')).toEqual([p(t('Map<String,Integer>'))]);
+    expect(body('a <- b, i<n && j<m')).toEqual([p(t('a <- b, i<n && j<m'))]);
+  });
+
+  it('태그 모양은 여전히 거절한다 — 열고 닫는 태그·속성이 있는 태그·주석', () => {
+    for (const html of ['<b>', '<br/>', '<a href="x">', '<img src=x onerror=y>', '</div>', '<!-- c -->', '<?php ?>']) {
+      expect(fail(`앞 ${html} 뒤`).join(' '), html).toMatch(/HTML/);
+    }
+  });
+
   it('코드 안의 HTML은 글자다', () => {
     expect(body('`<b>`')).toEqual([p(t('<b>', [code]))]);
     expect(body('```\n<script>\n```')).toEqual([{ type: 'codeBlock', content: [t('<script>')] }]);

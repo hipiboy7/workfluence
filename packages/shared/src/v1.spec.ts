@@ -8,6 +8,7 @@ import {
   matchLabel,
   matchMember,
   matchSpaces,
+  capItems,
   toV1Attachment,
   toV1Category,
   toV1Comment,
@@ -21,6 +22,7 @@ import {
   v1CreatePageDto,
   v1CreateSpaceDto,
   v1ErrorBody,
+  v1ExportQuery,
   v1LabelDto,
   v1MemberRoleDto,
   v1MovePageDto,
@@ -33,6 +35,7 @@ import {
   v1UpdatePageDto,
   v1UpdateSpaceDto,
   v1UploadDto,
+  v1VersionNo,
   V1_DEFAULTS,
 } from './v1';
 
@@ -151,23 +154,55 @@ describe('v1CreatePageDto — 필수는 어디·제목·본문뿐 (FR-2223)', ()
 });
 
 describe('v1UpdatePageDto — 고칠 것만 (FR-2223)', () => {
-  it('본문만, 제목만으로 통과한다', () => {
-    expect(v1UpdatePageDto.parse({ body: '새 글' }).doc?.type).toBe('doc');
-    expect(v1UpdatePageDto.parse({ title: '새 제목' })).toMatchObject({ title: '새 제목', doc: undefined, baseVersionNo: undefined });
+  it('본문만, 제목만으로 통과한다 — 기준 버전과 함께', () => {
+    expect(v1UpdatePageDto.parse({ body: '새 글', baseVersionNo: 1 }).doc?.type).toBe('doc');
+    expect(v1UpdatePageDto.parse({ title: '새 제목', baseVersionNo: 1 })).toMatchObject({ title: '새 제목', doc: undefined, baseVersionNo: 1 });
   });
 
-  it('기준 버전은 고르면 쓴다 — 없으면 서버가 지금 버전을 쓴다', () => {
+  it('**기준 버전은 꼭 보낸다** — 서버가 지금 버전으로 채우면 그 사이 남의 고침을 조용히 덮는다', () => {
     expect(v1UpdatePageDto.parse({ body: 'x', baseVersionNo: 3 }).baseVersionNo).toBe(3);
+    expect(v1UpdatePageDto.safeParse({ body: 'x' }).success).toBe(false);
+    expect(v1UpdatePageDto.safeParse({ title: '새 제목' }).success).toBe(false);
   });
 
   it('아무것도 고치지 않으면 거절한다', () => {
-    expect(v1UpdatePageDto.safeParse({}).success).toBe(false);
     expect(v1UpdatePageDto.safeParse({ baseVersionNo: 3 }).success).toBe(false);
+    expect(v1UpdatePageDto.safeParse({}).success).toBe(false);
   });
 
   it('기준 버전은 양의 정수', () => {
     expect(v1UpdatePageDto.safeParse({ body: 'x', baseVersionNo: 0 }).success).toBe(false);
     expect(v1UpdatePageDto.safeParse({ body: 'x', baseVersionNo: 1.5 }).success).toBe(false);
+  });
+
+  it('기준 버전은 DB 정수 범위 안이다 — 넘으면 저장 단계에서 500이 된다', () => {
+    expect(v1UpdatePageDto.safeParse({ body: 'x', baseVersionNo: 2147483647 }).success).toBe(true);
+    expect(v1UpdatePageDto.safeParse({ body: 'x', baseVersionNo: 2147483648 }).success).toBe(false);
+  });
+});
+
+describe('v1VersionNo·v1ExportQuery — 경로·쿼리의 버전 번호', () => {
+  it('양의 정수 문자열을 숫자로 읽는다', () => {
+    expect(v1VersionNo.parse('5')).toBe(5);
+    expect(v1ExportQuery.parse({})).toEqual({});
+    expect(v1ExportQuery.parse({ versionNo: '3' })).toEqual({ versionNo: 3 });
+  });
+
+  it('거절: 빈 값·0·음수·소수·글자·32비트 밖', () => {
+    for (const bad of ['', '0', '-1', '1.5', 'abc', '2147483648', '99999999999']) {
+      expect(v1VersionNo.safeParse(bad).success, bad).toBe(false);
+      expect(v1ExportQuery.safeParse({ versionNo: bad }).success, bad).toBe(false);
+    }
+  });
+});
+
+describe('capItems — 잘렸으면 잘렸다고 말한다', () => {
+  it('한도 안이면 그대로, 잘리지 않았다', () => {
+    expect(capItems([1, 2, 3], 3)).toEqual({ items: [1, 2, 3], truncated: false });
+  });
+
+  it('한도를 넘으면 앞에서 자르고 truncated', () => {
+    expect(capItems([1, 2, 3, 4], 3)).toEqual({ items: [1, 2, 3], truncated: true });
   });
 });
 
@@ -514,6 +549,13 @@ describe('v1UploadDto — 텍스트나 base64로 올린다 (에이전트는 바�
   it('base64는 글자 모양을 본다', () => {
     expect(v1UploadDto.parse({ filename: 'a.pdf', content: 'JVBERi0=', encoding: 'base64' }).encoding).toBe('base64');
     expect(v1UploadDto.safeParse({ filename: 'a.pdf', content: '이건 base64가 아님', encoding: 'base64' }).success).toBe(false);
+  });
+
+  it('base64는 길이와 채움도 본다 — 잘린 것을 저장하지 않는다', () => {
+    expect(v1UploadDto.safeParse({ filename: 'a.bin', content: 'JVBE\r\nRi0=', encoding: 'base64' }).success).toBe(true);
+    expect(v1UploadDto.safeParse({ filename: 'a.bin', content: 'JVBERi0', encoding: 'base64' }).success).toBe(false);
+    expect(v1UploadDto.safeParse({ filename: 'a.bin', content: 'abc', encoding: 'base64' }).success).toBe(false);
+    expect(v1UploadDto.safeParse({ filename: 'a.bin', content: 'AAA=AAAA', encoding: 'base64' }).success).toBe(false);
   });
 
   it('거절: 이름 없음·경로가 든 이름·빈 내용·모르는 인코딩·모르는 칸', () => {
