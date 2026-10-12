@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { useAuth } from '../auth';
+import { ChatInvite } from '../components/ChatInvite';
 import { ChatNewRoom } from '../components/ChatNewRoom';
+import { useConfirm } from '../components/ConfirmDialog';
 import { ChatSideNav } from '../components/ChatSideNav';
 import { ChatSendError, createChatLink, type ChatLinkState, type ChatSocketLike } from '../components/chatLink';
 import { applyMessageToRooms, lastSeqOf, mergeMessages, roomTitle } from '../components/chatState';
@@ -49,6 +51,8 @@ export function ChatPage() {
   const [draft, setDraft] = useState('');
   const [failed, setFailed] = useState<Record<string, Failed[]>>({});
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [confirm, dialog] = useConfirm();
   const linkRef = useRef<ReturnType<typeof createChatLink> | null>(null);
   const viewing = id ?? null;
   const viewingRef = useRef<string | null>(viewing);
@@ -164,6 +168,19 @@ export function ChatPage() {
     send(body);
   };
 
+  const leave = async () => {
+    if (!room) return;
+    const ok = await confirm({ title: '이 방에서 나갈까요?', body: `"${roomTitle(room, meId)}" 방에서 나간다. 나간 뒤에는 이 방의 메시지를 읽지도 보내지도 못한다.`, confirmLabel: '나간다' });
+    if (!ok) return;
+    api(`/api/chat/rooms/${room.id}/members/me`, { method: 'DELETE' })
+      .then(() => {
+        setMessages((cur) => Object.fromEntries(Object.entries(cur).filter(([k]) => k !== room.id)));
+        void loadRooms();
+        nav('/chat');
+      })
+      .catch((e: unknown) => setError(errText(e)));
+  };
+
   const live = linkState === 'live';
   const roomFailed = viewing ? (failed[viewing] ?? []) : [];
 
@@ -172,7 +189,25 @@ export function ChatPage() {
       <SideSlot>
         <ChatSideNav rooms={rooms} failed={roomsFailed} meId={meId} currentId={viewing} onNew={() => setAdding(true)} />
       </SideSlot>
-      <PageHeader title={room ? roomTitle(room, meId) : '채팅'} description={room?.kind === 'group' ? `참여자 ${room.members.length}명 — ${room.members.map((m) => m.displayName).join(', ')}` : undefined} />
+      {dialog}
+      <PageHeader
+        title={room ? roomTitle(room, meId) : '채팅'}
+        description={room?.kind === 'group' ? `참여자 ${room.members.length}명 — ${room.members.map((m) => m.displayName).join(', ')}` : undefined}
+        actions={
+          room?.kind === 'group' && (
+            <>
+              {room.createdBy === meId && (
+                <button type="button" className="subtle" onClick={() => setInviting(true)}>
+                  사람 초대
+                </button>
+              )}
+              <button type="button" className="subtle danger" onClick={() => void leave()}>
+                방에서 나가기
+              </button>
+            </>
+          )
+        }
+      />
       {linkState === 'offline' && <Notice kind="warning">연결이 끊겼다 — 다시 붙는 중이다. 붙으면 놓친 메시지를 받는다.</Notice>}
       {linkState === 'revoked' && <Notice kind="error">로그인이 끝나 채팅 연결이 닫혔다 — 다시 로그인한 뒤 이 화면을 연다.</Notice>}
       {linkState === 'refused' && <Notice kind="error">서버가 이 화면의 요청을 받지 않고 연결을 닫았다 — 화면을 새로 고쳐 본다.</Notice>}
@@ -184,6 +219,16 @@ export function ChatPage() {
             setAdding(false);
             void loadRooms();
             nav(`/chat/${r.id}`);
+          }}
+        />
+      )}
+      {inviting && room && (
+        <ChatInvite
+          room={room}
+          onCancel={() => setInviting(false)}
+          onInvited={(r) => {
+            setInviting(false);
+            setRooms((cur) => (cur ? cur.map((x) => (x.id === r.id ? { ...x, members: r.members } : x)) : cur));
           }}
         />
       )}

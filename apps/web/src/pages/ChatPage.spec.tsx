@@ -80,6 +80,8 @@ beforeEach(() => {
       return Promise.resolve(json(200, { items: (messages[m[1]!] ?? []).filter((x) => (after === null ? true : x.seq > Number(after))) }));
     }
     if (/\/read$/.test(url) && method === 'PUT') return Promise.resolve(json(200, { lastReadSeq: body.seq }));
+    if (/\/members\/me$/.test(url) && method === 'DELETE') return Promise.resolve(json(200, { ok: true }));
+    if (/\/members$/.test(url) && method === 'POST') return Promise.resolve(json(201, room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', displayName: '나' }, { userId: 'u3', displayName: '밥' }, { userId: 'u2', displayName: '앨리스' }] })));
     if (url.startsWith('/api/chat/users')) return Promise.resolve(json(200, { items: [{ id: 'u2', displayName: '앨리스' }, { id: 'u3', displayName: '밥' }] }));
     if (url === '/api/chat/rooms' && method === 'POST') return Promise.resolve(json(201, { ...room(R1), created: false }));
     return Promise.resolve(json(404, { message: 'x' }));
@@ -240,5 +242,41 @@ describe('새 대화 (FR-2401·2402)', () => {
     expect(create.disabled).toBe(false);
     fireEvent.click(create);
     await waitFor(() => expect(calls).toContainEqual({ method: 'POST', url: '/api/chat/rooms', body: { kind: 'group', name: '프로젝트', userIds: ['u2', 'u3'] } }));
+  });
+});
+
+describe('여럿 방의 초대·나가기 (FR-2402)', () => {
+  it('만든 사람은 사람을 초대한다 — 이미 든 사람은 목록에 없다', async () => {
+    open(`/chat/${R2}`);
+    fireEvent.click(await screen.findByRole('button', { name: '사람 초대' }));
+    const box = await screen.findByRole('region', { name: '사람 초대' });
+    expect(await within(box).findByLabelText('앨리스')).toBeTruthy();
+    expect(within(box).queryByLabelText('밥')).toBeNull(); // 이미 든 사람
+    fireEvent.click(within(box).getByLabelText('앨리스'));
+    fireEvent.click(within(box).getByRole('button', { name: '초대' }));
+    await waitFor(() => expect(calls).toContainEqual({ method: 'POST', url: `/api/chat/rooms/${R2}/members`, body: { userIds: ['u2'] } }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '사람 초대' })).toBeNull());
+    expect(await screen.findByText(/참여자 3명/)).toBeTruthy();
+  });
+
+  it('만든 사람이 아니면 초대 단추가 없다. 1:1 방에는 둘 다 없다', async () => {
+    rooms = [room(R2, { kind: 'group', name: '팀', createdBy: 'u3', members: [{ userId: 'u1', displayName: '나' }, { userId: 'u3', displayName: '밥' }] }), room(R1)];
+    open(`/chat/${R2}`);
+    await screen.findByText(/참여자 2명/);
+    expect(screen.queryByRole('button', { name: '사람 초대' })).toBeNull();
+    expect(screen.getByRole('button', { name: '방에서 나가기' })).toBeTruthy();
+    cleanup();
+    open(`/chat/${R1}`);
+    await screen.findByLabelText('메시지');
+    expect(screen.queryByRole('button', { name: '방에서 나가기' })).toBeNull();
+  });
+
+  it('나가기는 확인을 받고, 나가면 방 목록으로 돌아간다', async () => {
+    open(`/chat/${R2}`);
+    fireEvent.click(await screen.findByRole('button', { name: '방에서 나가기' }));
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false); // 확인 전에는 보내지 않는다
+    fireEvent.click(await screen.findByRole('button', { name: '나간다' }));
+    await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', url: `/api/chat/rooms/${R2}/members/me`, body: undefined }));
+    expect(await screen.findByText('방을 고른다')).toBeTruthy();
   });
 });

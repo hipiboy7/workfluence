@@ -3,7 +3,7 @@
 - 읽는 사람: 위키의 기능을 **프로그램으로 쓰려는 개발자**와 **LLM 에이전트(도구를 부르는 서비스)**. 위키 화면을 쓰는 법은 [사용자가이드](../../guide/사용자가이드.md) 28절이다
 - 무엇을 답하나: "토큰을 어떻게 받고, 어떤 요청을 어떻게 보내고, 오류가 오면 무엇을 하나"
 - 정확한 경로·입력·응답의 모양은 이 문서가 아니라 **명세**(`GET /api/v1/openapi.yaml`)가 정본이다. 이 문서는 명세를 받아 읽는 법과 자주 하는 일의 예다
-- 기준: 2026-10-08의 코드(공개 API v1 — 동작 66개). 설계 근거는 [설계서_PublicApi](설계서_PublicApi.md)
+- 기준: 2026-10-12의 코드(공개 API v1 — 동작 75개, 채팅 9개 포함). 설계 근거는 [설계서_PublicApi](설계서_PublicApi.md)
 - 아래 `curl` 예는 개발 서버에서 순서대로 실제로 불러 확인했다 (2026-10-08)
 
 ## 1. 시작하기
@@ -184,6 +184,44 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/users?q=alice"
 
 사용자 목록·승인·잠금 해제·정지·역할·맡기는 권한, 운영 정책값, 감사로그를 읽는다. 토큰에 `admin`이 없으면 403 `INSUFFICIENT_SCOPE`다. **비밀번호 초기화는 이 API에 없다** — 임시 비밀번호를 돌려주는 경로가 토큰에 있으면 토큰 하나가 남의 계정을 넘겨받는 길이 되기 때문이다.
 
+### 3.13 채팅 — 방과 메시지, 그리고 실시간 연결 (Phase 21)
+
+에이전트가 사람처럼 **한 사용자로** 방에 들어와 메시지를 받고 답한다. 경로 아홉(`chat.*` — 방 목록·만들기·초대·나가기, 메시지 읽기·보내기, 읽음, 사람 찾기)은 명세에 있고, **WebSocket은 OpenAPI가 표현하지 못해 명세의 머리말("채팅 실시간 연결")과 이 절에 있다.**
+
+**연결** — `wss://<서버>/api/v1/chat/ws`에 업그레이드 요청을 보낸다. 머리말에 `Authorization: Bearer <토큰>`(토큰을 주소의 `?token=`으로 주면 401이다 — 주소는 로그에 남는다). `Origin`·쿠키는 필요 없다. 토큰에 `read`가 있어야 연결되고(없으면 403) 보내려면 `write`가 더 있어야 한다. 연결 하나로 내가 든 **모든 방**의 새 메시지가 온다.
+
+```js
+// Node — `ws` 패키지
+const ws = new WebSocket(`${BASE.replace('https', 'wss')}/api/v1/chat/ws`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+ws.on('message', (data) => {
+  const f = JSON.parse(data.toString());
+  if (f.type === 'message' && f.senderId !== ME) {
+    ws.send(JSON.stringify({ type: 'send', roomId: f.roomId, body: '확인했습니다', clientMsgId: crypto.randomUUID() }));
+  }
+});
+```
+
+| 방향 | `type` | 뜻 |
+|---|---|---|
+| 서버→나 | `hello` | 연결 직후 한 번 — `userId`, 참여한 방 `roomIds` |
+| 서버→나 | `message` | 방의 새 메시지(`roomId`·`seq`·`senderId`·`body`·`createdAt`) — **내가 보낸 것도 온다** |
+| 서버→나 | `ack` | 내가 보낸 `send`의 결과(`clientMsgId`·`roomId`·`seq`·`createdAt`) |
+| 서버→나 | `room` | 내가 방에 들었다·나갔다(`change`) — 방이 새로 생기면 연결을 다시 열지 않아도 온다 |
+| 서버→나 | `error` | 보낸 것 하나를 거절(`code`·`roomId`·`clientMsgId`) — 연결은 그대로. `EMPTY`·`TOO_LONG`·`BAD_CHAR`·`ROOM_NOT_FOUND`·`INSUFFICIENT_SCOPE`·`RATE_LIMITED` |
+| 나→서버 | `send` | `{"type":"send","roomId":"…","body":"…","clientMsgId":"(선택)"}` — **이것 하나뿐이다** |
+
+**지킬 것**
+- **모르는 `type`·모르는 칸·JSON이 아닌 글·바이너리·너무 큰 프레임**은 서버가 연결을 닫는다(코드 4400, 큰 것은 1009). 같은 것을 다시 보내지 말고 프레임을 고친다.
+- 토큰이 폐기·만료되거나 주인이 정지·비밀번호 변경·세션 강제 종료를 당하면 연결이 닫힌다(**4401**) — 다시 붙지 말고 새 토큰을 받는다.
+- 같은 사용자의 연결이 상한(기본 5)을 넘으면 **가장 오래된** 연결이 닫힌다(**4409**) — 닫지 않고 다시 열기만 하면 쌓이지 않는다.
+- **연결은 새 메시지만 보낸다.** 끊겼다 돌아오면 방마다 마지막으로 받은 `seq` 이후를 `GET /chat/rooms/{id}/messages?afterSeq=<seq>`로 받아 메우고, 같은 메시지가 둘 오면 `(roomId, seq)`로 거른다.
+- 연달아 보낸 `send`는 보낸 순서대로 번호를 받는다. 끊겼다 다시 보낼 때는 **같은 `clientMsgId`**로 보낸다 — 같은 값은 한 번만 받는다(REST 보내기의 응답은 `duplicate: true`).
+- 분당 보내기 한도는 연결마다(REST는 토큰마다) 기본 60이다 — 공개 API의 쓰기 한도(30)와 별개다. 넘으면 `RATE_LIMITED`(REST는 429와 `Retry-After`).
+- 서버가 30초마다 ping을 보낸다 — WebSocket 라이브러리의 pong 자동 응답을 끄지 않는다.
+- 메시지는 **평문**이다. 방은 참여자만 읽고 쓴다 — 참여하지 않은 방은 있는지도 알려 주지 않는 404다. 메시지의 보존·삭제·감사는 정하지 않았다(보류 39).
+
+연결 없이 **REST만으로**도 쓸 수 있다: `GET /chat/rooms`로 방을 보고, `GET /chat/rooms/{id}/messages?afterSeq=`로 새 것을 가져오고, `POST /chat/rooms/{id}/messages`로 보낸다(폴링은 느리다 — 실시간이 필요하면 연결을 쓴다).
+
 ## 4. 오류
 
 | 상태 | `code` | 뜻 → 할 일 |
@@ -219,7 +257,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/users?q=alice"
 
 ### 5.1 명세를 받아 읽는 법 — 처음은 전체, 그 뒤는 변동분
 
-명세는 YAML로 약 270KB·7,000줄(동작 66개)이다.
+명세는 YAML로 약 8,000줄(동작 75개)이다.
 
 1. **처음** — `openapi.yaml`을 받아 **전체를** 분석해 도구를 만든다. 받은 파일과 `openapi.sha256` 값을 함께 보관한다.
    - 머리말(`info.description`)을 먼저 읽는다 — 토큰, 오류 코드와 각각의 대처, 고칠 때 `baseVersionNo`를 보내는 규칙, 목록은 `limit`까지만 온다는 것이 여기 있다
@@ -275,7 +313,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/users?q=alice"
 - **비밀번호 초기화** — 위의 3.12절 까닭
 - **사내 LLM 질문·연결 관리** — 사내 LLM은 별도의 서비스가 맡고, 그 서비스가 이 API를 부르는 쪽이다. 위키 안의 LLM 질문 화면은 사람이 쓰는 기능이다
 - **토큰 발급·폐기** — 화면(세션)에서만 한다
-- **실시간 공동 편집** — 사람의 편집기가 쓴다. API로 쓰는 저장은 사람이 편집 중이면 409다
+- **실시간 공동 편집** — 사람의 편집기가 쓴다. API로 쓰는 저장은 사람이 편집 중이면 409다. (채팅의 실시간 연결은 있다 — 3.13절)
 - **그림 문법(`![]()`)** — 문서에 그림 노드가 없다. 첨부를 링크로 건다(3.8)
 
 ## 7. 막히면
