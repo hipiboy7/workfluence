@@ -348,7 +348,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 | 사내 LLM | 등록·삭제는 root와, root가 위임한 관리자. API 키는 `WF_LLM_MASTER_KEY`로 암호화(AES-256-GCM, **행 id와 주소**를 AAD로 — 주소만 바꿔도 풀리지 않는다)해 두고 **응답·로그·감사로그에 다시 내보내지 않는다.** LLM 서버의 문장이 키를 되읊으면 가린다. 브라우저는 LLM에 가지 않고 서버만 부른다. 주소는 `http(s)`만, 사용자 정보·질의를 받지 않고 넘겨주기(redirect)를 따르지 않는다. http 주소면 등록 화면이 무엇이 평문으로 가는지 알린다. **세션을 끊으면 받던 답도 멈춘다**(실시간 편집과 같은 버스). 답은 평문으로 그린다(HTML로 그리지 않는다) |
 | TLS | 검증을 끄지 않는다. 사내 CA는 `NODE_EXTRA_CA_CERTS`로 신뢰. nginx가 종단 |
 | 의존성 | lockfile 고정(`--frozen-lockfile`). 허용 라이선스 MIT·Apache-2.0·BSD·ISC·0BSD. GPL·AGPL·SSPL·상용은 승인 없이 금지. TipTap은 npm 공개 MIT 확장만. `pnpm audit`·라이선스 검사·gitleaks를 CI 관문으로. 반입 번들에 SBOM과 라이선스 목록 포함. **Windows 체험 묶음(F-009 — 반입과 무관)** 은 사용자가 승인한 것을 더 싣는다 — Microsoft VC++ 재배포 가능 런타임(2026-09-28), GNU libiconv·libintl(LGPL — 소스는 같은 실행의 별도 결과물, 2026-09-29). PostgreSQL License·Zlib·ICU License는 허용적 라이선스로 본다(2026-09-29). 판정은 [`docs/guide/shortcut/windows시연가이드.md`](docs/guide/shortcut/windows시연가이드.md) 10.3절. **Docker 설치 묶음(F-014 — 반입, 대상에 Docker가 없을 때만)** 은 Red Hat이 서명한 RHEL 부품(`container-selinux`·`iptables-nft`·`nftables`·`libnftnl` — GPL 계열, `jansson` — MIT)을 고치지 않고 싣는다(사용자 승인 2026-09-30). 판·라이선스 목록은 묶음의 `PACKAGES.txt`, 판정은 linux서버배포가이드 12-1절 |
-| 컨테이너 | non-root, 불필요 패키지 없음, 헬스체크, `restart: unless-stopped`(늘 떠 있는 서비스 — 부를 때만 도는 `tools`는 빼고). 시크릿은 이미지에 넣지 않고 `.env`·파일 마운트로 — 빌드 문맥에도 넣지 않는다(`.dockerignore`) |
+| 컨테이너 | non-root, 불필요 패키지 없음, 헬스체크, **`restart` 옵션은 두지 않는다**(사용자 결정 2026-10-12 — 서버가 다시 켜지면 사람이 `docker compose up -d`로 올린다). 시크릿은 이미지에 넣지 않고 `.env`·파일 마운트로 — 빌드 문맥에도 넣지 않는다(`.dockerignore`) |
 
 ## 8. 실행 환경·Docker·반입
 
@@ -389,7 +389,7 @@ Phase는 **기능 수직 슬라이스**(DB → API → UI)다. 각 Phase가 끝�
 
 - 반입 묶음의 **구성 목록은 `packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`가 단일 출처다** — 문서가 아니라 코드가 들고, `pnpm release:verify`가 그것으로 판정한다. 이미지는 `docker save`가 만든 **tar 하나**에 세 개가 함께 들어간다(따로 두면 하나만 빠뜨린 채 반입된다). 반입 당일의 절차는 [`docs/guide/설치및실행가이드.md`](docs/guide/설치및실행가이드.md)다.
 - `docker load` → `.env` 작성 → 표 만들기(`run --rm tools node dist/db/migrate.js` — 앱 DB 계정과 권한도 만든다) → 첫 root 계정(`run --rm tools node dist/db/seed.js`) → `docker compose up -d` → 사후 검증. 폐쇄망에는 Node가 없다 — 마이그레이션·시드·월간 작업은 compose의 `tools`(Phase 13)로 앱 이미지 안에서 돈다. 절차는 설치및실행가이드다.
-- 늘 떠 있는 서비스(postgres·api·nginx)는 `restart: unless-stopped` + 헬스체크. 재부팅 후 자동 기동을 실제로 확인한다. `tools`는 부를 때만 도는 한 번짜리 칸이다(`restart: "no"`, profile).
+- 늘 떠 있는 서비스(postgres·api·nginx)는 헬스체크를 둔다. **`restart` 옵션은 두지 않는다 — 서버를 다시 켜면 사람이 `docker compose up -d`로 올린다**(사용자 결정 2026-10-12. 이전에는 `unless-stopped`로 자동 기동을 실제 재부팅으로 확인하는 규칙이었다). `tools`는 부를 때만 도는 한 번짜리 칸이다(`restart: "no"`, profile).
 - nginx는 TLS를 종단하고 `absolute_redirect off`, `X-Forwarded-*` 전달, WebSocket `Upgrade` 프록시를 둔다. `client_max_body_size`는 첨부 상한과 일치시킨다. 요청 번호(`X-Request-Id`)를 만들어 넘기고 접근 로그는 JSON 한 줄(질의 문자열 없음)이다.
 - 로그는 compose가 서비스마다 순환한다(`WF_LOG_MAX_SIZE` × `WF_LOG_MAX_FILES`, 기본 20MB × 5). 사내 CA는 compose 옆 `ca/ca.pem` 하나 — 있으면 앱이 믿는다(compose를 고치지 않는다).
 - 볼륨은 `postgres_data`와 `attachments`다. 백업은 `pg_dump` + 첨부 디렉토리. 복원 리허설은 Phase 5 완료 기준.

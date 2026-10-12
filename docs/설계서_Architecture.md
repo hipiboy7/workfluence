@@ -299,7 +299,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 
 - 이미지 3종: `app`(Nest + SPA), `nginx`, `postgres`.
 - 빌드 스테이지에서 의존성 설치·빌드, 런타임 스테이지에는 산출물과 production 의존성만. 베이스는 `node:24-bookworm-slim` (alpine은 네이티브 모듈 호환 위험).
-- 컨테이너는 non-root, 헬스체크, `restart: unless-stopped`.
+- 컨테이너는 non-root, 헬스체크. `restart` 옵션은 두지 않는다 — 재부팅 뒤에는 사람이 `docker compose up -d`로 올린다(2026-10-12).
 - 반입 묶음 구성의 단일 출처는 **코드**다 (`packages/shared/src/release.ts`의 `RELEASE_REQUIRED_FILES`). 반입 당일의 절차는 [`docs/guide/설치및실행가이드.md`](guide/설치및실행가이드.md)다.
 - 대상은 RHEL 9다(Phase 20). 들고 갈 것은 반입 묶음 하나 — 서버에 Docker가 없으면 **Docker 묶음**(빌드 서버에 깔린 판의 Docker CE RPM과 그것이 늘 쓰는 RHEL 부품 + firewalld가 없는 서버에 모자란 RHEL 부품 + 판·라이선스 목록 + Docker 공개키 — `pnpm release:docker`, linux서버배포가이드 12-1절)도. 앱의 코드·구성은 대상에 따라 바뀌지 않는다.
 
