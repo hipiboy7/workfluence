@@ -232,7 +232,8 @@ export function buildOpenApi(ops: readonly V1Op[], info: OpenApiInfo): object {
       security: op.public ? [] : [{ bearerAuth: requiredScopes(op.method, op.admin === true) }],
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
-      responses: { '200': responseOf(op), ...(op.public ? {} : errorResponses(op)) },
+      // 성공 코드는 서버와 같게 — Nest는 POST에 201, 나머지에 200을 준다(v1에는 `@HttpCode`로 바꾸는 곳이 없다)
+      responses: { [op.method === 'post' ? '201' : '200']: responseOf(op), ...(op.public ? {} : errorResponses(op)) },
     };
     (paths[op.path] ??= {})[op.method] = entry;
   }

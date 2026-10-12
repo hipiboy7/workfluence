@@ -427,7 +427,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -1166,7 +1166,7 @@ paths:
       description: "읽음으로 바뀐 수를 돌려준다."
       operationId: notifications.readAll
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -1292,7 +1292,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -1595,7 +1595,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -2693,7 +2693,7 @@ paths:
               - text
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -2974,7 +2974,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -3242,7 +3242,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -3439,7 +3439,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -4086,7 +4086,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -4649,7 +4649,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -5223,7 +5223,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -5629,7 +5629,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -5791,7 +5791,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -6045,7 +6045,7 @@ paths:
               type: object
         required: true
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -6164,7 +6164,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -6567,7 +6567,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -6686,7 +6686,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -6757,7 +6757,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
@@ -6876,7 +6876,7 @@ paths:
             format: uuid
             type: string
       responses:
-        "200":
+        "201":
           content:
             "application/json":
               schema:
