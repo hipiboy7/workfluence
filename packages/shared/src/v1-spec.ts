@@ -338,8 +338,8 @@ export const V1_OPERATIONS: V1Op[] = [
 
   // ---- 관리 (admin scope가 더 필요하다) ----
   { id: 'users.list', method: 'get', path: '/users', tag: 'admin', admin: true, summary: '사용자 목록', description: '이름·아이디로 찾고(`q`) 상태로 거르고(`status`) 나누어 읽는다(`limit`·`offset`, 전체 수는 `total`).', query: listUsersDto, response: v1UserList },
-  { id: 'users.create', method: 'post', path: '/users', tag: 'admin', admin: true, summary: '사용자 만들기', description: '활성 계정과 개인 스페이스가 함께 생긴다. 비밀번호는 응답에 없다.', body: createUserDto, response: v1User },
-  { id: 'users.approve', method: 'post', path: '/users/{id}/approve', tag: 'admin', admin: true, summary: '가입 승인', description: '승인 대기를 활성으로 바꾸고 개인 스페이스를 만든다.', params: uid, response: v1User },
+  { id: 'users.create', method: 'post', path: '/users', tag: 'admin', admin: true, summary: '사용자 만들기', description: '활성 계정과 개인 스페이스가 함께 생긴다(승인이 필요 없다). 비밀번호는 응답에 없다.', body: createUserDto, response: v1User },
+  { id: 'users.approve', method: 'post', path: '/users/{id}/approve', tag: 'admin', admin: true, summary: '가입 승인', description: '승인 대기(`status: pending` — 가입 요청으로 생긴 계정)를 활성으로 바꾸고 개인 스페이스를 만든다. 승인 대기가 아니면 400이다 — `POST /users`로 만든 계정은 이미 활성이라 승인하지 않는다.', params: uid, response: v1User },
   { id: 'users.unlock', method: 'post', path: '/users/{id}/unlock', tag: 'admin', admin: true, summary: '잠금 해제', description: '로그인 실패로 잠긴 계정을 푼다.', params: uid, response: v1User },
   { id: 'users.suspend', method: 'post', path: '/users/{id}/suspend', tag: 'admin', admin: true, summary: '계정 정지', description: '그 사람의 세션·토큰·편집 연결이 그 자리에서 끊기고 로그인하지 못한다. 내용·감사는 남는다.', params: uid, response: v1User },
   { id: 'users.unsuspend', method: 'post', path: '/users/{id}/unsuspend', tag: 'admin', admin: true, summary: '정지 풀기', description: '정지한 계정을 활성으로 되돌린다.', params: uid, response: v1User },
