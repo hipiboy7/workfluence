@@ -122,9 +122,9 @@
 |---|---|---|
 | 방 접근 판정(참여자인가·초대할 수 있는가) · 프레임 모양 검증 · 번호·쪽 나누기 계산 | `packages/shared/src/chat/**` | A (테스트 먼저) |
 | 보내기 한도·되풀이(`clientMsgId`) 판정 | `apps/api/src/chat/domain/**` | A |
-| 채팅 유스케이스(방·메시지·읽음) | `apps/api/src/chat/chat.service.ts` | B (실제 PostgreSQL) |
-| 연결 게이트웨이(업그레이드·인증·재판정·끊기·방 구독) | `apps/api/src/chat/chat.gateway.ts` | B |
-| 화면용·headless용 컨트롤러 | `apps/api/src/chat/*.controller.ts`, `apps/api/src/v1/v1-chat.controller.ts` | B |
+| 채팅 유스케이스(방·메시지·읽음) | apps/api/src/chat/chat.service.ts | B (실제 PostgreSQL) |
+| 연결 게이트웨이(업그레이드·인증·재판정·끊기·방 구독) | apps/api/src/chat/chat.gateway.ts | B |
+| 화면용·headless용 컨트롤러 | apps/api/src/chat/*.controller.ts, apps/api/src/v1/v1-chat.controller.ts | B |
 | 채팅 화면(방 목록·메시지·보내기) · 연결 상태 기계(`chatLink.ts` — React 밖) | `apps/web/src/` | B(상태 기계는 Node 시험) |
 | E2E — 두 브라우저가 한 방에서 주고받는다 · headless 클라이언트가 토큰으로 받고 답한다 | `e2e/` | C |
 
