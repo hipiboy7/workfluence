@@ -71,12 +71,12 @@ const renderAt = (path = '/') =>
 const texts = (els: HTMLElement[]) => els.map((e) => e.textContent?.trim());
 
 describe('AppLayout — 위 막대 (J.3.2)', () => {
-  it('**주 메뉴는 스페이스·검색·LLM 질문·휴지통** — 관리 권한이 없으면 "관리"가 없고, 지금 구역에 `aria-current`', async () => {
+  it('**주 메뉴는 스페이스·검색·LLM 질문·채팅·휴지통** — 관리 권한이 없으면 "관리"가 없고, 지금 구역에 `aria-current`', async () => {
     renderAt('/search');
     const nav = await screen.findByRole('navigation', { name: '주 메뉴' });
     const links = within(nav).getAllByRole('link');
-    expect(texts(links)).toEqual(['스페이스', '검색', 'LLM 질문', '휴지통']);
-    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/', '/search', '/llm', '/trash']);
+    expect(texts(links)).toEqual(['스페이스', '검색', 'LLM 질문', '채팅', '휴지통']);
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/', '/search', '/llm', '/chat', '/trash']);
     expect(within(nav).getByRole('link', { name: '검색' }).getAttribute('aria-current')).toBe('page');
     expect(within(nav).getByRole('link', { name: '스페이스' }).getAttribute('aria-current')).toBeNull();
     // 관리 묶음도 없다
@@ -87,7 +87,7 @@ describe('AppLayout — 위 막대 (J.3.2)', () => {
     me = { ...me, role: 'member', grants: ['category.manage'] };
     renderAt();
     const nav = await screen.findByRole('navigation', { name: '주 메뉴' });
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['스페이스', '검색', 'LLM 질문', '휴지통', '관리']);
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['스페이스', '검색', 'LLM 질문', '채팅', '휴지통', '관리']);
     // 분류 관리만 받은 member의 첫 관리 화면은 스페이스 관리다
     expect(within(nav).getByRole('link', { name: '관리' }).getAttribute('href')).toBe('/admin/spaces');
   });
