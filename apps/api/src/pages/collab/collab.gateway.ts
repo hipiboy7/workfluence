@@ -38,6 +38,7 @@ import { dueForRecheck, revocationReason, shouldTerminate } from '../domain/live
 import { screenIsAhead } from '../domain/received';
 import { cloneDoc, inspectUpdate, type GateRule } from '../domain/gate';
 import { MAX_PRESENCE_BINDS, readPresence, screenPresence, unwrittenBindsLeft, writePresence } from '../domain/presence';
+import { readChatWsPath } from '../../chat/domain/ws-path';
 import { readClientIp, readPageId, readSessionId } from './session-auth';
 import { logLine } from '../../common/log-line';
 
@@ -276,6 +277,10 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
     // **원시 소켓에 error를 붙여 둔다.** 안 붙이면 상대가 먼저 끊었을 때 Node가
     // 그 'error'를 uncaught로 올린다 (P6 코드 리뷰 21)
     socket.on('error', () => undefined);
+
+    // **채팅 경로는 건드리지 않는다** — 채팅 게이트웨이가 같은 서버의 업그레이드를 받아 처리한다(P21 C.1). 아래의 "우리 경로가 아니면 닫는다"가
+    // 채팅 연결까지 404로 닫지 않게 먼저 가른다. 채팅 쪽은 꺼져 있어도 자기 경로를 직접 닫으므로 응답 없이 열려 남는 소켓은 없다
+    if (readChatWsPath(req.url)) return;
 
     const pageId = readPageId(req.url);
     // **우리 경로가 아니면 닫는다.** 처음에는 "다른 처리기가 붙을 수 있으니 손대지

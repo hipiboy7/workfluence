@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { LogEvent } from '@workfluence/shared';
 import type { Server } from 'node:http';
+import { ChatGateway } from './chat/chat.gateway';
 import { CollabGateway } from './pages/collab/collab.gateway';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
@@ -65,6 +66,8 @@ async function bootstrap(): Promise<void> {
   // nginx 설정이 둘이 되고 방화벽 규칙도 둘이 된다 — 폐쇄망에서 늘릴 이유가 없다.
   // `listen` 뒤에 붙이는 것은 그때 서버 객체가 실제로 듣고 있기 때문이다
   app.get(CollabGateway).attach(app.getHttpServer() as Server);
+  // 채팅도 같은 서버에 붙인다 — 편집 게이트웨이는 채팅 경로를 건드리지 않는다(P21 C.1)
+  app.get(ChatGateway).attach(app.getHttpServer() as Server);
   // event는 목록(`LOG_EVENTS`)의 코드다 — `satisfies`가 오타를 컴파일에서 막는다(가이드 대조는 목록만 본다, P11 자체 점검 7)
   logger.info({ event: 'app.started' satisfies LogEvent, port: env.WF_PORT, env: env.WF_ENV, serveWeb: env.WF_SERVE_WEB }, 'workfluence api 기동');
 }

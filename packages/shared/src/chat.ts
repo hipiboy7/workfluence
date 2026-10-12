@@ -175,3 +175,13 @@ export type ChatRoomView = {
 };
 
 export type ChatUserView = { id: string; displayName: string };
+
+/** 서버가 연결을 닫을 때의 코드(4000대는 응용이 정한다). 클라이언트가 까닭을 알아 다시 붙을지 정한다 */
+export const CHAT_CLOSE = {
+  /** 모르는 프레임·모르는 type·글이 아닌 프레임 — 조작·고장. 같은 것을 다시 보내도 닫힌다 */
+  badFrame: 4400,
+  /** 세션·토큰이 죽었다 — 다시 붙지 말고 새로 인증한다 */
+  revoked: 4401,
+  /** 같은 사용자의 연결이 상한을 넘어 가장 오래된 연결이 닫혔다 */
+  evicted: 4409,
+} as const;

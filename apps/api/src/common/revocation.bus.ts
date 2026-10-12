@@ -22,11 +22,28 @@ import { logLine } from './log-line';
 export class RevocationBus {
   private readonly log = new Logger('Revocation');
   private readonly listeners = new Set<(userId: string, sid?: string) => void>();
+  private readonly tokenListeners = new Set<(tokenId: string) => void>();
 
   /** 구독을 해제하는 함수를 돌려준다 */
   onRevoke(fn: (userId: string, sid?: string) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** 공개 API 토큰 **하나**가 폐기됐다 (P21 I.1) — 그 토큰으로 연 연결만 끊는다. 사용자의 세션을 모두 끊는 동작은 `revoke`가 맡는다 */
+  onRevokeToken(fn: (tokenId: string) => void): () => void {
+    this.tokenListeners.add(fn);
+    return () => this.tokenListeners.delete(fn);
+  }
+
+  revokeToken(tokenId: string): void {
+    for (const fn of this.tokenListeners) {
+      try {
+        fn(tokenId);
+      } catch (e) {
+        this.log.warn(logLine('session.revoke_failed', '토큰 폐기 통지 처리 실패', {}, e));
+      }
+    }
   }
 
   /**

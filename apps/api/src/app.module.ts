@@ -7,6 +7,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard } from './auth/auth.guard';
+import { ChatModule } from './chat/chat.module';
 import { CommentsModule } from './comments/comments.module';
 import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -75,6 +76,7 @@ function resolveWebDist(): string {
     TemplatesModule,
     // Phase 10 — 사내 LLM 질문 (P10_설계서_Llm)
     LlmModule,
+    ChatModule,
     // 공개 API 토큰 (docs/spinoff/public-api)
     ApiTokensModule,
     // 공개 API v1 — 지금은 페이지 (docs/spinoff/public-api 설계서)

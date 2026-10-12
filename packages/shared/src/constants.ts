@@ -204,6 +204,16 @@ export const LOG_EVENTS = [
   'collab.closed',
   'collab.frame_too_large',
   'collab.scratch_failed',
+  // 채팅 (P21)
+  'chat.disabled',
+  'chat.enabled',
+  'chat.upgrade_failed',
+  'chat.rejected',
+  'chat.rate_limited',
+  'chat.revoked',
+  'chat.recheck_failed',
+  'chat.evicted',
+  'chat.send_failed',
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 

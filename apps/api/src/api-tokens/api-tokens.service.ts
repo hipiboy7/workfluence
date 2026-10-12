@@ -73,7 +73,7 @@ export class ApiTokensService implements OnModuleDestroy {
     @Inject(DB) private readonly db: Db,
     private readonly audit: AuditService,
     private readonly users: UsersService,
-    bus: RevocationBus,
+    private readonly bus: RevocationBus,
     @Inject(APP_ENV) private readonly env: Pick<AppEnvToken, 'WF_API_JWT_SECRET'>,
   ) {
     this.unsubscribe = bus.onRevoke((userId, sid) => {
@@ -137,6 +137,12 @@ export class ApiTokensService implements OnModuleDestroy {
 
   /** 내 토큰만. 남의 것과 없는 것은 같은 404다. 이미 폐기된 것은 그대로 돌려준다(감사는 한 번) */
   async revoke(userId: string, tokenId: string, ip: string | null, now = new Date()): Promise<ApiTokenView> {
+    const view = await this.revokeInTx(userId, tokenId, ip, now);
+    this.bus.revokeToken(tokenId); // 커밋 뒤 — 그 토큰으로 열린 연결(채팅)을 그 자리에서 끊는다
+    return view;
+  }
+
+  private async revokeInTx(userId: string, tokenId: string, ip: string | null, now: Date): Promise<ApiTokenView> {
     return this.db.transaction(async (tx) => {
       const [row] = await tx
         .select()
@@ -164,6 +170,12 @@ export class ApiTokensService implements OnModuleDestroy {
    * 다른 사람 주소에 남의 토큰 id를 끼워도 폐기되지 않는다. 이미 폐기된 것은 그대로 돌려준다(감사는 한 번)
    */
   async revokeForUser(actor: Principal, userId: string, tokenId: string, ip: string | null, now = new Date()): Promise<ApiTokenView> {
+    const view = await this.revokeForUserInTx(actor, userId, tokenId, ip, now);
+    this.bus.revokeToken(tokenId);
+    return view;
+  }
+
+  private async revokeForUserInTx(actor: Principal, userId: string, tokenId: string, ip: string | null, now: Date): Promise<ApiTokenView> {
     return this.db.transaction(async (tx) => {
       await this.users.assertManageable(userId, actor, tx);
       const [row] = await tx
@@ -214,6 +226,14 @@ export class ApiTokensService implements OnModuleDestroy {
       }
       return done.length;
     });
+  }
+
+  /** 열려 있는 연결이 쓰는 토큰이 지금도 살아 있는가 — 주기 재판정(P21 FR-2411). 폐기·만료·정지·비밀번호 변경 강제 */
+  async isLive(userId: string, tokenId: string, now = new Date()): Promise<boolean> {
+    const [row] = await this.db.select().from(apiTokens).where(eq(apiTokens.id, tokenId));
+    if (tokenRowProblem(row ?? null, { userId, tokenId }, now)) return false;
+    const user = await this.users.findById(userId);
+    return tokenUserProblem(user ?? null) === null;
   }
 
   async authenticate(jwt: string, now = new Date()): Promise<ApiAuthResult> {
