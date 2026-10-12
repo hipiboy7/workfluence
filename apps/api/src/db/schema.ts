@@ -477,6 +477,71 @@ export const apiTokens = pgTable(
   (t) => [index('api_tokens_user_idx').on(t.userId, t.createdAt)],
 );
 
+/** 채팅 방 (P21_설계서_Chat D절 · `0015_chat`). 1:1(`direct`)은 이름이 없고 여럿(`group`)은 이름이 있다. `lastSeq`는 새 메시지의 번호를 매기는 곳이다(행 잠금) */
+export const chatRooms = pgTable('chat_rooms', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  kind: text('kind').notNull(),
+  name: text('name'),
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeq: bigint('last_seq', { mode: 'number' }).notNull().default(0),
+  lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
+});
+
+export const chatMembers = pgTable(
+  'chat_members',
+  {
+    roomId: uuid('room_id')
+      .notNull()
+      .references(() => chatRooms.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    lastReadSeq: bigint('last_read_seq', { mode: 'number' }).notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.roomId, t.userId] }), index('chat_members_user_idx').on(t.userId)],
+);
+
+/** 1:1 방의 쌍 — `userA < userB`로 줄여 둔다(순서와 무관하게 하나) */
+export const chatDirectPairs = pgTable(
+  'chat_direct_pairs',
+  {
+    userA: uuid('user_a')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    userB: uuid('user_b')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    roomId: uuid('room_id')
+      .notNull()
+      .unique()
+      .references(() => chatRooms.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.userA, t.userB] })],
+);
+
+/** 채팅 메시지 — 고쳐 쓰지도 지우지도 않는 모양이다(보류 39). 방 안의 차례는 `seq`다 */
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    roomId: uuid('room_id')
+      .notNull()
+      .references(() => chatRooms.id, { onDelete: 'cascade' }),
+    seq: bigint('seq', { mode: 'number' }).notNull(),
+    senderId: uuid('sender_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    clientMsgId: text('client_msg_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique('chat_messages_seq_uq').on(t.roomId, t.seq), unique('chat_messages_client_uq').on(t.roomId, t.senderId, t.clientMsgId)],
+);
+
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type CommentRow = typeof comments.$inferSelect;
 export type SpaceRow = typeof spaces.$inferSelect;

@@ -1,4 +1,5 @@
 export * from './api-token';
+export * from './chat';
 export * from './constants';
 export * from './env';
 export * from './diff';

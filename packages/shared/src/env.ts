@@ -125,6 +125,22 @@ export const envSchema = z
      * (FR-805) 이 주기가 잡는 것은 Crew 제거·스페이스 중지·만료다
      */
     WF_COLLAB_RECHECK_MS: intString(10_000, 3_600_000, 300_000),
+
+    // --- Phase 21: 채팅 (P21_설계서_Chat H절) ---
+    /** 끄면 메뉴가 사라지고 연결·REST가 거절된다 (FR-2420) */
+    WF_CHAT_ENABLED: bool(true),
+    /** 메시지 한 건의 글자 수 상한 (A.1-3) */
+    WF_CHAT_MAX_MESSAGE_CHARS: intString(1, 100_000, 4_000),
+    /** 연결마다 분당 보내기 한도 (NFR-240). 토큰의 공개 API 쓰기 한도(분당 30)와 별개다 — 채팅 보내기에는 이것만 적용한다 */
+    WF_CHAT_SEND_PER_MIN: intString(1, 6_000, 60),
+    /** 한 사용자의 동시 연결 상한 (NFR-241). 넘으면 가장 오래된 연결을 닫는다 */
+    WF_CHAT_MAX_CONNECTIONS_PER_USER: intString(1, 100, 5),
+    /** 하트비트 주기 (ms) — nginx proxy_read_timeout보다 짧아야 한다 */
+    WF_CHAT_PING_MS: intString(5_000, 120_000, 30_000),
+    /** 열린 연결의 권한·세션·토큰을 다시 보는 주기 (ms) — 권한을 잃은 연결이 더 쓸 수 있는 최대 시간 (FR-2411) */
+    WF_CHAT_RECHECK_MS: intString(10_000, 3_600_000, 300_000),
+    /** 한 프레임의 바이트 상한 — 넘으면 닫는다 */
+    WF_CHAT_MAX_FRAME_BYTES: intString(1_024, 16_777_216, 65_536),
     /**
      * 메일은 **기본이 꺼짐**이다 (P6 FR-757). 켰는데(모의 아님) 주소가 없거나 운영에서 켰는데 모의면 **기동을 거부한다** — 아래 `parseEnv`
      * (P18 FR-1904. Phase 6에서는 기동은 되고 발송만 조용히 실패했다)
