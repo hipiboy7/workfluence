@@ -32,6 +32,7 @@ import {
   v1UpdatePageDto,
   v1UpdateSpaceDto,
   v1UploadDto,
+  V1_VERSION_NO_MAX,
 } from './v1';
 import {
   v1Attachment,
@@ -159,7 +160,8 @@ const errorResponses = (op: V1Op): Json => {
 
 const PARAM_SCHEMA = {
   uuid: { type: 'string', format: 'uuid' },
-  integer: { type: 'integer' },
+  // 정수 경로 칸은 버전 번호뿐이다 — 서버가 보는 범위(`v1VersionNo`)와 같게
+  integer: { type: 'integer', minimum: 1, maximum: V1_VERSION_NO_MAX },
   string: { type: 'string' },
 } as const;
 

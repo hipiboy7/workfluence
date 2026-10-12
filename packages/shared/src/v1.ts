@@ -96,10 +96,10 @@ export const v1CreatePageDto = z
 export type V1CreatePageDto = z.infer<typeof v1CreatePageDto>;
 
 /** 버전 번호의 가장 큰 값 — DB `integer`의 끝이다. 넘기면 조회가 PostgreSQL 오류(500)로 끝나므로 경계에서 막는다 */
-const VERSION_NO_MAX = 2_147_483_647;
+export const V1_VERSION_NO_MAX = 2_147_483_647;
 
 /** 경로·쿼리에서 오는 버전 번호 — 양의 정수만(`''`·`0`·음수·소수·글자·범위 밖은 400) */
-export const v1VersionNo = z.coerce.number().int().min(1).max(VERSION_NO_MAX);
+export const v1VersionNo = z.coerce.number().int().min(1).max(V1_VERSION_NO_MAX);
 
 /** 내보내기 쿼리 — 버전을 안 주면 지금 버전 */
 export const v1ExportQuery = z.object({ versionNo: v1VersionNo.optional().describe('이 버전을 내보낸다 — 없으면 지금 버전') });
@@ -115,7 +115,7 @@ export const v1UpdatePageDto = z
     title: titleSchema.optional(),
     body: z.unknown().optional(),
     format: writeFormat,
-    baseVersionNo: z.number().int().min(1).max(VERSION_NO_MAX).describe('고치는 기준이 되는 버전 번호 — 페이지를 읽을 때 받은 `currentVersionNo`를 그대로 보낸다. 그 사이 다른 사람이 저장했으면 409 VERSION_CONFLICT'),
+    baseVersionNo: z.number().int().min(1).max(V1_VERSION_NO_MAX).describe('고치는 기준이 되는 버전 번호 — 페이지를 읽을 때 받은 `currentVersionNo`를 그대로 보낸다. 그 사이 다른 사람이 저장했으면 409 VERSION_CONFLICT'),
   })
   .refine((v) => v.title !== undefined || v.body !== undefined, { message: '고칠 것이 없다 — title이나 body 중 하나는 있어야 한다' })
   .transform((v, ctx) => ({

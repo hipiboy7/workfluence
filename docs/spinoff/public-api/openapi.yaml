@@ -2397,12 +2397,16 @@ paths:
           name: a
           required: true
           schema:
+            maximum: 2147483647
+            minimum: 1
             type: integer
         - description: "뒤 버전 번호"
           in: path
           name: b
           required: true
           schema:
+            maximum: 2147483647
+            minimum: 1
             type: integer
       responses:
         "200":
@@ -2558,6 +2562,8 @@ paths:
           name: "no"
           required: true
           schema:
+            maximum: 2147483647
+            minimum: 1
             type: integer
         - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
@@ -2672,6 +2678,8 @@ paths:
           name: "no"
           required: true
           schema:
+            maximum: 2147483647
+            minimum: 1
             type: integer
         - description: "응답에 실을 본문 형식 — markdown(기본)·json·text"
           in: query
