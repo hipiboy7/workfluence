@@ -44,3 +44,18 @@ describe('세션 하나만 끊기 (P7 보안 검토 F1)', () => {
     expect(seen).toEqual([['u1', 'sid-abc']]);
   });
 });
+
+describe('RevocationBus — 토큰 하나 (P21 I.1)', () => {
+  it('토큰 id를 구독자에게 알리고, 던지는 구독자는 삼킨다', () => {
+    const bus = new RevocationBus();
+    const seen: string[] = [];
+    bus.onRevokeToken(() => {
+      throw new Error('듣는 쪽의 사정');
+    });
+    const off = bus.onRevokeToken((id) => seen.push(id));
+    expect(() => bus.revokeToken('t1')).not.toThrow();
+    off();
+    bus.revokeToken('t2');
+    expect(seen).toEqual(['t1']);
+  });
+});
