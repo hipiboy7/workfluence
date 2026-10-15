@@ -620,7 +620,8 @@ function commentView(c: DemoState['comments'][number], u: DemoUser): CommentView
   const p = db().pages.find((x) => x.id === c.pageId)!;
   const sp = db().spaces.find((x) => x.id === p.spaceId)!;
   const a = accessOf(sp, u);
-  return { ...c, createdByName: userName(c.createdBy) ?? '', canDelete: c.createdBy === u.id || a.isOwner || can(principal(u), 'space.manage') };
+  // 서버와 같다 — 쓴 사람, 또는 그 공간에 쓰고 지울 수 있는 사람
+  return { ...c, createdByName: userName(c.createdBy) ?? '', canDelete: c.createdBy === u.id || (a.canWrite && can(principal(u), 'page.delete')) };
 }
 on('GET', '/api/pages/:id/comments', (_r, [id]) => {
   const u = me();
@@ -632,10 +633,8 @@ on('GET', '/api/pages/:id/comments', (_r, [id]) => {
 });
 on('POST', '/api/pages/:id/comments', (r, [id]) => {
   const u = me();
-  const p = readablePage(id, u);
-  // 댓글은 읽을 수 있는 사람이 단다 — 중지된 공간은 막는다(서버와 같다)
-  const sp = db().spaces.find((x) => x.id === p.spaceId)!;
-  if (sp.status !== 'active') fail(403, '중지된 스페이스는 읽기만 된다');
+  // 댓글은 그 공간에 쓸 수 있는 사람이 단다(서버와 같다) — 읽기만 되는 공간에서는 댓글 칸도 없다
+  const p = writablePage(id, u);
   const dto = parse(createCommentDto, r.body);
   const t = nowIso();
   const c = { id: newId(), pageId: id, parentId: dto.parentId ?? null, body: dto.body as DocNode, createdBy: u.id, createdAt: t, updatedAt: t };
@@ -647,7 +646,7 @@ on('POST', '/api/pages/:id/comments', (r, [id]) => {
 on('DELETE', '/api/comments/:id', (_r, [id]) => {
   const u = me();
   const c = db().comments.find((x) => x.id === id) ?? fail(404, '댓글이 없다');
-  readablePage(c.pageId, u);
+  writablePage(c.pageId, u);
   if (!commentView(c, u).canDelete) fail(403, '이 댓글을 지울 수 없다');
   db().comments = db().comments.filter((x) => x.id !== id && x.parentId !== id);
   audit('comment.delete', u.id, 'comment', id, { pageId: c.pageId });
