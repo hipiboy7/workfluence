@@ -28,7 +28,12 @@ RUN pnpm build \
  # **라이선스 원문은 남긴다** (7절). `-name '*.md'`만 쓰면 `LICENSE.md`·`NOTICE.md`도 지워져
  # 주석이 약속한 것과 반대가 된다 — 실제로 `jose`·`ms` 등 운영 의존성이 그 이름을 쓴다
  # (P7 보안 검토 F5). 우리 `dist`의 소스맵도 남긴다 — 장애 때 필요하다
- && find /out/api/node_modules -type f \( -name '*.map' -o \( \( -name '*.md' -o -name '*.markdown' \) ! -iname 'license*' ! -iname 'licence*' ! -iname 'copying*' ! -iname 'notice*' \) \) -delete
+ && find /out/api/node_modules -type f \( -name '*.map' -o \( \( -name '*.md' -o -name '*.markdown' \) ! -iname 'license*' ! -iname 'licence*' ! -iname 'copying*' ! -iname 'notice*' \) \) -delete \
+ # **권한은 빌드 호스트에 기대지 않고 여기서 정한다** (T-099). `COPY . .`는 호스트 파일의 권한과
+ # POSIX ACL을 그대로 옮기고, 빌드가 만든 dist는 그 디렉토리의 기본 ACL을 물려받는다. 저장소에
+ # `other::---` ACL이 걸리자 dist가 0660이 되어 node 사용자가 main.js도 화면 파일도 읽지 못했다 —
+ # 빌드는 성공하고 컨테이너만 뜨지 않는다
+ && chmod -R u=rwX,go=rX /out
 
 # ---------- 2) 런타임 ----------
 FROM node:24-bookworm-slim
@@ -53,7 +58,10 @@ COPY --from=build /out/web /app/web
 # non-root로 도는 앱이 첫 업로드에서 EACCES로 막힌다. 미리 있으면 도커가 그 소유·권한을 옮긴다
 RUN mkdir -p /data/attachments && chown -R node:node /data
 # 시작 스크립트 — 사내 CA 파일(/etc/workfluence/ca/ca.pem)이 있으면 믿고 띄운다 (P11_설계서_Ops D.7)
-COPY --chmod=0755 deploy/entrypoint.sh /usr/local/bin/workfluence-entrypoint
+# `COPY --chmod=0755`는 쓰지 않는다 — 원본에 ACL이 있으면 BuildKit이 ACL을 함께 옮겨 0755를 덮는다(T-099).
+# `install`은 내용만 새 파일로 쓴다
+RUN --mount=type=bind,source=deploy/entrypoint.sh,target=/tmp/entrypoint.sh \
+    install -m 0755 /tmp/entrypoint.sh /usr/local/bin/workfluence-entrypoint
 # non-root (CLAUDE.md 7절)
 USER node
 EXPOSE 3000
