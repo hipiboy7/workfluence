@@ -244,7 +244,10 @@ function PageEditorScreen() {
     setSaveError(null);
     try {
       await api<PageView>(`/api/pages/${id}`, { method: 'PATCH', json: { title, content: doc, baseVersionNo: page.currentVersionNo } });
-      nav(`/pages/${id}`);
+      // 스마트폰 시연판(F-015)만 — 편집은 보기 화면에서 들어온다. 저장 뒤 앞 화면(보기)으로 돌아가 뒤로 가기가 편집 화면을 다시 열지 않게 한다.
+      // 제품 빌드에서는 상수 거짓이라 지금과 같다
+      if (import.meta.env.MODE === 'demo' && window.history.length > 1) nav(-1);
+      else nav(`/pages/${id}`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         const b = e.body as { currentVersionNo: number; baseVersionNo: number; message: string };
