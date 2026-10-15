@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { can, type SpaceView } from '@workfluence/shared';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { EmptyState, Field, Loading, Notice, Page, PageHeader, StatusBadge } from '../components/ui';
+
+/** 스마트폰 시연판(F-015)만 — "시연 데이터 처음으로". 제품 빌드에서는 상수 거짓이라 실리지 않는다 */
+const DemoReset = import.meta.env.MODE === 'demo' ? lazy(() => import('../demo/DemoReset')) : null;
 
 /**
  * 홈 — 내 스페이스 목록 (FR-340 · P17 설계서 J.6 기본 문맥). 버튼 노출은 응답의 access를 쓴다 (FR-345).
@@ -101,6 +104,11 @@ export function SpacesPage() {
             ))}
           </tbody>
         </table>
+      )}
+      {DemoReset && (
+        <Suspense fallback={null}>
+          <DemoReset />
+        </Suspense>
       )}
     </Page>
   );

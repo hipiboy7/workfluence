@@ -106,6 +106,8 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
   if (!me) return null;
   const admin = adminLinks(me);
+  // 스마트폰 시연판(F-015)만 — 관리의 첫 화면을 감사로그로(시연 장면). 제품 빌드에서는 상수 거짓이다
+  if (import.meta.env.MODE === 'demo') admin.sort((a, b) => Number(b.to === '/admin/audit') - Number(a.to === '/admin/audit'));
   const section = currentSection(pathname);
   const here = (key: string) => (section === key ? ('page' as const) : undefined);
 

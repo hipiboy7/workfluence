@@ -222,6 +222,8 @@ export function buildSeed(now: Date): DemoState {
     ),
     h(2, '처음 확인할 것'),
     code('# 앱 서버 상태\nsystemctl status app\n# 최근 오류 로그\njournalctl -u app --since "10 min ago" | grep -i error'),
+    h(2, '고칠 때'),
+    p('이 절차는 분기마다 다시 봅니다. 고칠 것이 있으면 바로 고치고, 고친 내용은 버전으로 남습니다.'),
   );
   const incident = page(
     OPS,

@@ -9,7 +9,7 @@ import { flattenTree, indentedTitle } from '../components/pageTree';
 import { SpaceManage } from '../components/SpaceManage';
 import { Field, FormActions, FormRow, FormRows, FormSection, Loading, Notice, Page, PageHeader, StatusBadge } from '../components/ui';
 import { SideSlot } from '../layout/AppLayout';
-import { SpaceSideNav, announceTreeChanged } from '../layout/SpaceSideNav';
+import { PageTree, SpaceSideNav, announceTreeChanged } from '../layout/SpaceSideNav';
 
 type MemberRole = (typeof ASSIGNABLE_MEMBER_ROLES)[number];
 
@@ -191,6 +191,14 @@ export function SpacePage() {
         }
       />
       {topError}
+
+      {/* 스마트폰 시연판(F-015)만 — 폰에서는 왼쪽 칸이 ☰ 서랍이라 첫 화면에 문서 트리를 함께 보인다. 제품 빌드에서는 상수 거짓이다 */}
+      {import.meta.env.MODE === 'demo' && (
+        <section className="card demo-tree" aria-labelledby="demo-tree-title">
+          <h2 id="demo-tree-title">문서</h2>
+          <PageTree pages={tree} />
+        </section>
+      )}
 
       {space.access.canWrite && (
         // 왼쪽 칸의 새 페이지가 여기로 온다(`#new-page`) — 구획의 머리부터 보이게 폼 전체에 둔다

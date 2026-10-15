@@ -84,3 +84,30 @@ html:has(.edit-canvas) { scroll-padding-top: 160px; }
 /* 비교 — 두 칸을 위아래로 */
 .diff p { font-size: 15px; }
 dialog.confirm { padding: 16px; }
+
+/* ---------- 화면별 다듬기 (F-015 시연판) ---------- */
+/* 스페이스 목록 — 시연에서 만들지 않는다. 표는 이름·종류·Crew·상태만 */
+#sp-create-title, form[aria-labelledby='sp-create-title'] { display: none; }
+table[aria-labelledby='sp-list-title'] :is(th, td):nth-child(3) { display: none; }
+table[aria-labelledby='sp-list-title'] td:first-child a { display: inline-block; padding: 8px 0; font-weight: 700; font-size: 16px; }
+/* 스페이스 첫 화면의 문서 트리 */
+.demo-tree { padding: 12px 8px; }
+.demo-tree h2 { padding: 0 8px; }
+.demo-tree .tree-row a { font-size: 15px; color: var(--text); }
+/* 폰 안에 없는 것 — HTML 내보내기, 첨부 받기 */
+a[href$='/export'] { display: none; }
+a[href^='/api/attachments/'] { pointer-events: none; color: inherit; text-decoration: none; }
+/* 버전 비교 — 폰에서는 바뀐 것만 보인다(같은 문단은 숨긴다) */
+.diff .diff-same { display: none; }
+/* 감사로그 — 표를 줄마다 카드로: 행위·주체 / 시각 / 상세. 대상 아이디·요청 번호·거르기 칸은 숨긴다 */
+main:has(#requestId) .filter-bar { display: none; }
+main:has(#requestId) .table-scroll table, main:has(#requestId) .table-scroll tbody { display: block; }
+main:has(#requestId) .table-scroll thead { display: none; }
+main:has(#requestId) .table-scroll tbody tr { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; height: auto; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+main:has(#requestId) .table-scroll td { display: block; border: 0; padding: 0; }
+main:has(#requestId) .table-scroll td:nth-child(1) { grid-column: 1 / -1; grid-row: 2; text-align: left; color: var(--muted); font-size: 12px; }
+main:has(#requestId) .table-scroll td:nth-child(2) { grid-row: 1; font-weight: 700; }
+main:has(#requestId) .table-scroll td:nth-child(3) { grid-row: 1; }
+main:has(#requestId) .table-scroll td:nth-child(5) { grid-column: 1 / -1; grid-row: 3; }
+main:has(#requestId) .table-scroll td:nth-child(4), main:has(#requestId) .table-scroll td:nth-child(6) { display: none; }
+.demo-reset { margin: 32px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); }
