@@ -110,9 +110,9 @@ export function directPairKey(x: string, y: string): [string, string] | null {
   return a < b ? [a, b] : [b, a];
 }
 
-/** 초대는 여럿 방을 **만든 사람**만 한다 (A.1-2). 1:1 방은 사람을 더하지 못한다 */
-export function canInviteToRoom(room: { kind: ChatRoomKind; createdBy: string }, userId: string): boolean {
-  return room.kind === 'group' && room.createdBy.toLowerCase() === userId.toLowerCase();
+/** 여럿 방은 **참여자 누구나** 초대한다 (A.1-2, 2026-10-15 개정 — 처음에는 만든 사람만이었다). 1:1 방은 사람을 더하지 못한다. 참여자인지는 부르는 쪽이 따로 판정한다 */
+export function canInviteToRoom(room: { kind: ChatRoomKind }): boolean {
+  return room.kind === 'group';
 }
 
 /** 메시지 쪽 나누기 (FR-2403·2406) — `before`는 그 번호보다 이전(없으면 가장 새 것부터), `after`는 그 번호보다 이후 */
@@ -151,7 +151,7 @@ export const createChatRoomDto = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
-      kind: z.literal('group').describe('방의 종류 — `group`은 이름이 있는 여럿 방(만든 사람이 초대한다)'),
+      kind: z.literal('group').describe('방의 종류 — `group`은 이름이 있는 여럿 방(참여자 누구나 초대한다)'),
       name: z.string().trim().min(1).max(CHAT_LIMITS.maxRoomNameChars).describe(`여럿 방의 이름 — 1~${CHAT_LIMITS.maxRoomNameChars}자`),
       userIds: z.array(idSchema).min(1).max(CHAT_LIMITS.maxRoomMembers).describe(`방에 부를 사용자들의 id — 1~${CHAT_LIMITS.maxRoomMembers}명(만든 사람은 빼도 든다). 하나라도 부를 수 없으면 404 \`USER_NOT_FOUND\``),
     })
@@ -219,7 +219,7 @@ export const chatRoomSchema = z.object({
   id: z.string().describe('방의 id'),
   kind: z.enum(['direct', 'group']).describe('`direct`는 1:1, `group`은 이름이 있는 여럿 방'),
   name: z.string().nullable().describe('여럿 방의 이름 — 1:1은 null(상대의 이름을 보여 준다)'),
-  createdBy: z.string().describe('만든 사용자의 id — 여럿 방은 만든 사람만 초대한다'),
+  createdBy: z.string().describe('만든 사용자의 id — 여럿 방은 참여자 누구나 초대한다(만든 사람이 나가도 초대할 수 있다)'),
   members: z.array(z.object({ userId: z.string().describe('참여자의 id'), displayName: z.string().describe('참여자의 표시 이름') })).describe('참여자들(표시 이름 순)'),
   lastSeq: z.number().int().describe('방의 마지막 메시지 번호 — 메시지가 없으면 0'),
   lastMessageAt: iso.nullable().describe('마지막 메시지의 시각 — 없으면 null'),

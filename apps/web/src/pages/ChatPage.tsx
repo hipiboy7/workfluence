@@ -213,11 +213,9 @@ export function ChatPage() {
         actions={
           room?.kind === 'group' && (
             <>
-              {room.createdBy === meId && (
-                <button type="button" className="subtle" onClick={() => setInviting(true)}>
-                  사람 초대
-                </button>
-              )}
+              <button type="button" className="subtle" onClick={() => setInviting(true)}>
+                사람 초대
+              </button>
               <button type="button" className="subtle danger" onClick={() => void leave()}>
                 방에서 나가기
               </button>

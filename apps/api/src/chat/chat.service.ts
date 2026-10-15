@@ -202,12 +202,11 @@ export class ChatService {
       .where(and(eq(chatMembers.roomId, room.id), eq(chatMembers.lastReadSeq, room.lastSeq)));
   }
 
-  /** 여럿 방에 사람을 부른다 — 만든 사람만. 들어온 사람마다 안내 줄이 한 줄 들어간다(F-019) */
+  /** 여럿 방에 사람을 부른다 — 참여자 누구나(2026-10-15 개정). 들어온 사람마다 안내 줄이 한 줄 들어간다(F-019) */
   async invite(me: { id: string }, roomId: string, userIds: string[]): Promise<ChatRoomView> {
     const [peek] = await this.db.select().from(chatRooms).where(eq(chatRooms.id, roomId));
     if (!peek || !(await this.isMember(roomId, me.id))) throw notFoundRoom();
-    if (peek.kind === 'direct') throw new ForbiddenException({ code: 'DIRECT_ROOM', message: '1:1 방에는 사람을 초대할 수 없다 — 여럿 방을 새로 만든다' });
-    if (!canInviteToRoom({ kind: peek.kind as ChatRoomKind, createdBy: peek.createdBy }, me.id)) throw new ForbiddenException({ code: 'FORBIDDEN', message: '여럿 방을 만든 사람만 초대할 수 있다' });
+    if (!canInviteToRoom({ kind: peek.kind as ChatRoomKind })) throw new ForbiddenException({ code: 'DIRECT_ROOM', message: '1:1 방에는 사람을 초대할 수 없다 — 여럿 방을 새로 만든다' });
     const wanted = [...new Set(userIds)];
     const ok = await this.activeIds(wanted);
     if (wanted.some((id) => !ok.has(id))) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: '사용자를 찾을 수 없다' });

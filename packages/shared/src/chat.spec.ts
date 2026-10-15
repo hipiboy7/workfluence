@@ -89,12 +89,11 @@ describe('directPairKey (A.1-1 · D)', () => {
 });
 
 describe('canInviteToRoom (A.1-2)', () => {
-  it('여럿 방은 만든 사람만 초대한다', () => {
-    expect(canInviteToRoom({ kind: 'group', createdBy: A }, A)).toBe(true);
-    expect(canInviteToRoom({ kind: 'group', createdBy: A }, B)).toBe(false);
+  it('여럿 방은 참여자 누구나 초대한다 — 만든 사람이 아니어도', () => {
+    expect(canInviteToRoom({ kind: 'group' })).toBe(true);
   });
   it('1:1 방은 아무도 초대하지 못한다', () => {
-    expect(canInviteToRoom({ kind: 'direct', createdBy: A }, A)).toBe(false);
+    expect(canInviteToRoom({ kind: 'direct' })).toBe(false);
   });
 });
 

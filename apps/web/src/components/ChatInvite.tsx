@@ -6,7 +6,7 @@ import { Notice } from './ui';
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /**
- * 여럿 방에 사람을 더한다 (P21_설계서_Chat FR-2402) — 방을 **만든 사람**에게만 보인다(서버가 다시 판정한다). 이미 든 사람은 목록에서 뺀다.
+ * 여럿 방에 사람을 더한다 (P21_설계서_Chat FR-2402) — 여럿 방의 참여자 누구에게나 보인다(서버가 다시 판정한다). 이미 든 사람은 목록에서 뺀다.
  * 사람은 표시 이름으로 찾는다(`ChatNewRoom`과 같은 길)
  */
 export function ChatInvite({ room, onInvited, onCancel }: { room: ChatRoomView; onInvited: (room: ChatRoomView) => void; onCancel: () => void }) {

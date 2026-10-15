@@ -267,7 +267,7 @@ describe('새 대화 (FR-2401·2402)', () => {
 });
 
 describe('여럿 방의 초대·나가기 (FR-2402)', () => {
-  it('만든 사람은 사람을 초대한다 — 이미 든 사람은 목록에 없다', async () => {
+  it('여럿 방의 참여자는 사람을 초대한다 — 이미 든 사람은 목록에 없다', async () => {
     open(`/chat/${R2}`);
     fireEvent.click(await screen.findByRole('button', { name: '사람 초대' }));
     const box = await screen.findByRole('region', { name: '사람 초대' });
@@ -280,16 +280,17 @@ describe('여럿 방의 초대·나가기 (FR-2402)', () => {
     expect(await screen.findByText(/참여자 3명/)).toBeTruthy();
   });
 
-  it('만든 사람이 아니면 초대 단추가 없다. 1:1 방에는 둘 다 없다', async () => {
+  it('만든 사람이 아니어도 여럿 방이면 초대 단추가 있다. 1:1 방에는 초대도 나가기도 없다', async () => {
     rooms = [room(R2, { kind: 'group', name: '팀', createdBy: 'u3', members: [{ userId: 'u1', displayName: '나' }, { userId: 'u3', displayName: '밥' }] }), room(R1)];
     open(`/chat/${R2}`);
     await screen.findByText(/참여자 2명/);
-    expect(screen.queryByRole('button', { name: '사람 초대' })).toBeNull();
+    expect(screen.getByRole('button', { name: '사람 초대' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '방에서 나가기' })).toBeTruthy();
     cleanup();
     open(`/chat/${R1}`);
     await screen.findByLabelText('메시지');
     expect(screen.queryByRole('button', { name: '방에서 나가기' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '사람 초대' })).toBeNull();
   });
 
   it('나가기는 확인을 받고, 나가면 방 목록으로 돌아간다', async () => {
