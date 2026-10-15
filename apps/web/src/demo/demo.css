@@ -111,3 +111,19 @@ main:has(#requestId) .table-scroll td:nth-child(3) { grid-row: 1; }
 main:has(#requestId) .table-scroll td:nth-child(5) { grid-column: 1 / -1; grid-row: 3; }
 main:has(#requestId) .table-scroll td:nth-child(4), main:has(#requestId) .table-scroll td:nth-child(6) { display: none; }
 .demo-reset { margin: 32px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); }
+
+/* 안드로이드 글꼴은 넓다(에뮬레이터 실측) — 위 막대의 첫 줄이 넘치면 세 줄로 접혀 메뉴가 제목을 덮었다. 이름이 줄어들고 오른쪽 묶음은 접히지 않는다 */
+.topbar { flex-wrap: wrap; }
+.topbar .brand { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; line-height: 48px; }
+.topbar-right { flex: 0 0 auto; flex-wrap: nowrap; margin-left: 0; }
+.topbar-right > button, .notify-button { padding: 0 8px; }
+/* 표는 칸 폭을 넘으면 옆으로 민다 (감사로그는 위의 카드 모양) */
+.app-main table { display: block; overflow-x: auto; max-width: 100%; }
+table[aria-labelledby='sp-list-title'] :is(th, td):nth-child(4) { display: none; }
+/* 첫 줄이 넘쳐도 접히지 않게 격자로 둔다 — ☰ · 이름(줄어든다) · 알림·로그아웃 / 주 메뉴 */
+.topbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 48px 41px; align-items: center; column-gap: 4px; }
+.topbar > .skip-link { position: absolute; }
+.mainnav { grid-column: 1 / -1; grid-row: 2; margin: 0 -8px 0 -4px; }
+@media (max-width: 400px) {
+  .notify-button > span:not(.notify-count) { display: none; }
+}
