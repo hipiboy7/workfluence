@@ -151,7 +151,7 @@ jobs:
           see '먼저 알리고'
           tap '편집'; sleep 4; shot editor
           tap '저장'; sleep 3; shot saved
-          see '버전 6'
+          see 'text="6"'  # "버전 "과 "6"은 따로 읽힌다
           adb shell input keyevent KEYCODE_BACK; sleep 2; shot back-1
           adb shell input keyevent KEYCODE_BACK; sleep 2; shot back-2
           tap '검색' || true; sleep 2; shot search
