@@ -120,6 +120,13 @@
       "when": 1790913600000,
       "tag": "0016_chat_notices",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791000000000,
+      "tag": "0017_chat_leave_idx",
+      "breakpoints": true
     }
   ]
 }

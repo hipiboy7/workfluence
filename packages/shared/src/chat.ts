@@ -221,6 +221,7 @@ export const chatRoomSchema = z.object({
   name: z.string().nullable().describe('여럿 방의 이름 — 1:1은 null(상대의 이름을 보여 준다)'),
   createdBy: z.string().describe('만든 사용자의 id — 여럿 방은 참여자 누구나 초대한다(만든 사람이 나가도 초대할 수 있다)'),
   members: z.array(z.object({ userId: z.string().describe('참여자의 id'), displayName: z.string().describe('참여자의 표시 이름') })).describe('참여자들(표시 이름 순)'),
+  pastMembers: z.array(z.object({ userId: z.string().describe('나간 사람의 id'), displayName: z.string().describe('나간 사람의 표시 이름') })).describe('방을 나간 사람들 — 그 사람이 쓴 메시지의 이름을 "(나간 사람)"으로 지우지 않으려고 싣는다. "나갔습니다" 안내 줄(`kind=leave`)이 있는 사람만이고, 다시 초대돼 들어와 있으면 `members`에 있고 여기에는 없다'),
   lastSeq: z.number().int().describe('방의 마지막 메시지 번호 — 메시지가 없으면 0'),
   lastMessageAt: iso.nullable().describe('마지막 메시지의 시각 — 없으면 null'),
   lastMessage: chatMessageSchema.nullable().describe('마지막 메시지 — 없으면 null'),

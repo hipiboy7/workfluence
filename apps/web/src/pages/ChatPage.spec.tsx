@@ -49,6 +49,7 @@ const room = (id: string, over: Partial<ChatRoomView> = {}): ChatRoomView => ({
     { userId: 'u1', displayName: '나' },
     { userId: 'u2', displayName: '앨리스' },
   ],
+  pastMembers: [],
   lastSeq: 0,
   lastMessageAt: null,
   lastMessage: null,
@@ -143,6 +144,15 @@ describe('대화 (FR-2403·2405)', () => {
     const line = await pane().findByText('상대님이 채팅방을 나갔습니다'); // 왼쪽 방 목록의 미리보기에도 같은 글이 있다
     expect(line.closest('li')!.classList.contains('chat-notice')).toBe(true);
     expect(line.closest('li')!.classList.contains('chat-msg')).toBe(false);
+  });
+
+  it('나간 사람의 메시지에는 "(나간 사람) 이름"이 남는다 — 이름이 지워지지 않는다 (F-021)', async () => {
+    rooms = [room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', displayName: '나' }], pastMembers: [{ userId: 'u3', displayName: '밥' }], lastSeq: 1, lastMessage: msg(R2, 1, '떠나기 전 말', 'u3') })];
+    messages[R2] = [msg(R2, 1, '떠나기 전 말', 'u3')];
+    open(`/chat/${R2}`);
+    expect(await pane().findByText('떠나기 전 말')).toBeTruthy();
+    expect(pane().getByText('(나간 사람) 밥')).toBeTruthy(); // 나갔다는 것과 누구였는지가 함께 남는다
+    expect(pane().queryByText('(나간 사람)')).toBeNull();
   });
 
   it('연결이 붙기 전에는 보내지 못하고, 붙으면 보낸다 — 입력칸을 비운다', async () => {

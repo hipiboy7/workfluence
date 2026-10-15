@@ -1,6 +1,6 @@
 import type { ChatMessageView, ChatRoomView } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
-import { applyMessageToRooms, CHAT_TONES, lastSeqOf, memberTones, mergeMessages, roomTitle, totalUnread } from './chatState';
+import { applyMessageToRooms, CHAT_TONES, lastSeqOf, memberTones, mergeMessages, roomTitle, senderName, totalUnread } from './chatState';
 
 const msg = (seq: number, over: Partial<ChatMessageView> = {}): ChatMessageView => ({ id: `m${seq}`, roomId: 'r1', seq, senderId: 'u2', body: `b${seq}`, kind: 'user', createdAt: `2026-10-12T00:00:0${seq}.000Z`, ...over });
 const room = (over: Partial<ChatRoomView> = {}): ChatRoomView => ({
@@ -12,6 +12,7 @@ const room = (over: Partial<ChatRoomView> = {}): ChatRoomView => ({
     { userId: 'u1', displayName: '나' },
     { userId: 'u2', displayName: '상대' },
   ],
+  pastMembers: [],
   lastSeq: 0,
   lastMessageAt: null,
   lastMessage: null,
@@ -93,7 +94,22 @@ describe('memberTones', () => {
     expect([...t.values()].every((v) => v >= 0 && v < CHAT_TONES)).toBe(true);
   });
 
-  it('방에 없는 사람은 번호가 없다', () => {
-    expect(memberTones(many(2)).has('나간사람')).toBe(false);
+  it('방에 어디에도 없는 사람은 번호가 없다', () => {
+    expect(memberTones(many(2)).has('모르는사람')).toBe(false);
+  });
+
+  it('나간 사람은 참여자들 뒤에 이어서 번호를 받는다 — 그 사람의 메시지가 색을 잃지 않는다', () => {
+    const r = many(2);
+    r.pastMembers = [{ userId: 'gone', displayName: '떠난사람' }];
+    expect(memberTones(r).get('gone')).toBe(2);
+  });
+});
+
+describe('senderName (F-021)', () => {
+  it('참여자는 이름, 나간 사람은 "(나간 사람) 이름", 방 어디에도 없으면 이름 없는 "(나간 사람)"', () => {
+    const r = room({ pastMembers: [{ userId: 'gone', displayName: '떠난사람' }] });
+    expect(senderName(r, 'u2')).toBe('상대');
+    expect(senderName(r, 'gone')).toBe('(나간 사람) 떠난사람');
+    expect(senderName(r, 'x')).toBe('(나간 사람)');
   });
 });

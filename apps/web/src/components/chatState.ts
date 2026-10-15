@@ -52,8 +52,16 @@ export const CHAT_TONES = 10;
 
 /**
  * 방 참여자마다 바탕색 번호를 임의로 하나씩 준다(F-018). 참여자 목록의 차례대로 0, 1, 2… — 방 안에서는 `CHAT_TONES`명까지 겹치지 않는다.
- * 방 목록에 없는 보낸 사람(나간 사람)은 번호가 없다. 열 명이 넘으면 처음 색으로 돌아간다
+ * 나간 사람은 현재 참여자들 뒤에 이어서 번호를 받는다(그 사람의 메시지가 색을 잃지 않게). 방 어디에도 없는 사람은 번호가 없다. 열 명이 넘으면 처음 색으로 돌아간다
  */
 export function memberTones(room: ChatRoomView): Map<string, number> {
-  return new Map(room.members.map((m, i) => [m.userId, i % CHAT_TONES]));
+  return new Map([...room.members, ...room.pastMembers].map((m, i) => [m.userId, i % CHAT_TONES]));
+}
+
+/** 보낸 사람의 이름 — 지금 참여자는 이름, 나간 사람은 `(나간 사람) 이름`(나갔다는 것과 누구였는지를 함께 남긴다), 방 어디에도 없으면 이름을 모르는 `(나간 사람)` */
+export function senderName(room: ChatRoomView, userId: string): string {
+  const now = room.members.find((m) => m.userId === userId);
+  if (now) return now.displayName;
+  const past = room.pastMembers.find((m) => m.userId === userId);
+  return past ? `(나간 사람) ${past.displayName}` : '(나간 사람)';
 }

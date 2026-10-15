@@ -104,12 +104,21 @@ export class ChatService {
       .from(chatMessages)
       .where(or(...items.filter((i) => i.room.lastSeq > 0).map((i) => and(eq(chatMessages.roomId, i.room.id), eq(chatMessages.seq, i.room.lastSeq)))) ?? sql`false`);
     const lastBy = new Map(lasts.map((m) => [m.roomId, toMessage(m)]));
+    // 나간 사람 — "나갔습니다" 안내 줄의 보낸 사람. 지금 참여자가 아닌 사람만(다시 들어왔으면 참여자다)
+    const leavers = await this.db
+      .select({ roomId: chatMessages.roomId, userId: chatMessages.senderId, displayName: users.displayName })
+      .from(chatMessages)
+      .innerJoin(users, eq(users.id, chatMessages.senderId))
+      .where(and(inArray(chatMessages.roomId, ids), eq(chatMessages.kind, 'leave')))
+      .orderBy(byName(users.displayName), asc(users.id));
     const views = items.map(({ room, lastReadSeq }): ChatRoomView => ({
       id: room.id,
       kind: room.kind as ChatRoomView['kind'],
       name: room.name,
       createdBy: room.createdBy,
       members: members.filter((m) => m.roomId === room.id).map((m) => ({ userId: m.userId, displayName: m.displayName })),
+      // 같은 사람이 여러 번 나갔다 들어왔을 수 있어 사람마다 한 번만
+      pastMembers: [...new Map(leavers.filter((l) => l.roomId === room.id && !members.some((m) => m.roomId === room.id && m.userId === l.userId)).map((l) => [l.userId, { userId: l.userId, displayName: l.displayName }])).values()],
       lastSeq: room.lastSeq,
       lastMessageAt: room.lastMessageAt?.toISOString() ?? null,
       lastMessage: lastBy.get(room.id) ?? null,

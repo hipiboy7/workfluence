@@ -762,6 +762,22 @@ paths:
                           type:
                             - string
                             - "null"
+                        pastMembers:
+                          description: "방을 나간 사람들 — 그 사람이 쓴 메시지의 이름을 \"(나간 사람)\"으로 지우지 않으려고 싣는다. \"나갔습니다\" 안내 줄(`kind=leave`)이 있는 사람만이고, 다시 초대돼 들어와 있으면 `members`에 있고 여기에는 없다"
+                          items:
+                            additionalProperties: false
+                            properties:
+                              displayName:
+                                description: "나간 사람의 표시 이름"
+                                type: string
+                              userId:
+                                description: "나간 사람의 id"
+                                type: string
+                            required:
+                              - userId
+                              - displayName
+                            type: object
+                          type: array
                         unread:
                           description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
                           maximum: 9007199254740991
@@ -773,6 +789,7 @@ paths:
                         - name
                         - createdBy
                         - members
+                        - pastMembers
                         - lastSeq
                         - lastMessageAt
                         - lastMessage
@@ -964,6 +981,22 @@ paths:
                     type:
                       - string
                       - "null"
+                  pastMembers:
+                    description: "방을 나간 사람들 — 그 사람이 쓴 메시지의 이름을 \"(나간 사람)\"으로 지우지 않으려고 싣는다. \"나갔습니다\" 안내 줄(`kind=leave`)이 있는 사람만이고, 다시 초대돼 들어와 있으면 `members`에 있고 여기에는 없다"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        displayName:
+                          description: "나간 사람의 표시 이름"
+                          type: string
+                        userId:
+                          description: "나간 사람의 id"
+                          type: string
+                      required:
+                        - userId
+                        - displayName
+                      type: object
+                    type: array
                   unread:
                     description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
                     maximum: 9007199254740991
@@ -975,6 +1008,7 @@ paths:
                   - name
                   - createdBy
                   - members
+                  - pastMembers
                   - lastSeq
                   - lastMessageAt
                   - lastMessage
@@ -1129,6 +1163,22 @@ paths:
                     type:
                       - string
                       - "null"
+                  pastMembers:
+                    description: "방을 나간 사람들 — 그 사람이 쓴 메시지의 이름을 \"(나간 사람)\"으로 지우지 않으려고 싣는다. \"나갔습니다\" 안내 줄(`kind=leave`)이 있는 사람만이고, 다시 초대돼 들어와 있으면 `members`에 있고 여기에는 없다"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        displayName:
+                          description: "나간 사람의 표시 이름"
+                          type: string
+                        userId:
+                          description: "나간 사람의 id"
+                          type: string
+                      required:
+                        - userId
+                        - displayName
+                      type: object
+                    type: array
                   unread:
                     description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
                     maximum: 9007199254740991
@@ -1140,6 +1190,7 @@ paths:
                   - name
                   - createdBy
                   - members
+                  - pastMembers
                   - lastSeq
                   - lastMessageAt
                   - lastMessage
@@ -1306,6 +1357,22 @@ paths:
                     type:
                       - string
                       - "null"
+                  pastMembers:
+                    description: "방을 나간 사람들 — 그 사람이 쓴 메시지의 이름을 \"(나간 사람)\"으로 지우지 않으려고 싣는다. \"나갔습니다\" 안내 줄(`kind=leave`)이 있는 사람만이고, 다시 초대돼 들어와 있으면 `members`에 있고 여기에는 없다"
+                    items:
+                      additionalProperties: false
+                      properties:
+                        displayName:
+                          description: "나간 사람의 표시 이름"
+                          type: string
+                        userId:
+                          description: "나간 사람의 id"
+                          type: string
+                      required:
+                        - userId
+                        - displayName
+                      type: object
+                    type: array
                   unread:
                     description: "내가 안 읽은 메시지 수 — 내가 보낸 것은 읽은 것으로 친다"
                     maximum: 9007199254740991
@@ -1317,6 +1384,7 @@ paths:
                   - name
                   - createdBy
                   - members
+                  - pastMembers
                   - lastSeq
                   - lastMessageAt
                   - lastMessage

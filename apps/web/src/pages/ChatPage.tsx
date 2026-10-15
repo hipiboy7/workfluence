@@ -8,7 +8,7 @@ import { ChatNewRoom } from '../components/ChatNewRoom';
 import { useConfirm } from '../components/ConfirmDialog';
 import { ChatSideNav } from '../components/ChatSideNav';
 import { ChatSendError, createChatLink, type ChatLinkState, type ChatSocketLike } from '../components/chatLink';
-import { applyMessageToRooms, lastSeqOf, memberTones, mergeMessages, roomTitle } from '../components/chatState';
+import { applyMessageToRooms, lastSeqOf, memberTones, mergeMessages, roomTitle, senderName } from '../components/chatState';
 import { EmptyState, Notice, Page, PageHeader, useDocumentTitle } from '../components/ui';
 import { SideSlot } from '../layout/AppLayout';
 
@@ -161,7 +161,7 @@ export function ChatPage() {
 
   const tones = useMemo(() => (room ? memberTones(room) : new Map<string, number>()), [room]);
   const toneClass = (userId: string): string => (tones.has(userId) ? ` tone-${tones.get(userId)}` : '');
-  const nameOf = (userId: string): string => room?.members.find((m) => m.userId === userId)?.displayName ?? '(나간 사람)';
+  const nameOf = (userId: string): string => (room ? senderName(room, userId) : '(나간 사람)');
 
   const send = (body: string, clientMsgId?: string) => {
     const link = linkRef.current;

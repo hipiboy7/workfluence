@@ -121,6 +121,24 @@ describe('안내 줄 (F-019)', () => {
     expect((await svc.listRooms(c.id))[0]!.unread).toBe(0);
   });
 
+  it('나간 사람은 방 정보의 pastMembers에 이름이 남고, 다시 초대되면 참여자로 돌아온다 (F-021)', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const c = await person(db, 'c');
+    const { room } = await svc.createRoom(a, { kind: 'group', name: '팀', userIds: [b.id, c.id] });
+    await svc.send(b, room.id, { body: '떠나기 전' });
+    await svc.leave(b, room.id);
+    const v = await svc.getRoom(a.id, room.id);
+    expect(v.members.map((m) => m.userId).sort()).toEqual([a.id, c.id].sort());
+    expect(v.pastMembers.map((m) => m.userId)).toEqual([b.id]);
+    expect(v.pastMembers[0]!.displayName).toBeTruthy();
+    expect((await svc.listRooms(a.id))[0]!.pastMembers).toHaveLength(1);
+    await svc.invite(a, room.id, [b.id]); // 다시 들어왔다
+    const again = await svc.getRoom(a.id, room.id);
+    expect(again.pastMembers).toEqual([]);
+    expect(again.members.map((m) => m.userId)).toContain(b.id);
+  });
+
   it('마지막 사람이 나가면 보여 줄 사람이 없어 줄을 넣지 않는다', async () => {
     const a = await person(db, 'a');
     const b = await person(db, 'b');
