@@ -1,0 +1,10 @@
+{
+  "appId": "io.github.hipiboy7.workfluence.demo",
+  "appName": "workfluence 시연판",
+  "webDir": "../web/dist-demo",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  }
+}

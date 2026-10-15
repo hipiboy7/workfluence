@@ -1,0 +1,16 @@
+{
+  "name": "workfluence-mobile-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "workfluence 시연판 — apps/web의 시연 빌드를 안드로이드 앱으로 감싼다 (F-015). pnpm 작업공간 밖이다: 제품 lockfile·이미지를 바꾸지 않는다",
+  "license": "UNLICENSED",
+  "scripts": {
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/cli": "8.5.3",
+    "@capacitor/core": "8.5.3"
+  }
+}

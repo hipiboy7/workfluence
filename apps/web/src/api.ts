@@ -57,6 +57,9 @@ export function hasDotSegment(path: string): boolean {
 /** API를 부른다. **`.`·`..` 조각이 든 경로는 보내지 않는다** (`hasDotSegment`) */
 export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   if (hasDotSegment(path)) throw new ApiError(400, { message: '주소에 "."이나 ".." 조각이 있어 요청을 보내지 않았다' });
+  // 스마트폰 시연판(F-015, `vite build --mode demo`)만 서버 대신 폰 안의 시연 저장소에 묻는다. 제품 빌드에서는 이 조건이 상수 거짓이라
+  // 시연 저장소가 산출물에 실리지 않는다(시연판 워크플로가 `dist`에서 확인한다)
+  if (import.meta.env.MODE === 'demo') return (await import('./demo/server')).demoApi<T>(path, init);
   const res = await fetch(path, requestInit(init));
   if (res.status === 204) return undefined as T;
   const text = await res.text();

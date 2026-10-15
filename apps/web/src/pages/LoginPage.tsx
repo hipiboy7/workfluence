@@ -1,9 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { Suspense, lazy, useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { AuthBrand } from '../layout/AuthLayout';
 import { Field, FormActions, Notice, useDocumentTitle } from '../components/ui';
+
+/** 스마트폰 시연판(F-015)만 — 시연 계정 단추와 "시연 데이터 처음으로". 제품 빌드에서는 상수 거짓이라 실리지 않는다 */
+const DemoLogin = import.meta.env.MODE === 'demo' ? lazy(() => import('../demo/DemoLogin')) : null;
 
 /**
  * 로그인 (FR-242). OIDC 버튼은 서버가 켜져 있다고 알려줄 때만 보인다 (FR-219).
@@ -49,6 +52,11 @@ export function LoginPage() {
       <AuthBrand heading />
       <div className="auth-card">
         <h2>로그인</h2>
+        {DemoLogin && (
+          <Suspense fallback={null}>
+            <DemoLogin />
+          </Suspense>
+        )}
         {error && <Notice kind="error">{error}</Notice>}
         <form className="form-stack" onSubmit={submit}>
           <Field id="username" label="아이디" required>
@@ -73,10 +81,10 @@ export function LoginPage() {
           </>
         )}
       </div>
-      <p className="auth-links">
+      {!DemoLogin && <p className="auth-links">
         <Link to="/signup">가입 요청</Link> · <Link to="/find-account">아이디·비밀번호 찾기</Link> ·{' '}
         <Link to="/find-account/root">시스템 관리자 아이디 찾기</Link>
-      </p>
+      </p>}
     </>
   );
 }

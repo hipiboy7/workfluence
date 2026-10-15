@@ -2,7 +2,11 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+/**
+ * `--mode demo`는 **스마트폰 시연판**(F-015)이다 — 화면이 서버 대신 폰 안의 시연 저장소(`src/demo/`)에 묻는다(`src/api.ts`). 산출물은
+ * `dist-demo`로 따로 나가 제품 산출물(`dist` — app 이미지가 싣는 것)과 섞이지 않는다. 그 밖의 모드는 지금까지와 같다
+ */
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   resolve: {
     alias: {
@@ -18,8 +22,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: mode === 'demo' ? 'dist-demo' : 'dist',
     sourcemap: false,
     emptyOutDir: true,
   },
-});
+}));

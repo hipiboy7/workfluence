@@ -10,7 +10,7 @@ import tseslint from 'typescript-eslint';
  * - `import type`으로 주입 대상 클래스를 가져오기: 런타임에 사라져 Nest DI가 undefined를 받는다
  */
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/coverage/**', '**/node_modules/**', '.local/**', 'apps/web/dist/**'] },
+  { ignores: ['**/dist/**', '**/coverage/**', '**/node_modules/**', '.local/**', 'apps/web/dist/**', '**/dist-demo/**', 'apps/mobile/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

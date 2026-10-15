@@ -1,0 +1,86 @@
+/* 스마트폰 시연판(F-015)의 화면 — 시연 빌드에서만 실린다(`src/demo/boot.ts`가 들인다). 제품의 `styles.css`는 바뀌지 않는다 */
+
+.demo-login { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.demo-login-label { margin: 4px 0 0; font-weight: 700; }
+.demo-login-accounts { display: flex; flex-direction: column; gap: 8px; }
+.demo-login-accounts button { height: 44px; }
+
+/* ---------- 폰 화면 맞춤 (F-015) — 제품 화면은 PC 전용(`body { min-width: 1024px }`)이다. 시연 빌드에서만 폰 폭(360~412px)에 맞춘다 ---------- */
+:root { --pad-x: 12px; --topbar-h: 89px; }
+body { min-width: 0; -webkit-tap-highlight-color: transparent; }
+input, select, textarea { font-size: 16px; }
+
+/* 위 막대 — 한 줄은 ☰·이름·알림·로그아웃, 둘째 줄은 주 메뉴(옆으로 민다) */
+.topbar { flex-wrap: wrap; align-content: flex-start; height: var(--topbar-h); padding: 0 8px 0 4px; row-gap: 0; }
+.topbar > button.icon, .topbar .brand, .topbar-right { height: 48px; display: flex; align-items: center; }
+.topbar .brand { margin: 0 4px; }
+.topbar-right { gap: 6px; }
+.topbar-right .me, .topbar-right a[href='/change-password'] { display: none; }
+.topbar-right > button { height: 36px; padding: 0 10px; }
+.mainnav { order: 3; flex: 1 0 100%; overflow-x: auto; border-top: 1px solid var(--line); margin: 0 -8px 0 -4px; }
+.mainnav ul { gap: 0; padding: 0 4px; }
+.mainnav a { height: 40px; padding: 0 12px; }
+/* 폰 안에는 사내 LLM이 없다 — 메뉴에서 뺀다 */
+.mainnav a[href='/llm'], .side a[href='/llm/prompts'] { display: none; }
+
+/* 왼쪽 칸 → ☰ 서랍. 열리면 본문 위에 뜨고 바깥을 누르면 닫힌다(`boot.ts`) */
+.app-body { display: block; min-height: auto; }
+.side { position: fixed; z-index: 35; top: 0; left: 0; bottom: 0; width: min(320px, 86vw); height: auto; padding: 16px 8px 32px; box-shadow: var(--shadow-float); border-right: 0; }
+.app-body:not(.side-collapsed)::before { content: ''; position: fixed; inset: 0; z-index: 34; background: rgba(16, 24, 40, 0.4); }
+.side a.side-item, .side-item { min-height: 44px; }
+.tree-row { min-height: 40px; }
+.tree-toggle { flex-basis: 36px; width: 36px; height: 36px; }
+.tree-spacer { flex-basis: 36px; }
+.tree-row a { padding: 8px 6px; }
+.app-main { padding: 12px var(--pad-x) 40px; }
+
+/* 머리·단추 — 누르는 자리를 크게 */
+button, a.btn { min-height: 40px; }
+button.sm, a.btn.sm { min-height: 32px; }
+button.icon { width: 40px; height: 40px; }
+.page-header { flex-direction: column; }
+.page-header .actions { flex: 1 1 auto; }
+h1 { font-size: 22px; line-height: 30px; }
+.doc > h1 { font-size: 24px; line-height: 32px; }
+
+/* 카드 틀(로그인) */
+.auth { padding: 24px 12px; }
+.auth-card, .auth-card.wide, .auth-card.guide { width: 100%; max-width: 440px; padding: 20px 16px; }
+.auth-cards { flex-direction: column; }
+
+/* 폼 — 한 줄(라벨 칸·입력 칸)을 두 줄로 */
+.form-row { grid-template-columns: minmax(0, 1fr); }
+.form-row > .row-label { padding: 8px 12px 4px; }
+.form-row > .row-field { padding: 4px 12px 12px; align-items: stretch; }
+.form-section { padding: 12px; }
+:where(input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden'])), :where(select) { width: 100%; }
+.w-s, .w-m, .w-l { width: 100%; }
+.filter-bar { padding: 8px 12px; }
+.filter-bar .field { flex: 1 1 100%; }
+dl.meta { grid-template-columns: 7rem 1fr; }
+
+/* 표 — 옆으로 민다 */
+.table-scroll, .tableWrapper, .doc .editor table { overflow-x: auto; }
+.editor .ProseMirror table { display: block; overflow-x: auto; max-width: 100%; }
+td.actions-cell .actions { flex-wrap: wrap; }
+
+/* 문서 보기·편집 */
+.doc-head { align-items: flex-start; }
+.doc-tools { gap: 2px; }
+.editor .ProseMirror { font-size: 16px; line-height: 26px; }
+.editor .ProseMirror ul, .editor .ProseMirror ol { padding-left: 22px; }
+.edit-bar { gap: 6px 8px; padding: 6px var(--pad-x); }
+.paper { padding: 12px; border-radius: 6px; }
+.paper .editor:not(.readonly) .ProseMirror { min-height: 40vh; }
+/* 서식 단추 줄은 한 줄로 두고 옆으로 민다 */
+.format-bar { flex-wrap: nowrap; overflow-x: auto; }
+.format-bar .fmt-btn { height: 40px; min-width: 40px; }
+html:has(.edit-canvas) { scroll-padding-top: 160px; }
+
+/* 알림 판 — 화면 폭 안에 */
+.notify { position: static; }
+.notify-panel { position: fixed; left: 8px; right: 8px; top: 52px; width: auto; }
+
+/* 비교 — 두 칸을 위아래로 */
+.diff p { font-size: 15px; }
+dialog.confirm { padding: 16px; }

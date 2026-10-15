@@ -17,3 +17,6 @@ history
 **/.vite
 test-results
 playwright-report
+# 스마트폰 시연판(F-015) — 안드로이드 껍데기와 시연 빌드 산출물은 app 이미지와 무관하다
+apps/mobile
+**/dist-demo
