@@ -195,7 +195,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/users?q=alice"
 const ws = new WebSocket(`${BASE.replace('https', 'wss')}/api/v1/chat/ws`, { headers: { Authorization: `Bearer ${TOKEN}` } });
 ws.on('message', (data) => {
   const f = JSON.parse(data.toString());
-  if (f.type === 'message' && f.senderId !== ME) {
+  if (f.type === 'message' && f.kind === 'user' && f.senderId !== ME) { // 안내 줄(join·leave)에는 답하지 않는다
     ws.send(JSON.stringify({ type: 'send', roomId: f.roomId, body: '확인했습니다', clientMsgId: crypto.randomUUID() }));
   }
 });
@@ -204,11 +204,25 @@ ws.on('message', (data) => {
 | 방향 | `type` | 뜻 |
 |---|---|---|
 | 서버→나 | `hello` | 연결 직후 한 번 — `userId`, 참여한 방 `roomIds` |
-| 서버→나 | `message` | 방의 새 메시지(`roomId`·`seq`·`senderId`·`body`·`createdAt`) — **내가 보낸 것도 온다** |
+| 서버→나 | `message` | 방의 새 메시지(`roomId`·`seq`·`senderId`·`body`·`kind`·`createdAt`) — **내가 보낸 것도 온다.** `kind`는 아래 "메시지의 종류" |
 | 서버→나 | `ack` | 내가 보낸 `send`의 결과(`clientMsgId`·`roomId`·`seq`·`createdAt`) |
 | 서버→나 | `room` | 내가 방에 들었다·나갔다(`change`=joined·left), 또는 내가 든 방의 참여자가 바뀌었다(`members`) — 방이 새로 생기면 연결을 다시 열지 않아도 온다 |
 | 서버→나 | `error` | 보낸 것 하나를 거절(`code`·`roomId`·`clientMsgId`) — 연결은 그대로. `EMPTY`·`TOO_LONG`·`BAD_CHAR`·`ROOM_NOT_FOUND`·`INSUFFICIENT_SCOPE`·`RATE_LIMITED` |
 | 나→서버 | `send` | `{"type":"send","roomId":"…","body":"…","clientMsgId":"(선택)"}` — **이것 하나뿐이다** |
+
+**메시지의 종류(`kind`)** — 메시지마다 있다(REST의 메시지·방의 `lastMessage`·WebSocket `message` 프레임 모두).
+
+| `kind` | 뜻 | `senderId` | `body` |
+|---|---|---|---|
+| `user` | 사람(또는 에이전트)이 보낸 메시지 | 보낸 사용자 | 보낸 글 |
+| `join` | 누가 방에 들어왔다 — 시스템이 넣은 **안내 줄** | 초대한 사용자 | `OO님이 채팅방에 들어왔습니다` |
+| `leave` | 누가 방에서 나갔다 — 시스템이 넣은 **안내 줄** | 나간 사용자 | `OO님이 채팅방을 나갔습니다` |
+
+- **안내 줄은 사람의 말이 아니다 — 답하지 않는다.** 위의 예처럼 `kind === 'user'`만 골라 답한다. 안내 줄에 답하면 "들어왔습니다"에 "확인했습니다"를 되풀이해 방이 어지러워진다.
+- 안내 줄도 **메시지라 `seq`를 먹는다** — 번호가 비지 않으니 `afterSeq`로 메울 때 걸러 내지 말고 받은 뒤 `kind`로 가른다. 안 읽은 수(`unread`)는 올리지 않는다.
+- 안내 줄은 **시스템만 만든다.** `POST …/messages`·`send` 프레임으로는 `user`만 보낼 수 있다(`kind` 칸을 받지 않는다).
+- 이름은 그 줄을 넣을 때의 표시 이름이다. 나중에 이름이 바뀌어도 줄은 고쳐지지 않는다(메시지는 고치지 않는다).
+- 이 필드는 2026-10-15에 더해졌다 — 그 전의 메시지는 모두 `user`다. 옛 클라이언트는 이 칸을 몰라도 동작하지만, **모든 메시지에 답하는 클라이언트는 안내 줄에도 답한다.**
 
 **지킬 것**
 - **모르는 `type`·모르는 칸·JSON이 아닌 글·바이너리·너무 큰 프레임**은 서버가 연결을 닫는다(코드 4400, 큰 것은 1009). 같은 것을 다시 보내지 말고 프레임을 고친다.
@@ -238,7 +252,7 @@ ws.on('message', (data) => {
 | 503 | `API_DISABLED` | 서버에 공개 API가 꺼져 있다 → 운영자에게 |
 | 400 | `INVALID_REQUEST` | 입력이 틀렸다 → 메시지가 칸과 까닭을 말한다(값은 싣지 않는다) |
 | 400 | `INVALID_JSON` | 본문이 JSON이 아니다 |
-| 400 | `EMPTY`·`TOO_LONG`·`BAD_CHAR`·`DIRECT_ROOM`·`SELF_ROOM`·`NO_MEMBERS`·`BAD_QUERY` | 채팅 — 메시지 본문의 문제·1:1 방에서 나가기·자기 자신과의 1:1·부를 사람이 없다·번호 질의가 틀렸다(3.13절) |
+| 400 | `EMPTY`·`TOO_LONG`·`BAD_CHAR`·`DIRECT_ROOM`·`SELF_ROOM`·`NO_MEMBERS`·`BAD_QUERY` | 채팅 — 메시지 본문의 문제·1:1 방에서 나가기·자기 자신과의 1:1·부를 사람이 없다·번호 질의가 틀렸다(3.13절). `DIRECT_ROOM`은 **1:1 방에 사람을 초대할 때는 403**이다(2026-10-15 — 그 전에는 `FORBIDDEN`) |
 | 413 | `PAYLOAD_TOO_LARGE` | 본문이 너무 크다 |
 | 413 | `TOO_LARGE_FOR_JSON` | 첨부가 JSON으로 받기에 너무 크다 → `format` 없이 바이너리로 받는다 |
 | 404 | `NOT_FOUND` | 없거나 볼 수 없다 — 둘을 구별하지 않는다 |

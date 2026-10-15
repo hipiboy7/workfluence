@@ -20,4 +20,12 @@ describe('SendLimiter (NFR-240 · 보안 검토 2)', () => {
     expect(l.take('a', 5_001)).toBe(true);
     expect(l.take('a', 5_002)).toBe(false);
   });
+  it('쓸어 내는 때 아직 쉬지 않는 사용자의 창은 남긴다 — 그 사람의 한도는 그대로다', () => {
+    const l = new SendLimiter(1, 1_000);
+    l.take('a', 0);
+    l.take('b', 900);
+    expect(l.take('c', 1_500)).toBe(true); // 쓸어 내는 때 — a(1.5초 쉼)는 지워지고 b(0.6초 쉼)는 남는다
+    expect(l.take('b', 1_600)).toBe(false); // b의 창은 아직 안 지났다
+    expect(l.take('a', 1_601)).toBe(true);
+  });
 });
