@@ -167,7 +167,7 @@ describe('createChatLink (G절)', () => {
     const h = harness();
     h.link.start();
     h.hello(h.sockets[0]!);
-    h.sockets[0]!.recv({ type: 'message', roomId: 'r1', seq: 1, senderId: 'u2', body: 'hi', createdAt: 't' });
+    h.sockets[0]!.recv({ type: 'message', roomId: 'r1', seq: 1, senderId: 'u2', body: 'hi', kind: 'user', createdAt: 't' });
     h.sockets[0]!.recv({ type: 'room', roomId: 'r2', change: 'joined' });
     expect(h.frames.map((f) => f.type)).toEqual(['message', 'room']);
   });
@@ -180,7 +180,7 @@ describe('createChatLink (G절)', () => {
     h.fire(10);
     h.hello(h.sockets[1]!);
     h.sockets[0]!.drop(); // 늦게 온 닫힘
-    h.sockets[0]!.recv({ type: 'message', roomId: 'r1', seq: 9, senderId: 'u2', body: 'old', createdAt: 't' });
+    h.sockets[0]!.recv({ type: 'message', roomId: 'r1', seq: 9, senderId: 'u2', body: 'old', kind: 'user', createdAt: 't' });
     expect(h.link.state).toBe('live');
     expect(h.frames).toEqual([]);
   });

@@ -46,6 +46,7 @@
 | FR-2411 | 토큰으로 연 연결은 **토큰이 폐기되거나 세션이 끊기면(폐기·비밀번호 변경·세션 강제 종료·정지) 그 자리에서** 끊기고, 만료와 그 밖의 변화는 주기 재판정(`WF_CHAT_RECHECK_MS`)이 끊는다. 끊은 연결이 보낸 프레임은 처리하지 않는다 | 통합 |
 | FR-2412 | 브라우저 연결은 세션 쿠키 + **같은 출처(`Origin`)**만 받는다. 토큰 연결은 `Origin`을 보지 않는다(브라우저가 아니다) | 통합 |
 | FR-2420 | 설정으로 채팅을 끈다(`WF_CHAT_ENABLED=false`) — 끄면 메뉴가 사라지고 연결·REST가 거절된다 | 통합 |
+| FR-2408 | **안내 줄**(F-019) — 여럿 방에서 누가 나가면 남은 사람들의 대화에 "OO님이 채팅방을 나갔습니다", 초대하면 들어온 사람마다 "OO님이 채팅방에 들어왔습니다" 한 줄이 들어간다. 안내 줄은 메시지라 번호를 먹지만 **안 읽은 수를 올리지 않고**, 화면은 말풍선이 아니라 가운데 한 줄로 그린다. 1:1 방에서 초대하면 "1:1 방에는 사람을 초대할 수 없다"(`DIRECT_ROOM`)로 거절한다 | A·통합·컴포넌트 |
 | NFR-240 | 보내기 한도 — **사용자마다** 분당 N건(`WF_CHAT_SEND_PER_MIN`): 화면·headless, REST·WebSocket이 한 예산이다(연결·토큰마다 세면 곱해진다 — 보안 검토 2). 넘으면 그 메시지만 429 `RATE_LIMITED`로 거절하고 연결은 둔다 | 통합 |
 | NFR-241 | 한 사용자의 동시 연결 상한(`WF_CHAT_MAX_CONNECTIONS_PER_USER`) — 넘으면 **가장 오래된 연결을 닫는다**(에이전트가 재접속을 되풀이해도 쌓이지 않는다) | 통합 |
 | NFR-242 | 메시지 본문을 **로그에 남기지 않는다**(CLAUDE.md 7절) | 로그 대조 |
@@ -72,23 +73,24 @@
 | 서버→클라 | `hello` | 연결이 선 직후 — `userId`, 참여한 방 id 목록 |
 | 클라→서버 | `send` | `roomId`, `body`, `clientMsgId`(선택) |
 | 서버→클라 | `ack` | `clientMsgId`, `roomId`, `seq`, `createdAt` — 보낸 사람에게만 |
-| 서버→클라 | `message` | `roomId`, `seq`, `senderId`, `body`, `createdAt` — **보낸 사람 포함** 참여자 모두 |
+| 서버→클라 | `message` | `roomId`, `seq`, `senderId`, `body`, `kind`(`user`·`join`·`leave`), `createdAt` — **보낸 사람 포함** 참여자 모두 |
 | 서버→클라 | `room` | 방이 생기거나 초대·나감 — `roomId`, `change`(`joined`·`left`는 당사자에게, `members`는 방에 남은 다른 참여자에게) |
 | 서버→클라 | `error` | `code`, `roomId?`, `clientMsgId?` — 그 메시지만 거절하고 연결은 둔다 |
 | 양쪽 | 프로토콜 ping/pong | 30초 주기 — 응답이 없으면 끊는다(실시간 편집과 같다) |
 
 모르는 `type`·너무 큰 프레임·JSON이 아닌 것은 **연결을 닫는다**(편집 관문의 규칙과 같다 — 조작한 연결이 서버에 일을 시키지 못하게).
 
-## D. 데이터 모델 (마이그레이션 `0015_chat.sql` — 손으로 쓴다)
+## D. 데이터 모델 (마이그레이션 `0015_chat.sql`, 안내 줄은 `0016_chat_notices.sql` — 손으로 쓴다)
 
 | 표 | 칸 | 비고 |
 |---|---|---|
 | `chat_rooms` | `id` uuid, `kind` (`direct`/`group`), `name` text null, `created_by` uuid, `created_at`, `last_seq` bigint(기본 0), `last_message_at` timestamptz null(방 목록 정렬) | 1:1은 `name` 없음. `last_seq`는 새 메시지의 번호를 매기는 곳(행 잠금) |
 | `chat_members` | `room_id`, `user_id`, `joined_at`, `last_read_seq` bigint(기본 0), 기본키(`room_id`,`user_id`) | 나가면 행을 지운다(되돌리기 없음) |
 | `chat_direct_pairs` | `user_a`, `user_b`(`user_a < user_b`), `room_id` | 쌍의 유일성. 1:1 만들기가 두 사람 순서와 무관하게 같은 방을 돌려준다 |
-| `chat_messages` | `id` uuid, `room_id`, `seq` bigint, `sender_id`, `body` text, `client_msg_id` text null, `created_at` | 고유(`room_id`,`seq`) · 고유(`room_id`,`sender_id`,`client_msg_id`) — 같은 값의 되풀이를 한 번만 받는다 |
+| `chat_messages` | `id` uuid, `room_id`, `seq` bigint, `sender_id`, `body` text, `client_msg_id` text null, `created_at` | 고유(`room_id`,`seq`) · 고유(`room_id`,`sender_id`,`client_msg_id`) — 같은 값의 되풀이를 한 번만 받는다. `kind` text(기본 `user`, 0016 — `user`·`join`·`leave`만): 안내 줄은 `join`·`leave`이고 `sender_id`는 그 일을 한 사람(나간 사람·초대한 사람), `body`는 `chatNoticeText`가 만든 문장이다 |
 
 - 번호 매기기: 보낼 때 `chat_rooms` 행을 `FOR UPDATE`로 잠그고 `last_seq + 1`을 받는다 — 방 안에서 번호가 비지도 겹치지도 않는다.
+- **안내 줄(F-019)**: 방 행을 잠근 같은 트랜잭션에서 넣고(`ChatService.insertNotice`·`closeNotices`) 방의 마지막 번호를 올린다. 다 읽어 둔 사람(읽은 번호 = 안내 전의 마지막 번호)은 안내 줄까지 읽은 것으로 옮겨 안 읽은 수가 늘지 않는다 — 이미 밀려 있는 사람은 그대로라 그 사람의 수에는 안내 줄이 끼어 하나 늘 수 있다(번호만으로 세는 FR-2407 때문). 마지막 사람이 나가면 줄을 넣지 않는다. 안내 줄은 사람이 쓴 것이 아니라 **보내기 한도에 들지 않는다**. headless 클라이언트는 `kind`로 사람의 말과 가른다 — 안내 줄에는 답하지 않는다
 - 메시지는 **고쳐 쓰지도 지우지도 않는 모양**으로 둔다(보류 39 — 정책이 정해지면 그 위에 얹는다). 앱 DB 계정에는 UPDATE·DELETE를 주지 않는 방안을 보류 39에서 본다.
 - 앱 계정의 권한은 마이그레이션 단계가 **모든 표에 한꺼번에** 준다(`apps/api/src/db/app-role.ts` — DML 전부, `audit_events`만 예외). 새 표도 따로 더할 것이 없다. 메시지 표의 UPDATE·DELETE를 앱 계정에서 거두는 것은 보류 39에서 본다.
 

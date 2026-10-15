@@ -1,10 +1,12 @@
 import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   canInviteToRoom,
+  chatNoticeText,
   directPairKey,
   messagePageQuery,
   unreadCount,
   validateChatBody,
+  type ChatMessageKind,
   type ChatMessageView,
   type ChatRoomKind,
   type ChatMessagesQueryDto,
@@ -32,6 +34,7 @@ const toMessage = (m: typeof chatMessages.$inferSelect): ChatMessageView => ({
   seq: m.seq,
   senderId: m.senderId,
   body: m.body,
+  kind: m.kind as ChatMessageKind,
   createdAt: m.createdAt.toISOString(),
 });
 
@@ -178,38 +181,83 @@ export class ChatService {
     return { room: await this.getRoom(meId, roomId), created: true };
   }
 
-  /** 여럿 방에 사람을 더한다 — 만든 사람만. 이미 든 사람은 그대로 둔다 */
+  /**
+   * 안내 줄을 넣는다 (F-019) — 보낸 사람은 그 일을 한 사람이고, 번호는 방의 다음 번호다. 호출하는 쪽이 **방 행을 잠근 같은 트랜잭션**에서 부르고,
+   * 마지막에 `closeNotices`로 방의 마지막 번호를 올린다
+   */
+  private async insertNotice(tx: Tx, roomId: string, seq: number, kind: 'join' | 'leave', actorId: string, displayName: string): Promise<ChatMessageView> {
+    const [row] = await tx.insert(chatMessages).values({ roomId, seq, senderId: actorId, body: chatNoticeText(kind, displayName), kind }).returning();
+    return toMessage(row!);
+  }
+
+  /**
+   * 안내 줄을 다 넣은 뒤 방의 마지막 번호를 올린다. **안 읽은 수는 올리지 않는다** — 다 읽어 둔 사람(읽은 번호가 안내 전의 마지막 번호)은 안내 줄까지 읽은 것으로 옮기고,
+   * 이미 밀려 있는 사람은 그대로 둔다(그 사람의 안 읽은 수에는 안내 줄이 끼어 하나 늘 수 있다)
+   */
+  private async closeNotices(tx: Tx, room: typeof chatRooms.$inferSelect, last: ChatMessageView): Promise<void> {
+    await tx.update(chatRooms).set({ lastSeq: last.seq, lastMessageAt: new Date(last.createdAt) }).where(eq(chatRooms.id, room.id));
+    await tx
+      .update(chatMembers)
+      .set({ lastReadSeq: last.seq })
+      .where(and(eq(chatMembers.roomId, room.id), eq(chatMembers.lastReadSeq, room.lastSeq)));
+  }
+
+  /** 여럿 방에 사람을 부른다 — 만든 사람만. 들어온 사람마다 안내 줄이 한 줄 들어간다(F-019) */
   async invite(me: { id: string }, roomId: string, userIds: string[]): Promise<ChatRoomView> {
-    const [room] = await this.db.select().from(chatRooms).where(eq(chatRooms.id, roomId));
-    if (!room || !(await this.isMember(roomId, me.id))) throw notFoundRoom();
-    if (!canInviteToRoom({ kind: room.kind as ChatRoomKind, createdBy: room.createdBy }, me.id)) throw new ForbiddenException({ code: 'FORBIDDEN', message: '여럿 방을 만든 사람만 초대할 수 있다' });
+    const [peek] = await this.db.select().from(chatRooms).where(eq(chatRooms.id, roomId));
+    if (!peek || !(await this.isMember(roomId, me.id))) throw notFoundRoom();
+    if (peek.kind === 'direct') throw new ForbiddenException({ code: 'DIRECT_ROOM', message: '1:1 방에는 사람을 초대할 수 없다 — 여럿 방을 새로 만든다' });
+    if (!canInviteToRoom({ kind: peek.kind as ChatRoomKind, createdBy: peek.createdBy }, me.id)) throw new ForbiddenException({ code: 'FORBIDDEN', message: '여럿 방을 만든 사람만 초대할 수 있다' });
     const wanted = [...new Set(userIds)];
     const ok = await this.activeIds(wanted);
     if (wanted.some((id) => !ok.has(id))) throw new NotFoundException({ code: 'USER_NOT_FOUND', message: '사용자를 찾을 수 없다' });
-    const added = await this.db
-      .insert(chatMembers)
-      .values(wanted.map((userId) => ({ roomId, userId, lastReadSeq: room.lastSeq })))
-      .onConflictDoNothing()
-      .returning({ userId: chatMembers.userId });
-    for (const a of added) this.hub.publishRoom(a.userId, roomId, 'joined');
+
+    const out = await this.db.transaction(async (tx) => {
+      const [room] = await tx.select().from(chatRooms).where(eq(chatRooms.id, roomId)).for('update');
+      if (!room || !(await this.isMember(roomId, me.id, tx))) throw notFoundRoom();
+      const added = await tx
+        .insert(chatMembers)
+        .values(wanted.map((userId) => ({ roomId, userId, lastReadSeq: room.lastSeq })))
+        .onConflictDoNothing()
+        .returning({ userId: chatMembers.userId });
+      if (added.length === 0) return { added: [] as string[], notices: [] as ChatMessageView[], memberIds: [] as string[] };
+      const names = await tx.select({ id: users.id, displayName: users.displayName }).from(users).where(inArray(users.id, added.map((a) => a.userId)));
+      const nameBy = new Map(names.map((n) => [n.id, n.displayName]));
+      const notices: ChatMessageView[] = [];
+      for (const a of added) notices.push(await this.insertNotice(tx, roomId, room.lastSeq + notices.length + 1, 'join', me.id, nameBy.get(a.userId) ?? ''));
+      await this.closeNotices(tx, room, notices[notices.length - 1]!);
+      const members = await tx.select({ u: chatMembers.userId }).from(chatMembers).where(eq(chatMembers.roomId, roomId));
+      return { added: added.map((a) => a.userId), notices, memberIds: members.map((m) => m.u) };
+    });
+    for (const id of out.added) this.hub.publishRoom(id, roomId, 'joined');
     // 이미 있던 참여자들의 참여자 목록도 바뀌었다 — 새 사람의 메시지가 "(나간 사람)"으로 그려지지 않게(자체 점검 5)
-    if (added.length > 0) {
-      const addedIds = new Set(added.map((a) => a.userId));
-      for (const m of await this.db.select({ u: chatMembers.userId }).from(chatMembers).where(eq(chatMembers.roomId, roomId))) {
-        if (!addedIds.has(m.u)) this.hub.publishRoom(m.u, roomId, 'members');
-      }
-    }
+    const addedSet = new Set(out.added);
+    for (const id of out.memberIds) if (!addedSet.has(id)) this.hub.publishRoom(id, roomId, 'members');
+    for (const n of out.notices) this.hub.publishMessage(out.memberIds, n);
     return this.getRoom(me.id, roomId);
   }
 
-  /** 방에서 나간다. 1:1 방은 나가지 못한다(쌍마다 방 하나라 나가면 다시 열 길이 없다) */
+  /** 방에서 나간다. 1:1 방은 나가지 못한다(쌍마다 방 하나라 나가면 다시 열 길이 없다). 남은 사람이 있으면 그 방에 "나갔습니다" 한 줄이 들어간다(F-019) */
   async leave(me: { id: string }, roomId: string): Promise<void> {
-    const [room] = await this.db.select().from(chatRooms).where(eq(chatRooms.id, roomId));
-    if (!room || !(await this.isMember(roomId, me.id))) throw notFoundRoom();
-    if (room.kind === 'direct') throw new BadRequestException({ code: 'DIRECT_ROOM', message: '1:1 방에서는 나갈 수 없다' });
-    await this.db.delete(chatMembers).where(and(eq(chatMembers.roomId, roomId), eq(chatMembers.userId, me.id)));
+    const [peek] = await this.db.select().from(chatRooms).where(eq(chatRooms.id, roomId));
+    if (!peek || !(await this.isMember(roomId, me.id))) throw notFoundRoom();
+    if (peek.kind === 'direct') throw new BadRequestException({ code: 'DIRECT_ROOM', message: '1:1 방에서는 나갈 수 없다' });
+    const out = await this.db.transaction(async (tx) => {
+      const [room] = await tx.select().from(chatRooms).where(eq(chatRooms.id, roomId)).for('update');
+      if (!room) throw notFoundRoom();
+      const gone = await tx.delete(chatMembers).where(and(eq(chatMembers.roomId, roomId), eq(chatMembers.userId, me.id))).returning({ u: chatMembers.userId });
+      if (gone.length === 0) return null; // 확인과 쓰기 사이에 이미 나갔다
+      const [who] = await tx.select({ displayName: users.displayName }).from(users).where(eq(users.id, me.id));
+      const remaining = (await tx.select({ u: chatMembers.userId }).from(chatMembers).where(eq(chatMembers.roomId, roomId))).map((m) => m.u);
+      if (remaining.length === 0) return { remaining, notice: null };
+      const notice = await this.insertNotice(tx, roomId, room.lastSeq + 1, 'leave', me.id, who?.displayName ?? '');
+      await this.closeNotices(tx, room, notice);
+      return { remaining, notice };
+    });
+    if (!out) return;
     this.hub.publishRoom(me.id, roomId, 'left');
-    for (const m of await this.db.select({ u: chatMembers.userId }).from(chatMembers).where(eq(chatMembers.roomId, roomId))) this.hub.publishRoom(m.u, roomId, 'members');
+    for (const u of out.remaining) this.hub.publishRoom(u, roomId, 'members');
+    if (out.notice) this.hub.publishMessage(out.remaining, out.notice);
   }
 
   /**

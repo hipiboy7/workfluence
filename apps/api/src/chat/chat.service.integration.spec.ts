@@ -60,7 +60,83 @@ describe('1:1 방 (FR-2401)', () => {
     const c = await person(db, 'c');
     const { room } = await svc.createRoom(a, { kind: 'direct', userId: b.id });
     await expect(svc.leave(a, room.id)).rejects.toMatchObject({ response: { code: 'DIRECT_ROOM' } });
-    await expect(svc.invite(a, room.id, [c.id])).rejects.toMatchObject({ status: 403 });
+    await expect(svc.invite(a, room.id, [c.id])).rejects.toMatchObject({ status: 403, response: { code: 'DIRECT_ROOM' } }); // 만든 사람이어도 1:1 방이라는 까닭을 말한다
+  });
+});
+
+describe('안내 줄 (F-019)', () => {
+  const all = async (userId: string, roomId: string) => svc.listMessages({ id: userId }, roomId, { limit: 50 } as never);
+
+  it('나가면 남은 사람들의 방에 "나갔습니다" 한 줄이 들어가고 실시간으로 알린다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const c = await person(db, 'c');
+    const { room } = await svc.createRoom(a, { kind: 'group', name: '팀', userIds: [b.id, c.id] });
+    msgs.length = 0;
+    await svc.leave(b, room.id);
+    const list = await all(a.id, room.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ kind: 'leave', senderId: b.id, seq: 1 });
+    expect(list[0]!.body).toMatch(/님이 채팅방을 나갔습니다$/);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.to.sort()).toEqual([a.id, c.id].sort()); // 나간 사람에게는 가지 않는다
+  });
+
+  it('초대하면 들어온 사람마다 "들어왔습니다" 한 줄이 들어가고 보낸 사람은 초대한 사람이다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const c = await person(db, 'c');
+    const d = await person(db, 'd');
+    const { room } = await svc.createRoom(a, { kind: 'group', name: '팀', userIds: [b.id] });
+    msgs.length = 0;
+    await svc.invite(a, room.id, [c.id, d.id, b.id]); // b는 이미 들어 있다
+    const list = await all(a.id, room.id);
+    expect(list.map((m) => [m.seq, m.kind, m.senderId])).toEqual([[1, 'join', a.id], [2, 'join', a.id]]);
+    expect(msgs).toHaveLength(2);
+    expect(await svc.invite(a, room.id, [c.id])).toBeTruthy(); // 이미 든 사람만이면 줄이 늘지 않는다
+    expect(await all(a.id, room.id)).toHaveLength(2);
+  });
+
+  it('안내 줄은 안 읽은 수를 올리지 않는다 — 다 읽은 사람은 그대로, 밀린 사람만 안내 줄이 끼어 하나 늘 수 있다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const c = await person(db, 'c');
+    const { room } = await svc.createRoom(a, { kind: 'group', name: '팀', userIds: [b.id, c.id] });
+    await svc.send(a, room.id, { body: '안녕' }); // seq 1 — b·c는 안 읽었다
+    await svc.markRead(b, room.id, 1); // b는 다 읽었다
+    await svc.leave(c, room.id); // seq 2 안내 줄
+    const rooms = await svc.listRooms(b.id);
+    expect(rooms[0]!.unread).toBe(0);
+    expect(rooms[0]!.lastMessage?.kind).toBe('leave');
+    expect((await svc.listRooms(a.id))[0]!.unread).toBe(0); // 보낸 사람
+  });
+
+  it('새로 들어온 사람은 들어오기 전의 메시지로 안 읽은 수가 생기지 않는다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const c = await person(db, 'c');
+    const { room } = await svc.createRoom(a, { kind: 'group', name: '팀', userIds: [b.id] });
+    await svc.send(a, room.id, { body: '먼저' });
+    await svc.invite(a, room.id, [c.id]);
+    expect((await svc.listRooms(c.id))[0]!.unread).toBe(0);
+  });
+
+  it('마지막 사람이 나가면 보여 줄 사람이 없어 줄을 넣지 않는다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const { room } = await svc.createRoom(a, { kind: 'group', name: '팀', userIds: [b.id] });
+    await svc.leave(b, room.id);
+    msgs.length = 0;
+    await svc.leave(a, room.id);
+    expect(msgs).toHaveLength(0);
+  });
+
+  it('사람이 보낸 메시지의 종류는 user다', async () => {
+    const a = await person(db, 'a');
+    const b = await person(db, 'b');
+    const { room } = await svc.createRoom(a, { kind: 'direct', userId: b.id });
+    const { message } = await svc.send(a, room.id, { body: '안녕' });
+    expect(message.kind).toBe('user');
   });
 });
 
@@ -86,7 +162,7 @@ describe('여럿 방 (FR-2402)', () => {
     const b = await person(db, 'b');
     const c = await person(db, 'c');
     const { room } = await svc.createRoom(a, { kind: 'group', name: '팀', userIds: [b.id] });
-    await expect(svc.invite(b, room.id, [c.id])).rejects.toMatchObject({ status: 403 });
+    await expect(svc.invite(b, room.id, [c.id])).rejects.toMatchObject({ status: 403, response: { code: 'FORBIDDEN' } });
     await expect(svc.invite(c, room.id, [c.id])).rejects.toMatchObject({ status: 404 });
   });
   it('불러 올 수 없는 사람이 하나라도 있으면 만들지 않는다', async () => {

@@ -1,4 +1,4 @@
-import type { ChatMessageView, ChatRoomView } from '@workfluence/shared';
+import { isChatNotice, type ChatMessageView, type ChatRoomView } from '@workfluence/shared';
 
 /**
  * 채팅 화면의 상태 계산 — React 밖의 순수 함수 (P21_설계서_Chat G절, 3절 "상태 기계는 React 밖에서 Node로 시험한다").
@@ -31,7 +31,7 @@ export function applyMessageToRooms(rooms: ChatRoomView[], m: ChatMessageView, m
   const r = rooms[i]!;
   if (m.seq <= r.lastSeq) return rooms; // 이미 반영한 것
   const mine = m.senderId === meId;
-  const seen = mine || viewingRoomId === r.id;
+  const seen = mine || viewingRoomId === r.id || isChatNotice(m.kind); // 안내 줄은 안 읽은 수를 올리지 않는다(F-019)
   const next: ChatRoomView = {
     ...r,
     lastSeq: m.seq,
@@ -45,4 +45,15 @@ export function applyMessageToRooms(rooms: ChatRoomView[], m: ChatMessageView, m
 /** 방 목록의 안 읽은 수 합 — 위 막대에 보인다 */
 export function totalUnread(rooms: ChatRoomView[]): number {
   return rooms.reduce((n, r) => n + r.unread, 0);
+}
+
+/** 말풍선 바탕색의 수 — `styles.css`의 `.chat-msg.tone-0`~`tone-9`와 같게 둔다 */
+export const CHAT_TONES = 10;
+
+/**
+ * 방 참여자마다 바탕색 번호를 임의로 하나씩 준다(F-018). 참여자 목록의 차례대로 0, 1, 2… — 방 안에서는 `CHAT_TONES`명까지 겹치지 않는다.
+ * 방 목록에 없는 보낸 사람(나간 사람)은 번호가 없다. 열 명이 넘으면 처음 색으로 돌아간다
+ */
+export function memberTones(room: ChatRoomView): Map<string, number> {
+  return new Map(room.members.map((m, i) => [m.userId, i % CHAT_TONES]));
 }

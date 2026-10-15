@@ -701,6 +701,13 @@ paths:
                                 id:
                                   description: "메시지의 id"
                                   type: string
+                                kind:
+                                  description: "종류 — `user`는 사람이 보낸 메시지, `join`·`leave`는 사람이 들어오고 나갈 때 시스템이 넣은 안내 줄이다(`senderId`는 그 일을 한 사람). 안내 줄은 사람의 말이 아니니 답하지 않는다"
+                                  enum:
+                                    - user
+                                    - join
+                                    - leave
+                                  type: string
                                 roomId:
                                   description: "방의 id"
                                   type: string
@@ -718,6 +725,7 @@ paths:
                                 - seq
                                 - senderId
                                 - body
+                                - kind
                                 - createdAt
                               type: object
                             - type: "null"
@@ -895,6 +903,13 @@ paths:
                           id:
                             description: "메시지의 id"
                             type: string
+                          kind:
+                            description: "종류 — `user`는 사람이 보낸 메시지, `join`·`leave`는 사람이 들어오고 나갈 때 시스템이 넣은 안내 줄이다(`senderId`는 그 일을 한 사람). 안내 줄은 사람의 말이 아니니 답하지 않는다"
+                            enum:
+                              - user
+                              - join
+                              - leave
+                            type: string
                           roomId:
                             description: "방의 id"
                             type: string
@@ -912,6 +927,7 @@ paths:
                           - seq
                           - senderId
                           - body
+                          - kind
                           - createdAt
                         type: object
                       - type: "null"
@@ -1052,6 +1068,13 @@ paths:
                           id:
                             description: "메시지의 id"
                             type: string
+                          kind:
+                            description: "종류 — `user`는 사람이 보낸 메시지, `join`·`leave`는 사람이 들어오고 나갈 때 시스템이 넣은 안내 줄이다(`senderId`는 그 일을 한 사람). 안내 줄은 사람의 말이 아니니 답하지 않는다"
+                            enum:
+                              - user
+                              - join
+                              - leave
+                            type: string
                           roomId:
                             description: "방의 id"
                             type: string
@@ -1069,6 +1092,7 @@ paths:
                           - seq
                           - senderId
                           - body
+                          - kind
                           - createdAt
                         type: object
                       - type: "null"
@@ -1221,6 +1245,13 @@ paths:
                           id:
                             description: "메시지의 id"
                             type: string
+                          kind:
+                            description: "종류 — `user`는 사람이 보낸 메시지, `join`·`leave`는 사람이 들어오고 나갈 때 시스템이 넣은 안내 줄이다(`senderId`는 그 일을 한 사람). 안내 줄은 사람의 말이 아니니 답하지 않는다"
+                            enum:
+                              - user
+                              - join
+                              - leave
+                            type: string
                           roomId:
                             description: "방의 id"
                             type: string
@@ -1238,6 +1269,7 @@ paths:
                           - seq
                           - senderId
                           - body
+                          - kind
                           - createdAt
                         type: object
                       - type: "null"
@@ -1459,6 +1491,13 @@ paths:
                         id:
                           description: "메시지의 id"
                           type: string
+                        kind:
+                          description: "종류 — `user`는 사람이 보낸 메시지, `join`·`leave`는 사람이 들어오고 나갈 때 시스템이 넣은 안내 줄이다(`senderId`는 그 일을 한 사람). 안내 줄은 사람의 말이 아니니 답하지 않는다"
+                          enum:
+                            - user
+                            - join
+                            - leave
+                          type: string
                         roomId:
                           description: "방의 id"
                           type: string
@@ -1476,6 +1515,7 @@ paths:
                         - seq
                         - senderId
                         - body
+                        - kind
                         - createdAt
                       type: object
                     type: array
@@ -1567,6 +1607,13 @@ paths:
                   id:
                     description: "메시지의 id"
                     type: string
+                  kind:
+                    description: "종류 — `user`는 사람이 보낸 메시지, `join`·`leave`는 사람이 들어오고 나갈 때 시스템이 넣은 안내 줄이다(`senderId`는 그 일을 한 사람). 안내 줄은 사람의 말이 아니니 답하지 않는다"
+                    enum:
+                      - user
+                      - join
+                      - leave
+                    type: string
                   roomId:
                     description: "방의 id"
                     type: string
@@ -1584,6 +1631,7 @@ paths:
                   - seq
                   - senderId
                   - body
+                  - kind
                   - createdAt
                   - duplicate
                 type: object

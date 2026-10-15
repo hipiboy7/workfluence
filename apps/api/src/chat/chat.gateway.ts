@@ -270,7 +270,7 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
 
   private deliverMessage(memberIds: string[], m: ChatMessageView): void {
     const to = new Set(memberIds);
-    const frame: ChatServerFrame = { type: 'message', roomId: m.roomId, seq: m.seq, senderId: m.senderId, body: m.body, createdAt: m.createdAt };
+    const frame: ChatServerFrame = { type: 'message', roomId: m.roomId, seq: m.seq, senderId: m.senderId, body: m.body, kind: m.kind, createdAt: m.createdAt };
     for (const c of this.conns) if (to.has(c.userId)) this.sendTo(c, frame);
   }
 

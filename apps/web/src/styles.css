@@ -532,6 +532,18 @@ dialog.confirm .form-actions { justify-content: flex-end; margin-top: 20px; }
 .chat-messages { list-style: none; padding: 0; margin: 0 0 16px; }
 .chat-msg { padding: 8px 12px; border-radius: 8px; margin: 6px 0; background: var(--surface); border: 1px solid var(--line); max-width: 85%; }
 .chat-msg.mine { margin-left: auto; background: var(--accent-soft); border-color: transparent; }
+/* 참여자마다 바탕색(F-018) — 본문 색(--text)과 대비가 충분한 옅은 색 열 가지. 개수는 chatState의 CHAT_TONES */
+.chat-msg.tone-0 { background: #dbeafe; border-color: transparent; }
+.chat-msg.tone-1 { background: #fde2e2; border-color: transparent; }
+.chat-msg.tone-2 { background: #dcfce7; border-color: transparent; }
+.chat-msg.tone-3 { background: #fef3c7; border-color: transparent; }
+.chat-msg.tone-4 { background: #ede9fe; border-color: transparent; }
+.chat-msg.tone-5 { background: #fce7f3; border-color: transparent; }
+.chat-msg.tone-6 { background: #cffafe; border-color: transparent; }
+.chat-msg.tone-7 { background: #ffedd5; border-color: transparent; }
+.chat-msg.tone-8 { background: #e7e5e4; border-color: transparent; }
+.chat-msg.tone-9 { background: #ecfccb; border-color: transparent; }
+.chat-notice { margin: 10px auto; text-align: center; font-size: 13px; line-height: 20px; color: var(--muted); }
 .chat-msg.failed { border: 1px dashed var(--line); }
 .chat-msg p { margin: 0; }
 .chat-meta { font-size: 12px; line-height: 18px; color: var(--muted); }

@@ -37,6 +37,20 @@ export function validateChatBody(body: unknown, maxChars: number): { ok: true; b
   return { ok: true, body };
 }
 
+/** 메시지의 종류 — `user`는 사람이 보낸 것, `join`·`leave`는 방에 사람이 들어오고 나갈 때 시스템이 넣는 안내 줄이다(F-019) */
+export const CHAT_MESSAGE_KINDS = ['user', 'join', 'leave'] as const;
+export type ChatMessageKind = (typeof CHAT_MESSAGE_KINDS)[number];
+
+/** 안내 줄의 문장 — 시스템이 넣은 줄은 이 문장으로만 만든다. 이름은 그때의 표시 이름이다 */
+export function chatNoticeText(kind: Exclude<ChatMessageKind, 'user'>, displayName: string): string {
+  return kind === 'join' ? `${displayName}님이 채팅방에 들어왔습니다` : `${displayName}님이 채팅방을 나갔습니다`;
+}
+
+/** 안내 줄인가 — 안 읽은 수를 올리지 않고, 화면은 말풍선이 아니라 가운데 한 줄로 그린다 */
+export function isChatNotice(kind: ChatMessageKind): boolean {
+  return kind !== 'user';
+}
+
 /** 클라이언트 → 서버 프레임 (C.2). 지금은 `send` 하나다 */
 export type ChatClientFrame = { type: 'send'; roomId: string; body: string; clientMsgId?: string };
 
@@ -44,7 +58,7 @@ export type ChatClientFrame = { type: 'send'; roomId: string; body: string; clie
 export type ChatServerFrame =
   | { type: 'hello'; userId: string; roomIds: string[] }
   | { type: 'ack'; clientMsgId: string | null; roomId: string; seq: number; createdAt: string }
-  | { type: 'message'; roomId: string; seq: number; senderId: string; body: string; createdAt: string }
+  | { type: 'message'; roomId: string; seq: number; senderId: string; body: string; kind: ChatMessageKind; createdAt: string }
   /** `joined`·`left`는 당사자에게, `members`는 방에 남은 다른 참여자에게(초대·나감으로 참여자 목록이 바뀌었다) */
   | { type: 'room'; roomId: string; change: 'joined' | 'left' | 'members' }
   | { type: 'error'; code: string; roomId?: string; clientMsgId?: string };
@@ -196,6 +210,7 @@ export const chatMessageSchema = z.object({
   seq: z.number().int().describe('방 안의 번호 — 1부터 이어지고 비지도 겹치지도 않는다. 같은 방에서 번호 순서가 곧 도착 순서다'),
   senderId: z.string().describe('보낸 사용자의 id'),
   body: z.string().describe('본문(평문)'),
+  kind: z.enum(CHAT_MESSAGE_KINDS).describe('종류 — `user`는 사람이 보낸 메시지, `join`·`leave`는 사람이 들어오고 나갈 때 시스템이 넣은 안내 줄이다(`senderId`는 그 일을 한 사람). 안내 줄은 사람의 말이 아니니 답하지 않는다'),
   createdAt: iso.describe('보낸 시각'),
 });
 export type ChatMessageView = z.infer<typeof chatMessageSchema>;

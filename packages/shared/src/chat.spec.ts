@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   canInviteToRoom,
+  chatNoticeText,
+  isChatNotice,
   directPairKey,
   encodeChatFrame,
   messagePageQuery,
@@ -148,5 +150,17 @@ describe('seq 상한 (보안 검토 7)', () => {
     expect(chatMessagesQueryDto.safeParse({ beforeSeq: '1e30' }).success).toBe(false);
     expect(chatMessagesQueryDto.safeParse({ afterSeq: String(Number.MAX_SAFE_INTEGER) }).success).toBe(true);
     expect(markChatReadDto.safeParse({ seq: 1e30 }).success).toBe(false);
+  });
+});
+
+describe('안내 줄 (F-019)', () => {
+  it('문장은 이름과 일로만 만든다', () => {
+    expect(chatNoticeText('leave', '홍길동')).toBe('홍길동님이 채팅방을 나갔습니다');
+    expect(chatNoticeText('join', '홍길동')).toBe('홍길동님이 채팅방에 들어왔습니다');
+  });
+  it('사람이 보낸 것만 안내 줄이 아니다', () => {
+    expect(isChatNotice('user')).toBe(false);
+    expect(isChatNotice('join')).toBe(true);
+    expect(isChatNotice('leave')).toBe(true);
   });
 });

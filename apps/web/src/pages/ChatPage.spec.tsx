@@ -55,7 +55,7 @@ const room = (id: string, over: Partial<ChatRoomView> = {}): ChatRoomView => ({
   unread: 0,
   ...over,
 });
-const msg = (roomId: string, seq: number, body: string, senderId = 'u2'): ChatMessageView => ({ id: `${roomId}-${seq}`, roomId, seq, senderId, body, createdAt: '2026-10-12T01:00:00.000Z' });
+const msg = (roomId: string, seq: number, body: string, senderId = 'u2'): ChatMessageView => ({ id: `${roomId}-${seq}`, roomId, seq, senderId, body, kind: 'user', createdAt: '2026-10-12T01:00:00.000Z' });
 
 let rooms: ChatRoomView[];
 let messages: Record<string, ChatMessageView[]>;
@@ -126,6 +126,25 @@ describe('대화 (FR-2403·2405)', () => {
     await waitFor(() => expect(within(nav).queryByLabelText(/안 읽은 메시지/)).toBeNull());
   });
 
+  it('보낸 사람마다 바탕색 클래스가 다르다 — 방 안에서 겹치지 않는다', async () => {
+    open(`/chat/${R1}`);
+    const first = (await screen.findByText('첫 번째')).closest('li')!;
+    const second = screen.getByText('<b>두 번째</b>').closest('li')!;
+    const tone = (li: Element) => [...li.classList].find((c) => c.startsWith('tone-'));
+    expect(tone(first)).toBeTruthy();
+    expect(tone(second)).toBeTruthy();
+    if (first.classList.contains('mine') !== second.classList.contains('mine')) expect(tone(first)).not.toBe(tone(second));
+  });
+
+  it('안내 줄 프레임은 말풍선이 아니라 가운데 한 줄로 그린다', async () => {
+    open(`/chat/${R1}`);
+    await screen.findByText('첫 번째');
+    sock().recv({ type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '상대님이 채팅방을 나갔습니다', kind: 'leave', createdAt: '2026-10-12T01:05:00.000Z' });
+    const line = await pane().findByText('상대님이 채팅방을 나갔습니다'); // 왼쪽 방 목록의 미리보기에도 같은 글이 있다
+    expect(line.closest('li')!.classList.contains('chat-notice')).toBe(true);
+    expect(line.closest('li')!.classList.contains('chat-msg')).toBe(false);
+  });
+
   it('연결이 붙기 전에는 보내지 못하고, 붙으면 보낸다 — 입력칸을 비운다', async () => {
     open(`/chat/${R1}`);
     const box = (await screen.findByLabelText('메시지')) as HTMLTextAreaElement;
@@ -154,9 +173,9 @@ describe('대화 (FR-2403·2405)', () => {
     open(`/chat/${R1}`);
     await screen.findByText('첫 번째');
     hello();
-    sock().recv({ type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '방금 온 것', createdAt: '2026-10-12T01:05:00.000Z' });
+    sock().recv({ type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '방금 온 것', kind: 'user', createdAt: '2026-10-12T01:05:00.000Z' });
     await waitFor(() => expect(pane().getByText('방금 온 것')).toBeTruthy());
-    sock().recv({ type: 'message', roomId: R2, seq: 1, senderId: 'u3', body: '팀 소식', createdAt: '2026-10-12T01:06:00.000Z' });
+    sock().recv({ type: 'message', roomId: R2, seq: 1, senderId: 'u3', body: '팀 소식', kind: 'user', createdAt: '2026-10-12T01:06:00.000Z' });
     const nav = screen.getByRole('navigation', { name: '채팅 방 목록' });
     await waitFor(() => expect(within(nav).getByLabelText('안 읽은 메시지 1개')).toBeTruthy());
   });
@@ -165,7 +184,7 @@ describe('대화 (FR-2403·2405)', () => {
     open(`/chat/${R1}`);
     await screen.findByText('첫 번째');
     hello();
-    const f: ChatServerFrame = { type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '중복', createdAt: '2026-10-12T01:05:00.000Z' };
+    const f: ChatServerFrame = { type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '중복', kind: 'user', createdAt: '2026-10-12T01:05:00.000Z' };
     sock().recv(f);
     sock().recv(f);
     await waitFor(() => expect(pane().getAllByText('중복')).toHaveLength(1));
@@ -308,7 +327,7 @@ describe('놓친 메시지 메우기와 받기 전의 프레임 (코드 리뷰 1
     }) as unknown as typeof fetch;
     open(`/chat/${R1}`);
     hello();
-    sock().recv({ type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '먼저 온 것', createdAt: '2026-10-12T01:05:00.000Z' });
+    sock().recv({ type: 'message', roomId: R1, seq: 3, senderId: 'u2', body: '먼저 온 것', kind: 'user', createdAt: '2026-10-12T01:05:00.000Z' });
     release();
     await waitFor(() => expect(pane().getByText('첫 번째')).toBeTruthy());
     expect(pane().getByText('먼저 온 것')).toBeTruthy();

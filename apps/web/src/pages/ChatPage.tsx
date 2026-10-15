@@ -1,4 +1,4 @@
-import { CHAT_LIMITS, type ChatMessageView, type ChatRoomView, type ChatServerFrame } from '@workfluence/shared';
+import { CHAT_LIMITS, isChatNotice, type ChatMessageView, type ChatRoomView, type ChatServerFrame } from '@workfluence/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { api } from '../api';
@@ -8,7 +8,7 @@ import { ChatNewRoom } from '../components/ChatNewRoom';
 import { useConfirm } from '../components/ConfirmDialog';
 import { ChatSideNav } from '../components/ChatSideNav';
 import { ChatSendError, createChatLink, type ChatLinkState, type ChatSocketLike } from '../components/chatLink';
-import { applyMessageToRooms, lastSeqOf, mergeMessages, roomTitle } from '../components/chatState';
+import { applyMessageToRooms, lastSeqOf, memberTones, mergeMessages, roomTitle } from '../components/chatState';
 import { EmptyState, Notice, Page, PageHeader, useDocumentTitle } from '../components/ui';
 import { SideSlot } from '../layout/AppLayout';
 
@@ -117,7 +117,7 @@ export function ChatPage() {
       onState: setLinkState,
       onFrame: (f: ChatServerFrame) => {
         if (f.type === 'message') {
-          const m: ChatMessageView = { id: `${f.roomId}:${f.seq}`, roomId: f.roomId, seq: f.seq, senderId: f.senderId, body: f.body, createdAt: f.createdAt };
+          const m: ChatMessageView = { id: `${f.roomId}:${f.seq}`, roomId: f.roomId, seq: f.seq, senderId: f.senderId, body: f.body, kind: f.kind, createdAt: f.createdAt };
           // 받기 전인 방의 메시지도 버리지 않고 쌓아 둔다 — 처음 받아 온 것과 번호로 합쳐진다(코드 리뷰 2)
           setMessages((cur) => ({ ...cur, [f.roomId]: mergeMessages(cur[f.roomId] ?? [], [m]) }));
           setRooms((cur) => (cur ? applyMessageToRooms(cur, m, meId, viewingRef.current) : cur));
@@ -159,6 +159,8 @@ export function ChatPage() {
     listEnd.current?.scrollIntoView?.({ block: 'end' });
   }, [viewing, lastSeq]);
 
+  const tones = useMemo(() => (room ? memberTones(room) : new Map<string, number>()), [room]);
+  const toneClass = (userId: string): string => (tones.has(userId) ? ` tone-${tones.get(userId)}` : '');
   const nameOf = (userId: string): string => room?.members.find((m) => m.userId === userId)?.displayName ?? '(나간 사람)';
 
   const send = (body: string, clientMsgId?: string) => {
@@ -269,15 +271,21 @@ export function ChatPage() {
           )}
           <ul className="chat-messages" aria-live="polite">
             {(list ?? []).map((m) => (
-              <li key={m.seq} className={m.senderId === meId ? 'chat-msg mine' : 'chat-msg'}>
+              isChatNotice(m.kind) ? (
+                <li key={m.seq} className="chat-notice">
+                  {m.body}
+                </li>
+              ) : (
+              <li key={m.seq} className={`${m.senderId === meId ? 'chat-msg mine' : 'chat-msg'}${toneClass(m.senderId)}`}>
                 <p className="chat-meta">
                   <strong>{m.senderId === meId ? '나' : nameOf(m.senderId)}</strong> <span className="muted">{time(m.createdAt)}</span>
                 </p>
                 <p className="chat-text">{m.body}</p>
               </li>
+              )
             ))}
             {roomFailed.map((f) => (
-              <li key={f.clientMsgId} className="chat-msg mine failed">
+              <li key={f.clientMsgId} className={`chat-msg mine failed${toneClass(meId)}`}>
                 <p className="chat-text">{f.body}</p>
                 <p className="chat-meta" role="alert">
                   보내지 못했다 — {SEND_PROBLEMS[f.code] ?? f.code}{' '}

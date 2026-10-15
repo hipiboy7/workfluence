@@ -536,6 +536,8 @@ export const chatMessages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     body: text('body').notNull(),
+    /** `user`는 사람이 보낸 것, `join`·`leave`는 시스템이 넣은 안내 줄이다(`0016_chat_notices`) */
+    kind: text('kind').notNull().default('user'),
     clientMsgId: text('client_msg_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
