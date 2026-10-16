@@ -54,7 +54,7 @@
 | FR-2223 | **에이전트가 정하는 입력은 핵심뿐이다**(사용자 지시 2026-10-07). 페이지 만들기는 **어디(스페이스)·제목·본문** 셋만 필수이고 나머지는 모두 서버가 기본값으로 채운다. 선택 입력을 받더라도 에이전트가 **몰라도 되게** 한다 | 3.5절 · B 모듈별 "필수 입력만으로 성공" |
 | FR-2224 | **기본값은 한 곳에 둔다**(`packages/shared`의 `V1_DEFAULTS`). 같은 값이 컨트롤러·명세·문서에 따로 적히지 않는다 — OpenAPI의 `default`와 API 사용가이드가 그것에서 나온다 | A · 계약 시험(명세의 default가 그 상수와 같다) |
 | FR-2225 | **기본값으로 채운 결과를 응답이 말한다** — 서버가 정한 부모·위치·버전을 돌려줘서 에이전트가 다음 호출에 id를 외우지 않아도 된다 | B |
-| FR-2226 | **누가 만들었나를 싣고 그것으로 거른다**(기능백로그 F-023, 2026-10-16). 스페이스 목록·하나는 만든 사람(`createdBy`·`createdByUsername`·`createdByName`)과 `createdAt`을, 페이지 트리·읽기·옮기기·검색·라벨의 페이지는 그에 더해 마지막으로 고친 사람(`updatedBy`·`updatedByUsername`·`updatedByName`)을, 댓글은 `authorId`·`authorUsername`을 싣는다(`author`는 이름 그대로). 거르기는 선택 쿼리다 — 스페이스 `createdBy`·`member`, 페이지 `createdBy`·`updatedBy`, 댓글 `author`. 값은 **아이디(username)나 id**이고 없는 사람은 404 `USER_NOT_FOUND`다(빈 목록이면 오타를 "없다"로 읽는다). 거르기는 **자르기(`limit`) 전에** 한다 — 스페이스·검색·라벨은 SQL에서, 트리·댓글은 전부 읽은 뒤에. 아이디가 목록에 보이는 것은 사용자 결정이다("id 오픈되도 되. 노출 신경쓰지 말고 구현해") | A 쿼리·`matchesAuthor`·`withAuthorship` · B 모듈별 · 계약 시험 |
+| FR-2226 | **누가 만들었나를 싣고 그것으로 거른다**(기능백로그 F-023, 2026-10-16). 스페이스 목록·하나는 만든 사람(`createdBy`·`createdByUsername`·`createdByName`)과 `createdAt`을, 페이지 트리·읽기·옮기기·검색·라벨의 페이지는 그에 더해 마지막으로 고친 사람(`updatedBy`·`updatedByUsername`·`updatedByName`)을, 댓글은 `authorId`·`authorUsername`을 싣는다(`author`는 이름 그대로). 거르기는 선택 쿼리다 — 스페이스 `createdBy`·`member`, 페이지 `createdBy`·`updatedBy`, 댓글 `author`. 값은 **아이디(username)나 id**이고 없는 사람은 404 `USER_NOT_FOUND`다(빈 목록이면 오타를 "없다"로 읽는다). 거르기는 **자르기(`limit`) 전에** 한다 — 스페이스·검색·라벨은 SQL에서, 트리·댓글은 전부 읽은 뒤에. 아이디가 목록에 보이는 것은 사용자 결정이다("id 오픈되도 되. 노출 신경쓰지 말고 구현해") 거르는 쿼리는 모두 **모르는 키를 400으로** 받는다 — 키를 잘못 치면(`createdby=`) 조용히 무시되어 거르지 않은 전체가 돌아간다(자체 점검 2026-10-16) | A 쿼리·`matchesAuthor`·`withAuthorship` · B 모듈별 · 계약 시험 |
 
 ### 2.3 명세와 화면 (5·6단계)
 
@@ -113,7 +113,7 @@
 
 | 경로 | 에이전트가 정하는 것 | 화면용과 다른 점 |
 |---|---|---|
-| `GET /api/v1/pages?space=&limit=` | 스페이스(이름이나 id) | 본문 없는 트리. `limit` 기본 200·최대 1000 |
+| `GET /api/v1/pages?space=&limit=&createdBy=&updatedBy=` | 스페이스(이름이나 id) | 본문 없는 트리. `limit` 기본 200·최대 1000. 항목마다 만든 사람·고친 사람, 그 사람으로 거르기(거른 뒤에 자른다) — FR-2226 |
 | `GET /api/v1/pages/:id?format=` | 페이지 | `format` 기본 `markdown`(`json`·`text`) — 본문은 `body`, 형식은 `format`, **`ancestors`**(뿌리부터)가 함께 온다 |
 | `POST /api/v1/pages` | `space`·`title`·`body` | 스페이스를 **이름으로** 고른다(겹치면 409 `SPACE_AMBIGUOUS`+후보, 없거나 볼 수 없으면 404 `SPACE_NOT_FOUND`). 본문은 마크다운(`format`으로 `json`). 부모 없으면 맨 위, 위치는 맨 끝. 모르는 칸은 400 |
 | `PATCH /api/v1/pages/:id` | 고칠 `title`·`body` 중 하나 이상 | 안 준 것은 그대로, **기준 버전(`baseVersionNo`)은 필수**(없으면 400 — 서버가 지금 버전으로 채우면 남의 고침을 조용히 덮는다. 어긋나면 409 `VERSION_CONFLICT`+지금 버전). **사람이 실시간 편집 중이면 409 `PAGE_BEING_EDITED`**(쓰기 권한이 없으면 403이 먼저) |
@@ -175,7 +175,7 @@
 | `PATCH·DELETE /api/v1/comments/:id` | `body` | |
 | `GET·POST /api/v1/pages/:pageId/labels` | `name` | |
 | `DELETE …/labels/:ref` | — | `:ref`는 **이름이나 id** — 붙어 있지 않으면 404 `LABEL_NOT_FOUND` |
-| `GET /api/v1/labels` · `GET …/labels/:name/pages` | — | 볼 수 있는 페이지만(`{items}`) |
+| `GET /api/v1/labels` · `GET …/labels/:name/pages?limit=&createdBy=&updatedBy=` | — | 볼 수 있는 페이지만(`{items}`, 검색 결과와 같은 모양). 만든 사람·고친 사람으로 거르기 — FR-2226 |
 | `GET /api/v1/pages/:pageId/attachments` | — | 응답에 **`url`**(이 API로 받는 주소)과 **`href`**(위키 안 주소 — 본문에 이 주소로 링크를 걸면 사람이 눌러 받는다) |
 | `POST …/attachments` | **JSON `{filename, content, encoding?}`**(글은 utf8, 바이너리는 base64) 또는 multipart(필드 `file`) | 에이전트는 바이너리를 보낼 수 없어 JSON 길을 둔다. **형식(mime)은 받지 않고** 확장자에서 정한다. 종류·크기·내용(가장한 파일) 검사와 감사는 화면용과 같다. JSON 본문은 앱의 JSON 상한(2MB) 안 |
 | `GET /api/v1/attachments/:id` | — | 바이너리(`nosniff`·`no-store`·`attachment`). **`?format=json`이면 글은 utf8·바이너리는 base64로 JSON에 담는다**(1,000,000바이트까지 — 넘으면 413 `TOO_LARGE_FOR_JSON`) |
@@ -189,7 +189,7 @@
 
 | 경로 | 에이전트가 정하는 것 | 서버가 채우는 것·화면용과 다른 점 |
 |---|---|---|
-| `GET /api/v1/search?q=&space=&limit=` | `q` | 스페이스는 **이름이나 id**로 좁힌다(없으면 읽을 수 있는 전부) — 없는 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`. `limit` 기본 20·최대 50. 쿼리의 모르는 칸은 400. 응답 `{items}`는 `pageId·spaceId·spaceName·title·snippet·updatedAt` |
+| `GET /api/v1/search?q=&space=&limit=&createdBy=&updatedBy=` | `q` | 스페이스는 **이름이나 id**로 좁힌다(없으면 읽을 수 있는 전부) — 없는 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`. `limit` 기본 20·최대 50. 쿼리의 모르는 칸은 400. 응답 `{items}`는 `pageId·spaceId·spaceName·title·snippet·updatedAt`과 만든 사람·고친 사람(`createdBy`·`createdByUsername`·`createdByName`·`updatedBy`·`updatedByUsername`·`updatedByName`·`createdAt` — FR-2226) |
 
 - 권한 거름(볼 수 없는 스페이스·휴지통)과 `%`·`_` 풀기는 검색 서비스 한 곳이 한다 — 화면용과 같은 `SearchService`를 부른다. 검색은 읽기라 감사에 남기지 않는다(FR-409).
 - 실제 호출 확인(2026-10-07, 개발 서버): v1으로 만든 페이지가 곧바로 검색됨(한글 두 글자), 이름으로 좁히기, 없는 스페이스 404, 검색어 없음 400, 모르는 칸 400.

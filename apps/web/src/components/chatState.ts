@@ -72,14 +72,15 @@ export type ChatAddress = { userId: string; displayName: string; rest: string };
 /**
  * 메시지 맨 앞의 `@이름`을 받는 사람으로 읽는다(F-024). 본문은 평문 그대로 오가므로(서버·에이전트도 같은 글을 받는다) 표시는 화면이 본문에서 읽는다.
  * 이름에 띄어쓰기가 들 수 있어(`ai agent`) **더 긴 이름부터** 맞추고, 이름 뒤는 공백·줄바꿈이거나 끝이어야 한다(`@앨리스씨`는 아니다).
- * 나간 사람도 본다 — 지난 대화의 받는 사람이 사라지지 않게(F-021과 같은 판단)
+ * 나간 사람도 본다 — 지난 대화의 받는 사람이 사라지지 않게(F-021과 같은 판단). 이름은 후보 좁히기처럼 대소문자를 가리지 않는다.
+ * 표시 이름은 유일하지 않다 — 같은 이름이 둘이면 앞의 사람을 돌려준다(본문에는 이름만 있어 가릴 수 없다. 나에게 한 말인지는 화면이 이름으로 본다)
  */
 export function addressOf(room: ChatRoomView, body: string): ChatAddress | null {
   if (!body.startsWith('@')) return null;
   const text = body.slice(1);
   const people = [...room.members, ...room.pastMembers].filter((m) => m.displayName.length > 0).sort((a, b) => b.displayName.length - a.displayName.length);
   for (const m of people) {
-    if (!text.startsWith(m.displayName)) continue;
+    if (text.slice(0, m.displayName.length).toLowerCase() !== m.displayName.toLowerCase()) continue;
     const after = text.slice(m.displayName.length);
     if (after === '' || /^\s/.test(after)) return { userId: m.userId, displayName: m.displayName, rest: after.replace(/^\s/, '') };
   }

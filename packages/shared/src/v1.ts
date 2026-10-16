@@ -244,7 +244,8 @@ export const v1SearchQuery = z.strictObject({
 export type V1SearchQuery = z.infer<typeof v1SearchQuery>;
 
 /** 라벨이 붙은 페이지 — 상한과 사람으로 거르기 */
-export const v1LabelPagesQuery = listLimitDto.extend({ createdBy: byCreator, updatedBy: byEditor });
+// 모르는 키는 400이다 — 키를 잘못 치면(`createdby=`) 조용히 무시되어 거르지 않은 전체가 돌아간다(F-023 자체 점검 1)
+export const v1LabelPagesQuery = listLimitDto.extend({ createdBy: byCreator, updatedBy: byEditor }).strict();
 export type V1LabelPagesQuery = z.infer<typeof v1LabelPagesQuery>;
 
 // ---- 댓글·라벨·첨부 ----
@@ -261,7 +262,7 @@ export const v1CommentUpdateDto = z
 export type V1CommentUpdateDto = z.infer<typeof v1CommentUpdateDto>;
 
 /** 댓글 목록 — 읽는 형식과 쓴 사람으로 거르기 */
-export const v1CommentListQuery = v1PageQuery.extend({ author: userRef.optional().describe('쓴 사람의 아이디(username)나 id로 거른다') });
+export const v1CommentListQuery = v1PageQuery.extend({ author: userRef.optional().describe('쓴 사람의 아이디(username)나 id로 거른다') }).strict();
 export type V1CommentListQuery = z.infer<typeof v1CommentListQuery>;
 
 /** 라벨 붙이기 — 이름만 */
@@ -403,7 +404,7 @@ export const v1CategoryDto = z.strictObject({ name: categoryRef });
 export type V1CategoryDto = z.infer<typeof v1CategoryDto>;
 
 /** 스페이스 목록 — 찾기와 상한은 선택이다 */
-export const v1SpaceListQuery = z.object({
+export const v1SpaceListQuery = z.strictObject({
   q: z
     .string()
     .trim()

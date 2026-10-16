@@ -199,10 +199,13 @@ export function ChatPage() {
   const textOf = (body: string) => {
     const to = room ? addressOf(room, body) : null;
     if (!to) return body;
+    // 표시 이름은 유일하지 않다 — 나와 이름이 같으면 나에게 한 말로도 본다(자체 점검 5)
+    const myName = room?.members.find((x) => x.userId === meId)?.displayName.toLowerCase();
+    const toMe = to.userId === meId || to.displayName.toLowerCase() === myName;
     const head = 1 + to.displayName.length;
     return (
       <>
-        <span className={to.userId === meId ? 'chat-to to-me' : 'chat-to'} title={`${to.displayName}에게 한 말`}>
+        <span className={toMe ? 'chat-to to-me' : 'chat-to'} title={`${to.displayName}에게 한 말`}>
           {body.slice(0, head)}
         </span>
         {body.slice(head)}
@@ -372,8 +375,6 @@ export function ChatPage() {
                 rows={2}
                 value={draft}
                 placeholder="메시지를 쓴다 (Enter 보내기 · Shift+Enter 줄바꿈 · 맨 앞에 @를 치면 받는 사람을 고른다)"
-                role="combobox"
-                aria-expanded={candidates !== null}
                 aria-controls={candidates ? 'chat-mention' : undefined}
                 aria-autocomplete="list"
                 aria-activedescendant={candidates ? `chat-mention-${candidates[pick % candidates.length]!.userId}` : undefined}
@@ -386,7 +387,7 @@ export function ChatPage() {
                     setPick((p) => (p + (e.key === 'ArrowDown' ? 1 : candidates.length - 1)) % candidates.length);
                     return;
                   }
-                  if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                  if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
                     e.preventDefault();
                     choose(candidates[pick % candidates.length]!);
                     return;

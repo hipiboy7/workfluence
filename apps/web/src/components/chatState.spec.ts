@@ -142,6 +142,7 @@ describe('받는 사람 (@ — F-024)', () => {
 
   it('이름은 대소문자를 가리지 않는다 — 후보 좁히기와 같게(자체 점검 8)', () => {
     expect(addressOf(r, '@AI Agent 안녕')).toEqual({ userId: 'a', displayName: 'ai agent', rest: '안녕' });
+    expect(addressOf(r, '@AI Agent Hello')?.rest).toBe('Hello'); // 할 말의 대소문자는 그대로
   });
 
   it('나간 사람에게 한 말도 지난 대화에서는 받는 사람이 남는다', () => {
