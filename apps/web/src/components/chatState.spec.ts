@@ -1,6 +1,6 @@
 import type { ChatMessageView, ChatRoomView } from '@workfluence/shared';
 import { describe, expect, it } from 'vitest';
-import { applyMessageToRooms, CHAT_TONES, lastSeqOf, memberTones, mergeMessages, roomTitle, senderName, totalUnread } from './chatState';
+import { addressOf, addressTo, applyMessageToRooms, CHAT_TONES, lastSeqOf, memberTones, mentionCandidates, mergeMessages, roomTitle, senderName, totalUnread } from './chatState';
 
 const msg = (seq: number, over: Partial<ChatMessageView> = {}): ChatMessageView => ({ id: `m${seq}`, roomId: 'r1', seq, senderId: 'u2', body: `b${seq}`, kind: 'user', createdAt: `2026-10-12T00:00:0${seq}.000Z`, ...over });
 const room = (over: Partial<ChatRoomView> = {}): ChatRoomView => ({
@@ -111,5 +111,57 @@ describe('senderName (F-021)', () => {
     expect(senderName(r, 'u2')).toBe('상대');
     expect(senderName(r, 'gone')).toBe('(나간 사람) 떠난사람');
     expect(senderName(r, 'x')).toBe('(나간 사람)');
+  });
+});
+
+describe('받는 사람 (@ — F-024)', () => {
+  const r = room({
+    kind: 'group',
+    members: [
+      { userId: 'u1', username: 'me', displayName: '나' },
+      { userId: 'a', username: 'aiagent', displayName: 'ai agent' },
+      { userId: 'b', username: 'ai', displayName: 'ai' },
+      { userId: 'c', username: 'alice', displayName: '앨리스' },
+    ],
+    pastMembers: [{ userId: 'gone', displayName: '떠난사람' }],
+  });
+
+  it('맨 앞의 "@이름 "을 받는 사람으로 읽는다 — 띄어쓰기가 든 이름도, 더 긴 이름이 먼저다', () => {
+    expect(addressOf(r, '@ai agent 오늘 일정 알려줘')).toEqual({ userId: 'a', displayName: 'ai agent', rest: '오늘 일정 알려줘' });
+    expect(addressOf(r, '@ai 안녕')).toEqual({ userId: 'b', displayName: 'ai', rest: '안녕' });
+    expect(addressOf(r, '@앨리스')).toEqual({ userId: 'c', displayName: '앨리스', rest: '' });
+    expect(addressOf(r, '@앨리스\n두 줄')).toEqual({ userId: 'c', displayName: '앨리스', rest: '두 줄' });
+  });
+
+  it('이름 뒤에 글자가 붙거나, 맨 앞이 아니거나, 모르는 이름이면 받는 사람이 없다', () => {
+    expect(addressOf(r, '@앨리스씨 안녕')).toBeNull();
+    expect(addressOf(r, '안녕 @앨리스 ')).toBeNull();
+    expect(addressOf(r, '@밥 안녕')).toBeNull();
+    expect(addressOf(r, '@')).toBeNull();
+  });
+
+  it('나간 사람에게 한 말도 지난 대화에서는 받는 사람이 남는다', () => {
+    expect(addressOf(r, '@떠난사람 잘 가')?.userId).toBe('gone');
+  });
+
+  it('후보 — "@"로 시작하면 나를 뺀 참여자를, 친 글자로 이름이나 아이디의 앞을 맞춰(대소문자 무시) 보인다', () => {
+    expect(mentionCandidates(r, 'u1', '@')?.map((m) => m.userId)).toEqual(['a', 'b', 'c']);
+    expect(mentionCandidates(r, 'u1', '@AI')?.map((m) => m.userId)).toEqual(['a', 'b']);
+    expect(mentionCandidates(r, 'u1', '@ai a')?.map((m) => m.userId)).toEqual(['a']);
+    expect(mentionCandidates(r, 'u1', '@alice')?.map((m) => m.userId)).toEqual(['c']);
+  });
+
+  it('후보를 보이지 않는다 — "@"로 시작하지 않거나, 받는 사람을 이미 골랐거나, 줄을 바꿨거나, 맞는 사람이 없을 때. 나간 사람은 후보가 아니다', () => {
+    expect(mentionCandidates(r, 'u1', '안녕')).toBeNull();
+    expect(mentionCandidates(r, 'u1', '@앨리스 ')).toBeNull();
+    expect(mentionCandidates(r, 'u1', '@a\nb')).toBeNull();
+    expect(mentionCandidates(r, 'u1', '@zzz')).toBeNull();
+    expect(mentionCandidates(r, 'u1', '@떠난')).toBeNull();
+    expect(mentionCandidates(r, 'u1', '@나')).toBeNull();
+  });
+
+  it('고르면 입력칸이 "@이름 "이 된다 — 그 뒤에 할 말을 쓴다', () => {
+    expect(addressTo({ displayName: 'ai agent' })).toBe('@ai agent ');
+    expect(addressOf(r, addressTo({ displayName: 'ai agent' }) + '안녕')?.userId).toBe('a');
   });
 });

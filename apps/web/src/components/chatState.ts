@@ -65,3 +65,37 @@ export function senderName(room: ChatRoomView, userId: string): string {
   const past = room.pastMembers.find((m) => m.userId === userId);
   return past ? `(나간 사람) ${past.displayName}` : '(나간 사람)';
 }
+
+/** 받는 사람(F-024) — 메시지 맨 앞의 `@이름` */
+export type ChatAddress = { userId: string; displayName: string; rest: string };
+
+/**
+ * 메시지 맨 앞의 `@이름`을 받는 사람으로 읽는다(F-024). 본문은 평문 그대로 오가므로(서버·에이전트도 같은 글을 받는다) 표시는 화면이 본문에서 읽는다.
+ * 이름에 띄어쓰기가 들 수 있어(`ai agent`) **더 긴 이름부터** 맞추고, 이름 뒤는 공백·줄바꿈이거나 끝이어야 한다(`@앨리스씨`는 아니다).
+ * 나간 사람도 본다 — 지난 대화의 받는 사람이 사라지지 않게(F-021과 같은 판단)
+ */
+export function addressOf(room: ChatRoomView, body: string): ChatAddress | null {
+  if (!body.startsWith('@')) return null;
+  const text = body.slice(1);
+  const people = [...room.members, ...room.pastMembers].filter((m) => m.displayName.length > 0).sort((a, b) => b.displayName.length - a.displayName.length);
+  for (const m of people) {
+    if (!text.startsWith(m.displayName)) continue;
+    const after = text.slice(m.displayName.length);
+    if (after === '' || /^\s/.test(after)) return { userId: m.userId, displayName: m.displayName, rest: after.replace(/^\s/, '') };
+  }
+  return null;
+}
+
+/**
+ * 입력칸이 `@`로 시작하면 보일 받는 사람 후보(F-024) — 나를 뺀 지금 참여자 가운데 `@` 뒤에 친 글자로 표시 이름이나 아이디의 앞이 맞는 사람(대소문자 무시).
+ * 보이지 않을 때는 `null` — `@`로 시작하지 않을 때, 줄을 바꿨을 때, 맞는 사람이 없을 때(받는 사람을 골라 할 말을 쓰기 시작하면 `@이름 할 말`에 맞는 이름이 없어 사라진다)
+ */
+export function mentionCandidates(room: ChatRoomView, meId: string, draft: string): ChatRoomView['members'] | null {
+  if (!draft.startsWith('@') || draft.includes('\n')) return null;
+  const q = draft.slice(1).toLowerCase();
+  const found = room.members.filter((m) => m.userId !== meId && (m.displayName.toLowerCase().startsWith(q) || m.username.toLowerCase().startsWith(q)));
+  return found.length > 0 ? found : null;
+}
+
+/** 후보를 고르면 입력칸에 들어갈 글 — `@이름 ` 뒤에 할 말을 쓴다 */
+export const addressTo = (m: { displayName: string }): string => `@${m.displayName} `;

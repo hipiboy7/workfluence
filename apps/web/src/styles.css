@@ -549,7 +549,15 @@ dialog.confirm .form-actions { justify-content: flex-end; margin-top: 20px; }
 .chat-meta { font-size: 12px; line-height: 18px; color: var(--muted); }
 .chat-text { white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 22px; }
 .chat-compose { position: sticky; bottom: 0; z-index: 10; display: flex; gap: 8px; align-items: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; box-shadow: 0 -4px 12px rgba(16, 24, 40, 0.06); }
-.chat-compose textarea { flex: 1 1 auto; resize: vertical; }
+.chat-draft { flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.chat-draft textarea { resize: vertical; }
+/* 받는 사람(F-024) — 본문의 `@이름`은 글자 그대로 두고 강조만, 후보는 입력칸 위에 뜬다 */
+.chat-to { color: var(--accent-strong); font-weight: 600; }
+.chat-to.to-me { background: var(--accent-soft); border-radius: 4px; padding: 0 2px; }
+.chat-addressee { margin: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
+.chat-mention { position: absolute; left: 12px; bottom: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 4px 0; min-width: 240px; max-height: 240px; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); }
+.chat-mention li { padding: 6px 12px; cursor: pointer; }
+.chat-mention li.active, .chat-mention li:hover { background: var(--accent-soft); }
 .chat-new { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 0 0 16px; background: var(--surface); max-width: var(--w-read); }
 .chat-new h2 { margin: 0 0 8px; font-size: 16px; }
 .chat-field { display: block; margin: 8px 0; }

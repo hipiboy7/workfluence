@@ -8,7 +8,7 @@ import { ChatNewRoom } from '../components/ChatNewRoom';
 import { useConfirm } from '../components/ConfirmDialog';
 import { ChatSideNav } from '../components/ChatSideNav';
 import { ChatSendError, createChatLink, type ChatLinkState, type ChatSocketLike } from '../components/chatLink';
-import { applyMessageToRooms, lastSeqOf, memberTones, mergeMessages, roomTitle, senderName } from '../components/chatState';
+import { addressOf, addressTo, applyMessageToRooms, lastSeqOf, memberTones, mentionCandidates, mergeMessages, roomTitle, senderName } from '../components/chatState';
 import { EmptyState, Notice, Page, PageHeader, useDocumentTitle } from '../components/ui';
 import { SideSlot } from '../layout/AppLayout';
 
@@ -49,6 +49,10 @@ export function ChatPage() {
   const [linkState, setLinkState] = useState<ChatLinkState>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  /** 받는 사람 후보(F-024) — 고른 줄과, Esc로 닫았는가(입력칸이 `@`로 다시 시작할 때까지) */
+  const [pick, setPick] = useState(0);
+  const [mentionClosed, setMentionClosed] = useState(false);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const [failed, setFailed] = useState<Record<string, Failed[]>>({});
   const [adding, setAdding] = useState(false);
   const [inviting, setInviting] = useState(false);
@@ -178,10 +182,38 @@ export function ChatPage() {
       });
   };
 
+  const candidates = room && !mentionClosed ? mentionCandidates(room, meId, draft) : null;
+  const addressee = room ? addressOf(room, draft) : null;
+  const changeDraft = (v: string) => {
+    setDraft(v);
+    setPick(0);
+    if (!v.startsWith('@')) setMentionClosed(false);
+  };
+  /** 후보를 고른다 — 입력칸은 `@이름 `이 되고 할 말을 이어 쓴다 */
+  const choose = (m: { displayName: string }) => {
+    changeDraft(addressTo(m));
+    draftRef.current?.focus();
+  };
+
+  /** 메시지 본문 — 맨 앞의 `@이름`은 글자 그대로 두고 강조만 한다(F-024). 나에게 한 말은 더 눈에 띄게 */
+  const textOf = (body: string) => {
+    const to = room ? addressOf(room, body) : null;
+    if (!to) return body;
+    const head = 1 + to.displayName.length;
+    return (
+      <>
+        <span className={to.userId === meId ? 'chat-to to-me' : 'chat-to'} title={`${to.displayName}에게 한 말`}>
+          {body.slice(0, head)}
+        </span>
+        {body.slice(head)}
+      </>
+    );
+  };
+
   const submit = () => {
     const body = draft;
     if (!body.trim()) return;
-    setDraft('');
+    changeDraft('');
     send(body);
   };
 
@@ -278,7 +310,7 @@ export function ChatPage() {
                 <p className="chat-meta">
                   <strong>{m.senderId === meId ? '나' : nameOf(m.senderId)}</strong> <span className="muted">{time(m.createdAt)}</span>
                 </p>
-                <p className="chat-text">{m.body}</p>
+                <p className="chat-text">{textOf(m.body)}</p>
               </li>
               )
             ))}
@@ -307,23 +339,72 @@ export function ChatPage() {
               submit();
             }}
           >
-            <label className="sr-only" htmlFor="chat-draft">
-              메시지
-            </label>
-            <textarea
-              id="chat-draft"
-              rows={2}
-              value={draft}
-              placeholder="메시지를 쓴다 (Enter 보내기 · Shift+Enter 줄바꿈)"
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
+            {candidates && (
+              <ul className="chat-mention" id="chat-mention" role="listbox" aria-label="받는 사람">
+                {candidates.map((m, i) => (
+                  <li
+                    key={m.userId}
+                    id={`chat-mention-${m.userId}`}
+                    role="option"
+                    aria-selected={i === pick % candidates.length}
+                    className={i === pick % candidates.length ? 'active' : undefined}
+                    // 누르는 동안 입력칸의 초점을 잃지 않게 — 클릭으로 고른다
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => choose(m)}
+                  >
+                    <strong>{m.displayName}</strong> <span className="muted">{m.username}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="chat-draft">
+              {addressee && (
+                <p className="chat-addressee">
+                  <span className="chat-to">@{addressee.displayName}</span>에게 말한다
+                </p>
+              )}
+              <label className="sr-only" htmlFor="chat-draft">
+                메시지
+              </label>
+              <textarea
+                id="chat-draft"
+                ref={draftRef}
+                rows={2}
+                value={draft}
+                placeholder="메시지를 쓴다 (Enter 보내기 · Shift+Enter 줄바꿈 · 맨 앞에 @를 치면 받는 사람을 고른다)"
+                role="combobox"
+                aria-expanded={candidates !== null}
+                aria-controls={candidates ? 'chat-mention' : undefined}
+                aria-autocomplete="list"
+                aria-activedescendant={candidates ? `chat-mention-${candidates[pick % candidates.length]!.userId}` : undefined}
+                onChange={(e) => changeDraft(e.target.value)}
+                onKeyDown={(e) => {
+                if (candidates && !e.nativeEvent.isComposing) {
+                  // 후보가 보이는 동안 위·아래는 고르는 줄을, Enter·Tab은 고르기를, Esc는 닫기를 한다 — 보내지 않는다
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setPick((p) => (p + (e.key === 'ArrowDown' ? 1 : candidates.length - 1)) % candidates.length);
+                    return;
+                  }
+                  if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                    e.preventDefault();
+                    choose(candidates[pick % candidates.length]!);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setMentionClosed(true);
+                    return;
+                  }
+                }
                 // 한글 조합 중의 Enter는 보내지 않는다
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   submit();
                 }
               }}
-            />
+              />
+            </div>
             <button type="submit" disabled={!live || !draft.trim()}>
               보내기
             </button>

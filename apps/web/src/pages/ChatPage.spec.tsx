@@ -358,3 +358,65 @@ describe('연결 상한으로 밀려났을 때 (코드 리뷰 4)', () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 });
+
+describe('받는 사람 고르기 (@ — F-024)', () => {
+  const team = () =>
+    room(R2, {
+      kind: 'group',
+      name: '팀',
+      members: [
+        { userId: 'u1', username: 'u1', displayName: '나' },
+        { userId: 'u3', username: 'bob', displayName: '밥' },
+        { userId: 'ag', username: 'aiagent', displayName: 'ai agent' },
+      ],
+    });
+
+  it('맨 앞에 @를 치면 나를 뺀 참여자가 뜨고, Enter로 고르면 "@이름 "이 되고 보내지 않는다 — 보낸 본문에 @이름이 그대로 있다', async () => {
+    rooms = [team()];
+    open(`/chat/${R2}`);
+    const box = (await screen.findByLabelText('메시지')) as HTMLTextAreaElement;
+    hello();
+    fireEvent.change(box, { target: { value: '@' } });
+    const list = screen.getByRole('listbox', { name: '받는 사람' });
+    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual(['밥 bob', 'ai agent aiagent']);
+    fireEvent.change(box, { target: { value: '@ai' } });
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(1);
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(box.value).toBe('@ai agent ');
+    expect(sock().sent).toHaveLength(0);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByText('에게 말한다')).toBeTruthy();
+    fireEvent.change(box, { target: { value: '@ai agent 오늘 회의 정리해 줘' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(sock().sent).toHaveLength(1));
+    expect(JSON.parse(sock().sent[0]!)).toMatchObject({ body: '@ai agent 오늘 회의 정리해 줘' });
+  });
+
+  it('아래 화살표·클릭으로 고르고, Esc로 닫는다', async () => {
+    rooms = [team()];
+    open(`/chat/${R2}`);
+    const box = (await screen.findByLabelText('메시지')) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: '@' } });
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    expect(screen.getAllByRole('option')[1]!.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(box, { key: 'Tab' });
+    expect(box.value).toBe('@ai agent ');
+    fireEvent.change(box, { target: { value: '@' } });
+    fireEvent.click(screen.getAllByRole('option')[0]!);
+    expect(box.value).toBe('@밥 ');
+    fireEvent.change(box, { target: { value: '@' } });
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('대화에서 맨 앞의 @이름은 글자 그대로 남고 강조된다 — 나에게 한 말은 더 눈에 띈다', async () => {
+    rooms = [team()];
+    messages[R2] = [msg(R2, 1, '@나 확인 부탁', 'u3'), msg(R2, 2, '@ai agent 요약해 줘', 'u3'), msg(R2, 3, '그냥 @밥 아님', 'u3')];
+    open(`/chat/${R2}`);
+    const toMe = await pane().findByText('@나');
+    expect(toMe.className).toBe('chat-to to-me');
+    expect(toMe.parentElement!.textContent).toBe('@나 확인 부탁');
+    expect(pane().getByText('@ai agent').className).toBe('chat-to');
+    expect(pane().getByText('그냥 @밥 아님').querySelector('.chat-to')).toBeNull(); // 맨 앞이 아니면 그냥 글이다
+  });
+});
