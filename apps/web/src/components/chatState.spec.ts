@@ -9,8 +9,8 @@ const room = (over: Partial<ChatRoomView> = {}): ChatRoomView => ({
   name: null,
   createdBy: 'u1',
   members: [
-    { userId: 'u1', displayName: '나' },
-    { userId: 'u2', displayName: '상대' },
+    { userId: 'u1', username: 'u1', displayName: '나' },
+    { userId: 'u2', username: 'u2', displayName: '상대' },
   ],
   pastMembers: [],
   lastSeq: 0,
@@ -76,7 +76,7 @@ describe('안내 줄 (F-019)', () => {
 });
 
 describe('memberTones', () => {
-  const many = (n: number) => room({ members: Array.from({ length: n }, (_, i) => ({ userId: `u${i}`, displayName: `사람${i}` })) });
+  const many = (n: number) => room({ members: Array.from({ length: n }, (_, i) => ({ userId: `u${i}`, username: `u${i}`, displayName: `사람${i}` })) });
 
   it('참여자마다 차례대로 다른 번호를 준다', () => {
     const t = memberTones(many(3));

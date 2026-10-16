@@ -752,8 +752,12 @@ paths:
                               userId:
                                 description: "참여자의 id"
                                 type: string
+                              username:
+                                description: "참여자의 아이디(로그인 이름) — 스페이스 Crew 넣기(`POST /api/v1/spaces/{id}/members`)의 `username`에 그대로 쓴다. 같은 방 사람의 것만 싣는다(사람 찾기에는 없다)"
+                                type: string
                             required:
                               - userId
+                              - username
                               - displayName
                             type: object
                           type: array
@@ -971,8 +975,12 @@ paths:
                         userId:
                           description: "참여자의 id"
                           type: string
+                        username:
+                          description: "참여자의 아이디(로그인 이름) — 스페이스 Crew 넣기(`POST /api/v1/spaces/{id}/members`)의 `username`에 그대로 쓴다. 같은 방 사람의 것만 싣는다(사람 찾기에는 없다)"
+                          type: string
                       required:
                         - userId
+                        - username
                         - displayName
                       type: object
                     type: array
@@ -1153,8 +1161,12 @@ paths:
                         userId:
                           description: "참여자의 id"
                           type: string
+                        username:
+                          description: "참여자의 아이디(로그인 이름) — 스페이스 Crew 넣기(`POST /api/v1/spaces/{id}/members`)의 `username`에 그대로 쓴다. 같은 방 사람의 것만 싣는다(사람 찾기에는 없다)"
+                          type: string
                       required:
                         - userId
+                        - username
                         - displayName
                       type: object
                     type: array
@@ -1347,8 +1359,12 @@ paths:
                         userId:
                           description: "참여자의 id"
                           type: string
+                        username:
+                          description: "참여자의 아이디(로그인 이름) — 스페이스 Crew 넣기(`POST /api/v1/spaces/{id}/members`)의 `username`에 그대로 쓴다. 같은 방 사람의 것만 싣는다(사람 찾기에는 없다)"
+                          type: string
                       required:
                         - userId
+                        - username
                         - displayName
                       type: object
                     type: array

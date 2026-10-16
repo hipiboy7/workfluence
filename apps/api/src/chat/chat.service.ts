@@ -93,7 +93,7 @@ export class ChatService {
     if (items.length === 0) return [];
     const ids = items.map((i) => i.room.id);
     const members = await this.db
-      .select({ roomId: chatMembers.roomId, userId: chatMembers.userId, displayName: users.displayName })
+      .select({ roomId: chatMembers.roomId, userId: chatMembers.userId, username: users.username, displayName: users.displayName })
       .from(chatMembers)
       .innerJoin(users, eq(users.id, chatMembers.userId))
       .where(inArray(chatMembers.roomId, ids))
@@ -116,7 +116,7 @@ export class ChatService {
       kind: room.kind as ChatRoomView['kind'],
       name: room.name,
       createdBy: room.createdBy,
-      members: members.filter((m) => m.roomId === room.id).map((m) => ({ userId: m.userId, displayName: m.displayName })),
+      members: members.filter((m) => m.roomId === room.id).map((m) => ({ userId: m.userId, username: m.username, displayName: m.displayName })),
       // 같은 사람이 여러 번 나갔다 들어왔을 수 있어 사람마다 한 번만
       pastMembers: [...new Map(leavers.filter((l) => l.roomId === room.id && !members.some((m) => m.roomId === room.id && m.userId === l.userId)).map((l) => [l.userId, { userId: l.userId, displayName: l.displayName }])).values()],
       lastSeq: room.lastSeq,

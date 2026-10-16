@@ -40,6 +40,19 @@ describe('1:1 방 (FR-2401)', () => {
     expect(r1.room.members.map((m) => m.userId).sort()).toEqual([a.id, b.id].sort());
     expect(rooms.map((r) => r.userId).sort()).toEqual([a.id, b.id].sort()); // 만든 한 번만 알린다
   });
+
+  it('참여자에는 아이디가 실린다 — 스페이스 Crew 넣기에 그대로 쓴다. 사람 찾기에는 없다 (F-022)', async () => {
+    const a = await person(db, 'a', 'member', { displayName: '에이' });
+    const b = await person(db, 'b', 'member', { displayName: '비' });
+    const { room } = await svc.createRoom(a, { kind: 'direct', userId: b.id });
+    expect(room.members.map(({ userId, username, displayName }) => ({ userId, username, displayName }))).toEqual(
+      [
+        { userId: b.id, username: 'b', displayName: '비' },
+        { userId: a.id, username: 'a', displayName: '에이' },
+      ].sort((x, y) => (x.displayName < y.displayName ? -1 : 1)),
+    );
+    expect(await svc.searchUsers(a, '', 10)).toEqual([{ id: b.id, displayName: '비' }]);
+  });
   it('동시에 열어도 방은 하나다', async () => {
     const a = await person(db, 'a');
     const b = await person(db, 'b');

@@ -232,6 +232,7 @@ ws.on('message', (data) => {
 - 연달아 보낸 `send`는 보낸 순서대로 번호를 받는다. 끊겼다 다시 보낼 때는 **같은 `clientMsgId`**로 보낸다 — 같은 값은 한 번만 받는다(REST 보내기의 응답은 `duplicate: true`).
 - 여럿 방은 **참여자 누구나** 초대할 수 있다(`POST /chat/rooms/{id}/members`) — 만든 사람이 아니어도, 만든 사람이 나가도 된다(2026-10-15 개정, 그 전에는 만든 사람만). 참여자가 아니면 404, 1:1 방은 403 `DIRECT_ROOM`이다.
 - 방 정보(`GET /chat/rooms`·`/chat/rooms/{id}`)의 `pastMembers`는 **방을 나간 사람**의 `userId`·`displayName`이다(2026-10-15 더함). 나간 사람이 쓴 메시지의 `senderId`를 이름으로 바꿀 때 `members`에 없으면 여기서 찾는다. "나갔습니다" 안내 줄(`kind=leave`)이 있는 사람만 실리고, 다시 초대돼 들어와 있으면 `members`에 있다.
+- 방 정보의 `members[]`에는 `username`(아이디)도 실린다(2026-10-16 더함). 방 사람들로 스페이스 Crew를 채울 때 `POST /spaces/{id}/members`의 `{ "username": … }`에 그대로 넣는다. 사람 찾기(`GET /chat/users`)와 `pastMembers`에는 아이디가 없다.
 - 분당 보내기 한도는 **사용자마다** 기본 60이다 — 연결·토큰을 여럿 열어도 한 예산이고 화면의 보내기도 같은 예산이다. 공개 API의 쓰기 한도(30)와 별개다. 넘으면 `RATE_LIMITED`(REST는 429와 `details.retryAfterSec`).
 - 서버가 30초마다 ping을 보낸다 — WebSocket 라이브러리의 pong 자동 응답을 끄지 않는다.
 - 메시지는 **평문**이다. 방은 참여자만 읽고 쓴다 — 참여하지 않은 방은 있는지도 알려 주지 않는 404다. 메시지의 보존·삭제·감사는 정하지 않았다(보류 39).

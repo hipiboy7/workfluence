@@ -46,8 +46,8 @@ const room = (id: string, over: Partial<ChatRoomView> = {}): ChatRoomView => ({
   name: null,
   createdBy: 'u1',
   members: [
-    { userId: 'u1', displayName: '나' },
-    { userId: 'u2', displayName: '앨리스' },
+    { userId: 'u1', username: 'u1', displayName: '나' },
+    { userId: 'u2', username: 'u2', displayName: '앨리스' },
   ],
   pastMembers: [],
   lastSeq: 0,
@@ -66,7 +66,7 @@ const json = (status: number, body: unknown) => ({ ok: status < 400, status, hea
 beforeEach(() => {
   FakeWebSocket.instances = [];
   globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-  rooms = [room(R1, { lastSeq: 2, lastMessage: msg(R1, 2, '두 번째'), unread: 2 }), room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', displayName: '나' }, { userId: 'u3', displayName: '밥' }] })];
+  rooms = [room(R1, { lastSeq: 2, lastMessage: msg(R1, 2, '두 번째'), unread: 2 }), room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', username: 'u1', displayName: '나' }, { userId: 'u3', username: 'u3', displayName: '밥' }] })];
   messages = { [R1]: [msg(R1, 1, '첫 번째'), msg(R1, 2, '<b>두 번째</b>')], [R2]: [] };
   calls = [];
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
@@ -84,7 +84,7 @@ beforeEach(() => {
     }
     if (/\/read$/.test(url) && method === 'PUT') return Promise.resolve(json(200, { lastReadSeq: body.seq }));
     if (/\/members\/me$/.test(url) && method === 'DELETE') return Promise.resolve(json(200, { ok: true }));
-    if (/\/members$/.test(url) && method === 'POST') return Promise.resolve(json(201, room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', displayName: '나' }, { userId: 'u3', displayName: '밥' }, { userId: 'u2', displayName: '앨리스' }] })));
+    if (/\/members$/.test(url) && method === 'POST') return Promise.resolve(json(201, room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', username: 'u1', displayName: '나' }, { userId: 'u3', username: 'u3', displayName: '밥' }, { userId: 'u2', username: 'u2', displayName: '앨리스' }] })));
     if (url.startsWith('/api/chat/users')) return Promise.resolve(json(200, { items: [{ id: 'u2', displayName: '앨리스' }, { id: 'u3', displayName: '밥' }] }));
     if (url === '/api/chat/rooms' && method === 'POST') return Promise.resolve(json(201, { ...room(R1), created: false }));
     return Promise.resolve(json(404, { message: 'x' }));
@@ -147,7 +147,7 @@ describe('대화 (FR-2403·2405)', () => {
   });
 
   it('나간 사람의 메시지에는 "(나간 사람) 이름"이 남는다 — 이름이 지워지지 않는다 (F-021)', async () => {
-    rooms = [room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', displayName: '나' }], pastMembers: [{ userId: 'u3', displayName: '밥' }], lastSeq: 1, lastMessage: msg(R2, 1, '떠나기 전 말', 'u3') })];
+    rooms = [room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u1', username: 'u1', displayName: '나' }], pastMembers: [{ userId: 'u3', displayName: '밥' }], lastSeq: 1, lastMessage: msg(R2, 1, '떠나기 전 말', 'u3') })];
     messages[R2] = [msg(R2, 1, '떠나기 전 말', 'u3')];
     open(`/chat/${R2}`);
     expect(await pane().findByText('떠나기 전 말')).toBeTruthy();
@@ -291,7 +291,7 @@ describe('여럿 방의 초대·나가기 (FR-2402)', () => {
   });
 
   it('만든 사람이 아니어도 여럿 방이면 초대 단추가 있다. 1:1 방에는 초대도 나가기도 없다', async () => {
-    rooms = [room(R2, { kind: 'group', name: '팀', createdBy: 'u3', members: [{ userId: 'u1', displayName: '나' }, { userId: 'u3', displayName: '밥' }] }), room(R1)];
+    rooms = [room(R2, { kind: 'group', name: '팀', createdBy: 'u3', members: [{ userId: 'u1', username: 'u1', displayName: '나' }, { userId: 'u3', username: 'u3', displayName: '밥' }] }), room(R1)];
     open(`/chat/${R2}`);
     await screen.findByText(/참여자 2명/);
     expect(screen.getByRole('button', { name: '사람 초대' })).toBeTruthy();
