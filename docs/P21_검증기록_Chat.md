@@ -101,6 +101,14 @@
 - **이미지·스택** — `deploy/build.sh`, `tiffanie-workfluence-app:latest` **383MB**, 라벨의 커밋 `5c1a710`. 마이그레이션은 없어 api만 다시 만들었고 3개 모두 healthy, `https://wf.internal:8444/api/health` 200.
 - **8444에서 API로 실호출**(공개 API 토큰) — `GET /chat/rooms` 3개 방에서 `members` 원소의 칸은 `displayName`·`userId`·`username`, `pastMembers`는 `displayName`·`userId`였다. `GET /chat/users`는 `displayName`·`id`뿐이었다.
 
+## 3-8. 받는 사람 고르기 — 입력칸의 `@` (2026-10-16, F-024)
+
+설계서 FR-2413. 화면만 고쳤다 — 서버·API·명세는 그대로다(공개 API 명세 해시 변화 없음).
+
+- **시험** — 상태 계산(`chatState.spec.ts`) 6건: 띄어쓰기가 든 이름과 더 긴 이름 먼저, 이름 뒤 글자·맨 앞이 아님·모르는 이름은 아님, 나간 사람, 후보의 좁히기(이름·아이디, 대소문자)와 보이지 않을 때, 고른 뒤의 입력칸. 컴포넌트(`ChatPage.spec.tsx`) 3건: `@`로 뜬 목록에서 Enter로 고르면 보내지 않고 `@ai agent `가 되며 보낸 본문에 `@이름`이 그대로 있다, 화살표·Tab·클릭·Esc, 대화의 `@이름`이 글자 그대로 남고 강조(나에게는 `to-me`)되며 맨 앞이 아니면 그냥 글이다. 두 파일 46건 통과. `pnpm check`는 종료 코드 0이었다.
+- **이미지·스택** — `deploy/build.sh`, `tiffanie-workfluence-app:latest` **383MB**, 라벨의 커밋 `a7a93b3`. api만 다시 만들었고 3개 모두 healthy, `/api/health` 200. 8444가 내주는 화면 묶음에 새 코드(`chat-mention`·`에게 말한다`)가 들어 있음을 봤다.
+- **확인하지 못한 것** — 8444의 실제 브라우저에서 사람 계정으로 눌러 보지 않았다(이 세션에 사람 계정의 비밀번호가 없다 — 에이전트 계정은 화면 로그인을 못 한다, F-020). 화면은 컴포넌트 시험(happy-dom)으로만 봤다.
+
 ## 4. 확인하지 못한 것
 
 - **세션 유휴 만료와 오래 열어 둔 채팅 화면** — 아무도 말하지 않는 방을 30분 넘게 열어 두면 세션이 만료되고 주기 재판정이 연결을 닫는다(close 4401). 실제로 오래 열어 두고 재현하지 않았다.
