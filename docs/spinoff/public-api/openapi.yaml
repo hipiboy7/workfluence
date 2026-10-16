@@ -2052,6 +2052,12 @@ paths:
                   author:
                     description: "쓴 사람의 이름"
                     type: string
+                  authorId:
+                    description: "쓴 사람의 id"
+                    type: string
+                  authorUsername:
+                    description: "쓴 사람의 아이디 — 지워진 사용자면 빈 글"
+                    type: string
                   body:
                     anyOf:
                       - type: string
@@ -2096,6 +2102,8 @@ paths:
                   - pageId
                   - parentId
                   - author
+                  - authorId
+                  - authorUsername
                   - createdAt
                   - updatedAt
                   - canDelete
@@ -2217,7 +2225,7 @@ paths:
         - labels
   "/labels/{name}/pages":
     get:
-      description: "그 라벨이 붙은, 내가 읽을 수 있는 페이지."
+      description: "그 라벨이 붙은, 내가 읽을 수 있는 페이지. 항목마다 만든 사람·마지막으로 고친 사람이 온다. 만든 사람(`createdBy`)·마지막으로 고친 사람(`updatedBy`)을 아이디(username)나 id로 주면 그 사람의 페이지만 — 없는 사람은 404 `USER_NOT_FOUND`."
       operationId: labels.pages
       parameters:
         - description: "라벨 이름"
@@ -2235,6 +2243,22 @@ paths:
             maximum: 500
             minimum: 1
             type: integer
+        - description: "만든 사람의 아이디(username)나 id로 거른다"
+          in: query
+          name: createdBy
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
+        - description: "마지막으로 고친 사람의 아이디(username)나 id로 거른다"
+          in: query
+          name: updatedBy
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
       responses:
         "200":
           content:
@@ -2247,6 +2271,18 @@ paths:
                     items:
                       additionalProperties: false
                       properties:
+                        createdAt:
+                          description: "ISO 8601 시각(UTC)"
+                          type: string
+                        createdBy:
+                          description: "만든 사람의 id"
+                          type: string
+                        createdByName:
+                          description: "만든 사람의 이름"
+                          type: string
+                        createdByUsername:
+                          description: "만든 사람의 아이디"
+                          type: string
                         pageId:
                           description: "페이지의 id"
                           type: string
@@ -2265,6 +2301,15 @@ paths:
                         updatedAt:
                           description: "ISO 8601 시각(UTC)"
                           type: string
+                        updatedBy:
+                          description: "마지막으로 고친 사람의 id"
+                          type: string
+                        updatedByName:
+                          description: "마지막으로 고친 사람의 이름"
+                          type: string
+                        updatedByUsername:
+                          description: "마지막으로 고친 사람의 아이디"
+                          type: string
                       required:
                         - pageId
                         - spaceId
@@ -2272,6 +2317,13 @@ paths:
                         - title
                         - snippet
                         - updatedAt
+                        - createdBy
+                        - createdByUsername
+                        - createdByName
+                        - updatedBy
+                        - updatedByUsername
+                        - updatedByName
+                        - createdAt
                       type: object
                     type: array
                 required:
@@ -2677,7 +2729,7 @@ paths:
         - spec
   "/pages":
     get:
-      description: "스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 많으면 `limit`에서 잘리고 `truncated`가 true다(`total`은 전체 수) — 잘린 목록의 일부 항목은 부모가 빠져 있을 수 있다. 본문은 `GET /pages/{id}`로 읽는다."
+      description: "스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 많으면 `limit`에서 잘리고 `truncated`가 true다(`total`은 전체 수) — 잘린 목록의 일부 항목은 부모가 빠져 있을 수 있다. 본문은 `GET /pages/{id}`로 읽는다. 항목마다 만든 사람·마지막으로 고친 사람(id·아이디·이름)과 만든 때가 온다. 만든 사람(`createdBy`)·마지막으로 고친 사람(`updatedBy`)을 아이디(username)나 id로 주면 그 사람의 페이지만 — 없는 사람은 404 `USER_NOT_FOUND`."
       operationId: pages.tree
       parameters:
         - description: "스페이스의 이름이나 id"
@@ -2695,6 +2747,22 @@ paths:
             maximum: 1000
             minimum: 1
             type: integer
+        - description: "만든 사람의 아이디(username)나 id로 거른다"
+          in: query
+          name: createdBy
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
+        - description: "마지막으로 고친 사람의 아이디(username)나 id로 거른다"
+          in: query
+          name: updatedBy
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
       responses:
         "200":
           content:
@@ -2707,6 +2775,18 @@ paths:
                     items:
                       additionalProperties: false
                       properties:
+                        createdAt:
+                          description: "ISO 8601 시각(UTC)"
+                          type: string
+                        createdBy:
+                          description: "만든 사람의 id"
+                          type: string
+                        createdByName:
+                          description: "만든 사람의 이름"
+                          type: string
+                        createdByUsername:
+                          description: "만든 사람의 아이디"
+                          type: string
                         currentVersionNo:
                           description: "지금 버전 번호 — 고칠 때 `baseVersionNo`로 보낸다"
                           maximum: 9007199254740991
@@ -2734,6 +2814,15 @@ paths:
                         updatedAt:
                           description: "ISO 8601 시각(UTC)"
                           type: string
+                        updatedBy:
+                          description: "마지막으로 고친 사람의 id"
+                          type: string
+                        updatedByName:
+                          description: "마지막으로 고친 사람의 이름"
+                          type: string
+                        updatedByUsername:
+                          description: "마지막으로 고친 사람의 아이디"
+                          type: string
                       required:
                         - id
                         - spaceId
@@ -2742,6 +2831,13 @@ paths:
                         - position
                         - currentVersionNo
                         - updatedAt
+                        - createdBy
+                        - createdByUsername
+                        - createdByName
+                        - updatedBy
+                        - updatedByUsername
+                        - updatedByName
+                        - createdAt
                       type: object
                     type: array
                   space:
@@ -2759,7 +2855,7 @@ paths:
                       - name
                     type: object
                   total:
-                    description: "이 스페이스의 페이지 수 전체(잘리기 전)"
+                    description: "조건(`createdBy`·`updatedBy`)에 맞는 이 스페이스의 페이지 수 전체(잘리기 전)"
                     maximum: 9007199254740991
                     minimum: -9007199254740991
                     type: integer
@@ -2907,6 +3003,15 @@ paths:
                   createdAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   currentVersionNo:
                     description: "지금 버전 번호 — 고칠 때 `baseVersionNo`로 보낸다"
                     maximum: 9007199254740991
@@ -2941,6 +3046,15 @@ paths:
                   updatedAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  updatedBy:
+                    description: "마지막으로 고친 사람의 id"
+                    type: string
+                  updatedByName:
+                    description: "마지막으로 고친 사람의 이름"
+                    type: string
+                  updatedByUsername:
+                    description: "마지막으로 고친 사람의 아이디"
+                    type: string
                 required:
                   - id
                   - spaceId
@@ -2949,6 +3063,12 @@ paths:
                   - position
                   - currentVersionNo
                   - updatedAt
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - updatedBy
+                  - updatedByUsername
+                  - updatedByName
                   - createdAt
                   - format
                   - body
@@ -3067,7 +3187,7 @@ paths:
       tags:
         - pages
     get:
-      description: "페이지 하나를 본문과 함께 읽는다. 조상 경로(`ancestors`)와 지금 버전 번호(`currentVersionNo`)가 함께 온다 — 고칠 때 기준 버전으로 쓴다. `format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text."
+      description: "페이지 하나를 본문과 함께 읽는다. 조상 경로(`ancestors`)와 지금 버전 번호(`currentVersionNo`)가 함께 온다 — 고칠 때 기준 버전으로 쓴다. 만든 사람·마지막으로 고친 사람(id·아이디·이름)도 온다. `format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text."
       operationId: pages.get
       parameters:
         - description: "페이지의 id"
@@ -3126,6 +3246,15 @@ paths:
                   createdAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   currentVersionNo:
                     description: "지금 버전 번호 — 고칠 때 `baseVersionNo`로 보낸다"
                     maximum: 9007199254740991
@@ -3160,6 +3289,15 @@ paths:
                   updatedAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  updatedBy:
+                    description: "마지막으로 고친 사람의 id"
+                    type: string
+                  updatedByName:
+                    description: "마지막으로 고친 사람의 이름"
+                    type: string
+                  updatedByUsername:
+                    description: "마지막으로 고친 사람의 아이디"
+                    type: string
                 required:
                   - id
                   - spaceId
@@ -3168,6 +3306,12 @@ paths:
                   - position
                   - currentVersionNo
                   - updatedAt
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - updatedBy
+                  - updatedByUsername
+                  - updatedByName
                   - createdAt
                   - format
                   - body
@@ -3299,6 +3443,15 @@ paths:
                   createdAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   currentVersionNo:
                     description: "지금 버전 번호 — 고칠 때 `baseVersionNo`로 보낸다"
                     maximum: 9007199254740991
@@ -3333,6 +3486,15 @@ paths:
                   updatedAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  updatedBy:
+                    description: "마지막으로 고친 사람의 id"
+                    type: string
+                  updatedByName:
+                    description: "마지막으로 고친 사람의 이름"
+                    type: string
+                  updatedByUsername:
+                    description: "마지막으로 고친 사람의 아이디"
+                    type: string
                 required:
                   - id
                   - spaceId
@@ -3341,6 +3503,12 @@ paths:
                   - position
                   - currentVersionNo
                   - updatedAt
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - updatedBy
+                  - updatedByUsername
+                  - updatedByName
                   - createdAt
                   - format
                   - body
@@ -3494,6 +3662,18 @@ paths:
               schema:
                 additionalProperties: false
                 properties:
+                  createdAt:
+                    description: "ISO 8601 시각(UTC)"
+                    type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   currentVersionNo:
                     description: "지금 버전 번호 — 고칠 때 `baseVersionNo`로 보낸다"
                     maximum: 9007199254740991
@@ -3521,6 +3701,15 @@ paths:
                   updatedAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  updatedBy:
+                    description: "마지막으로 고친 사람의 id"
+                    type: string
+                  updatedByName:
+                    description: "마지막으로 고친 사람의 이름"
+                    type: string
+                  updatedByUsername:
+                    description: "마지막으로 고친 사람의 아이디"
+                    type: string
                 required:
                   - id
                   - spaceId
@@ -3529,6 +3718,13 @@ paths:
                   - position
                   - currentVersionNo
                   - updatedAt
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - updatedBy
+                  - updatedByUsername
+                  - updatedByName
+                  - createdAt
                 type: object
           description: "성공"
         "400":
@@ -4005,6 +4201,15 @@ paths:
                   createdAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   currentVersionNo:
                     description: "지금 버전 번호 — 고칠 때 `baseVersionNo`로 보낸다"
                     maximum: 9007199254740991
@@ -4039,6 +4244,15 @@ paths:
                   updatedAt:
                     description: "ISO 8601 시각(UTC)"
                     type: string
+                  updatedBy:
+                    description: "마지막으로 고친 사람의 id"
+                    type: string
+                  updatedByName:
+                    description: "마지막으로 고친 사람의 이름"
+                    type: string
+                  updatedByUsername:
+                    description: "마지막으로 고친 사람의 아이디"
+                    type: string
                 required:
                   - id
                   - spaceId
@@ -4047,6 +4261,12 @@ paths:
                   - position
                   - currentVersionNo
                   - updatedAt
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - updatedBy
+                  - updatedByUsername
+                  - updatedByName
                   - createdAt
                   - format
                   - body
@@ -4340,7 +4560,7 @@ paths:
         - attachments
   "/pages/{pageId}/comments":
     get:
-      description: "댓글과 답글(`parentId`)을 시간순으로. `format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text."
+      description: "댓글과 답글(`parentId`)을 시간순으로. 쓴 사람은 이름(`author`)·id(`authorId`)·아이디(`authorUsername`)로 온다. `author`를 쿼리에 아이디나 id로 주면 그 사람의 댓글만 — 없는 사람은 404 `USER_NOT_FOUND`. `format`(쿼리)으로 본문 형식을 고른다 — markdown(기본)·json·text."
       operationId: comments.list
       parameters:
         - description: "페이지의 id"
@@ -4361,6 +4581,14 @@ paths:
               - json
               - text
             type: string
+        - description: "쓴 사람의 아이디(username)나 id로 거른다"
+          in: query
+          name: author
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
       responses:
         "200":
           content:
@@ -4375,6 +4603,12 @@ paths:
                       properties:
                         author:
                           description: "쓴 사람의 이름"
+                          type: string
+                        authorId:
+                          description: "쓴 사람의 id"
+                          type: string
+                        authorUsername:
+                          description: "쓴 사람의 아이디 — 지워진 사용자면 빈 글"
                           type: string
                         body:
                           anyOf:
@@ -4420,6 +4654,8 @@ paths:
                         - pageId
                         - parentId
                         - author
+                        - authorId
+                        - authorUsername
                         - createdAt
                         - updatedAt
                         - canDelete
@@ -4526,6 +4762,12 @@ paths:
                   author:
                     description: "쓴 사람의 이름"
                     type: string
+                  authorId:
+                    description: "쓴 사람의 id"
+                    type: string
+                  authorUsername:
+                    description: "쓴 사람의 아이디 — 지워진 사용자면 빈 글"
+                    type: string
                   body:
                     anyOf:
                       - type: string
@@ -4570,6 +4812,8 @@ paths:
                   - pageId
                   - parentId
                   - author
+                  - authorId
+                  - authorUsername
                   - createdAt
                   - updatedAt
                   - canDelete
@@ -4850,7 +5094,7 @@ paths:
         - labels
   "/search":
     get:
-      description: "필수는 검색어(`q`)뿐이다 — 내가 읽을 수 있는 모든 스페이스에서 찾는다. `space`(이름이나 id)로 좁힌다. 없는 스페이스 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`다. 모르는 쿼리 칸은 400."
+      description: "필수는 검색어(`q`)뿐이다 — 내가 읽을 수 있는 모든 스페이스에서 찾는다. `space`(이름이나 id)로 좁힌다. 없는 스페이스 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`다. 항목마다 만든 사람·마지막으로 고친 사람이 온다. 만든 사람(`createdBy`)·마지막으로 고친 사람(`updatedBy`)을 아이디(username)나 id로 주면 그 사람의 페이지만 — 없는 사람은 404 `USER_NOT_FOUND`. 모르는 쿼리 칸은 400."
       operationId: search.find
       parameters:
         - description: "검색어 — 제목과 본문에서 찾는다(두 글자부터 된다)"
@@ -4878,6 +5122,22 @@ paths:
             maximum: 50
             minimum: 1
             type: integer
+        - description: "만든 사람의 아이디(username)나 id로 거른다"
+          in: query
+          name: createdBy
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
+        - description: "마지막으로 고친 사람의 아이디(username)나 id로 거른다"
+          in: query
+          name: updatedBy
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
       responses:
         "200":
           content:
@@ -4890,6 +5150,18 @@ paths:
                     items:
                       additionalProperties: false
                       properties:
+                        createdAt:
+                          description: "ISO 8601 시각(UTC)"
+                          type: string
+                        createdBy:
+                          description: "만든 사람의 id"
+                          type: string
+                        createdByName:
+                          description: "만든 사람의 이름"
+                          type: string
+                        createdByUsername:
+                          description: "만든 사람의 아이디"
+                          type: string
                         pageId:
                           description: "페이지의 id"
                           type: string
@@ -4908,6 +5180,15 @@ paths:
                         updatedAt:
                           description: "ISO 8601 시각(UTC)"
                           type: string
+                        updatedBy:
+                          description: "마지막으로 고친 사람의 id"
+                          type: string
+                        updatedByName:
+                          description: "마지막으로 고친 사람의 이름"
+                          type: string
+                        updatedByUsername:
+                          description: "마지막으로 고친 사람의 아이디"
+                          type: string
                       required:
                         - pageId
                         - spaceId
@@ -4915,6 +5196,13 @@ paths:
                         - title
                         - snippet
                         - updatedAt
+                        - createdBy
+                        - createdByUsername
+                        - createdByName
+                        - updatedBy
+                        - updatedByUsername
+                        - updatedByName
+                        - createdAt
                       type: object
                     type: array
                 required:
@@ -5190,7 +5478,7 @@ paths:
         - admin
   "/spaces":
     get:
-      description: "내가 볼 수 있는 스페이스. `q`로 이름을 찾고 `limit`으로 자른다 — 잘렸으면 `truncated`가 true다."
+      description: "내가 볼 수 있는 스페이스. `q`로 이름을 찾고 `limit`으로 자른다 — 잘렸으면 `truncated`가 true다. 항목마다 만든 사람(id·아이디·이름)과 만든 때가 온다. `createdBy`(만든 사람)·`member`(든 사람)를 아이디(username)나 id로 주면 그 사람의 스페이스만 — 없는 사람은 404 `USER_NOT_FOUND`."
       operationId: spaces.list
       parameters:
         - description: "찾을 말 — 이름의 일부(대소문자 무시)"
@@ -5208,6 +5496,22 @@ paths:
             maximum: 1000
             minimum: 1
             type: integer
+        - description: "만든 사람의 아이디(username)나 id로 거른다 — 팀 스페이스는 만든 사람이 처음의 owner이고, 개인 스페이스는 그 사람의 것이다"
+          in: query
+          name: createdBy
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
+        - description: "그 사람이 든 스페이스만 — 팀은 Crew이거나 만든 사람, 개인은 그 사람의 것. 아이디(username)나 id"
+          in: query
+          name: member
+          required: false
+          schema:
+            maxLength: 200
+            minLength: 1
+            type: string
       responses:
         "200":
           content:
@@ -5236,6 +5540,18 @@ paths:
                           type:
                             - string
                             - "null"
+                        createdAt:
+                          description: "ISO 8601 시각(UTC)"
+                          type: string
+                        createdBy:
+                          description: "만든 사람의 id"
+                          type: string
+                        createdByName:
+                          description: "만든 사람의 이름"
+                          type: string
+                        createdByUsername:
+                          description: "만든 사람의 아이디"
+                          type: string
                         description:
                           description: "설명(없으면 null)"
                           type: string
@@ -5283,6 +5599,10 @@ paths:
                         - myRole
                         - canWrite
                         - canManageMembers
+                        - createdBy
+                        - createdByUsername
+                        - createdByName
+                        - createdAt
                       type: object
                     type: array
                   truncated:
@@ -5383,6 +5703,18 @@ paths:
                     type:
                       - string
                       - "null"
+                  createdAt:
+                    description: "ISO 8601 시각(UTC)"
+                    type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   description:
                     description: "설명(없으면 null)"
                     type: string
@@ -5430,6 +5762,10 @@ paths:
                   - myRole
                   - canWrite
                   - canManageMembers
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - createdAt
                 type: object
           description: "성공"
         "400":
@@ -5577,6 +5913,18 @@ paths:
                     type:
                       - string
                       - "null"
+                  createdAt:
+                    description: "ISO 8601 시각(UTC)"
+                    type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   description:
                     description: "설명(없으면 null)"
                     type: string
@@ -5624,6 +5972,10 @@ paths:
                   - myRole
                   - canWrite
                   - canManageMembers
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - createdAt
                 type: object
           description: "성공"
         "400":
@@ -5720,6 +6072,18 @@ paths:
                     type:
                       - string
                       - "null"
+                  createdAt:
+                    description: "ISO 8601 시각(UTC)"
+                    type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   description:
                     description: "설명(없으면 null)"
                     type: string
@@ -5767,6 +6131,10 @@ paths:
                   - myRole
                   - canWrite
                   - canManageMembers
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - createdAt
                 type: object
           description: "성공"
         "400":
@@ -6250,6 +6618,18 @@ paths:
                     type:
                       - string
                       - "null"
+                  createdAt:
+                    description: "ISO 8601 시각(UTC)"
+                    type: string
+                  createdBy:
+                    description: "만든 사람의 id"
+                    type: string
+                  createdByName:
+                    description: "만든 사람의 이름"
+                    type: string
+                  createdByUsername:
+                    description: "만든 사람의 아이디"
+                    type: string
                   description:
                     description: "설명(없으면 null)"
                     type: string
@@ -6297,6 +6677,10 @@ paths:
                   - myRole
                   - canWrite
                   - canManageMembers
+                  - createdBy
+                  - createdByUsername
+                  - createdByName
+                  - createdAt
                 type: object
           description: "성공"
         "400":

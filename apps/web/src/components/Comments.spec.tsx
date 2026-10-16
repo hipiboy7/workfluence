@@ -22,6 +22,7 @@ const comment = (id: string, parentId: string | null, text: string, canDelete = 
   body: doc(text),
   createdBy: 'u1',
   createdByName: '김',
+  createdByUsername: 'kim',
   createdAt: '2026-09-27T00:00:00.000Z',
   updatedAt: '2026-09-27T00:00:00.000Z',
   canDelete,

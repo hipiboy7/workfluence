@@ -2,10 +2,12 @@ import { HttpException } from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { v1SearchQuery } from '@workfluence/shared';
 import { pages } from '../db/schema';
+import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
+import { PagesService } from '../pages/pages.service';
 import { SearchService } from '../search/search.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { person } from '../test/people';
+import { person, userLookup } from '../test/people';
 import { V1SearchController } from './v1-search.controller';
 
 /**
@@ -20,7 +22,7 @@ let ctrl: V1SearchController;
 beforeAll(async () => {
   ({ db } = await openTestDb());
   spacesSvc = new SpacesService(db);
-  ctrl = new V1SearchController(new SearchService(db), spacesSvc);
+  ctrl = new V1SearchController(new SearchService(db), spacesSvc, new PagesService(db, spacesSvc, new NotificationsService(db, new InAppChannel())), userLookup(db));
 });
 afterAll(closeTestDb);
 beforeEach(() => resetTables(db));
@@ -41,6 +43,24 @@ describe('검색', () => {
     const r = await ctrl.find(query({ q: '지연' }), me);
     expect(r.items.map((h) => h.title).sort()).toEqual(['10/7 장애', '휴가 규정']);
     expect(r.items[0]).toMatchObject({ spaceName: expect.any(String), snippet: expect.stringContaining('지연') });
+  });
+
+  it('만든 사람·고친 사람을 싣고, 그것으로 거른다 — 자르기 전에 (F-023)', async () => {
+    const me = await person(db, 'me', 'member', { displayName: '나' });
+    const bob = await person(db, 'bob', 'member', { displayName: '밥' });
+    const s = await team(me, '팀');
+    await addPage(s.id, me.id, '내 글', '검색 대상', { updatedAt: new Date('2026-01-01T00:00:00Z') });
+    await addPage(s.id, bob.id, '밥 글', '검색 대상', { updatedBy: me.id, updatedAt: new Date('2026-02-01T00:00:00Z') });
+    const all = await ctrl.find(query({ q: '검색' }), me);
+    expect(all.items.find((h) => h.title === '밥 글')).toMatchObject({ createdBy: bob.id, createdByUsername: 'bob', createdByName: '밥', updatedBy: me.id, updatedByUsername: 'me', updatedByName: '나' });
+    // 새로 고친 '밥 글'이 앞이다 — 거르기가 자른 뒤라면 limit 1에서 '내 글'이 사라진다
+    expect((await ctrl.find(query({ q: '검색', createdBy: 'me', limit: '1' }), me)).items.map((h) => h.title)).toEqual(['내 글']);
+    expect((await ctrl.find(query({ q: '검색', createdBy: bob.id }), me)).items.map((h) => h.title)).toEqual(['밥 글']);
+    expect((await ctrl.find(query({ q: '검색', updatedBy: 'me' }), me)).items.map((h) => h.title)).toEqual(['밥 글', '내 글']);
+    expect((await ctrl.find(query({ q: '검색', createdBy: 'bob', updatedBy: 'bob' }), me)).items).toEqual([]);
+    const e = await ctrl.find(query({ q: '검색', createdBy: 'nobody' }), me).catch((x: unknown) => x);
+    expect((e as HttpException).getStatus()).toBe(404);
+    expect(((e as HttpException).getResponse() as { code: string }).code).toBe('USER_NOT_FOUND');
   });
 
   it('**스페이스를 이름으로 좁힌다**(id로도)', async () => {

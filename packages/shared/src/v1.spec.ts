@@ -8,7 +8,13 @@ import {
   matchLabel,
   matchMember,
   matchSpaces,
+  matchesAuthor,
   capItems,
+  withAuthorship,
+  v1CommentListQuery,
+  v1LabelPagesQuery,
+  v1PageTreeQuery,
+  type V1Authorship,
   toV1Attachment,
   toV1Category,
   toV1Comment,
@@ -418,6 +424,12 @@ describe('분류 입력', () => {
 });
 
 describe('v1SpaceListQuery', () => {
+  it('만든 사람·든 사람은 아이디나 id로 — 앞뒤 빈칸은 뗀다 (F-023)', () => {
+    expect(v1SpaceListQuery.parse({ createdBy: ' alice ', member: UUID })).toEqual({ createdBy: 'alice', member: UUID });
+    expect(v1SpaceListQuery.safeParse({ createdBy: '  ' }).success).toBe(false);
+    expect(v1SpaceListQuery.safeParse({ member: 'x'.repeat(201) }).success).toBe(false);
+  });
+
   it('찾기 `q`와 `limit`는 모두 선택이다', () => {
     expect(v1SpaceListQuery.parse({})).toEqual({});
     expect(v1SpaceListQuery.parse({ q: ' 장애 ', limit: '10' })).toEqual({ q: '장애', limit: 10 });
@@ -460,6 +472,7 @@ describe('응답 줄이기 — 에이전트가 쓸 것만', () => {
     categoryName: '운영',
     createdBy: 'u1',
     createdByUsername: 'alice',
+    createdByName: '앨리스',
     memberCount: 3,
     myRole: 'owner',
     access: { canRead: true, canWrite: true, canManageMembers: true, canEditInfo: true, canChangeStatus: true, canDelete: true, isOwner: true, crewFrozen: false },
@@ -480,6 +493,10 @@ describe('응답 줄이기 — 에이전트가 쓸 것만', () => {
       myRole: 'owner',
       canWrite: true,
       canManageMembers: true,
+      createdBy: 'u1',
+      createdByUsername: 'alice',
+      createdByName: '앨리스',
+      createdAt: 'a',
     });
   });
 
@@ -570,8 +587,8 @@ describe('v1UploadDto — 텍스트나 base64로 올린다 (에이전트는 바�
 
 describe('응답 변환 — 댓글·첨부', () => {
   it('댓글: 글쓴이 이름·본문은 형식대로·지울 수 있는지', () => {
-    const c: CommentView = { id: 'c1', pageId: 'p1', parentId: null, body: doc('안녕'), createdBy: 'u1', createdByName: '앨리스', createdAt: 'a', updatedAt: 'b', canDelete: true };
-    expect(toV1Comment(c, 'markdown')).toEqual({ id: 'c1', pageId: 'p1', parentId: null, author: '앨리스', createdAt: 'a', updatedAt: 'b', canDelete: true, format: 'markdown', body: '안녕' });
+    const c: CommentView = { id: 'c1', pageId: 'p1', parentId: null, body: doc('안녕'), createdBy: 'u1', createdByName: '앨리스', createdByUsername: 'alice', createdAt: 'a', updatedAt: 'b', canDelete: true };
+    expect(toV1Comment(c, 'markdown')).toEqual({ id: 'c1', pageId: 'p1', parentId: null, author: '앨리스', authorId: 'u1', authorUsername: 'alice', createdAt: 'a', updatedAt: 'b', canDelete: true, format: 'markdown', body: '안녕' });
     expect(toV1Comment(c, 'json').body).toEqual(doc('안녕'));
   });
 
@@ -588,6 +605,44 @@ describe('응답 변환 — 댓글·첨부', () => {
       url: `/api/v1/attachments/${UUID}`,
       href: `/api/attachments/${UUID}`,
     });
+  });
+});
+
+describe('사람으로 거르기 — 만든 사람·마지막으로 고친 사람 (F-023)', () => {
+  const who = (createdBy: string, updatedBy: string): V1Authorship => ({
+    createdBy,
+    createdByUsername: createdBy,
+    createdByName: createdBy,
+    updatedBy,
+    updatedByUsername: updatedBy,
+    updatedByName: updatedBy,
+    createdAt: 'a',
+  });
+
+  it('검색·트리·라벨·댓글의 쿼리가 사람 칸을 받는다(선택)', () => {
+    expect(v1SearchQuery.parse({ q: 'x', createdBy: 'alice', updatedBy: UUID })).toEqual({ q: 'x', limit: 20, createdBy: 'alice', updatedBy: UUID });
+    expect(v1PageTreeQuery.parse({ space: 's', createdBy: ' bob ' })).toEqual({ space: 's', limit: V1_DEFAULTS.listLimit, createdBy: 'bob' });
+    expect(v1PageTreeQuery.parse({ space: 's' })).toEqual({ space: 's', limit: V1_DEFAULTS.listLimit });
+    expect(v1LabelPagesQuery.parse({ updatedBy: 'carol' })).toEqual({ limit: 100, updatedBy: 'carol' });
+    expect(v1CommentListQuery.parse({ author: 'dave' })).toEqual({ format: 'markdown', author: 'dave' });
+    expect(v1PageTreeQuery.safeParse({ space: 's', createdBy: '' }).success).toBe(false);
+    expect(v1CommentListQuery.safeParse({ author: ' ' }).success).toBe(false);
+  });
+
+  it('matchesAuthor: 안 준 조건은 보지 않고, 준 조건은 모두 맞아야 한다', () => {
+    const a = who('u1', 'u2');
+    expect(matchesAuthor(a, {})).toBe(true);
+    expect(matchesAuthor(a, { createdBy: 'u1' })).toBe(true);
+    expect(matchesAuthor(a, { updatedBy: 'u2' })).toBe(true);
+    expect(matchesAuthor(a, { createdBy: 'u1', updatedBy: 'u2' })).toBe(true);
+    expect(matchesAuthor(a, { createdBy: 'u2' })).toBe(false);
+    expect(matchesAuthor(a, { createdBy: 'u1', updatedBy: 'u1' })).toBe(false);
+  });
+
+  it('withAuthorship: 페이지 id(`id`나 `pageId`)로 붙이고, 표에 없는 줄은 뺀다', () => {
+    const of = new Map([['p1', who('u1', 'u2')]]);
+    expect(withAuthorship([{ id: 'p1', title: 'T' }, { id: 'gone', title: 'G' }], of)).toEqual([{ id: 'p1', title: 'T', ...who('u1', 'u2') }]);
+    expect(withAuthorship([{ pageId: 'p1', snippet: '' }], of)).toEqual([{ pageId: 'p1', snippet: '', ...who('u1', 'u2') }]);
   });
 });
 

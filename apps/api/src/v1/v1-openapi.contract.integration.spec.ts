@@ -217,13 +217,13 @@ beforeAll(async () => {
   const trashSvc = new TrashService(db, spacesSvc);
   const usersSvc = new UsersService(db, new SettingsService(db, loadEnv()), bus);
   c = {
-    pages: new V1PagesController(pagesSvc, new PageUseCases(pagesSvc, audit, {} as never, { notify: vi.fn() } as never, spacesSvc, db), spacesSvc, live),
-    spaces: new V1SpacesController(spacesSvc, new SpaceUseCases(spacesSvc, audit, db), cats),
+    pages: new V1PagesController(pagesSvc, new PageUseCases(pagesSvc, audit, {} as never, { notify: vi.fn() } as never, spacesSvc, db), spacesSvc, live, usersSvc),
+    spaces: new V1SpacesController(spacesSvc, new SpaceUseCases(spacesSvc, audit, db), cats, usersSvc),
     categories: new V1CategoriesController(cats),
-    comments: new V1CommentsController(commentsSvc, new CommentUseCases(commentsSvc, audit, { notify: vi.fn().mockResolvedValue(undefined) } as never, db)),
-    labels: new V1LabelsController(labelsSvc, new LabelUseCases(labelsSvc, audit, db)),
+    comments: new V1CommentsController(commentsSvc, new CommentUseCases(commentsSvc, audit, { notify: vi.fn().mockResolvedValue(undefined) } as never, db), usersSvc),
+    labels: new V1LabelsController(labelsSvc, new LabelUseCases(labelsSvc, audit, db), pagesSvc, usersSvc),
     attachments: new V1AttachmentsController(attSvc, new AttachmentUseCases(attSvc, audit, db)),
-    search: new V1SearchController(new SearchService(db), spacesSvc),
+    search: new V1SearchController(new SearchService(db), spacesSvc, pagesSvc, usersSvc),
     templates: new V1TemplatesController(tplSvc, new TemplateUseCases(tplSvc, audit, db)),
     trash: new V1TrashController(trashSvc, new TrashUseCases(trashSvc, audit, db)),
     notes: new V1NotificationsController(notif),

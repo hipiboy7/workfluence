@@ -39,6 +39,8 @@ import {
   v1MovePageDto,
   v1ExportQuery, v1PageQuery, v1PageTreeQuery,
   v1SearchQuery,
+  v1LabelPagesQuery,
+  v1CommentListQuery,
   v1SpaceListQuery,
   v1SpaceStatusDto,
   v1TemplateDto,
@@ -280,8 +282,8 @@ const exportQuery = v1ExportQuery;
 
 export const V1_OPERATIONS: V1Op[] = [
   // ---- 페이지 ----
-  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 많으면 `limit`에서 잘리고 `truncated`가 true다(`total`은 전체 수) — 잘린 목록의 일부 항목은 부모가 빠져 있을 수 있다. 본문은 `GET /pages/{id}`로 읽는다.', query: v1PageTreeQuery, response: v1PageTree },
-  { id: 'pages.get', method: 'get', path: '/pages/{id}', tag: 'pages', summary: '페이지 읽기', description: `페이지 하나를 본문과 함께 읽는다. 조상 경로(\`ancestors\`)와 지금 버전 번호(\`currentVersionNo\`)가 함께 온다 — 고칠 때 기준 버전으로 쓴다. ${formatNote}`, params: pid, query: v1PageQuery, response: v1Page },
+  { id: 'pages.tree', method: 'get', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '스페이스의 페이지 목록(트리)', description: '스페이스 하나의 페이지를 본문 없이 돌려준다. 각 항목의 `parentId`·`position`으로 트리를 그린다. 많으면 `limit`에서 잘리고 `truncated`가 true다(`total`은 전체 수) — 잘린 목록의 일부 항목은 부모가 빠져 있을 수 있다. 본문은 `GET /pages/{id}`로 읽는다. 항목마다 만든 사람·마지막으로 고친 사람(id·아이디·이름)과 만든 때가 온다. 만든 사람(`createdBy`)·마지막으로 고친 사람(`updatedBy`)을 아이디(username)나 id로 주면 그 사람의 페이지만 — 없는 사람은 404 `USER_NOT_FOUND`.', query: v1PageTreeQuery, response: v1PageTree },
+  { id: 'pages.get', method: 'get', path: '/pages/{id}', tag: 'pages', summary: '페이지 읽기', description: `페이지 하나를 본문과 함께 읽는다. 조상 경로(\`ancestors\`)와 지금 버전 번호(\`currentVersionNo\`)가 함께 온다 — 고칠 때 기준 버전으로 쓴다. 만든 사람·마지막으로 고친 사람(id·아이디·이름)도 온다. ${formatNote}`, params: pid, query: v1PageQuery, response: v1Page },
   { id: 'pages.create', method: 'post', path: '/pages', tag: 'pages', conflict: CONFLICTS.space, summary: '페이지 만들기', description: '필수는 `space`(이름이나 id)·`title`·`body`뿐이다. 부모를 안 주면 맨 위, 위치는 맨 끝에 만들고 서버가 정한 값을 응답이 말한다. 본문은 마크다운이 기본이다(`format`=json이면 문서 객체). 원시 HTML·그림·허용 밖 링크는 400이다.', body: v1CreatePageDto, query: v1PageQuery, response: v1Page },
   { id: 'pages.update', method: 'patch', path: '/pages/{id}', tag: 'pages', conflict: CONFLICTS.update, summary: '페이지 고치기', description: '고칠 것(`title`·`body`)만 보낸다 — 안 보낸 것은 그대로다. 기준 버전(`baseVersionNo`)은 **꼭** 보낸다 — 페이지를 읽을 때 받은 `currentVersionNo`다. 사람이 그 페이지를 실시간으로 편집 중이면 409 `PAGE_BEING_EDITED` — 편집이 끝난 뒤 다시 시도한다. 기준 버전이 어긋나면 409 `VERSION_CONFLICT`.', params: pid, body: v1UpdatePageDto, query: v1PageQuery, response: v1Page },
   { id: 'pages.move', method: 'patch', path: '/pages/{id}/move', tag: 'pages', conflict: CONFLICTS.editing, summary: '페이지 옮기기', description: '부모(`parentId`, null이면 맨 위)만 있으면 된다. 위치를 안 주면 형제의 맨 끝이다.', params: pid, body: v1MovePageDto, response: v1MovedPage },
@@ -293,7 +295,7 @@ export const V1_OPERATIONS: V1Op[] = [
   { id: 'pages.export', method: 'get', path: '/pages/{id}/export', tag: 'pages', summary: '페이지를 HTML 한 파일로 내보내기', description: '내려받는 파일(`Content-Disposition: attachment`)이다. 감사로그에 남는다.', params: pid, query: exportQuery, response: { contentType: 'text/html', description: 'HTML 한 파일' } },
 
   // ---- 스페이스·Crew ----
-  { id: 'spaces.list', method: 'get', path: '/spaces', tag: 'spaces', summary: '스페이스 목록', description: '내가 볼 수 있는 스페이스. `q`로 이름을 찾고 `limit`으로 자른다 — 잘렸으면 `truncated`가 true다.', query: v1SpaceListQuery, response: v1Items(v1Space).extend({ truncated: v1Truncated }) },
+  { id: 'spaces.list', method: 'get', path: '/spaces', tag: 'spaces', summary: '스페이스 목록', description: '내가 볼 수 있는 스페이스. `q`로 이름을 찾고 `limit`으로 자른다 — 잘렸으면 `truncated`가 true다. 항목마다 만든 사람(id·아이디·이름)과 만든 때가 온다. `createdBy`(만든 사람)·`member`(든 사람)를 아이디(username)나 id로 주면 그 사람의 스페이스만 — 없는 사람은 404 `USER_NOT_FOUND`.', query: v1SpaceListQuery, response: v1Items(v1Space).extend({ truncated: v1Truncated }) },
   { id: 'spaces.get', method: 'get', path: '/spaces/{id}', tag: 'spaces', summary: '스페이스 하나', description: '내 역할(`myRole`)과 할 수 있는 일(`canWrite`·`canManageMembers`)이 함께 온다.', params: sid, response: v1Space },
   { id: 'spaces.create', method: 'post', path: '/spaces', tag: 'spaces', summary: '팀 스페이스 만들기', description: '필수는 `name`뿐이다. 종류는 팀, 설명은 빈 글, 분류는 없음이 기본이다. 분류는 **이름으로** 고르고 없는 이름이면 404와 고를 수 있는 이름을 돌려준다.', body: v1CreateSpaceDto, response: v1Space },
   { id: 'spaces.update', method: 'patch', path: '/spaces/{id}', tag: 'spaces', summary: '스페이스 이름·설명·분류 고치기', description: '고칠 것만 보낸다. 분류는 null이면 지운다.', params: sid, body: v1UpdateSpaceDto, response: v1Space },
@@ -311,14 +313,14 @@ export const V1_OPERATIONS: V1Op[] = [
   { id: 'categories.delete', method: 'delete', path: '/categories/{id}', tag: 'categories', summary: '분류 지우기', description: '지우면 그 분류를 쓰던 스페이스는 분류 없음이 된다.', params: { id: id('분류의 id') }, response: v1Ok },
 
   // ---- 댓글 ----
-  { id: 'comments.list', method: 'get', path: '/pages/{pageId}/comments', tag: 'comments', summary: '페이지의 댓글', description: `댓글과 답글(\`parentId\`)을 시간순으로. ${formatNote}`, params: pageId, query: v1PageQuery, response: v1Items(v1Comment) },
+  { id: 'comments.list', method: 'get', path: '/pages/{pageId}/comments', tag: 'comments', summary: '페이지의 댓글', description: `댓글과 답글(\`parentId\`)을 시간순으로. 쓴 사람은 이름(\`author\`)·id(\`authorId\`)·아이디(\`authorUsername\`)로 온다. \`author\`를 쿼리에 아이디나 id로 주면 그 사람의 댓글만 — 없는 사람은 404 \`USER_NOT_FOUND\`. ${formatNote}`, params: pageId, query: v1CommentListQuery, response: v1Items(v1Comment) },
   { id: 'comments.create', method: 'post', path: '/pages/{pageId}/comments', tag: 'comments', summary: '댓글 쓰기', description: '필수는 `body`뿐이다. 답글이면 `parentId`. 본문의 `@사용자`는 멘션이 되어 알림이 간다.', params: pageId, body: v1CommentDto, query: v1PageQuery, response: v1Comment },
   { id: 'comments.update', method: 'patch', path: '/comments/{id}', tag: 'comments', summary: '댓글 고치기', description: '내가 쓴 댓글만 고칠 수 있다. 본문 형식은 쓰기 형식(markdown·json)이다.', params: { id: id('댓글의 id') }, body: v1CommentUpdateDto, query: v1PageQuery, response: v1Comment },
   { id: 'comments.delete', method: 'delete', path: '/comments/{id}', tag: 'comments', summary: '댓글 지우기', description: '쓴 사람, 또는 그 스페이스에 쓸 수 있고 페이지를 지울 권한이 있는 사람만 지운다(중지된 스페이스에서는 아무도). 답글은 함께 지워지지 않는다.', params: { id: id('댓글의 id') }, response: v1Ok },
 
   // ---- 라벨 ----
   { id: 'labels.list', method: 'get', path: '/labels', tag: 'labels', summary: '모든 라벨', description: '쓰이는 라벨의 이름 목록.', query: listLimitDto, response: array(v1Label) },
-  { id: 'labels.pages', method: 'get', path: '/labels/{name}/pages', tag: 'labels', summary: '라벨이 붙은 페이지', description: '그 라벨이 붙은, 내가 읽을 수 있는 페이지.', params: { name: text('라벨 이름') }, query: listLimitDto, response: v1Items(v1SearchHit) },
+  { id: 'labels.pages', method: 'get', path: '/labels/{name}/pages', tag: 'labels', summary: '라벨이 붙은 페이지', description: '그 라벨이 붙은, 내가 읽을 수 있는 페이지. 항목마다 만든 사람·마지막으로 고친 사람이 온다. 만든 사람(`createdBy`)·마지막으로 고친 사람(`updatedBy`)을 아이디(username)나 id로 주면 그 사람의 페이지만 — 없는 사람은 404 `USER_NOT_FOUND`.', params: { name: text('라벨 이름') }, query: v1LabelPagesQuery, response: v1Items(v1SearchHit) },
   { id: 'labels.forPage', method: 'get', path: '/pages/{pageId}/labels', tag: 'labels', summary: '페이지의 라벨', description: '그 페이지에 붙은 라벨.', params: pageId, response: array(v1Label) },
   { id: 'labels.attach', method: 'post', path: '/pages/{pageId}/labels', tag: 'labels', summary: '라벨 붙이기', description: '이름만 있으면 된다 — 없는 라벨이면 만든다. 이름은 소문자로 저장된다.', params: pageId, body: v1LabelDto, response: v1Label },
   { id: 'labels.detach', method: 'delete', path: '/pages/{pageId}/labels/{ref}', tag: 'labels', summary: '라벨 떼기', description: '`ref`는 라벨의 이름이나 id.', params: { ...pageId, ref: text('라벨의 이름이나 id') }, response: v1Ok },
@@ -330,7 +332,7 @@ export const V1_OPERATIONS: V1Op[] = [
   { id: 'attachments.delete', method: 'delete', path: '/attachments/{id}', tag: 'attachments', summary: '첨부 지우기', description: '그 스페이스에 쓸 수 있는 사람, 또는 올린 사람이 지운다(중지된 스페이스에서는 아무도).', params: { id: id('첨부의 id') }, response: v1Ok },
 
   // ---- 검색 ----
-  { id: 'search.find', method: 'get', path: '/search', tag: 'search', conflict: CONFLICTS.space, summary: '페이지 검색', description: '필수는 검색어(`q`)뿐이다 — 내가 읽을 수 있는 모든 스페이스에서 찾는다. `space`(이름이나 id)로 좁힌다. 없는 스페이스 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`다. 모르는 쿼리 칸은 400.', query: v1SearchQuery, response: v1Items(v1SearchHit) },
+  { id: 'search.find', method: 'get', path: '/search', tag: 'search', conflict: CONFLICTS.space, summary: '페이지 검색', description: '필수는 검색어(`q`)뿐이다 — 내가 읽을 수 있는 모든 스페이스에서 찾는다. `space`(이름이나 id)로 좁힌다. 없는 스페이스 이름은 빈 결과가 아니라 404 `SPACE_NOT_FOUND`다. 항목마다 만든 사람·마지막으로 고친 사람이 온다. 만든 사람(`createdBy`)·마지막으로 고친 사람(`updatedBy`)을 아이디(username)나 id로 주면 그 사람의 페이지만 — 없는 사람은 404 `USER_NOT_FOUND`. 모르는 쿼리 칸은 400.', query: v1SearchQuery, response: v1Items(v1SearchHit) },
 
   // ---- 템플릿 ----
   { id: 'templates.list', method: 'get', path: '/templates', tag: 'templates', summary: '페이지 템플릿 목록', description: `새 페이지의 본문으로 쓸 틀. 본문을 읽어 \`POST /pages\`의 \`body\`로 보내면 된다. ${formatNote}`, query: v1PageQuery, response: v1Items(v1Template) },

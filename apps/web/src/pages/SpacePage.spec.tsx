@@ -39,6 +39,7 @@ const space: SpaceView = {
   categoryName: null,
   createdBy: 'u1',
   createdByUsername: 'owner',
+  createdByName: '주인',
   memberCount: 2,
   myRole: 'owner',
   access: { canRead: true, canWrite: true, canManageMembers: true, canEditInfo: true, canChangeStatus: true, canDelete: false, isOwner: true, crewFrozen: false },

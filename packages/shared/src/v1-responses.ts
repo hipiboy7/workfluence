@@ -21,6 +21,16 @@ export const v1Count = z.object({ count: z.number().int() });
 export const v1Items = <T extends z.ZodType>(item: T) => z.object({ items: z.array(item) });
 
 // ---- 페이지 ----
+/** 만든 사람·마지막으로 고친 사람 (F-023) — 목록·검색·읽기가 함께 싣는다 */
+const authorship = {
+  createdBy: z.string(),
+  createdByUsername: z.string(),
+  createdByName: z.string(),
+  updatedBy: z.string(),
+  updatedByUsername: z.string(),
+  updatedByName: z.string(),
+  createdAt: iso,
+};
 export const v1PageSummary = z.object({
   id: z.string(),
   spaceId: z.string(),
@@ -29,13 +39,14 @@ export const v1PageSummary = z.object({
   position: z.number().int(),
   currentVersionNo: z.number().int(),
   updatedAt: iso,
+  ...authorship,
 });
 /** 목록이 `limit`에서 잘렸는가 — 잘렸으면 `true`, 에이전트가 부분 목록을 전체로 읽지 않게 */
 export const v1Truncated = z.boolean().describe('`limit`에서 잘렸으면 true — 뒤에 더 있다. `limit`을 올리거나 조건을 좁혀 다시 읽는다');
 export const v1PageTree = z.object({
   space: z.object({ id: z.string(), name: z.string() }),
   items: z.array(v1PageSummary),
-  total: z.number().int().describe('이 스페이스의 페이지 수 전체(잘리기 전)'),
+  total: z.number().int().describe('조건(`createdBy`·`updatedBy`)에 맞는 이 스페이스의 페이지 수 전체(잘리기 전)'),
   truncated: v1Truncated,
 });
 export const v1Page = z.object({
@@ -46,7 +57,7 @@ export const v1Page = z.object({
   position: z.number().int(),
   currentVersionNo: z.number().int(),
   updatedAt: iso,
-  createdAt: iso,
+  ...authorship,
   format: readFormat,
   body,
   ancestors: z.array(z.object({ id: z.string(), title: z.string() })).describe('맨 위 페이지부터 부모까지의 경로'),
@@ -75,6 +86,10 @@ export const v1Space = z.object({
   myRole: z.enum(SPACE_MEMBER_ROLES).nullable(),
   canWrite: z.boolean(),
   canManageMembers: z.boolean(),
+  createdBy: z.string(),
+  createdByUsername: z.string(),
+  createdByName: z.string(),
+  createdAt: iso,
 });
 export const v1Member = z.object({ userId: z.string(), username: z.string(), displayName: z.string(), role: z.enum(SPACE_MEMBER_ROLES) });
 export const v1Category = z.object({ id: z.string(), name: z.string(), canRename: z.boolean(), canDelete: z.boolean() });
@@ -85,6 +100,8 @@ export const v1Comment = z.object({
   pageId: z.string(),
   parentId: z.string().nullable(),
   author: z.string(),
+  authorId: z.string(),
+  authorUsername: z.string().describe('쓴 사람의 아이디 — 지워진 사용자면 빈 글'),
   createdAt: iso,
   updatedAt: iso,
   canDelete: z.boolean(),
@@ -113,7 +130,7 @@ export const v1AttachmentJson = z.object({
 });
 
 // ---- 검색·템플릿·휴지통·알림 ----
-export const v1SearchHit = z.object({ pageId: z.string(), spaceId: z.string(), spaceName: z.string(), title: z.string(), snippet: z.string(), updatedAt: iso });
+export const v1SearchHit = z.object({ pageId: z.string(), spaceId: z.string(), spaceName: z.string(), title: z.string(), snippet: z.string(), updatedAt: iso, ...authorship });
 export const v1Template = z.object({ id: z.string(), name: z.string(), description: z.string().nullable(), updatedAt: iso, format: readFormat, body });
 export const v1TrashPage = z.object({ id: z.string(), title: z.string(), spaceId: z.string(), spaceName: z.string(), deletedAt: iso, deletedByName: z.string() });
 export const v1TrashSpace = z.object({ id: z.string(), key: z.string(), name: z.string(), deletedAt: iso, createdByName: z.string() });

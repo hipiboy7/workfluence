@@ -54,6 +54,7 @@
 | FR-2223 | **에이전트가 정하는 입력은 핵심뿐이다**(사용자 지시 2026-10-07). 페이지 만들기는 **어디(스페이스)·제목·본문** 셋만 필수이고 나머지는 모두 서버가 기본값으로 채운다. 선택 입력을 받더라도 에이전트가 **몰라도 되게** 한다 | 3.5절 · B 모듈별 "필수 입력만으로 성공" |
 | FR-2224 | **기본값은 한 곳에 둔다**(`packages/shared`의 `V1_DEFAULTS`). 같은 값이 컨트롤러·명세·문서에 따로 적히지 않는다 — OpenAPI의 `default`와 API 사용가이드가 그것에서 나온다 | A · 계약 시험(명세의 default가 그 상수와 같다) |
 | FR-2225 | **기본값으로 채운 결과를 응답이 말한다** — 서버가 정한 부모·위치·버전을 돌려줘서 에이전트가 다음 호출에 id를 외우지 않아도 된다 | B |
+| FR-2226 | **누가 만들었나를 싣고 그것으로 거른다**(기능백로그 F-023, 2026-10-16). 스페이스 목록·하나는 만든 사람(`createdBy`·`createdByUsername`·`createdByName`)과 `createdAt`을, 페이지 트리·읽기·옮기기·검색·라벨의 페이지는 그에 더해 마지막으로 고친 사람(`updatedBy`·`updatedByUsername`·`updatedByName`)을, 댓글은 `authorId`·`authorUsername`을 싣는다(`author`는 이름 그대로). 거르기는 선택 쿼리다 — 스페이스 `createdBy`·`member`, 페이지 `createdBy`·`updatedBy`, 댓글 `author`. 값은 **아이디(username)나 id**이고 없는 사람은 404 `USER_NOT_FOUND`다(빈 목록이면 오타를 "없다"로 읽는다). 거르기는 **자르기(`limit`) 전에** 한다 — 스페이스·검색·라벨은 SQL에서, 트리·댓글은 전부 읽은 뒤에. 아이디가 목록에 보이는 것은 사용자 결정이다("id 오픈되도 되. 노출 신경쓰지 말고 구현해") | A 쿼리·`matchesAuthor`·`withAuthorship` · B 모듈별 · 계약 시험 |
 
 ### 2.3 명세와 화면 (5·6단계)
 
@@ -153,8 +154,8 @@
 | 경로 | 에이전트가 정하는 것 | 서버가 채우는 것·화면용과 다른 점 |
 |---|---|---|
 | `POST /api/v1/spaces` | `name` | 종류는 **팀**(개인 스페이스는 계정과 함께 생긴다 — `kind`를 보내면 400), 설명 빈 글, 분류 없음. 분류는 **이름**으로 고른다(`category`) — 없으면 404 `CATEGORY_NOT_FOUND`에 고를 수 있는 이름(`details.available`) |
-| `GET /api/v1/spaces?q=&limit=` | (없음) | 내가 읽을 수 있는 팀·개인 스페이스를 한 목록으로. 이름·키로 찾기 |
-| `GET /api/v1/spaces/:id` | — | 응답은 에이전트가 쓸 것만: `id·name·description·kind·status·category·categoryId·memberCount·myRole·canWrite·canManageMembers`(열쇠·만든 사람·세부 권한은 뺀다) |
+| `GET /api/v1/spaces?q=&limit=&createdBy=&member=` | (없음) | 내가 읽을 수 있는 팀·개인 스페이스를 한 목록으로. 이름·키로 찾기. 만든 사람·든 사람(Crew이거나 만든 사람)으로 거르기 — FR-2226 |
+| `GET /api/v1/spaces/:id` | — | 응답은 에이전트가 쓸 것만: `id·name·description·kind·status·category·categoryId·memberCount·myRole·canWrite·canManageMembers·createdBy·createdByUsername·createdByName·createdAt`(열쇠·세부 권한은 뺀다. 만든 사람은 2026-10-16부터 싣는다 — FR-2226) |
 | `PATCH /api/v1/spaces/:id` | 고칠 `name`·`description`·`category` | 분류는 `null`이면 지우고 없으면 그대로 |
 | `PATCH …/status` | `status`(`active`·`suspended`), 필요하면 `takeover` | `takeover`는 중지에만 |
 | `DELETE /api/v1/spaces/:id` | — | 휴지통으로 |
@@ -170,7 +171,7 @@
 
 | 경로 | 에이전트가 정하는 것 | 서버가 채우는 것·화면용과 다른 점 |
 |---|---|---|
-| `GET·POST /api/v1/pages/:pageId/comments` | `body`(답글이면 `parentId`) | 본문은 마크다운이 기본(`format`으로 `json`), 응답도 `format`대로. 응답은 `id·pageId·parentId·author·createdAt·updatedAt·canDelete·format·body`. 멘션 메일은 화면용과 같은 길 |
+| `GET·POST /api/v1/pages/:pageId/comments` | `body`(답글이면 `parentId`) | 본문은 마크다운이 기본(`format`으로 `json`), 응답도 `format`대로. 응답은 `id·pageId·parentId·author·authorId·authorUsername·createdAt·updatedAt·canDelete·format·body`. 목록은 `author`(아이디나 id)로 거른다 — FR-2226. 멘션 메일은 화면용과 같은 길 |
 | `PATCH·DELETE /api/v1/comments/:id` | `body` | |
 | `GET·POST /api/v1/pages/:pageId/labels` | `name` | |
 | `DELETE …/labels/:ref` | — | `:ref`는 **이름이나 id** — 붙어 있지 않으면 404 `LABEL_NOT_FOUND` |

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Inject,
   Delete,
   Get,
   NotFoundException,
@@ -21,6 +22,12 @@ import {
   matchLabel,
   toV1Attachment,
   toV1Comment,
+  v1CommentListQuery,
+  v1LabelPagesQuery,
+  withAuthorship,
+  type V1CommentListQuery,
+  type V1LabelPagesQuery,
+  type V1SearchHit,
   v1CommentDto,
   v1CommentUpdateDto,
   v1DownloadQuery,
@@ -29,7 +36,6 @@ import {
   v1UploadDto,
   V1_DEFAULTS,
   type LabelView,
-  type SearchHit,
   type V1AttachmentJson,
   type V1AttachmentView,
   type V1CommentView,
@@ -48,7 +54,10 @@ import { UuidPipe } from '../common/uuid.pipe';
 import { ZodPipe } from '../common/zod.pipe';
 import { LabelsService } from '../labels/labels.service';
 import { LabelUseCases } from '../labels/labels.usecases';
+import { PagesService } from '../pages/pages.service';
+import { UsersService } from '../users/users.service';
 import { UseV1 } from './use-v1';
+import { resolveUserRef, resolveUserRefs, type UserLookup } from './user-ref';
 
 /**
  * 공개 API v1 — 댓글 (docs/spinoff/public-api 설계서 3.3·3.5절). 얇은 층이다(FR-2210) — 트랜잭션·감사·멘션 메일은 화면용과 같은 `CommentUseCases`가 한다.
@@ -60,15 +69,19 @@ export class V1CommentsController {
   constructor(
     private readonly svc: CommentsService,
     private readonly uc: CommentUseCases,
+    @Inject(UsersService) private readonly users: UserLookup,
   ) {}
 
   @Get('pages/:pageId/comments')
   async list(
     @Param('pageId', UuidPipe) pageId: string,
-    @Query(new ZodPipe(v1PageQuery)) query: V1PageQuery,
+    @Query(new ZodPipe(v1CommentListQuery)) query: V1CommentListQuery,
     @CurrentUser() me: SessionUser,
   ): Promise<{ items: V1CommentView[] }> {
-    return { items: (await this.svc.list(pageId, me)).map((c) => toV1Comment(c, query.format)) };
+    // 한 페이지의 댓글은 다 읽으므로 읽은 뒤 걸러도 빠지는 것이 없다 (F-023)
+    const author = query.author === undefined ? undefined : await resolveUserRef(this.users, query.author);
+    const all = await this.svc.list(pageId, me);
+    return { items: all.filter((c) => author === undefined || c.createdBy === author).map((c) => toV1Comment(c, query.format)) };
   }
 
   @Post('pages/:pageId/comments')
@@ -107,6 +120,8 @@ export class V1LabelsController {
   constructor(
     private readonly svc: LabelsService,
     private readonly uc: LabelUseCases,
+    private readonly pageSvc: PagesService,
+    @Inject(UsersService) private readonly users: UserLookup,
   ) {}
 
   @Get('labels')
@@ -117,10 +132,13 @@ export class V1LabelsController {
   @Get('labels/:name/pages')
   async pages(
     @Param('name', new ZodPipe(v1LabelDto.shape.name)) name: string,
-    @Query(new ZodPipe(listLimitDto)) q: ReturnType<typeof listLimitDto.parse>,
+    @Query(new ZodPipe(v1LabelPagesQuery)) q: V1LabelPagesQuery,
     @CurrentUser() me: SessionUser,
-  ): Promise<{ items: SearchHit[] }> {
-    return { items: await this.svc.findPages(name, me, q.limit) };
+  ): Promise<{ items: V1SearchHit[] }> {
+    // 사람으로 거르는 것은 질의가 한다 — 자른 뒤에 거르면 `limit`이 조용히 빈다 (F-023)
+    const by = await resolveUserRefs(this.users, { createdBy: q.createdBy, updatedBy: q.updatedBy });
+    const hits = await this.svc.findPages(name, me, q.limit, undefined, by);
+    return { items: withAuthorship(hits, await this.pageSvc.authorship(hits.map((h) => h.pageId))) };
   }
 
   @Get('pages/:pageId/labels')

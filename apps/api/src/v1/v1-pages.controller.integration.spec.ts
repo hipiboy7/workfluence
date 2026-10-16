@@ -1,7 +1,7 @@
 import { ConflictException, ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { v1CreatePageDto, v1ExportQuery, v1MovePageDto, v1PageQuery, v1UpdatePageDto } from '@workfluence/shared';
+import { v1CreatePageDto, v1ExportQuery, v1MovePageDto, v1PageQuery, v1PageTreeQuery, v1UpdatePageDto } from '@workfluence/shared';
 import { ZodPipe } from '../common/zod.pipe';
 import { AuditService } from '../audit/audit.service';
 import { auditEvents, pages } from '../db/schema';
@@ -10,7 +10,7 @@ import { PagesService } from '../pages/pages.service';
 import { PageUseCases } from '../pages/pages.usecases';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { person } from '../test/people';
+import { person, userLookup } from '../test/people';
 import { V1PagesController } from './v1-pages.controller';
 
 /**
@@ -32,7 +32,7 @@ beforeAll(async () => {
   spacesSvc = new SpacesService(db);
   const pagesSvc = new PagesService(db, spacesSvc, new NotificationsService(db, new InAppChannel()));
   const uc = new PageUseCases(pagesSvc, new AuditService(db), {} as never, { notify } as never, spacesSvc, db);
-  ctrl = new V1PagesController(pagesSvc, uc, spacesSvc, live);
+  ctrl = new V1PagesController(pagesSvc, uc, spacesSvc, live, userLookup(db));
 });
 afterAll(closeTestDb);
 beforeEach(async () => {
@@ -195,6 +195,53 @@ describe('읽기 — 마크다운이 기본 (FR-2215)', () => {
     const whole = await ctrl.list({ space: space.id, limit: 200 }, owner);
     expect(whole.truncated).toBe(false);
     expect(whole.total).toBe(whole.items.length);
+  });
+});
+
+describe('만든 사람·마지막으로 고친 사람 — 싣고 거른다 (F-023)', () => {
+  /** 주인이 A를 만들고 밥이 B를 만든 뒤 A를 고친다 */
+  const twoAuthors = async () => {
+    const { owner, space, mk } = await setup();
+    const bob = await person(db, 'bob', 'member', { displayName: '밥' });
+    await spacesSvc.addMember(space.id, { username: 'bob', role: 'editor' }, owner);
+    const a = await mk('A');
+    const b = await ctrl.create(create({ space: space.id, title: 'B', body: 'b' }), md, bob, req);
+    await ctrl.update(a.id, v1UpdatePageDto.parse({ body: '밥이 고침', baseVersionNo: 1 }), md, bob, req);
+    return { owner, bob, space, a, b };
+  };
+  const tree = (space: string, me: Awaited<ReturnType<typeof person>>, q: Record<string, unknown> = {}) => ctrl.list(v1PageTreeQuery.parse({ space, ...q }), me);
+
+  it('읽기와 목록이 만든 사람·고친 사람의 id·아이디·이름과 만든 때를 싣는다', async () => {
+    const { owner, bob, space, a } = await twoAuthors();
+    const view = await ctrl.get(a.id, md, owner);
+    expect(view).toMatchObject({ createdBy: owner.id, createdByUsername: 'owner', createdByName: 'owner', updatedBy: bob.id, updatedByUsername: 'bob', updatedByName: '밥' });
+    expect(Date.parse(view.createdAt)).not.toBeNaN();
+    const item = (await tree(space.id, owner)).items.find((p) => p.id === a.id);
+    expect(item).toMatchObject({ createdBy: owner.id, createdByUsername: 'owner', updatedBy: bob.id, updatedByUsername: 'bob', createdAt: view.createdAt });
+  });
+
+  it('만든 사람·고친 사람을 아이디나 id로 거른다 — total은 거른 수다', async () => {
+    const { owner, bob, space, a, b } = await twoAuthors();
+    const byBob = await tree(space.id, owner, { createdBy: 'bob' });
+    expect(byBob.items.map((p) => p.id)).toEqual([b.id]);
+    expect(byBob.total).toBe(1);
+    expect((await tree(space.id, owner, { updatedBy: bob.id })).items.map((p) => p.id).sort()).toEqual([a.id, b.id].sort());
+    expect((await tree(space.id, owner, { createdBy: 'owner', updatedBy: 'bob' })).items.map((p) => p.id)).toEqual([a.id]);
+    expect((await tree(space.id, owner, { createdBy: 'owner', updatedBy: 'owner' })).items).toEqual([]);
+  });
+
+  it('limit은 거른 뒤에 자른다', async () => {
+    const { owner, space } = await twoAuthors();
+    await ctrl.create(create({ space: space.id, title: 'C', body: 'c' }), md, owner, req);
+    const cut = await tree(space.id, owner, { createdBy: 'owner', limit: '1' });
+    expect(cut.items.map((p) => p.title)).toEqual(['A']);
+    expect(cut).toMatchObject({ total: 2, truncated: true });
+  });
+
+  it('없는 사람은 404 USER_NOT_FOUND', async () => {
+    const { owner, space } = await setup();
+    expect(await codeOf(tree(space.id, owner, { createdBy: 'nobody' }))).toMatchObject({ status: 404, code: 'USER_NOT_FOUND' });
+    expect(await codeOf(tree(space.id, owner, { updatedBy: '3b1c8f06-6f0e-4b52-9f63-0c9b2a8c7d11' }))).toMatchObject({ status: 404, code: 'USER_NOT_FOUND' });
   });
 });
 

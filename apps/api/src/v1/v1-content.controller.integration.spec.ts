@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { v1CommentDto, v1CommentUpdateDto, v1LabelDto, v1PageQuery, type AppEnv } from '@workfluence/shared';
+import { v1CommentDto, v1CommentListQuery, v1CommentUpdateDto, v1LabelDto, v1LabelPagesQuery, v1PageQuery, type AppEnv } from '@workfluence/shared';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AttachmentUseCases } from '../attachments/attachments.usecases';
 import { LocalDiskStorage } from '../attachments/storage/local.storage';
@@ -12,14 +12,15 @@ import { PassThroughScanner } from '../attachments/storage/storage.provider';
 import { AuditService } from '../audit/audit.service';
 import { CommentsService } from '../comments/comments.service';
 import { CommentUseCases } from '../comments/comments.usecases';
-import { auditEvents } from '../db/schema';
+import { auditEvents, pages } from '../db/schema';
 import { LabelsService } from '../labels/labels.service';
 import { LabelUseCases } from '../labels/labels.usecases';
 import { InAppChannel, NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { person, teamPage } from '../test/people';
+import { PagesService } from '../pages/pages.service';
+import { person, teamPage, userLookup } from '../test/people';
 import { V1AttachmentsController, V1CommentsController, V1LabelsController } from './v1-content.controller';
 
 /**
@@ -45,9 +46,9 @@ beforeAll(async () => {
   spacesSvc = new SpacesService(db);
   const audit = new AuditService(db);
   const commentsSvc = new CommentsService(db, spacesSvc, new NotificationsService(db, new InAppChannel()));
-  comments = new V1CommentsController(commentsSvc, new CommentUseCases(commentsSvc, audit, mail as never, db));
+  comments = new V1CommentsController(commentsSvc, new CommentUseCases(commentsSvc, audit, mail as never, db), userLookup(db));
   const labelsSvc = new LabelsService(db, spacesSvc);
-  labels = new V1LabelsController(labelsSvc, new LabelUseCases(labelsSvc, audit, db));
+  labels = new V1LabelsController(labelsSvc, new LabelUseCases(labelsSvc, audit, db), new PagesService(db, spacesSvc, new NotificationsService(db, new InAppChannel())), userLookup(db));
   const attSvc = new AttachmentsService(db, new LocalDiskStorage(env), new PassThroughScanner(), env, spacesSvc, new SettingsService(db, env));
   attachments = new V1AttachmentsController(attSvc, new AttachmentUseCases(attSvc, audit, db));
 });
@@ -113,6 +114,23 @@ describe('댓글 — 본문만으로 (FR-2223)', () => {
     expect((json.items[0]!.body as { type: string }).type).toBe('doc');
   });
 
+  it('쓴 사람의 id·아이디를 싣고, 쓴 사람으로 거른다 — 없는 사람은 404 USER_NOT_FOUND (F-023)', async () => {
+    const { owner, pageId, spaceId } = await setup();
+    const bob = await person(db, 'bob', 'member', { displayName: '밥' });
+    await spacesSvc.addMember(spaceId, { username: 'bob', role: 'editor' }, owner);
+    await comments.create(pageId, v1CommentDto.parse({ body: '주인 글' }), md, owner, req);
+    const mine = await comments.create(pageId, v1CommentDto.parse({ body: '밥 글' }), md, bob, req);
+    expect(mine).toMatchObject({ author: '밥', authorId: bob.id, authorUsername: 'bob' });
+    const all = await comments.list(pageId, md, owner);
+    expect(all.items.map((c) => [c.authorUsername, c.body])).toEqual([
+      ['owner', '주인 글'],
+      ['bob', '밥 글'],
+    ]);
+    expect((await comments.list(pageId, v1CommentListQuery.parse({ author: 'BOB' }), owner)).items.map((c) => c.body)).toEqual(['밥 글']);
+    expect((await comments.list(pageId, v1CommentListQuery.parse({ author: owner.id }), owner)).items.map((c) => c.body)).toEqual(['주인 글']);
+    expect(await codeOf(comments.list(pageId, v1CommentListQuery.parse({ author: 'nobody' }), owner))).toEqual({ status: 404, code: 'USER_NOT_FOUND' });
+  });
+
   it('고치고 지운다', async () => {
     const { owner, pageId } = await setup();
     const c = await comments.create(pageId, v1CommentDto.parse({ body: '처음' }), md, owner, req);
@@ -165,6 +183,22 @@ describe('라벨 — 이름으로', () => {
     const mallory = await person(db, 'mallory');
     expect((await labels.pages('운영', { limit: 100 }, owner)).items.map((h) => h.pageId)).toEqual([pageId]);
     expect((await labels.pages('운영', { limit: 100 }, mallory)).items).toEqual([]);
+  });
+
+  it('라벨의 페이지도 만든 사람·고친 사람을 싣고 그것으로 거른다 (F-023)', async () => {
+    const { owner, pageId, spaceId } = await setup();
+    const bob = await person(db, 'bob');
+    const [other] = await db
+      .insert(pages)
+      .values({ spaceId, parentId: null, title: '밥 문서', position: 1, currentVersionNo: 1, searchText: '', createdBy: bob.id, updatedBy: bob.id })
+      .returning();
+    await labels.attach(pageId, v1LabelDto.parse({ name: '운영' }), owner, req);
+    await labels.attach(other!.id, v1LabelDto.parse({ name: '운영' }), owner, req);
+    const all = await labels.pages('운영', v1LabelPagesQuery.parse({}), owner);
+    expect(all.items.find((h) => h.pageId === other!.id)).toMatchObject({ createdBy: bob.id, createdByUsername: 'bob', updatedByUsername: 'bob' });
+    expect((await labels.pages('운영', v1LabelPagesQuery.parse({ createdBy: 'bob' }), owner)).items.map((h) => h.pageId)).toEqual([other!.id]);
+    expect((await labels.pages('운영', v1LabelPagesQuery.parse({ updatedBy: 'owner', limit: '1' }), owner)).items.map((h) => h.pageId)).toEqual([pageId]);
+    expect(await codeOf(labels.pages('운영', v1LabelPagesQuery.parse({ createdBy: 'nobody' }), owner))).toEqual({ status: 404, code: 'USER_NOT_FOUND' });
   });
 
   it('읽기만 하는 사람은 붙이지 못한다(403)', async () => {

@@ -126,7 +126,7 @@ export class SpacesService {
       .where(inArray(spaceMembers.spaceId, ids))
       .groupBy(spaceMembers.spaceId);
     const creators = await tx
-      .select({ id: users.id, username: users.username })
+      .select({ id: users.id, username: users.username, displayName: users.displayName })
       .from(users)
       .where(inArray(users.id, [...new Set(rows.map((r) => r.createdBy))]));
     const categoryIds = [...new Set(rows.flatMap((r) => (r.categoryId ? [r.categoryId] : [])))];
@@ -135,7 +135,7 @@ export class SpacesService {
       : [];
     const roleOf = new Map(mine.map((m) => [m.spaceId, m.role as SpaceMemberRole]));
     const countOf = new Map(counts.map((c) => [c.spaceId, c.n]));
-    const usernameOf = new Map(creators.map((u) => [u.id, u.username]));
+    const creatorOf = new Map(creators.map((u) => [u.id, u]));
     const categoryOf = new Map(categories.map((c) => [c.id, c.name]));
     return rows.map((row) => {
       const membership = roleOf.get(row.id) ?? null;
@@ -154,7 +154,8 @@ export class SpacesService {
         categoryId: row.categoryId,
         categoryName: (row.categoryId && categoryOf.get(row.categoryId)) ?? null,
         createdBy: row.createdBy,
-        createdByUsername: usernameOf.get(row.createdBy) ?? '',
+        createdByUsername: creatorOf.get(row.createdBy)?.username ?? '',
+        createdByName: creatorOf.get(row.createdBy)?.displayName ?? '',
         memberCount: n,
         myRole: membership,
         // 화면이 규칙을 다시 구현하지 않도록 판정 결과를 실어 보낸다 (FR-304)
@@ -174,12 +175,15 @@ export class SpacesService {
    *
    * **찾기와 상태는 DB가 거른다** (P14 FR-1514). 자르기(`limit`) 전에 걸러야 상한 밖의 스페이스도 찾아진다 — 화면에서만 거르면 500개 밖을
    * 찾지 못한다(T-051과 같은 까닭). `q`는 이름·키의 부분 일치 — `%`·`_`는 글자 그대로 찾는다(`containsPattern`)
+   *
+   * **사람으로도 DB가 거른다** (기능백로그 F-023 — 공개 API). `createdBy`는 만든 사람, `member`는 그 사람이 든 공간(팀은 Crew이거나 만든 사람,
+   * 개인은 그 사람의 것 — 위의 "볼 수 있음"과 같은 모양). 둘 다 사용자 id다
    */
   async list(
     principal: Principal,
     scope: 'personal' | 'team' | 'all',
     limit: number,
-    filter: { q?: string; status?: SpaceRow['status'] } = {},
+    filter: { q?: string; status?: SpaceRow['status']; createdBy?: string; member?: string } = {},
   ): Promise<SpaceView[]> {
     if (scope === 'all' && !can(principal, 'space.oversee')) {
       throw new ForbiddenException('전체 스페이스를 볼 권한이 없다');
@@ -201,10 +205,17 @@ export class SpacesService {
           );
 
     const found = filter.q ? or(ilike(spaces.name, containsPattern(filter.q)), ilike(spaces.key, containsPattern(filter.q))) : undefined;
+    const byCreator = filter.createdBy ? eq(spaces.createdBy, filter.createdBy) : undefined;
+    const byMember = filter.member
+      ? or(
+          eq(spaces.createdBy, filter.member),
+          and(eq(spaces.kind, 'team'), inArray(spaces.id, this.db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, filter.member)))),
+        )
+      : undefined;
     const query = this.db
       .select()
       .from(spaces)
-      .where(and(visible, found, filter.status ? eq(spaces.status, filter.status) : undefined))
+      .where(and(visible, found, filter.status ? eq(spaces.status, filter.status) : undefined, byCreator, byMember))
       .orderBy(byName(spaces.name));
     // **모든 스페이스는 SQL에서 자르고 거르지 않는다** (P14 병합 전 검토 · P15 D.3). 다른 범위는 볼 수 없는 것을 먼저 빼고 자른다(아래).
     // 보기는 한꺼번에 만든다(`toViews` — 질의 넷)

@@ -25,6 +25,7 @@ const space = (over: Partial<SpaceView>): SpaceView => ({
   categoryName: null,
   createdBy: 'm1',
   createdByUsername: 'kim',
+  createdByName: '김',
   memberCount: 2,
   myRole: 'owner',
   access: NO,

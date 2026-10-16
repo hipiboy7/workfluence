@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { can, type LabelView, type Principal, type SearchHit } from '@workfluence/shared';
+import { can, type LabelView, type Principal, type SearchHit, type V1AuthorFilter } from '@workfluence/shared';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { byName } from '../db/order';
@@ -75,7 +75,7 @@ export class LabelsService {
   }
 
   /** 라벨로 페이지 찾기 (FR-534). **권한을 질의에서 건다** — 검색과 같은 판단이다 */
-  async findPages(name: string, principal: Principal, limit: number, tx: Db = this.db): Promise<SearchHit[]> {
+  async findPages(name: string, principal: Principal, limit: number, tx: Db = this.db, by: V1AuthorFilter = {}): Promise<SearchHit[]> {
     const isAdmin = can(principal, 'space.manage');
     const rows = await tx.execute<{ page_id: string; space_id: string; space_name: string; title: string; updated_at: Date }>(sql`
       SELECT p.id AS page_id, s.id AS space_id, s.name AS space_name, p.title, p.updated_at
@@ -85,6 +85,8 @@ export class LabelsService {
         JOIN spaces s ON s.id = p.space_id AND s.deleted_at IS NULL
         LEFT JOIN space_members m ON m.space_id = s.id AND m.user_id = ${principal.id}
        WHERE (${isAdmin} OR m.user_id IS NOT NULL OR (s.kind = 'personal' AND s.created_by = ${principal.id}))
+         ${by.createdBy ? sql`AND p.created_by = ${by.createdBy}` : sql``}
+         ${by.updatedBy ? sql`AND p.updated_by = ${by.updatedBy}` : sql``}
        ORDER BY p.updated_at DESC
        LIMIT ${limit}
     `);

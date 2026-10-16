@@ -36,6 +36,7 @@ export class CommentsService {
       body: row.bodyJson as DocNode,
       createdBy: row.createdBy,
       createdByName: who?.displayName ?? '(삭제된 사용자)',
+      createdByUsername: who?.username ?? '',
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       canDelete: row.createdBy === principal.id || canModerate,

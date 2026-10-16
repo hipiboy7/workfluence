@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { can, type Principal, type SearchHit } from '@workfluence/shared';
+import { can, type Principal, type SearchHit, type V1AuthorFilter } from '@workfluence/shared';
 import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module';
 import { containsPattern } from '../common/like';
@@ -13,7 +13,7 @@ import { containsPattern } from '../common/like';
 export const SEARCH = Symbol('SEARCH');
 
 export interface SearchProvider {
-  search(principal: Principal, q: string, limit: number, spaceId?: string): Promise<SearchHit[]>;
+  search(principal: Principal, q: string, limit: number, spaceId?: string, by?: V1AuthorFilter): Promise<SearchHit[]>;
 }
 
 /**
@@ -26,7 +26,7 @@ export interface SearchProvider {
 export class SearchService implements SearchProvider {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async search(principal: Principal, q: string, limit: number, spaceId?: string): Promise<SearchHit[]> {
+  async search(principal: Principal, q: string, limit: number, spaceId?: string, by: V1AuthorFilter = {}): Promise<SearchHit[]> {
     // `%`와 `_`를 풀어 둔다 — 그대로 두면 `q=%` 한 글자가 **볼 수 있는 전부**를 돌려준다 (P3 자체 점검 #12, `containsPattern`)
     const like = containsPattern(q);
     const isAdmin = can(principal, 'space.manage');
@@ -56,6 +56,8 @@ export class SearchService implements SearchProvider {
        WHERE p.deleted_at IS NULL
          AND (${isAdmin} OR m.user_id IS NOT NULL OR (s.kind = 'personal' AND s.created_by = ${principal.id}))
          ${spaceId ? sql`AND s.id = ${spaceId}` : sql``}
+         ${by.createdBy ? sql`AND p.created_by = ${by.createdBy}` : sql``}
+         ${by.updatedBy ? sql`AND p.updated_by = ${by.updatedBy}` : sql``}
          AND (p.title ILIKE ${like} OR p.search_text ILIKE ${like})
        ORDER BY p.updated_at DESC
        LIMIT ${limit}

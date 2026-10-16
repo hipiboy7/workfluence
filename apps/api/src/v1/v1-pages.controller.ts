@@ -1,4 +1,4 @@
-import { ConflictException, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, Body } from '@nestjs/common';
+import { ConflictException, Controller, NotFoundException, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, Body } from '@nestjs/common';
 import {
   capItems,
   docToBody,
@@ -9,9 +9,11 @@ import {
   v1PageTreeQuery,
   v1VersionNo,
   type V1PageTreeQuery,
+  type V1PageSummary,
+  matchesAuthor,
+  withAuthorship,
   v1UpdatePageDto,
   type PageDiffView,
-  type PageSummary,
   type V1PageQuery,
   type V1PageView,
   type V1VersionView,
@@ -26,7 +28,9 @@ import { PagesService } from '../pages/pages.service';
 import { PageUseCases } from '../pages/pages.usecases';
 import { CollabGateway } from '../pages/collab/collab.gateway';
 import { SpacesService } from '../spaces/spaces.service';
+import { UsersService } from '../users/users.service';
 import { resolveSpaceRef } from './space-ref';
+import { resolveUserRefs, type UserLookup } from './user-ref';
 import { UseV1 } from './use-v1';
 
 /** 실시간 편집 중인지 — 게이트웨이의 좁은 면 (2절 ISP). 시험은 대역을 넣는다 */
@@ -49,10 +53,13 @@ export class V1PagesController {
     private readonly uc: PageUseCases,
     private readonly spaces: SpacesService,
     @Inject(CollabGateway) private readonly live: LiveEditing,
+    @Inject(UsersService) private readonly users: UserLookup,
   ) {}
 
   private async view(id: string, me: SessionUser, format: V1PageQuery['format']): Promise<V1PageView> {
     const [page, ancestors] = await Promise.all([this.pages.get(id, me), this.pages.ancestors(id, me)]);
+    const who = (await this.pages.authorship([page.id])).get(page.id);
+    if (!who) throw new NotFoundException('페이지를 찾을 수 없다');
     return {
       id: page.id,
       spaceId: page.spaceId,
@@ -61,7 +68,7 @@ export class V1PagesController {
       position: page.position,
       currentVersionNo: page.currentVersionNo,
       updatedAt: page.updatedAt,
-      createdAt: page.createdAt,
+      ...who,
       format,
       body: docToBody(format, page.content),
       ancestors,
@@ -84,14 +91,16 @@ export class V1PagesController {
     return page;
   }
 
-  /** 스페이스의 페이지 트리 — 본문 없이 */
+  /** 스페이스의 페이지 트리 — 본문 없이. 만든 사람·고친 사람을 싣고 그것으로 거른다 — 자르기 전에 걸러야 `total`·`truncated`가 맞다 (F-023) */
   @Get()
   async list(
     @Query(new ZodPipe(v1PageTreeQuery)) query: V1PageTreeQuery,
     @CurrentUser() me: SessionUser,
-  ): Promise<{ space: { id: string; name: string }; items: PageSummary[]; total: number; truncated: boolean }> {
+  ): Promise<{ space: { id: string; name: string }; items: V1PageSummary[]; total: number; truncated: boolean }> {
     const target = await resolveSpaceRef(this.spaces, query.space, me);
-    const all = await this.pages.tree(target.id, me);
+    const by = await resolveUserRefs(this.users, { createdBy: query.createdBy, updatedBy: query.updatedBy });
+    const tree = await this.pages.tree(target.id, me);
+    const all = withAuthorship(tree, await this.pages.authorship(tree.map((p) => p.id))).filter((p) => matchesAuthor(p, by));
     return { space: target, ...capItems(all, query.limit), total: all.length };
   }
 
@@ -134,8 +143,12 @@ export class V1PagesController {
     @Body(new ZodPipe(v1MovePageDto)) dto: ReturnType<typeof v1MovePageDto.parse>,
     @CurrentUser() me: SessionUser,
     @Req() req: Request,
-  ): Promise<PageSummary> {
-    return (await this.uc.move(id, dto, me, metaOf(req))).page;
+  ): Promise<V1PageSummary> {
+    const { page } = await this.uc.move(id, dto, me, metaOf(req));
+    // 목록의 항목과 같은 모양이다 — 만든 사람·고친 사람도 (F-023)
+    const [moved] = withAuthorship([page], await this.pages.authorship([page.id]));
+    if (!moved) throw new NotFoundException('페이지를 찾을 수 없다');
+    return moved;
   }
 
   @Delete(':id')

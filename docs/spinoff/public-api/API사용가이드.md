@@ -105,6 +105,16 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/pages/$PAGE_ID"
 
 본문이 마크다운 글자(`body`)로 온다. 문서 트리가 필요하면 `?format=json`, 글자만이면 `?format=text`. 스페이스의 페이지 목록(본문 없이)은 `GET /api/v1/pages`에 `space`(이름이나 id)를 쿼리로 준다.
 
+**누가 만들었나.** 페이지 읽기·목록·검색·라벨의 페이지는 만든 사람(`createdBy`·`createdByUsername`·`createdByName`)과 마지막으로 고친 사람(`updatedBy`·`updatedByUsername`·`updatedByName`), 만든 때(`createdAt`)를 함께 준다. 스페이스 목록은 만든 사람과 만든 때를, 댓글은 쓴 사람의 `authorId`·`authorUsername`을 준다. 목록은 그 사람으로 거른다 — 값은 아이디(username)나 id다:
+
+```bash
+curl -s -G -H "Authorization: Bearer $TOKEN" --data-urlencode "createdBy=alice" "$BASE/api/v1/spaces"          # alice가 만든 스페이스 (member=alice면 alice가 든 스페이스)
+curl -s -G -H "Authorization: Bearer $TOKEN" --data-urlencode "space=API 시험 공간" --data-urlencode "createdBy=alice" "$BASE/api/v1/pages"   # updatedBy도 된다
+curl -s -G -H "Authorization: Bearer $TOKEN" --data-urlencode "author=alice" "$BASE/api/v1/pages/$PAGE_ID/comments"
+```
+
+검색(`/search`)과 라벨의 페이지(`/labels/{name}/pages`)도 `createdBy`·`updatedBy`를 받는다. 없는 사람은 빈 목록이 아니라 404 `USER_NOT_FOUND`다.
+
 ### 3.4 고치기 — 고칠 것만
 
 ```bash
@@ -259,7 +269,7 @@ ws.on('message', (data) => {
 | 413 | `PAYLOAD_TOO_LARGE` | 본문이 너무 크다 |
 | 413 | `TOO_LARGE_FOR_JSON` | 첨부가 JSON으로 받기에 너무 크다 → `format` 없이 바이너리로 받는다 |
 | 404 | `NOT_FOUND` | 없거나 볼 수 없다 — 둘을 구별하지 않는다 |
-| 404 | `ROOM_NOT_FOUND`·`USER_NOT_FOUND`·`CHAT_DISABLED` | 채팅 — 참여하지 않은 방(있는지도 알려 주지 않는다)·부를 수 없는 사용자(정지·승인 대기·없는 id)·서버가 채팅을 껐다 |
+| 404 | `ROOM_NOT_FOUND`·`USER_NOT_FOUND`·`CHAT_DISABLED` | 채팅 — 참여하지 않은 방(있는지도 알려 주지 않는다)·부를 수 없는 사용자(정지·승인 대기·없는 id)·서버가 채팅을 껐다. `USER_NOT_FOUND`는 목록을 사람으로 거를 때(`createdBy`·`updatedBy`·`member`·`author`) 없는 아이디·id에도 온다 |
 | 404 | `SPACE_NOT_FOUND`·`SPACE_REQUIRED`·`CATEGORY_NOT_FOUND`·`MEMBER_NOT_FOUND`·`LABEL_NOT_FOUND` | 이름으로 부른 것이 없다 → 이름을 다시 본다(스페이스는 `GET /api/v1/spaces`, 분류는 오류의 `details.available`) |
 | 409 | `SPACE_AMBIGUOUS` | 같은 이름의 스페이스가 여럿이다 → id로 고른다 |
 | 409 | `VERSION_CONFLICT` | 기준 버전이 어긋났다 → `details.currentVersionNo`로 다시 읽고 고쳐 다시 보낸다 |

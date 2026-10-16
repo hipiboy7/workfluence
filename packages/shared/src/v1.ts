@@ -3,7 +3,7 @@ import { ASSIGNABLE_MEMBER_ROLES, CATEGORY_NAME_MAX, LIST_SEARCH_MAX, MARKDOWN_L
 import { extractText, validateDocument, type DocNode } from './document';
 import { renderDocMarkdown } from './markdown';
 import { parseMarkdown } from './markdown-parse';
-import { attachLabelDto, idSchema, usernameSchema, type AttachmentView, type CategoryView, type CommentView, type LabelView, type PageTemplateView, type SpaceMemberView, type SpaceStatusDto, type SpaceView } from './schemas';
+import { attachLabelDto, idSchema, listLimitDto, usernameSchema, type AttachmentView, type CategoryView, type CommentView, type LabelView, type PageSummary, type PageTemplateView, type SearchHit, type SpaceMemberView, type SpaceStatusDto, type SpaceView } from './schemas';
 
 /**
  * 공개 API v1의 계약 중 순수한 부분 (A등급, docs/spinoff/public-api 설계서 3.3·3.5절 · FR-2211·2215·2223~2225).
@@ -70,6 +70,13 @@ export function docToBody(format: V1ReadFormat, doc: DocNode): string | DocNode 
 // ---- 입력 ----
 
 const spaceRef = z.string().trim().min(1).max(200).describe('스페이스의 이름이나 id');
+/**
+ * 사람을 아이디(username)나 id로 — 목록을 "누가 만들었나"로 거를 때 쓴다 (기능백로그 F-023). 에이전트는 채팅방 참여자의 아이디를 안다.
+ * 없는 사람은 빈 목록이 아니라 404 `USER_NOT_FOUND`다 — 오타를 "그 사람이 만든 것은 없다"로 잘못 읽지 않게
+ */
+const userRef = z.string().trim().min(1).max(200);
+const byCreator = userRef.optional().describe('만든 사람의 아이디(username)나 id로 거른다');
+const byEditor = userRef.optional().describe('마지막으로 고친 사람의 아이디(username)나 id로 거른다');
 const titleSchema = z.string().trim().min(1).max(300).describe('페이지의 제목 — 300자까지');
 const bodyField = z.unknown().refine((v) => v !== undefined, { message: '본문(body)이 필요하다' }).describe('본문 — format이 markdown(기본)이면 마크다운 글자, json이면 문서 객체');
 /** 쓰기 본문의 형식 — 칸마다 같은 설명이 붙게 한 곳에 둔다 */
@@ -139,6 +146,35 @@ export type V1PageQuery = z.infer<typeof v1PageQuery>;
 // ---- 응답 ----
 
 export type V1Ancestor = { id: string; title: string };
+/**
+ * 페이지를 만든 사람과 마지막으로 고친 사람 (F-023) — 목록·검색·읽기가 함께 싣는다. "내가 쓴 글", "누가 고쳤나"를 목록만으로 답하게.
+ * 마지막으로 고친 사람은 페이지의 지금 버전을 남긴 사람이다(실시간 편집의 자동 저장이면 그 저장을 일으킨 사람)
+ */
+export type V1Authorship = {
+  createdBy: string;
+  createdByUsername: string;
+  createdByName: string;
+  updatedBy: string;
+  updatedByUsername: string;
+  updatedByName: string;
+  createdAt: string;
+};
+/** 페이지를 사람으로 거르는 조건 — 이미 id로 풀린 것 */
+export type V1AuthorFilter = { createdBy?: string; updatedBy?: string };
+export const matchesAuthor = (a: Pick<V1Authorship, 'createdBy' | 'updatedBy'>, f: V1AuthorFilter): boolean =>
+  (f.createdBy === undefined || a.createdBy === f.createdBy) && (f.updatedBy === undefined || a.updatedBy === f.updatedBy);
+/**
+ * 줄마다 만든 사람·고친 사람을 붙인다. 표에 없는 줄은 뺀다 — 목록을 읽은 뒤 그 사이 물리 삭제된 페이지다(휴지통 비우기). 빈 칸으로 남기면
+ * 에이전트가 "만든 사람 없음"으로 읽는다
+ */
+export function withAuthorship<T extends { id?: string; pageId?: string }>(items: readonly T[], of: ReadonlyMap<string, V1Authorship>): (T & V1Authorship)[] {
+  return items.flatMap((it) => {
+    const a = of.get((it.pageId ?? it.id)!);
+    return a ? [{ ...it, ...a }] : [];
+  });
+}
+export type V1PageSummary = PageSummary & V1Authorship;
+export type V1SearchHit = SearchHit & V1Authorship;
 /** 페이지 하나 — 본문은 `format`대로(기본 마크다운), 서버가 채운 부모·위치·버전과 조상 경로가 함께 온다 (FR-2217·2225) */
 export type V1PageView = {
   id: string;
@@ -148,11 +184,10 @@ export type V1PageView = {
   position: number;
   currentVersionNo: number;
   updatedAt: string;
-  createdAt: string;
   format: V1ReadFormat;
   body: string | DocNode;
   ancestors: V1Ancestor[];
-};
+} & V1Authorship;
 export type V1VersionView = { versionNo: number; title: string; createdByName: string; createdAt: string; format: V1ReadFormat; body: string | DocNode };
 
 // ---- 템플릿 ----
@@ -194,6 +229,8 @@ export const toV1Template = (t: PageTemplateView, format: V1ReadFormat): V1Templ
 export const v1PageTreeQuery = z.strictObject({
   space: z.string().describe('스페이스의 이름이나 id'),
   limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.listLimitMax).default(V1_DEFAULTS.listLimit).describe('돌려줄 가장 많은 수'),
+  createdBy: byCreator,
+  updatedBy: byEditor,
 });
 export type V1PageTreeQuery = z.infer<typeof v1PageTreeQuery>;
 
@@ -201,8 +238,14 @@ export const v1SearchQuery = z.strictObject({
   q: z.string().trim().min(1).max(200).describe('검색어 — 제목과 본문에서 찾는다(두 글자부터 된다)'),
   space: spaceRef.optional(),
   limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.searchLimitMax).default(V1_DEFAULTS.searchLimit),
+  createdBy: byCreator,
+  updatedBy: byEditor,
 });
 export type V1SearchQuery = z.infer<typeof v1SearchQuery>;
+
+/** 라벨이 붙은 페이지 — 상한과 사람으로 거르기 */
+export const v1LabelPagesQuery = listLimitDto.extend({ createdBy: byCreator, updatedBy: byEditor });
+export type V1LabelPagesQuery = z.infer<typeof v1LabelPagesQuery>;
 
 // ---- 댓글·라벨·첨부 ----
 
@@ -216,6 +259,10 @@ export const v1CommentUpdateDto = z
   .strictObject({ body: bodyField, format: writeFormat })
   .transform((v, ctx) => ({ doc: convert(v.format, v.body, ctx) }));
 export type V1CommentUpdateDto = z.infer<typeof v1CommentUpdateDto>;
+
+/** 댓글 목록 — 읽는 형식과 쓴 사람으로 거르기 */
+export const v1CommentListQuery = v1PageQuery.extend({ author: userRef.optional().describe('쓴 사람의 아이디(username)나 id로 거른다') });
+export type V1CommentListQuery = z.infer<typeof v1CommentListQuery>;
 
 /** 라벨 붙이기 — 이름만 */
 export const v1LabelDto = z.strictObject({ name: attachLabelDto.shape.name });
@@ -260,6 +307,8 @@ export type V1CommentView = {
   pageId: string;
   parentId: string | null;
   author: string;
+  authorId: string;
+  authorUsername: string;
   createdAt: string;
   updatedAt: string;
   canDelete: boolean;
@@ -286,6 +335,8 @@ export const toV1Comment = (c: CommentView, format: V1ReadFormat): V1CommentView
   pageId: c.pageId,
   parentId: c.parentId,
   author: c.createdByName,
+  authorId: c.createdBy,
+  authorUsername: c.createdByUsername,
   createdAt: c.createdAt,
   updatedAt: c.updatedAt,
   canDelete: c.canDelete,
@@ -360,6 +411,8 @@ export const v1SpaceListQuery = z.object({
     .optional()
     .transform((v) => (v ? v : undefined)),
   limit: z.coerce.number().int().min(1).max(V1_DEFAULTS.listLimitMax).optional(),
+  createdBy: userRef.optional().describe('만든 사람의 아이디(username)나 id로 거른다 — 팀 스페이스는 만든 사람이 처음의 owner이고, 개인 스페이스는 그 사람의 것이다'),
+  member: userRef.optional().describe('그 사람이 든 스페이스만 — 팀은 Crew이거나 만든 사람, 개인은 그 사람의 것. 아이디(username)나 id'),
 });
 export type V1SpaceListQuery = z.infer<typeof v1SpaceListQuery>;
 
@@ -382,11 +435,15 @@ export type V1SpaceView = {
   myRole: SpaceView['myRole'];
   canWrite: boolean;
   canManageMembers: boolean;
+  createdBy: string;
+  createdByUsername: string;
+  createdByName: string;
+  createdAt: string;
 };
 export type V1MemberView = { userId: string; username: string; displayName: string; role: SpaceMemberView['role'] };
 export type V1CategoryView = { id: string; name: string; canRename: boolean; canDelete: boolean };
 
-/** 에이전트가 쓸 것만 — 열쇠·만든 사람·세부 권한은 뺀다 (설계서 3.5절) */
+/** 에이전트가 쓸 것만 — 열쇠·세부 권한은 뺀다 (설계서 3.5절). 만든 사람은 싣는다 — "내가 만든 스페이스"를 목록으로 답하게 (F-023) */
 export const toV1Space = (v: SpaceView): V1SpaceView => ({
   id: v.id,
   name: v.name,
@@ -399,6 +456,10 @@ export const toV1Space = (v: SpaceView): V1SpaceView => ({
   myRole: v.myRole,
   canWrite: v.access.canWrite,
   canManageMembers: v.access.canManageMembers,
+  createdBy: v.createdBy,
+  createdByUsername: v.createdByUsername,
+  createdByName: v.createdByName,
+  createdAt: v.createdAt,
 });
 export const toV1Member = (m: SpaceMemberView): V1MemberView => ({ userId: m.userId, username: m.username, displayName: m.displayName, role: m.role });
 export const toV1Category = (c: CategoryView): V1CategoryView => ({ id: c.id, name: c.name, canRename: c.access.canRename, canDelete: c.access.canDelete });

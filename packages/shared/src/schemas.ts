@@ -416,6 +416,7 @@ export type SpaceView = {
   categoryName: string | null;
   createdBy: string;
   createdByUsername: string;
+  createdByName: string;
   memberCount: number;
   myRole: (typeof SPACE_MEMBER_ROLES)[number] | null;
   access: SpaceAccess;
@@ -522,6 +523,8 @@ export type CommentView = {
   body: DocNode;
   createdBy: string;
   createdByName: string;
+  /** 쓴 사람의 아이디 — 공개 API가 싣는다(F-023). 지워진 사용자면 빈 글 */
+  createdByUsername: string;
   createdAt: string;
   updatedAt: string;
   /** 지울 수 있는지. 화면이 규칙을 다시 구현하지 않게 서버가 판정해 내려 준다 */

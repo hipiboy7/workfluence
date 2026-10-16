@@ -8,7 +8,7 @@ import { CategoryUseCases } from '../spaces/categories.usecases';
 import { SpaceUseCases } from '../spaces/spaces.usecases';
 import { SpacesService } from '../spaces/spaces.service';
 import { closeTestDb, openTestDb, resetTables, type TestDb } from '../test/db';
-import { person } from '../test/people';
+import { person, userLookup } from '../test/people';
 import { V1CategoriesController, V1SpacesController } from './v1-spaces.controller';
 
 /**
@@ -29,7 +29,7 @@ beforeAll(async () => {
   spacesSvc = new SpacesService(db);
   const audit = new AuditService(db);
   const cats = new CategoryUseCases(audit, db);
-  spaces = new V1SpacesController(spacesSvc, new SpaceUseCases(spacesSvc, audit, db), cats);
+  spaces = new V1SpacesController(spacesSvc, new SpaceUseCases(spacesSvc, audit, db), cats, userLookup(db));
   categories = new V1CategoriesController(cats);
 });
 afterAll(closeTestDb);
@@ -101,10 +101,61 @@ describe('목록·읽기', () => {
     await expect(spaces.get(s.id, mallory)).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('응답은 에이전트가 쓸 것만 — 내부 열쇠·만든 사람 정보는 없다', async () => {
-    const owner = await person(db, 'owner');
+  it('응답은 에이전트가 쓸 것만 — 내부 열쇠·세부 권한은 없고 만든 사람은 있다 (F-023)', async () => {
+    const owner = await person(db, 'owner', 'member', { displayName: '주인' });
     const s = await spaces.create(create({ name: 's' }), owner, req);
-    for (const k of ['key', 'access', 'createdBy', 'createdByUsername', 'suspendedByOwner']) expect(s).not.toHaveProperty(k);
+    for (const k of ['key', 'access', 'suspendedByOwner']) expect(s).not.toHaveProperty(k);
+    expect(s).toMatchObject({ createdBy: owner.id, createdByUsername: 'owner', createdByName: '주인' });
+    expect(Date.parse(s.createdAt)).not.toBeNaN();
+    expect((await spaces.list(query(), owner)).items[0]).toMatchObject({ createdBy: owner.id, createdByUsername: 'owner', createdByName: '주인' });
+  });
+});
+
+describe('목록을 사람으로 거르기 — 만든 사람·든 사람 (F-023)', () => {
+  it('만든 사람(createdBy)을 아이디나 id로 — 대소문자는 무시한다', async () => {
+    const alice = await person(db, 'alice');
+    const bob = await person(db, 'bob');
+    const a = await spaces.create(create({ name: '앨리스 공간' }), alice, req);
+    const b = await spaces.create(create({ name: '밥 공간' }), bob, req);
+    await spaces.addMember(b.id, v1AddMemberDto.parse({ username: 'alice' }), bob, req);
+    expect((await spaces.list(query(), alice)).items.map((s) => s.id).sort()).toEqual([a.id, b.id].sort());
+    expect((await spaces.list(query({ createdBy: 'alice' }), alice)).items.map((s) => s.id)).toEqual([a.id]);
+    expect((await spaces.list(query({ createdBy: 'ALICE' }), alice)).items.map((s) => s.id)).toEqual([a.id]);
+    expect((await spaces.list(query({ createdBy: bob.id }), alice)).items.map((s) => s.id)).toEqual([b.id]);
+  });
+
+  it('든 사람(member)은 Crew이거나 만든 사람 — 그래도 내가 볼 수 있는 것만', async () => {
+    const alice = await person(db, 'alice');
+    const bob = await person(db, 'bob');
+    const carol = await person(db, 'carol');
+    const shared = await spaces.create(create({ name: '같이' }), alice, req);
+    await spaces.addMember(shared.id, v1AddMemberDto.parse({ username: 'bob' }), alice, req);
+    const mine = await spaces.create(create({ name: '혼자' }), alice, req);
+    await spaces.create(create({ name: '밥 혼자' }), bob, req);
+    expect((await spaces.list(query({ member: 'bob' }), alice)).items.map((s) => s.id)).toEqual([shared.id]);
+    expect((await spaces.list(query({ member: 'alice' }), alice)).items.map((s) => s.id).sort()).toEqual([shared.id, mine.id].sort());
+    // carol은 아무 데도 들지 않았다 — 볼 수 없는 밥의 공간이 거르기로 드러나지 않는다
+    expect((await spaces.list(query({ member: 'bob' }), carol)).items).toEqual([]);
+    expect((await spaces.list(query({ createdBy: 'bob' }), carol)).items).toEqual([]);
+  });
+
+  it('두 조건을 함께 주면 둘 다 맞는 것만, limit은 거른 뒤에 자른다', async () => {
+    const alice = await person(db, 'alice');
+    const bob = await person(db, 'bob');
+    for (const n of ['가', '나', '다']) await spaces.create(create({ name: `앨리스 ${n}` }), alice, req);
+    const b = await spaces.create(create({ name: '0 밥' }), bob, req);
+    await spaces.addMember(b.id, v1AddMemberDto.parse({ username: 'alice' }), bob, req);
+    expect((await spaces.list(query({ createdBy: 'bob', member: 'alice' }), alice)).items.map((s) => s.id)).toEqual([b.id]);
+    const cut = await spaces.list(query({ createdBy: 'alice', limit: '2' }), alice);
+    expect(cut.items.map((s) => s.name)).toEqual(['앨리스 가', '앨리스 나']);
+    expect(cut.truncated).toBe(true);
+  });
+
+  it('없는 사람은 빈 목록이 아니라 404 USER_NOT_FOUND', async () => {
+    const alice = await person(db, 'alice');
+    expect(await codeOf(spaces.list(query({ createdBy: 'nobody' }), alice))).toMatchObject({ status: 404, code: 'USER_NOT_FOUND' });
+    expect(await codeOf(spaces.list(query({ member: '3b1c8f06-6f0e-4b52-9f63-0c9b2a8c7d11' }), alice))).toMatchObject({ status: 404, code: 'USER_NOT_FOUND' });
+    expect(await codeOf(spaces.list(query({ member: '이름 아님!' }), alice))).toMatchObject({ status: 404, code: 'USER_NOT_FOUND' });
   });
 });
 

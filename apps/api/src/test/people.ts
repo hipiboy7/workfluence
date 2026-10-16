@@ -1,8 +1,16 @@
 import type { Role } from '@workfluence/shared';
+import { eq } from 'drizzle-orm';
 import { toSessionUser, type SessionUser } from '../auth/auth.guard';
 import { pages, users } from '../db/schema';
 import { SpacesService } from '../spaces/spaces.service';
+import type { UserLookup } from '../v1/user-ref';
 import type { TestDb } from './db';
+
+/** 공개 API가 사람을 아이디·id로 찾는 면 — `UsersService`와 같은 질의 (F-023) */
+export const userLookup = (db: TestDb): UserLookup => ({
+  findById: (id) => db.query.users.findFirst({ where: eq(users.id, id) }),
+  findByUsername: (username) => db.query.users.findFirst({ where: eq(users.username, username) }),
+});
 
 /** 유스케이스 시험의 사람 — 실제 사용자 행을 넣고 가드가 만드는 것과 같은 요청의 사용자를 돌려준다 (`toSessionUser`) */
 export async function person(db: TestDb, username: string, role: Role = 'member', over: Partial<typeof users.$inferInsert> = {}): Promise<SessionUser> {

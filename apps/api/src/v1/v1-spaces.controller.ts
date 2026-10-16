@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, NotFoundException, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
   capItems,
   matchMember,
@@ -28,7 +28,9 @@ import { ZodPipe } from '../common/zod.pipe';
 import { CategoryUseCases } from '../spaces/categories.usecases';
 import { SpacesService } from '../spaces/spaces.service';
 import { SpaceUseCases } from '../spaces/spaces.usecases';
+import { UsersService } from '../users/users.service';
 import { readableSpaces } from './space-ref';
+import { resolveUserRefs, type UserLookup } from './user-ref';
 import { UseV1 } from './use-v1';
 
 /**
@@ -42,6 +44,7 @@ export class V1SpacesController {
     private readonly spaces: SpacesService,
     private readonly uc: SpaceUseCases,
     private readonly categories: CategoryUseCases,
+    @Inject(UsersService) private readonly users: UserLookup,
   ) {}
 
   /** 분류를 이름으로 — 없으면 고를 수 있는 이름을 알려 준다 */
@@ -65,7 +68,9 @@ export class V1SpacesController {
   async list(@Query(new ZodPipe(v1SpaceListQuery)) q: V1SpaceListQuery, @CurrentUser() me: SessionUser): Promise<{ items: V1SpaceView[]; truncated: boolean }> {
     const limit = q.limit ?? V1_DEFAULTS.listLimit;
     // 한도보다 하나 더 읽어 와야 잘렸는지 알 수 있다
-    const { items, truncated } = capItems(await readableSpaces(this.spaces, me, { q: q.q }, limit + 1), limit);
+    // 사람으로 거르는 것도 자르기 전에 DB가 한다 (F-023)
+    const who = await resolveUserRefs(this.users, { createdBy: q.createdBy, member: q.member });
+    const { items, truncated } = capItems(await readableSpaces(this.spaces, me, { q: q.q, ...who }, limit + 1), limit);
     return { items: items.map(toV1Space), truncated };
   }
 

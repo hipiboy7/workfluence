@@ -15,8 +15,10 @@ import {
   type PageView,
   type Principal,
   type UpdatePageDto,
+  type V1Authorship,
 } from '@workfluence/shared';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { DB, type Db } from '../db/db.module';
 import type { MentionOutcome } from '../notifications/notifications.service';
 import { REINDEX_SELECT_SQL, reindexRows, type ReindexRow } from './reindex';
@@ -79,6 +81,33 @@ export class PagesService {
       .where(and(eq(pages.spaceId, spaceId), isNull(pages.deletedAt)))
       .orderBy(asc(pages.position), asc(pages.createdAt));
     return rows.map(toPageSummary);
+  }
+
+  /**
+   * 페이지마다 만든 사람·마지막으로 고친 사람 (기능백로그 F-023 — 공개 API의 목록·검색·읽기). **권한을 보지 않는다** — 부르는 쪽이 이미 읽을 수
+   * 있는 페이지의 id만 넘긴다. 줄 수와 무관하게 질의 하나다
+   */
+  async authorship(ids: readonly string[]): Promise<Map<string, V1Authorship>> {
+    const unique = [...new Set(ids)];
+    if (!unique.length) return new Map();
+    const creator = alias(users, 'creator');
+    const editor = alias(users, 'editor');
+    const rows = await this.db
+      .select({
+        id: pages.id,
+        createdBy: pages.createdBy,
+        createdByUsername: creator.username,
+        createdByName: creator.displayName,
+        updatedBy: pages.updatedBy,
+        updatedByUsername: editor.username,
+        updatedByName: editor.displayName,
+        createdAt: pages.createdAt,
+      })
+      .from(pages)
+      .innerJoin(creator, eq(creator.id, pages.createdBy))
+      .innerJoin(editor, eq(editor.id, pages.updatedBy))
+      .where(inArray(pages.id, unique));
+    return new Map(rows.map(({ id, createdAt, ...who }) => [id, { ...who, createdAt: createdAt.toISOString() }]));
   }
 
   async get(id: string, principal: Principal): Promise<PageView> {
