@@ -93,6 +93,14 @@
 - **화면 확인(사용자)** — 같은 날 사용자가 8444 화면에서 새 방의 나간 사람 표시가 잘 나온다고 확인했다.
 - **확인하지 못한 것(알면서 둔 한계)** — "나갔습니다" 안내 줄이 생긴 2026-10-15 이전에 나간 사람은 이름을 알 수 없어 이름 없는 `(나간 사람)`으로 보인다. 그 데이터는 시험 데이터라 되살리지 않기로 했다(사용자 2026-10-15: "지금부터 만드는 방에서만 유효하면 되. 이전 data는 test data니까"). 에이전트의 요약에서 이름이 쓰이는지는 그쪽 구현의 몫이다.
 
+## 3-7. 방 참여자의 아이디 (2026-10-16, F-022)
+
+설계서 FR-2409. 방 정보의 `members[]`에 `username`을 싣고, 사람 찾기와 `pastMembers`는 그대로 뒀다.
+
+- **시험** — api 통합 1건(참여자에는 `userId`·`username`·`displayName`이 실리고, 사람 찾기는 `id`·`displayName`뿐이다). web 시험의 방 fixture에 칸을 더했다. `pnpm check`는 종료 코드 0이었다(`verify:docs` 문서 109개, 위반 없음). 공개 API 명세는 `pnpm api:spec`으로 다시 만들었다(해시 대조 시험이 잡는다).
+- **이미지·스택** — `deploy/build.sh`, `tiffanie-workfluence-app:latest` **383MB**, 라벨의 커밋 `5c1a710`. 마이그레이션은 없어 api만 다시 만들었고 3개 모두 healthy, `https://wf.internal:8444/api/health` 200.
+- **8444에서 API로 실호출**(공개 API 토큰) — `GET /chat/rooms` 3개 방에서 `members` 원소의 칸은 `displayName`·`userId`·`username`, `pastMembers`는 `displayName`·`userId`였다. `GET /chat/users`는 `displayName`·`id`뿐이었다.
+
 ## 4. 확인하지 못한 것
 
 - **세션 유휴 만료와 오래 열어 둔 채팅 화면** — 아무도 말하지 않는 방을 30분 넘게 열어 두면 세션이 만료되고 주기 재판정이 연결을 닫는다(close 4401). 실제로 오래 열어 두고 재현하지 않았다.
