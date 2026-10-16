@@ -405,6 +405,8 @@ describe('받는 사람 고르기 (@ — F-024)', () => {
     fireEvent.click(screen.getAllByRole('option')[0]!);
     expect(box.value).toBe('@밥 ');
     fireEvent.change(box, { target: { value: '@' } });
+    fireEvent.keyDown(box, { key: 'Tab', shiftKey: true }); // Shift+Tab은 초점을 뒤로 옮기는 길이다 — 고르지 않는다(자체 점검 7)
+    expect(box.value).toBe('@');
     fireEvent.keyDown(box, { key: 'Escape' });
     expect(screen.queryByRole('listbox')).toBeNull();
   });
@@ -418,5 +420,12 @@ describe('받는 사람 고르기 (@ — F-024)', () => {
     expect(toMe.parentElement!.textContent).toBe('@나 확인 부탁');
     expect(pane().getByText('@ai agent').className).toBe('chat-to');
     expect(pane().getByText('그냥 @밥 아님').querySelector('.chat-to')).toBeNull(); // 맨 앞이 아니면 그냥 글이다
+  });
+
+  it('나와 표시 이름이 같은 사람이 있으면 그 이름을 부른 말은 나에게도 한 말로 강조한다 — 이름만으로는 가릴 수 없다(자체 점검 5)', async () => {
+    rooms = [room(R2, { kind: 'group', name: '팀', members: [{ userId: 'u9', username: 'other', displayName: '나' }, { userId: 'u1', username: 'u1', displayName: '나' }, { userId: 'u3', username: 'bob', displayName: '밥' }] })];
+    messages[R2] = [msg(R2, 1, '@나 확인 부탁', 'u3')];
+    open(`/chat/${R2}`);
+    expect((await pane().findByText('@나')).className).toBe('chat-to to-me');
   });
 });

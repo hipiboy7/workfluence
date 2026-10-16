@@ -4,7 +4,7 @@
 - 규칙: [`CLAUDE.md`](../CLAUDE.md) — 어떤 규칙으로
 - 요청 기록: [`docs/prompts/`](prompts) 아래 사용자 요청 원문 (`CLAUDE.md` 11절)
 - 작성일: 2026-09-16 / 작성 LLM: Claude Opus 5
-- 상태: **Phase 20까지 구현 완료** (2026-09-30). 계획으로 남은 표기는 없다. Phase별 상세는 `P{N}_설계서_*.md`에 있다
+- 상태: **Phase 20까지 구현 완료** (2026-09-30). Phase 21(채팅, F-016과 보완 F-017~F-024)은 `impl-phase21`에서 끝냈고 병합하지 않았다(병합은 원작자가 정한다, 2026-10-16). Phase별 상세는 `P{N}_설계서_*.md`에 있다
 
 ## 0. 범위 문서와의 경계
 
@@ -180,7 +180,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | `chat_rooms` | `id`, `kind`(direct·group), `name`(여럿 방만), `created_by`(CASCADE), `created_at`, `last_seq`, `last_message_at` | 채팅(F-016, `0015`) | 방. `last_seq`는 새 메시지의 번호를 매기는 곳(행 잠금). 스페이스에 속하지 않는다 |
 | `chat_members` | `room_id`·`user_id`(복합 키, CASCADE), `joined_at`, `last_read_seq` | 채팅(`0015`) | 참여자. 판정은 이 표에 행이 있는가 하나 — 없으면 방이 있는지도 알려 주지 않는 404 |
 | `chat_direct_pairs` | `user_a`·`user_b`(`user_a < user_b`, 복합 키), `room_id`(유일) | 채팅(`0015`) | 1:1 방의 쌍 — 두 사람 사이에 방 하나 |
-| `chat_messages` | `id`, `room_id`(CASCADE), `seq`, `sender_id`, `body`(평문), `client_msg_id`, `created_at` | 채팅(`0015`) | 고치지도 지우지도 않는 모양(보류 39). 유일 키 `(room_id, seq)`·`(room_id, sender_id, client_msg_id)` |
+| `chat_messages` | `id`, `room_id`(CASCADE), `seq`, `sender_id`, `body`(평문), `kind`(`user`·`join`·`leave` — 안내 줄), `client_msg_id`, `created_at` | 채팅(`0015`, `kind`는 `0016`, 나간 사람 조회 인덱스는 `0017`) | 고치지도 지우지도 않는 모양(보류 39). 유일 키 `(room_id, seq)`·`(room_id, sender_id, client_msg_id)` |
 
 ### 3.2 규약
 
@@ -327,7 +327,7 @@ shared  ←  api(config → db → common → 기능 모듈)
 | 18 | 사내 메일 API 설정(F-012) — 요청 모양을 사용자가 준 사내 API 설명(`subject`·`content`·`receivers`·`sender_name`)으로 한 곳(`apps/api/src/mail/domain/request.ts`)에 두고, 주소·형식(평문·마크다운)·보내는 이름·인증 헤더를 `WF_MAIL_*` 설정으로(기동 검사는 공유 `mail.ts`·`env.ts`). 메일 글은 `domain/compose.ts`(평문·마크다운 — 마크다운은 공유 `markdownText`로 이스케이프), 제목은 보내는 경계에서 한 줄로. 시험 명령 `apps/api/src/cli/mail-test.ts`(compose `tools`) |
 | 19 | 비밀번호를 잊었을 때 두 길·서식 단추 줄(F-011·F-013) — 두 길의 조건을 표시 이름+email로, 메일 재설정 링크(`auth/recovery.service.ts` · `domain/reset-link.ts` — 32바이트 값의 해시만·30분·한 번·5분에 한 통, 받는 계정은 공유 `canResetPasswordByMail`, 쓰기는 로그인 줄 안에서 세션·링크를 지운다), email 확인 요청(`email.confirm.request` — 받는 사람은 root), 운영 설정 `passwordResetMail`, 표 `password_reset_tokens`(`0013_recovery`). 편집기와 댓글 칸의 서식 단추 줄(`formatActions.ts` — 허용 목록·편집기 스키마는 그대로). 새 `WF_` 키·의존성 없음 |
 | 20 | RHEL 9에 반입(F-014) — 들고 갈 것의 목록(설치및실행가이드 0.1절 — 반입 묶음, 서버에 Docker가 없으면 Docker 묶음), Docker 묶음(`pnpm release:docker` — `scripts/docker-bundle.ts`, 빌드 서버에 깔린 판의 RPM·`PACKAGES.txt`·Docker 공개키·지문. 판정은 공유 `release.ts`의 `DOCKER_BUNDLE_RPMS`·`dockerKeyProblem`·`rpmSignatureProblems`·`formatPackages`), RHEL 9 준비(설치및실행가이드 0.3·0.4절 — 서명은 임시 RPM DB로 판정하고 dnf도 보게 한다·부딪히는 패키지·망 대역·SELinux를 끄지 않는다·firewalld는 Docker가 연 포트를 거르지 않는다). 앱의 동작·구성·설정 키·의존성 변경 없음 |
-| 21 | 채팅과 headless 접속(F-016) — `chat/` 모듈(방·메시지·읽음·사람 찾기 `ChatService`, 사건을 연결로 알리는 `ChatHub`, 한 서버에 편집 게이트웨이와 **경로로 나눠 붙는** WebSocket `ChatGateway`: 화면은 세션 쿠키+같은 출처, headless는 `Authorization: Bearer`), 표 넷(`0015_chat`), 환경변수 7개(`WF_CHAT_*`), 로그 event `chat.*` 9개, 공유 계약 `chat.ts`, `RevocationBus.revokeToken`(토큰 하나의 폐기를 그 토큰의 연결에), 공개 API 명세에 채팅 REST 9개와 실시간 연결 규칙, 화면 `ChatPage`(연결 상태 기계 `chatLink.ts`·상태 계산 `chatState.ts`) |
+| 21 | 채팅과 headless 접속(F-016) — `chat/` 모듈(방·메시지·읽음·사람 찾기 `ChatService`, 사건을 연결로 알리는 `ChatHub`, 한 서버에 편집 게이트웨이와 **경로로 나눠 붙는** WebSocket `ChatGateway`: 화면은 세션 쿠키+같은 출처, headless는 `Authorization: Bearer`), 표 넷(`0015_chat` — 안내 줄 `0016_chat_notices`, 나간 사람 조회 인덱스 `0017_chat_leave_idx`), 방 정보의 `pastMembers`·`members[].username`(F-021·F-022), 환경변수 7개(`WF_CHAT_*`), 로그 event `chat.*` 9개, 공유 계약 `chat.ts`, `RevocationBus.revokeToken`(토큰 하나의 폐기를 그 토큰의 연결에), 공개 API 명세에 채팅 REST 9개와 실시간 연결 규칙, 화면 `ChatPage`(연결 상태 기계 `chatLink.ts`·상태 계산 `chatState.ts`) |
 
 ## 11. 확장점 — 기능 하나를 더하려면 어디를 만지나
 

@@ -729,3 +729,16 @@ describe('v1PageTreeQuery — 범위 밖의 limit과 모르는 칸은 받지 않
     expect(v1PageTreeQuery.safeParse({ space: 'a', x: 1 }).success).toBe(false);
   });
 });
+
+describe('사람으로 거르는 쿼리는 모르는 키를 받지 않는다 (F-023 자체 점검 1)', () => {
+  it('키를 잘못 치면 400이다 — 조용히 무시되어 거르지 않은 전체가 돌아가지 않는다', () => {
+    expect(v1SpaceListQuery.safeParse({ createdby: 'alice' }).success).toBe(false);
+    expect(v1LabelPagesQuery.safeParse({ CreatedBy: 'alice' }).success).toBe(false);
+    expect(v1CommentListQuery.safeParse({ Author: 'alice' }).success).toBe(false);
+  });
+  it('맞는 키는 그대로 받는다', () => {
+    expect(v1SpaceListQuery.safeParse({ createdBy: 'alice', member: 'bob', q: 'x', limit: '5' }).success).toBe(true);
+    expect(v1LabelPagesQuery.safeParse({ createdBy: 'alice', updatedBy: 'bob', limit: '5' }).success).toBe(true);
+    expect(v1CommentListQuery.safeParse({ author: 'alice', format: 'text' }).success).toBe(true);
+  });
+});

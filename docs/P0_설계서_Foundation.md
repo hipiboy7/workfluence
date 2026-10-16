@@ -151,7 +151,7 @@ Phase 1~6이 공유하는 기반을 확정한다.
 |---|---|---|
 | FR-100 | 멀티스테이지 Dockerfile로 app 이미지를 만든다. 런타임 스테이지에는 산출물과 production 의존성만 | 이미지 크기·공격 표면 |
 | FR-101 | 컨테이너는 non-root로 실행하고 헬스체크를 포함한다 | |
-| FR-102 | compose에 app·postgres·nginx를 정의하고 전부 `restart: unless-stopped`를 둔다 | 재부팅 후 자동 기동이 안 되면 "서비스가 내려간 것을 코드 문제로 오진"한다 |
+| FR-102 | compose에 app·postgres·nginx를 정의하고 전부 `restart: unless-stopped`를 둔다(**정정 2026-10-12:** `restart`는 두지 않는다 — 사용자 결정, CLAUDE.md 8.3절) | 재부팅 후 자동 기동이 안 되면 "서비스가 내려간 것을 코드 문제로 오진"한다 |
 | FR-103 | nginx는 TLS를 종단하고 `X-Forwarded-*`를 전달한다. WebSocket 업그레이드를 프록시한다 | Phase 6 대비. 업로드 상한은 첨부 상한과 맞춘다 |
 | FR-104 | `.dockerignore`로 `node_modules`·`.env`·`.local`·`docs`·`e2e`를 제외한다 | 빌드 컨텍스트 축소 |
 | FR-110 | `doc-consistency`·`self-reviewer` 에이전트와 `troubleshoot` 스킬을 정의한다 | 13절 |
@@ -512,7 +512,7 @@ FROM node:24-bookworm-slim            # 산출물 + production 의존성만, USE
 
 - 매니페스트만 먼저 복사해 의존성 레이어를 캐시한다.
 - `HEALTHCHECK`는 `node -e "fetch('http://127.0.0.1:3000/api/health')..."`.
-- compose: `postgres`(healthcheck, 볼륨) → `api`(`depends_on: service_healthy`) → `nginx`(TLS, 포트 매핑). 전부 `restart: unless-stopped`.
+- compose: `postgres`(healthcheck, 볼륨) → `api`(`depends_on: service_healthy`) → `nginx`(TLS, 포트 매핑). 전부 `restart: unless-stopped`(정정 2026-10-12: 지금은 두지 않는다).
 - nginx: `absolute_redirect off`(호스트 매핑 포트 유실 방지), `X-Forwarded-*`, WebSocket `Upgrade` 프록시, `client_max_body_size`.
 - 개발 전용 키(`WF_PG_EMBEDDED_*`)는 컨테이너에 넘기지 않는다. 스키마가 strict라도 **선언된 키**이므로 넘겨도 기동은 되지만, 쓰이지 않는 값을 운영 환경에 두지 않는다.
 

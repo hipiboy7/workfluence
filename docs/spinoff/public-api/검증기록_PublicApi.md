@@ -1,6 +1,6 @@
 # 검증기록 — 공개 API v1 (F-015)
 
-- 일자: 2026-10-08 · 브랜치 `tanminkwan-rest-api` · 마지막 검증 커밋 `ccc3731`
+- 일자: 2026-10-08 · 브랜치 `tanminkwan-rest-api` · 마지막 검증 커밋 `ccc3731` (4-1절은 2026-10-16 · `impl-phase21` · `87bc85b`)
 - 설계: [`설계서_PublicApi.md`](설계서_PublicApi.md). 시행착오의 경위는 쓰지 않는다 (`CLAUDE.md` 4절).
 
 ## 1. 검사 (`pnpm check` — 종료 코드 0)
