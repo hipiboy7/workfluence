@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 보안 취약점 제보 (Security vulnerability)
+    url: https://github.com/hipiboy7/workfluence/security/advisories/new
+    about: 취약점은 공개 이슈로 올리지 않는다 — 비공개 제보로 보낸다 (SECURITY.md)

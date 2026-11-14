@@ -2,6 +2,7 @@
   "name": "@workfluence/web",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "workfluence 웹 SPA (React + Vite)",
   "scripts": {
