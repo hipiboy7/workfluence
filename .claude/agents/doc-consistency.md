@@ -30,18 +30,17 @@ model: fable
 3. docs/설계서_Architecture.md
 4. docs/P0_*.md
 5. docs/P1_*.md …          ← Phase가 늘면 Glob으로 docs/P*_*.md 전부
-6. docs/learnSystem/학습가이드_시스템이해.md   ← 개발 용어 없이 쓴 설명. Phase마다 갱신되는 필수 문서
+6. docs/learnSystem/학습가이드_시스템이해.md   ← 개발 용어 없이 쓴 설명. 사용자가 하는 일이 바뀌면 갱신
 6-1. docs/guide/사용자가이드.md   ← 화면을 쓰는 사람의 순서(Phase 13). 화면 문구가 바뀌면 함께 바뀐다
-7. docs/guide/장애대응가이드.md     ← 증상에서 조치로. Phase마다 갱신되는 필수 문서
+7. docs/guide/장애대응가이드.md     ← 증상에서 조치로. 새 장애 유형이 생기면 갱신
 7-1. docs/guide/설치및실행가이드.md · docs/guide/운영가이드.md   ← 폐쇄망 설치·평소 운영
 7-2. docs/guide/shortcut/*.md   ← windows시연가이드·linux서버배포가이드
 8. docs/*.md               ← 기능백로그 등
-9. docs/internal/*.md      ← 검토서(트러블슈팅·SelfReview·방법론개정)·에이전트 설계
+9. docs/internal/*.md      ← 검토서(트러블슈팅·방법론개정, 2026-11-13까지의 Phase 검토서)·에이전트 설계
 10. README.md
-11. docs/prompts/**/*.md   ← 최신 버전만. 구버전은 이력이라 건드리지 않는다
 ```
 
-`docs/prompts/prototype-*.md`는 **다른 브랜치(exp/prototype)의 기록**이다. 읽되 "어긋남"으로 보고하지 않는다.
+`docs/prompts/`는 2026-11-14까지의 요청 원문 기록이다(CLAUDE.md 11절). 읽지 않아도 되고, 거기와 다르다는 이유로 올리지 않는다. `docs/prompts/prototype-*.md`는 **다른 브랜치(exp/prototype)의 기록**이다.
 
 **과거를 서술한 문장은 어긋남이 아니다.** 개정 이력·정정 이력·트러블슈팅 기록은 "그때 그랬다"를 적은 것이다. 지금 사실과 다르다는 이유로 올리지 않는다. 올릴 것은 **지금 사실을 틀리게 말하는 문장**이다.
 
