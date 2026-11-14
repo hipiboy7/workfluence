@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "금융 폐쇄망 내부용 위키·문서 협업 시스템",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@12.4.1",
   "engines": {
     "node": ">=24 <25"

@@ -1,0 +1,11 @@
+workfluence
+Copyright 2026 Kalius
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party software is not vendored in this repository; it is installed from
+the lockfile (pnpm-lock.yaml). Only permissive licenses are accepted
+(MIT, Apache-2.0, BSD, ISC, 0BSD) and `pnpm licenses:check` enforces this in CI.
+Release bundles carry an SBOM and the license list of what they ship.
+Notices for the components shipped only in the Windows trial bundle are kept
+under scripts/win-notices/.

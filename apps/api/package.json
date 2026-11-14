@@ -2,6 +2,7 @@
   "name": "@workfluence/api",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "workfluence API 서버 (NestJS). 빌드된 SPA도 함께 서빙한다.",
   "main": "dist/main.js",
   "files": [

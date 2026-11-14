@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 
-/** 검사 대상. 작업 기록은 PR 설명에 쓰므로 저장소에 별도 기록 디렉토리를 두지 않는다 (CLAUDE.md 12.1절). */
+/** 검사 대상. 작업 기록은 병합 커밋 메시지에 쓰므로 저장소에 별도 기록 디렉토리를 두지 않는다 (CLAUDE.md 12.1절). */
 // git 패스펙에서 `docs/**/*.md`는 하위 디렉토리만 잡는다. 최상위 `docs/*.md`를 따로 적어야 한다.
 const INCLUDE = ['README.md', 'CLAUDE.md', 'PROTOTYPE.md', 'docs/*.md', 'docs/**/*.md'];
 // PROTOTYPE.md는 exp/prototype 브랜치에만 있다. 목록에 두어도 `git ls-files`가 없는 파일을 내놓지 않는다.
